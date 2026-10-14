@@ -1,0 +1,106 @@
+recx: "0.1"
+name: kyosei
+summary: A command-line tracker for ideas, tasks and evidence in software developed by a person and several coding agents.
+description: |
+  When coding agents do much of the work on a project, it is hard to establish afterwards
+  what was asked for, what was done, what was checked and by whom, and which documents
+  went stale. Kyosei keeps each piece of work as a record with acceptance criteria and the
+  files it expects to touch. Work goes to an agent as a brief generated from the record and
+  comes back as a structured report, and a criterion is settled only with the evidence it
+  was checked with. The store is a SQLite database rebuilt from a JSON export committed to
+  git. Sections of a document can name the code they describe, and a change to that code
+  raises an obligation to update the section or confirm it. The CLI is `kyo`; it ships a
+  Claude Code plugin with the session hooks and the orchestrator's skill. Kyosei does not
+  start agents itself, and Claude Code is the only agent harness it integrates with. The
+  Electron viewer under apps/desktop/ is optional and not listed as a module.
+license: Apache-2.0
+status: experimental
+capabilities:
+  - track ideas, tasks, bugs and decisions as records with acceptance criteria and the files each expects to touch
+  - generate a task brief for a coding agent from a record's criteria, file scope and the project's standing rules
+  - ingest a coding agent's structured report and apply its per-criterion verdicts with their evidence
+  - keep a task board in a JSON export committed to git, from which a SQLite database is rebuilt
+  - refuse to dispatch two agent tasks whose declared file scopes overlap
+  - create a git worktree and branch for each dispatched agent task, and prune finished ones
+  - raise an obligation when code changes under a documentation section that names it
+  - govern a RECX.yaml manifest module by module as a documentation section
+  - flag records whose declared files changed since the last staleness sweep
+  - brief a Claude Code session at start and run invariant checks when it stops
+  - serve a project's records over a local HTTP API
+  - search the recx index for existing work when a proposal is filed
+  - split a shell command line into the commands it runs and the directory each one runs in
+  - check that a Python module split moved every definition without changing it
+languages: [python]
+tags: [agents, task-tracking, provenance, documentation, claude-code, cli]
+repository: https://github.com/jbmv/kyosei
+homepage: https://github.com/jbmv/kyosei
+modules:
+  - id: kyosei-cli
+    path: src/kyosei/
+    summary: The kyo command-line program, its store, and the Claude Code plugin it carries.
+    interface:
+      type: cli
+      entrypoints:
+        - "kyo onboard"
+        - "kyo init [--prefix PREFIX] [--in-repo] [--store DIR] [--adopt] [directory]"
+        - "kyo new KIND [--title TEXT] [--criteria-file FILE] [--touches-file FILE] [--from FILE] [--check]"
+        - "kyo dispatch RECORD_ID [--branch NAME] [--base REF] [--model NAME] [--task-file FILE]"
+        - "kyo report DISPATCH_ID --file FILE [--check]"
+        - "kyo accept DISPATCH_ID [--reviewed] [--close]"
+        - "kyo verify CRITERION_ID --verdict VERDICT --method METHOD --evidence-file FILE"
+        - "kyo docs {assemble,check,index,obligations,preview,settle,suggest}"
+        - "kyo brief"
+        - "kyo sweep [--hook]"
+        - "kyo doctor [--hook]"
+        - "kyo serve [--port N] [--bind ADDR]"
+        - "kyo prior-art RECORD_ID"
+        - "kyo reference [COMMAND]"
+    requires:
+      packages:
+        - pkg:pypi/pyyaml
+    extract:
+      method: package
+      package: pkg:pypi/kyosei
+      notes: Installed with "uv tool install kyosei" or "pipx install kyosei". Prior-art search needs the optional extra kyosei[recx]. Python 3.12 or later.
+  - id: shell-words
+    path: src/kyosei/shell_words.py
+    summary: Reads a shell command line into the commands it runs, each with its environment and working directory.
+    interface:
+      type: library
+      entrypoints:
+        - "walk(command: str, cwd: Path | None) -> list[Step]"
+        - "segments(command: str) -> list[str]"
+        - "tokens(segment: str) -> list[str]"
+        - "invocation(words: list[str]) -> Invocation"
+    extract:
+      method: copy
+      notes: One file using only the standard library. Its module docstring states which shell shapes it reads and which it does not.
+  - id: pure-move
+    path: tools/pure_move.py
+    summary: Checks through the syntax tree that a Python module split moved its definitions without changing them.
+    interface:
+      type: cli
+      entrypoints:
+        - "python tools/pure_move.py --base REF [--head REF] --old PATH [--old PATH ...] [--root DIR]"
+    extract:
+      method: copy
+      notes: One file using only the standard library; it reads commits through git, which must be on PATH. Exits 1 when it finds a missing, changed, added or shim definition.
+evidence:
+  - id: lint
+    summary: ruff reports no problem in the source, the tests or the tools.
+    run: make lint
+    covers: [kyosei-cli, shell-words, pure-move]
+  - id: shell-words-tests
+    summary: The shell_words tests pass.
+    setup: make venv
+    run: .venv/bin/python -m pytest tests/test_shell_words.py
+    covers: [shell-words]
+  - id: pure-move-tests
+    summary: The pure_move tests pass.
+    setup: make venv
+    run: .venv/bin/python -m pytest tests/test_pure_move.py
+    covers: [pure-move]
+  - id: suite
+    summary: The whole test suite passes. The Makefile provisions a Python 3.12 environment with uv.
+    run: make test
+    covers: []

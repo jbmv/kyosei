@@ -71,6 +71,7 @@ ROOTS = (
     "README.md",
     "AGENTS.md",
     "llms.txt",
+    "RECX.yaml",
     "docs/guide",
     "docs/reference/topics",
     "docs/reference/cli.md",
@@ -86,6 +87,7 @@ PROSE_ROOTS = (
     "README.md",
     "AGENTS.md",
     "llms.txt",
+    "RECX.yaml",
     "docs/guide",
     "docs/reference/topics",
     "docs/reference/cli.md",
@@ -429,7 +431,9 @@ def test_a_registered_name_added_under_each_root_fails(tmp_path: Path, root: str
     terms = compile_terms(entries, (), common=frozenset(), own=own)
 
     tree = tmp_path / "tree"
-    is_file = root in ("README.md", "AGENTS.md", "llms.txt", "docs/reference/cli.md")
+    is_file = root in (
+        "README.md", "AGENTS.md", "llms.txt", "RECX.yaml", "docs/reference/cli.md"
+    )
     target = tree / root if is_file else tree / root / "added.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(f"clean line\nsee {name.capitalize()} here\n{prefix}-12 too\n")

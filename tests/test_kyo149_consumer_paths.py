@@ -100,7 +100,10 @@ PROJECT_OWNED_DIRS = (
 #: project in the next, and only prose distinguishes them. ``pyproject.toml`` is the
 #: third (KYO-514): `kyo onboard`'s prompt and `--check` read the reader's own to find
 #: how a fresh checkout is provisioned; no consumer surface cites Kyosei's.
-PROJECT_OWNED_FILES = ("README.md", "CLAUDE.md", "pyproject.toml")
+#: ``RECX.yaml`` is the fourth (KYO-636): every surface naming it means the reader's
+#: own recx manifest, the one file KYO-600's document format governs, and the name
+#: became a tracked file here only when this repository published its own.
+PROJECT_OWNED_FILES = ("README.md", "CLAUDE.md", "pyproject.toml", "RECX.yaml")
 
 #: Anything with a slash and a plausible file/dir shape, or a bare file with one of
 #: this repo's source extensions. Deliberately generous: over-matching costs a
