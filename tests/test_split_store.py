@@ -899,6 +899,14 @@ def test_a_store_beside_a_foreign_code_repository_reports_staleness_as_unanswere
     # the next sweep answers staleness again rather than repeating the warning forever.
     recovered = invoke(["--root", str(other), "sweep", "--json"])
     assert recovered.json["coverage"] == "swept"
+    # KYO-635.c3: the store still records the other repository's root commit, which
+    # doctor reports as a problem naming `kyo init --store <store> --adopt`; that
+    # command, the operator's word that the store is this repository's, clears it.
+    found = invoke(["--root", str(other), "doctor"])
+    assert found.code == 3 and "[code_repo_identity_mismatch]" in found.err
+    assert found.err.count("\n  - ") == 1, found.err
+    adopted = invoke(["init", str(other), "--store", str(store), "--adopt"])
+    assert adopted.code == 0, adopted.err
     assert invoke(["--root", str(other), "doctor"]).code == 0
 
 

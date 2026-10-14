@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -1018,3 +1019,35 @@ def check_code_repo_identity(store: Store) -> list[str]:
         return []
     notes = scaffold.fill_in_code_repo_id(store.config.root, code_root)
     return ["; ".join(notes)] if notes else []
+
+
+def check_code_repo_identity_mismatch(store: Store) -> list[str]:
+    """KYO-635.c3: a split store whose recorded ``code_repo_id`` shares no root commit
+    with the code repository it is linked from. A PROBLEM naming the one command that
+    clears it, `kyo init --store <store> --adopt`.
+
+    :func:`check_code_repo_identity` never writes over a recorded identity (KYO-559.c7),
+    and before this check nothing reported one that differs, so a repository whose
+    history was replaced (a new root commit) kept a store recording a root it no longer
+    has, and every check passed. Whether the store really is this repository's is the
+    operator's judgement, which is why this reports and the remedy is the override
+    rather than an automatic rewrite.
+    """
+    code_root = store.config.code_root
+    recorded = store.config.code_repo_id
+    if code_root is None or recorded is None:
+        return []
+    store_root = store.config.root
+    if Path(store_root).resolve() == Path(code_root).resolve():
+        return []
+    here = scaffold.code_repo_identity(Path(code_root))
+    if here is None or scaffold.same_code_history(recorded, here):
+        return []
+    remedy = f"kyo init --store {shlex.quote(str(store_root))} --adopt"
+    return [
+        f"the store at {store_root} records code repository root commit {recorded}, but "
+        f"the linked code repository {code_root} has root commit {here}: its history was "
+        "replaced, or the store belongs to another repository. If this store is this "
+        f"repository's, run `{remedy}` in {code_root} to record the new identity; if it "
+        "is not, link this repository to its own store"
+    ]

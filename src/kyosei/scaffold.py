@@ -803,7 +803,7 @@ def init_layout(
         recorded_result = _record_identity_into_linked_store(code_root, store_root)
         if recorded_result is not None:
             return recorded_result
-    if existing_link.is_file():
+    if existing_link.is_file() and not (adopt and _links_to(code_root, store_root)):
         raise KyoseiError(
             f"{existing_link} already exists; {code_root} already links to a store. "
             "Read that file to see where, or delete it if the store it names is gone"
@@ -852,6 +852,23 @@ def init_layout(
             f"records already use the prefix {chosen}",
             verdict_note,
         ]
+        if adoption_check == "overridden" and here is not None:
+            # KYO-635: --adopt is the override for a recorded identity that differs, so
+            # the store now records this repository's; leaving the old root commit
+            # recorded would make the next adoption, sweep and doctor check disagree
+            # with the link just written.
+            git_notes.append(
+                f"recorded this code repository's identity (root commit {here}) in the "
+                f"store's config, replacing {stored.code_repo_id}"
+            )
+            git_notes.extend(
+                _record_code_repo_id(
+                    store_root,
+                    chosen,
+                    here,
+                    "Kyosei: --adopt re-records the code repository's identity",
+                )
+            )
         if not (store_root / ".git").exists():
             git_notes.extend(init_store_repository(store_root))
     else:
@@ -1017,23 +1034,44 @@ def fill_in_code_repo_id(store_root: Path, code_root: Path) -> list[str]:
         return []
     if git_worktree_facts(code_root).main_checkout is not None:
         return []
-    write_config(store_root, project_prefix=stored.project_prefix, code_repo_id=here)
-    notes = [
+    return [
         f"recorded this code repository's identity (root commit {here}) in the config of "
-        f"the store at {store_root}, which recorded none"
+        f"the store at {store_root}, which recorded none",
+        *_record_code_repo_id(
+            store_root, stored.project_prefix, here, "Kyosei: record the code repository's identity"
+        ),
     ]
-    if (store_root / ".git").exists():
-        config_rel = config_path_for(store_root).relative_to(store_root).as_posix()
-        _git(store_root, "add", "--", config_rel)
-        committed = _pinned_commit(
-            store_root, "Kyosei: record the code repository's identity", paths=[config_rel]
-        )
-        notes.append(
-            f"committed it in {store_root}"
-            if committed is not None and committed.returncode == 0
-            else f"could not commit it in {store_root}; commit the config change yourself"
-        )
-    return notes
+
+
+def _record_code_repo_id(store_root: Path, prefix: str, here: str, message: str) -> list[str]:
+    """Write ``code_repo_id: here`` into the store's config and, where the store is a git
+    repository, commit that file alone. Returns the line saying how the commit went, or
+    nothing when the store is not (yet) a repository -- its first commit carries it.
+    Shared by the fill-in (KYO-559) and ``--adopt``'s re-record (KYO-635)."""
+    write_config(store_root, project_prefix=prefix, code_repo_id=here)
+    if not (store_root / ".git").exists():
+        return []
+    config_rel = config_path_for(store_root).relative_to(store_root).as_posix()
+    _git(store_root, "add", "--", config_rel)
+    committed = _pinned_commit(store_root, message, paths=[config_rel])
+    return [
+        f"committed it in {store_root}"
+        if committed is not None and committed.returncode == 0
+        else f"could not commit it in {store_root}; commit the config change yourself"
+    ]
+
+
+def _links_to(code_root: Path, store_root: Path) -> bool:
+    """KYO-635: whether ``code_root``'s store link already names ``store_root`` -- the
+    case where `kyo init --store <store> --adopt` re-records the identity of the store
+    this repository already uses, rather than linking a second one over it."""
+    from .config import read_store_link
+
+    try:
+        linked = read_store_link(code_root)
+    except KyoseiError:
+        return False
+    return linked is not None and linked.resolve() == store_root.resolve()
 
 
 def _record_identity_into_linked_store(code_root: Path, store_root: Path) -> InitResult | None:

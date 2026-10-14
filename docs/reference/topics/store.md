@@ -69,7 +69,8 @@ init` compares before it links:
   the output says it was verified;
 - a store recording a **different** history is refused, naming both root commits
   and the store path; `--adopt` links it anyway (a fork, a re-created
-  repository), and `--store DIR` gives this repository a store of its own;
+  repository) and records this repository's root commit in its place, with one line
+  naming both (KYO-635), and `--store DIR` gives this repository a store of its own;
 - a store that **cannot be compared** — it predates `code_repo_id`, or this
   repository has no commits yet — is refused on the default path, where the
   shared name is the only evidence, and linked with an `UNVERIFIED` line on an
@@ -79,7 +80,8 @@ init` compares before it links:
   records already carry its prefix, and adoption cannot change it.
 
 A repository with no commits at `kyo init` gets no `code_repo_id`, and the output
-says so. Adoption never writes one into an existing store.
+says so. Adoption writes one into an existing store only when `--adopt` overrides a
+recorded identity that differs.
 
 **Why the default is the split store.** Committing the store to the code
 repository commits, to the same place as the code and visible to everyone that
@@ -405,6 +407,11 @@ three cases differently:
   it in the store's config and commits it in the store, with one line saying so. No
   `--adopt` is needed for this fill-in, and no automatic path ever overwrites an
   identity already recorded (KYO-559).
+- *A recorded identity this repository no longer has* (its history was replaced, or
+  the store belongs to another repository): `kyo doctor` reports it as a problem,
+  `code_repo_identity_mismatch`, and names `kyo init --store <store> --adopt`, run in
+  the code repository, as the remedy; that command records the new root commit even
+  where the repository already links to the store (KYO-635).
 - *A repository with commits*: the identity is recorded at init.
 
 **CLAUDE.md in the code repository** (KYO-558): when it has no Kyosei section,
