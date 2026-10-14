@@ -231,7 +231,17 @@ def claude_md_for_init(code_root: Path) -> Path | None:
     Never replaces a marked section that is already there: a second checkout of a
     project whose CLAUDE.md carries `kyo install-skill`'s section must keep it, and a
     section `kyo init` wrote before is already the one this would write.
+
+    KYO-634: nor is anything written where the Kyosei plugin is already enabled, since
+    the section's advice (setup incomplete, skill and hooks not installed) would be
+    false there, and `kyo harness install claude-code` exists to remove it (KYO-613).
+    "Enabled" is :func:`kyosei.cmd_harness_migrate.plugin_enabled`, the predicate the
+    harness commands already use, so the commands cannot disagree about it.
     """
+    from .cmd_harness_migrate import plugin_enabled
+
+    if plugin_enabled(code_root):
+        return None
     path = code_root / CLAUDE_MD
     current = path.read_text(encoding="utf-8") if path.is_file() else None
     if current is not None and CLAUDE_MD_BEGIN in current:

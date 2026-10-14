@@ -429,6 +429,74 @@ def test_init_keeps_an_existing_claude_md_and_an_existing_section(fresh: Path) -
     assert (other / "CLAUDE.md").read_text(encoding="utf-8") == full
 
 
+def _enable_plugin(code: Path, rel: str = ".claude/settings.local.json") -> None:
+    """Enable ``kyosei@kyosei`` for ``code`` the way `kyo harness install` leaves it."""
+    import json
+
+    from kyosei.cmd_harness import PLUGIN_ID
+
+    path = code / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"enabledPlugins": {PLUGIN_ID: True}}), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "rel", [".claude/settings.local.json", ".claude/settings.json"], ids=["local", "project"]
+)
+def test_init_writes_no_section_where_the_plugin_is_enabled(fresh: Path, rel: str) -> None:
+    """KYO-634.c1, fresh init: the section's advice would be false where the plugin is on."""
+    (fresh / "CLAUDE.md").write_text("# Mine\n", encoding="utf-8")
+    _enable_plugin(fresh, rel)
+    result = invoke(["init", "--defaults", str(fresh), "--json"])
+    assert result.code == 0, result
+    assert result.json["claude_md"] is None
+    assert (fresh / "CLAUDE.md").read_text(encoding="utf-8") == "# Mine\n"
+
+
+def test_init_adopting_a_store_writes_no_section_where_the_plugin_is_enabled(
+    fresh: Path, tmp_path: Path
+) -> None:
+    """KYO-634.c1, the case seen: `kyo init --store` adopting an existing store in a
+    checkout whose plugin is enabled at local scope, with and without a CLAUDE.md."""
+    first = invoke(["init", "--defaults", str(fresh), "--json"])
+    store = first.json["store_root"]
+    for name, existing in (("with-md", "# Theirs\n"), ("without-md", None)):
+        other = tmp_path / name / "my-app"
+        other.mkdir(parents=True)
+        if existing is not None:
+            (other / "CLAUDE.md").write_text(existing, encoding="utf-8")
+        _enable_plugin(other)
+        linked = invoke(["init", str(other), "--store", store, "--json"])
+        assert linked.code == 0, linked
+        assert linked.json["adopted"] is True
+        assert linked.json["claude_md"] is None
+        md = other / "CLAUDE.md"
+        if existing is None:
+            assert not md.exists()
+        else:
+            assert md.read_text(encoding="utf-8") == existing
+
+
+def test_init_adopting_a_store_without_the_plugin_still_writes_the_section(
+    fresh: Path, tmp_path: Path
+) -> None:
+    """KYO-634.c2: no plugin enabled (a disabled entry counts as none), so the section
+    is written on the adopt path as before."""
+    first = invoke(["init", "--defaults", str(fresh), "--json"])
+    assert CLAUDE_MD_SETUP_INCOMPLETE_SECTION in (fresh / "CLAUDE.md").read_text("utf-8")
+    other = tmp_path / "elsewhere" / "my-app"
+    (other / ".claude").mkdir(parents=True)
+    (other / ".claude" / "settings.local.json").write_text(
+        '{"enabledPlugins": {"kyosei@kyosei": false}}', encoding="utf-8"
+    )
+    linked = invoke(["init", str(other), "--store", first.json["store_root"], "--json"])
+    assert linked.code == 0, linked
+    assert linked.json["claude_md"] == str(other / "CLAUDE.md")
+    assert (other / "CLAUDE.md").read_text(encoding="utf-8") == (
+        CLAUDE_MD_SETUP_INCOMPLETE_SECTION + "\n"
+    )
+
+
 def test_install_skill_replaces_inits_section_and_doctor_calls_neither_drift(
     fresh: Path,
 ) -> None:
