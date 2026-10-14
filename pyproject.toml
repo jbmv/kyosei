@@ -21,11 +21,12 @@ backend-path = ["build_backend"]
 [project]
 name = "kyosei"
 version = "0.1.0"
-description = "Kyosei (共生) — idea-delivery and documentation-governance store. Milestone 2: kind registry + export completeness."
+description = "A provenance-first command-line tracker for ideas, tasks and evidence in agentic software development."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+authors = [{ name = "James Bullard" }]
 # pyyaml is the only runtime dependency: the store's config, kind registry and status
 # registry are YAML. markdown-it-py left with `kyo html` (KYO-11's static viewer, since
 # removed; KYO-440.c7) -- a published package carries only what the CLI imports.
@@ -43,6 +44,10 @@ recx = ["recx-cli>=0.1,<0.2"]
 # The dev extra carries recx so the integration tests in tests/test_prior_art.py run in
 # Kyosei's own suite against the real search().
 dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6", "recx-cli>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/jbmv/kyosei"
+Repository = "https://github.com/jbmv/kyosei"
 
 [project.scripts]
 kyosei = "kyosei.cli:main"
