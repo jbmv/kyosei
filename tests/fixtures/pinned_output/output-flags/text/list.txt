@@ -1,0 +1,8 @@
+0
+--out--
+TST-1      bug            open      gates:0  -            A record
+TST-2      task           working   gates:0  -            A second record
+TST-3      task           open      gates:0  -            A withdrawn dispatch
+3 record(s): 3 counted, 0 not counted (kyosei/kinds.yml policy.counted)
+
+--err--

@@ -1,0 +1,5 @@
+1
+--out--
+
+--err--
+kyo: no record 'TST-99' in <TMP>/text/proj/kyosei/kyosei.db

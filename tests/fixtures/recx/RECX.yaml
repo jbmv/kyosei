@@ -1,0 +1,105 @@
+recx: "0.1"
+name: recx
+summary: A manifest format that lets coding agents find and reuse other people's open-source work.
+description: |
+  res extra commercium: things outside commerce. A repository drops RECX.yaml at
+  its root to say what it does, which of its modules can be taken on their own,
+  how to take them, and which checks anyone can rerun to see that they work.
+  GitHub code search on the filename is the index, so there is no service to
+  run. This repository holds the spec, and it is the spec's first adopter.
+license: MIT
+status: experimental
+capabilities:
+  - define a manifest format describing a repository's reusable modules to coding agents
+  - validate a RECX.yaml manifest with any JSON Schema 2020-12 validator
+  - keep a repository's RECX.yaml valid as a Claude Code session ends
+  - search published manifests for reusable modules that match a planned task
+tags: [agents, manifest, code-reuse, discovery, json-schema]
+modules:
+  - id: schema
+    path: spec/recx.schema.json
+    summary: The JSON Schema that defines a valid RECX.yaml.
+    interface:
+      type: schema
+      entrypoints:
+        - "uvx check-jsonschema --schemafile spec/recx.schema.json RECX.yaml"
+    extract:
+      method: package
+      package: pkg:npm/%40jbmv/recx
+      notes: The schema is one self-contained file, so copying spec/recx.schema.json works too. In Python it ships inside recx-cli.
+  - id: fixtures
+    path: spec/examples/
+    summary: Valid and invalid example manifests for testing any recx validator.
+    interface:
+      type: other
+      entrypoints:
+        - "spec/examples/valid/*.yaml: every file must validate"
+        - "spec/examples/invalid/*.yaml: every file must be rejected, for the reason its first-line comment names"
+        - "spec/examples/invalid-rules/*.yaml: every file passes the schema alone but must be rejected by the rules beyond it (recx check --no-repo)"
+    requires:
+      modules: [schema]
+    extract:
+      method: package
+      package: pkg:npm/%40jbmv/recx
+      notes: Shipped as @jbmv/recx/examples/*, or copy spec/examples/.
+  - id: validator
+    path: src/recx_cli/
+    summary: The recx check command, which validates a RECX.yaml against the schema and the rules beyond it.
+    language: python
+    interface:
+      type: cli
+      entrypoints:
+        - "recx check [PATH] [--no-repo]"
+        - "recx evidence [PATH] [--list] [--only ID ...]"
+        - "recx search QUERY... [--json] [--limit N] [--language TAG] [--interface TYPE] [--license ID]"
+        - "recx show OWNER/NAME [--json]"
+        - "recx_cli.search.search(query, limit=20) -> dict"
+        - "recx hook stop"
+    requires:
+      packages:
+        - pkg:pypi/jsonschema
+        - pkg:pypi/pyyaml
+      modules: [schema]
+    extract:
+      method: package
+      package: pkg:pypi/recx-cli
+  - id: plugin
+    path: plugin/
+    summary: The Claude Code plugin, with the recx:manifest skill and a Stop hook that keeps RECX.yaml valid.
+    interface:
+      type: claude-code-plugin
+      entrypoints:
+        - "/plugin marketplace add jbmv/recx"
+        - "/plugin install recx@recx"
+        - "/recx:manifest"
+    requires:
+      modules: [validator]
+    extract:
+      method: copy
+      notes: Installing through the marketplace is the intended route; copying plugin/ works but the hook then needs recx-cli 0.0.2 or later.
+  - id: action
+    path: action.yml
+    summary: A composite GitHub Action that runs recx check, and optionally recx evidence, in a repository's CI.
+    interface:
+      type: github-action
+      entrypoints:
+        - "uses: jbmv/recx@main"
+    requires:
+      modules: [validator]
+    extract:
+      method: copy
+      notes: Referencing it with "uses:" in a workflow is the intended route; copying action.yml works but it then installs recx-cli from PyPI like any user.
+evidence:
+  - id: schema-is-valid
+    summary: The schema is itself a valid JSON Schema 2020-12 document.
+    run: uvx check-jsonschema --check-metaschema spec/recx.schema.json
+    covers: [schema]
+  - id: manifests-validate
+    summary: This manifest and the valid examples pass the schema.
+    run: uvx check-jsonschema --schemafile spec/recx.schema.json RECX.yaml spec/examples/valid/*.yaml
+    covers: [schema, fixtures]
+  - id: validator-tests
+    summary: The validator passes its tests, including every fixture.
+    setup: uv sync
+    run: uv run pytest
+    covers: [validator, schema, fixtures]

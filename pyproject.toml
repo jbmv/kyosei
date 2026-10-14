@@ -1,0 +1,116 @@
+[build-system]
+# KYO-226: setuptools, wrapped by an in-tree backend that writes two files first — the
+# build stamp (`kyo version`) and the packaged changelog (`kyo changelog`). Both are
+# facts only knowable at build time: `uv tool install .` and `pipx install .` build a
+# wheel from the working tree at that instant, and the installed copy has neither a
+# `.git` nor this repository's store to consult afterwards. See
+# `build_backend/kyosei_build.py`.
+#
+# `pyyaml` is here because the generation reads the store through Kyosei's own readers
+# rather than with a parser of its own, and the status registry it needs to know which
+# status means "complete" is YAML. A build script with a second opinion about what a
+# record is would be exactly the drift this project's one-door rules exist to prevent
+# (KYO-179).
+#
+# setuptools 77 is the first release that reads the PEP 639 `license` expression and
+# `license-files` below; an older one refuses the string form of `license`.
+requires = ["setuptools>=77", "pyyaml>=6.0"]
+build-backend = "kyosei_build"
+backend-path = ["build_backend"]
+
+[project]
+name = "kyosei"
+version = "0.1.0"
+description = "Kyosei (共生) — idea-delivery and documentation-governance store. Milestone 2: kind registry + export completeness."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+# pyyaml is the only runtime dependency: the store's config, kind registry and status
+# registry are YAML. markdown-it-py left with `kyo html` (KYO-11's static viewer, since
+# removed; KYO-440.c7) -- a published package carries only what the CLI imports.
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+# KYO-585 (KYO-583, R11 (a)): prior-art search through recx. Optional, because resolving
+# recx-cli adds about twenty packages (jsonschema and its format validators among them)
+# that a project which never searches does not need. Installed with
+# `uv tool install 'kyosei[recx]'`; the upper bound is the one recx's docs/integrating.md
+# asks for, since a recx-cli minor release may change the Python signatures. Kyosei finds
+# it with importlib.util.find_spec("recx_cli") and imports it only inside
+# kyosei.prior_art, so an installation without it imports nothing new.
+recx = ["recx-cli>=0.1,<0.2"]
+# The dev extra carries recx so the integration tests in tests/test_prior_art.py run in
+# Kyosei's own suite against the real search().
+dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6", "recx-cli>=0.1,<0.2"]
+
+[project.scripts]
+kyosei = "kyosei.cli:main"
+kyo = "kyosei.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The default kind registry and standing-rules ledger `kyo init` copies into every
+# new project (kyosei.scaffold.DEFAULT_ASSETS), and the packaged Claude Code hook
+# templates `kyo install-hooks` merges into a consumer project (KYO-13.c1) — the
+# single packaged copy of each (law 3).
+#
+# KYO-149: `report.schema.json` joins them, and this list is the authority on what an
+# installed consumer actually has — `tests/test_kyo149_consumer_paths.py` reads these
+# patterns to decide whether a path cited in a worker-audience `enforced-by` line or in
+# generated brief text is one a consumer can open. Two things about the entry are
+# deliberate:
+#
+#   * It is `report.schema.json` beside `report_schema.py`, NOT `defaults/…`. Everything
+#     under `defaults/` is an asset something copies into a consumer's own tree (`kyo
+#     init`, `kyo install-hooks`); the schema is explicitly not copied — a copy goes
+#     stale when the schema changes — so it must not sit in the drawer that means "copy
+#     me". It is served in place, from the package, by `kyo report-schema`.
+#   * The file moved out of the source tree's `templates/` to get here, because
+#     `templates/` CANNOT be shipped: package-data patterns are relative to the package
+#     directory, and `templates/` is a sibling of `src/`, not a child of `src/kyosei/`.
+#     Measured rather than assumed — adding `"../../templates/*"` here builds a wheel
+#     that exits 0, prints no warning, and contains no `templates/` file at all. That is
+#     the silent-success failure this record is about, reproduced inside its own fix.
+#     Do not re-add it.
+#
+# KYO-226 adds the two build-time products, on `report.schema.json`'s reasoning exactly
+# and not `defaults/`': `_build_stamp.json` (which commit this wheel was built from) and
+# `_changelog.json` (every completed record at that moment). Nothing copies either into
+# a consumer's tree — a copy would be a second, stale answer to the one question they
+# exist to answer correctly — so they are served in place from the package, by
+# `kyo version` and `kyo changelog`. Both are gitignored and written by the build hook
+# (`build_backend/kyosei_build.py`), so they are present in every built wheel and absent
+# from every checkout until something builds one.
+kyosei = [
+    "defaults/*",
+    "defaults/hooks/*",
+    "defaults/agents/*",
+    "report.schema.json",
+    "_build_stamp.json",
+    "_changelog.json",
+]
+# KYO-593: the Claude Code marketplace and plugin, whose skill files are the ones `kyo install-skill` copies. One pattern per
+# directory, never a recursive glob: both `.claude-plugin/` directories start with a dot,
+# and a pattern that misses a directory builds a wheel without it and reports success.
+# `tests/test_harness_plugin.py` builds a wheel and checks that every file under
+# `src/kyosei/harness/claude-code/` is in it.
+"kyosei.harness" = [
+    "claude-code/.claude-plugin/*",
+    "claude-code/plugin/.claude-plugin/*",
+    "claude-code/plugin/skills/kyosei/*",
+    "claude-code/plugin/hooks/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]

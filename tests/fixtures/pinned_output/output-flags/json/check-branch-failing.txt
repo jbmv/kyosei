@@ -1,0 +1,47 @@
+2
+--out--
+{
+  "against": "main",
+  "against_source": "main-unmatched",
+  "branch": "touches-the-store",
+  "changed_files": [
+    "ideas/sneaky.md"
+  ],
+  "checked_the_worker_tree": true,
+  "command": "check-branch",
+  "dispatch_base_sha": null,
+  "error": "contract branch-touches-store not met:\n  -   against: main (default), this repository's trunk (git config init.defaultBranch)\n  - touches-the-store diffs ideas/sneaky.md, under kyosei/ or ideas/ relative to main — a worker branch must never touch the structured store or the ideas layer (kyosei/procedures.md's merge guard, KYO-13.c5)",
+  "exit_code": 2,
+  "fragment_refusals": [],
+  "guarded_dirs": [
+    "kyosei/",
+    "ideas/"
+  ],
+  "guarded_files": [
+    "ideas/sneaky.md"
+  ],
+  "guarding": true,
+  "history_lint": {
+    "blocking": 0,
+    "documents": [],
+    "matches": [],
+    "overrides": []
+  },
+  "layout": "in-repo",
+  "numbered_sections_added": [],
+  "ok": false,
+  "repo": "<TMP>/json/proj",
+  "section_status_problems": [],
+  "store_root": "<TMP>/json/proj",
+  "store_unreadable": false,
+  "subject": null,
+  "trunk": {
+    "ref": "main",
+    "source": "init-default-branch"
+  }
+}
+
+--err--
+kyo: contract branch-touches-store not met:
+  -   against: main (default), this repository's trunk (git config init.defaultBranch)
+  - touches-the-store diffs ideas/sneaky.md, under kyosei/ or ideas/ relative to main — a worker branch must never touch the structured store or the ideas layer (kyosei/procedures.md's merge guard, KYO-13.c5)

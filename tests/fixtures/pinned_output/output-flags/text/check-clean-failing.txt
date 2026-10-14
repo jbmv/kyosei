@@ -1,0 +1,7 @@
+2
+--out--
+
+--err--
+kyo: contract worktree-has-uncommitted-work not met:
+  - 1 uncommitted or unstaged path(s) in <TMP>/text/proj, outside kyosei/ or ideas/ or .kyosei-report.json: commit them before finishing — an uncommitted worktree at stop time is treated as work that does not durably exist yet
+  -   ?? stray.txt

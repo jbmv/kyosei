@@ -1,0 +1,24 @@
+0
+--out--
+summary: COMPLETE — report TST-1.r1 of TST-1.d1: premise_false 0, disagreements 0, verdicts: 1 met, open docs obligations 1
+accepted report TST-1.r1 of dispatch TST-1.d1 on TST-1, as orchestrator
+review: the report carries no premise_false and no disagreements entry
+[1/3] kyo verify --from-report TST-1.d1
+  applied 1 of 1 verdict(s) from report TST-1.r1 (dispatch TST-1.d1), as orchestrator
+    TST-1.c1  unmet-unbuilt -> met (machine-checked)  verification TST-1.v1  evidence TST-1.e2
+  not applied (0):
+    (none)
+[2/3] kyo docs settle --from-report TST-1.d1
+  applied 0 of 0 docs verdict(s) from report TST-1.r1 (dispatch TST-1.d1), as orchestrator
+  not applied (0):
+    (none)
+[3/3] kyo edit TST-1 --touches-from-drift TST-1.d1
+  edited TST-1 (bug)
+  touches: 1 -> 1
+    - src/app.py
+    + TST-1.t2  src/app.py
+    (from TST-1.d1's touch drift: corrects this record; the guard reads the next record's table)
+--close was not passed: records not moved
+explained in `kyo reference accept`
+
+--err--

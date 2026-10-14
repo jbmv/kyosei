@@ -1,0 +1,6 @@
+2
+
+--err--
+kyo: contract complete-requires-settled-criteria not met:
+  - TST-1.c2 is unmet-unobserved: the banner shows
+  - `kyo split TST-1 --to-successor TST-1.c2` carries it to a successor record, back-linked both ways, and leaves this one settled — that is what it is for. If the work really is finished, verify or withdraw it instead.

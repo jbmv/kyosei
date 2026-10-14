@@ -1,0 +1,17 @@
+0
+--out--
+dispatched TST-1 as TST-1.d1
+stored base sha: <SHA>
+  baseline for the stop check: <TMP>/text/proj/.git/kyosei-dispatch-baselines/TST-1.d1.json -- the main checkout's untracked files, the directories under <TMP>/kyosei-home and its projects.json entries, as they are now; a new one at this dispatch's stop is named to its worker (KYO-535)
+stored worktree: <worktrees>/kyo-137  (resolves to <TMP>/kyosei-home/proj/dispatch worktrees/kyo-137)
+  create it with: git worktree add '<TMP>/kyosei-home/proj/dispatch worktrees/kyo-137' -b kyo-137  (or without -b if the branch already exists)
+  this project declares no `worktree_setup`, so that worktree will hold tracked files only — anything gitignored (`.venv/`, `node_modules/`, built binaries) will be missing and the worker will rebuild it by hand; declare the commands in kyosei/config.yml to have them stated in the brief
+stored branch: kyo-137
+stored worker model: (not declared — nothing declared one — not kyosei/config.yml, not this kind's policy.worker_model, not `kyo dispatch --model`)
+--force overrode the blocked refusal (1 blocker(s)):
+  TST-2 (status working, not settled) through link TST-L1
+disjointness: computed from DECLARED touches. No other dispatch was running, so nothing was compared and nothing could have collided — this dispatch is unconstrained by the check rather than cleared by it.
+stored brief (15788 chars, sha256:<DIGEST>) — read it with `kyo show TST-1.d1` (or --print-brief)
+explained in `kyo reference dispatch`
+
+--err--

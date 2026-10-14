@@ -1,0 +1,10 @@
+0
+--out--
+created link TST-L1
+stored edge: TST-2 blocks TST-1
+  TST-2 "A second record"
+    BLOCKS
+  TST-1 "A record"
+TST-1 "A record" is not offered by `kyo next` or dispatched until TST-2 "A second record" settles.
+
+--err--

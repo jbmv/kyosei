@@ -1,0 +1,7 @@
+0
+--out--
+verified TST-2.c1
+stored criterion state: unmet-unbuilt -> met
+stored method: reasoned-about
+
+--err--

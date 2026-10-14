@@ -1,0 +1,304 @@
+# kyosei/documents.yml -- the document registry (KYO-129).
+#
+# WHICH FILES IN THIS PROJECT ARE LAYER 3 DOCUMENTS: the ones `kyo docs check` resolves
+# `governs:` targets in, and the ones `kyo base run --source docs` returns as rows.
+#
+# This file exists because discovery once covered only `docs/**/*.md`, so a project
+# whose stale documents sat at the root, with no `docs/` directory at all, was reported
+# clean by `kyo docs check` over documents it had never opened.
+#
+# THE SHAPE, which every Kyosei registry shares (see src/kyosei/registry.py):
+#
+#   documents:           one top-level key, the dimension's plural
+#     <name>:            a lowercase slug: a-z, digits and hyphens, starting a-z.
+#                        A name for a SET of documents -- `design`, `operating`,
+#                        `runbooks` -- not for one file.
+#       summary:         REQUIRED, one non-empty line. This file is reviewed by people
+#                        who did not write it; a name with no summary is a magic word.
+#       globs:           REQUIRED, a non-empty list of root-relative globs.
+#
+# `globs` is required here, unlike scopes.yml's optional `paths`, because a document set
+# is nothing but its globs: an entry with a summary and none would be a name that
+# selects no file.
+#
+# GLOB DIALECT: Python's pathlib, where `*` stops at a `/` and `**` crosses directories.
+#   *.md            the repository root only
+#   docs/**/*.md    every markdown file under docs/, at any depth
+#   docs/*.md       docs/ itself, not its subdirectories
+#
+# THIS IS NOT scopes.yml's DIALECT, AND THAT IS WHY THIS FIELD IS CALLED `globs:` AND
+# THAT ONE IS CALLED `paths:` (KYO-142). The jobs differ and the dialects follow:
+#
+#   this file    ENUMERATES the files that exist, by walking the tree -- pathlib
+#   scopes.yml   MATCHES a path a record already declared, by filtering a list -- fnmatch
+#
+# fnmatch cannot enumerate without walking the tree itself, so the divergence is forced
+# and is not going away. What was fixed is that both fields used to be called `paths:`,
+# which made the single most likely mistake -- copying a line from one file into the
+# other -- succeed and select a DIFFERENT SET, with no error. `docs/**/*.md` here
+# reaches every depth under docs/; under fnmatch the same string does not match
+# `docs/top.md` at all. `src/server/*` in scopes.yml matches at any depth; here it
+# matches direct children only.
+#
+# So the two are spelled differently, and a copied line now lands on a key its new file
+# does not accept and is refused, naming both dialects. Not a style rule: the dialect
+# owns the field name in registry.py (PathDialect), and any future registry with a
+# path-shaped field inherits the spelling from the dialect it picks rather than choosing
+# a name of its own.
+#
+# A glob may not be absolute and may not climb out of the project with `..` -- these
+# globs walk the filesystem, and a config file that reads outside the repository is not
+# a thing this tool offers. Both are refused when this file is read, naming the pattern.
+#
+# THE DEFAULT, WHICH IS WHY THIS FILE SHIPS EMPTY. A project that declares nothing here
+# -- including every project initialised before this release, which has no documents.yml
+# at all -- is scanned for:
+#
+#     *.md            root-level markdown: README.md, CONTRIBUTING.md, an operating doc
+#     docs/**/*.md    the docs tree, which is what discovery used to be
+#
+# That default lives in the code (registry.DEFAULT_DOCUMENT_GLOBS), not in this file, and
+# deliberately: the fix has to reach projects that do not have this file, which is all of
+# the existing ones. Seeding the two entries here instead would have delivered it to
+# exactly the projects that never had the problem. This file is the shape and the escape
+# hatch, not the default.
+#
+# `**/*.md` is NOT the default, and should not be your first instinct either: it sweeps
+# node_modules, vendored dependencies and the ideas/ pool into the governed set, and a
+# validator that fails your build over somebody else's changelog is worse than one that
+# cannot see your README.
+#
+# DECLARING ANYTHING REPLACES THE DEFAULT OUTRIGHT -- it does not add to it. If you want
+# the root and the docs tree plus a third place, name all three. There is no exclusion
+# field: narrowing is what declaring a set already does.
+#
+# A PROJECT WHOSE GLOBS MATCH NOTHING IS TOLD SO. `kyo docs check` reports `no-documents`
+# and names the globs it scanned, rather than printing "clean" over an empty scan. It is
+# not a build failure -- a project may legitimately hold no Layer 3 documents yet -- but
+# it is not a pass either, and the two are no longer spelled the same way.
+#
+# A DOCUMENT THAT GROWS BY NUMBERED SECTION: the optional `numbered:` block (KYO-299).
+#
+# Some documents are append-only and numbered: a long engineering-notes file whose
+# sections are headed `## 204. <title>`, whose numbers are cited across the repository,
+# and whose index is GENERATED from it by the project's own command. Two dispatched
+# workers who each append "the next number" in one wave collide three ways at once --
+# on the number, on the tail of the file, and on every generated index -- and they
+# collide however their touches were declared, because a touch narrows a claim and does
+# not move a byte.
+#
+# Declaring `numbered:` on a document set changes who writes what. Workers stop writing
+# to the document at all: each one writes ONE fragment file per new section, named after
+# its own dispatch with a distinct slug per section (a path no other dispatch can write,
+# so there is nothing to collide on), heading its section with `{{next}}` where the
+# number goes. A fragment receives one number, so one carrying two sections is refused. The controller runs `kyo docs assemble`
+# on the merged tree -- where the whole wave is visible and the numbering is therefore
+# decidable -- which appends each fragment with the next number, replaces `{{next}}`
+# throughout the section, removes the fragment, and NAMES the project's follow-up
+# commands without running them.
+#
+#   documents:
+#     notes:
+#       summary: The append-only engineering notes, one numbered section per finding.
+#       globs:
+#         - docs/notes.md
+#       numbered:
+#         fragments: docs/notes-fragments          # where workers write; relative, inside the repo
+#         heading: "## {number}."                  # the template a numbered heading follows
+#         after:                                   # NAMED after assembly, never run
+#           - make notes-index
+#
+# `heading:` is a TEMPLATE, not a regular expression, and it carries `{number}` exactly
+# once. Only as much of the heading as it takes to find the number: `"## {number}."`
+# matches `## 204. Cache warm-up (2026-01-15)` without this file having to
+# describe your titles. A template with no `{number}`, one with two, or one that is not
+# an ATX heading is refused by name when this file is read.
+#
+# `fragments:` is a directory, relative to the project root and not climbing out of it.
+# Workers write files there and `kyo docs assemble` deletes them, and neither is a thing
+# this tool does outside the repository.
+#
+# `after:` is optional, and it is the boundary of what Kyosei does here. KYOSEI NEVER
+# RUNS A PROJECT'S COMMANDS -- it prints these the same way a dispatch brief prints
+# `worktree_setup` and executes none of it. Numbering and appending are Kyosei's; your
+# index generator and your validator are yours.
+#
+# What this does NOT change: editing an EXISTING section stays an ordinary edit,
+# declared the ordinary way with a `path#section heading` touch and made in place. Only
+# the ADDITION of a new numbered section goes through a fragment, because only the
+# addition has to agree with every other worker about a number. `kyo check-branch`
+# refuses a worker branch that adds one directly and names the fragment path instead; it
+# does not refuse an edit.
+#
+# If a set's globs enumerate more than one document, a fragment names which one it is
+# for with a first line reading `<!--kyosei-fragment document: <path> -->`. With one
+# document in the set it must not have to, and does not.
+#
+# A SECTION THAT AMENDS EARLIER ONES (KYO-493), opt-in per set with `numbered.amends`:
+#
+#       numbered:
+#         ...
+#         amends:
+#           field: amended_by   # amended-by | amended_by: Kyosei's back-link key, your spelling
+#           status: amended     # the status an amended section is given; never a dead one
+#
+# Both keys are required, and anything else is refused by name when this file is read.
+# A fragment then names the sections it amends on its first line,
+# `<!-- kyosei-fragment amends: 178, 186 -->`, and `kyo docs assemble` writes the new
+# number onto each one's back-link (after its `status:` line) and sets its status, in
+# the same all-or-nothing run. Workers do not edit those two fields in place.
+#
+# A SET THAT STATES WHAT IS TRUE NOW: the optional `ssot:` block (KYO-552, KYO-553).
+#
+# The opposite of `numbered:`, and a set cannot be both: an ssot set's documents are
+# edited in place and always say what is true now -- specs, requirements, a current-state
+# reference, findings. With ids, each requirement owns an id in its heading
+# (`## API-12. A request without a token is refused`) and every other document cites
+# it by that id rather than by a heading or a path:
+#
+#   documents:
+#     specs:
+#       summary: The product requirements, one id per requirement.
+#       globs:
+#         - docs/specs/*.md
+#       section_status:
+#         statuses: [current, superseded]   # ssot: needs superseded among them (below)
+#       ssot:
+#         id_heading: '{id}. {title}'       # {id} and {title} once each, no '#'
+#         id_pattern: '[A-Z]{1,4}-\d+'      # a regex, unanchored; the prefix is before '-'
+#         prefixes:                         # each prefix -> the one document owning it
+#           API: docs/specs/api.md
+#           P: docs/specs/foundation.md
+#         history_lint: warn                # off | warn (the default) | block
+#
+# `kyo docs check` (and `kyo check-branch` on a worker's branch) then refuses an id cited
+# in prose that no heading owns, an id owned twice or in a document its prefix does not
+# map to, a citation of a superseded requirement that does not name its replacement, and
+# a superseded section longer than a short tombstone (`tombstone_max_lines`, default 3).
+# Fix the id scheme BEFORE the first spec is written: one prefix per owning document, ids
+# never reused or renumbered.
+#
+# Without ids -- a current-state reference or a findings document whose sections carry
+# none -- declare the block empty. It keeps the tombstone rule and the history lint and
+# none of the id rules; `id_heading`, `id_pattern` and `prefixes` come all three or none:
+#
+#   documents:
+#     reference:
+#       summary: How the system works today, edited in place.
+#       globs:
+#         - docs/how-it-works/**/*.md
+#       section_status:
+#         statuses: [current, superseded]
+#       ssot: {}
+#
+# `history_lint` (KYO-555) is either kind's: a sentence a branch adds to an ssot document
+# that narrates how it came to be ("this used to run nightly", "previously") belongs in
+# a decision record or the commit message. `warn` prints it at the worker's stop and
+# never blocks; `block` refuses `used to` and `previously` unless a commit carries a
+# `Kyosei-History-OK:` trailer; `off` suits a set that quotes history on purpose. With
+# ids, a `decision` record that names an id raises a docs obligation on that section
+# (KYO-554, the `decision` kind's `raises_docs_obligations` in kinds.yml).
+#
+# Leave a document out of every set when it is a plan, an ADR, a dated snapshot or a
+# generated file: nothing is current-state about it to keep true.
+#
+# A SECTION'S STATUS AND ITS LINKS (KYO-499). In every document, `kyo docs check` refuses a
+# section whose `status:` and `amended-by:` / `superseded-by:` (either spelling) disagree.
+# A set may opt in to stricter rules over its own sections with `section_status`:
+#
+#       section_status:
+#         statuses: [current, amended, superseded]   # required: the closed set of values
+#         pointer_obligations: true                  # optional, default true
+#         index: docs/design-sections.md   # optional; a path in your repository
+#         index_lists: every                       # optional: non-current (default) | every
+#         index_depth: 2                           # optional, with every: rows to this level
+#         index_fields: [area]                     # optional, with every: a column per field
+#
+# Any other key is refused by name when this file is read. In that set a status outside
+# `statuses` is refused, a link must name a heading (a bare key in the same document, or
+# `path.md#anchor` for another) and not its own, the linked section must mention the one
+# linking to it, and a `src/` pointer to a superseded section must name the successor in
+# the same comment. `kyo check-branch` runs the same rules on a worker's branch.
+#
+# `kyo docs index` writes the index: a summary per document, then -- by default -- each
+# section with a status other than current or a link, with its opening line. With
+# `index_lists: every` (KYO-512) it lists EVERY section instead, one row each: the number
+# and title in a numbered set (the heading, linked, otherwise), the status, its links, the
+# section at the head of an amended or superseded one's chain, and the `governs:` targets
+# when the document's sections declare any. Those rows hold nothing a prose edit changes -- no
+# opening line, no line count -- so a worker editing a section's prose in place cannot
+# make the committed index stale; only a heading, status, link or governs change can.
+# `index_depth: 2` gives rows to `##` headings and not the `###` ones inside them, and the
+# summary table's section count follows it (KYO-520): it counts the sections at or above
+# that depth, so it equals the rows listed. `index_fields: [area]` (KYO-520) adds one column
+# per named field after the fixed ones, filled from the first `area: value` line in each
+# section (inside a notes-meta comment or not; outside a code fence) and empty where a
+# section declares none -- the field need not be one the parser reads elsewhere. A value
+# outside non-current/every, `index_lists` without `index`, `index_depth` outside 1-6 or
+# without `index_lists: every`, and `index_fields` that is not a list of distinct non-empty
+# names, names a fixed column (status, links, ...) or lacks `index_lists: every` are each
+# refused by name.
+#
+# In a set that ALSO declares `numbered:` (KYO-505), a bare number is a key too:
+# `amended_by: [15]` -- what `kyo docs assemble` writes -- names the section whose
+# heading the set's `numbered.heading` renders for 15 (`## 15.` above), and the linked
+# section may mention the linking one by its number as `§15`, `<path> §15` (the path
+# root-relative or relative to the document; another document's path cites that one) or
+# `section 15` (`sections 3, 9 and 15`, a part letter like `§15b`). A bare `15` alone
+# does not count: it is also a date, a version, a count, or a `see_also:` list.
+#
+# YOU DO NOT HAVE TO WRITE ANY OF THIS BY HAND: `kyo docs suggest` (KYO-303).
+#
+# THIS FILE IS YOUR DECLARATION AND NOTHING OVERRIDES IT. That is the whole design, and
+# everything in this paragraph is subordinate to it. But a file that must be written
+# from scratch, whose most useful blocks (`numbered:` and `ssot:`, above) nothing
+# mentions until you go looking for them, is one most projects will never write -- so
+# there is a command that READS your repository and drafts what it looks like you might
+# want (an `ssot:` block too, for documents whose headings carry ids):
+#
+#     $ kyo docs suggest
+#     docs suggest: 1 suggestion(s) for kyosei/documents.yml (suggestion only, nothing written)
+#       scanned: docs/*.md (declared in .../kyosei/documents.yml)
+#       [numbered-index-sibling] docs/notes.md looks numbered and append-only, ...
+#           evidence: 204 heading(s) in docs/notes.md follow '## {number}.', ...
+#           evidence: docs/notes-index.md is generated and is about this document ...
+#           replace the whole `documents.notes:` entry in kyosei/documents.yml with this:
+#             documents:
+#               notes:
+#                 ...
+#                 numbered:
+#                   fragments: docs/notes-fragments
+#                   heading: '## {number}.'
+#                   after:
+#                   - make notes-index
+#
+# It prints the evidence beside every draft, and it WRITES NOTHING -- here or anywhere.
+# It is the shape `kyo new` has had for scope since KYO-100, where a derived value is
+# printed as "derived (suggestion only, nothing stored)" and the stored declaration is
+# never touched: the tool says what it can see, and the project decides.
+#
+# Nothing enforces a suggestion. No `kyo doctor` PROBLEM reads one; doctor prints a
+# single NOTICE when there is something to draft, and a project that has read the drafts
+# and decided against them turns that notice off with one line in kyosei/config.yml:
+#
+#     docs_suggest_notice: false
+#
+# because a suggestion that cannot be declined is not a suggestion.
+#
+# Edited as ordinary reviewable config in v1, exactly like kinds.yml. Proposal-gating
+# the edit is KYO-72 step 6 and does not exist yet.
+
+documents: {}
+# documents:
+#   operating:
+#     summary: What someone running this project needs at the top level.
+#     globs:
+#       - "*.md"
+#   design:
+#     summary: The design record -- decisions, architecture, the reasoning behind both.
+#     globs:
+#       - docs/**/*.md
+#   runbooks:
+#     summary: Operational procedures, kept beside the service they operate.
+#     globs:
+#       - ops/runbooks/**/*.md

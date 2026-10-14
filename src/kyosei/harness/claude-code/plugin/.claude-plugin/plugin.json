@@ -1,0 +1,8 @@
+{
+  "name": "kyosei",
+  "version": "0.1.0",
+  "description": "The kyosei orchestrator skill and the session hooks that drive a Kyosei-tracked project. Requires the kyo CLI on PATH (uv tool install kyosei).",
+  "author": {
+    "name": "James Bullard"
+  }
+}

@@ -1,0 +1,8 @@
+0
+--out--
+closed TST-3.d1
+stored state: withdrawn
+stored withdrawn because (17 chars, sha256:<DIGEST>):
+  | frozen by mistake
+
+--err--

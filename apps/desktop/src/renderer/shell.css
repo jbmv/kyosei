@@ -1,0 +1,1859 @@
+/* The v3 shell's stylesheet, written for the v3 shell (KYO-232.c1).
+
+   Not a trim of v2's. v2's 3500 lines dressed three modes, a pane workspace, a bottom
+   dock, a graph, a bubble field and two rails, none of which exist any more; what is
+   left to style is a rail, a sidebar, columns of tabs, and the raw renderings the
+   placeholder tabs draw. Keeping the old file and deleting from it would have left a
+   stylesheet whose shape was still v2's, with the deletions as the only record of why.
+
+   One light appearance, stated. `main.ts` pins `nativeTheme.themeSource = "light"`, so
+   there is no dark palette here and a window never gets a dark frame around a light
+   page (KYO-122.c6).
+
+   One token set (KYO-253): every colour, size and radius a rule in this file or in a
+   tab's `styles.ts` uses is one of the custom properties below. A tab styles LIKE this
+   app (`tabs/kind.ts`); the type scale in particular is closed -- seven sizes, and a
+   rule that wants an eighth is asking the wrong question. */
+
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --sunken: #eef1f6;
+  --border: #e2e4e8;
+  --border-strong: #cdd2da;
+  --fg: #16181d;
+  --muted: #6b7280;
+  --muted-2: #9aa1ac;
+  --accent: #2563eb;
+  --accent-soft: #dbe6fd;
+  --accent-border: #c3d6fb;
+  --accent-text: #1d4ed8;
+  --good: #1d6b38;
+  --good-soft: #e7f6ec;
+  --good-border: #c5e7d0;
+  --warn: #b45309;
+  --warn-soft: #fdf3e3;
+  --warn-border: #f0dcbb;
+  --bad: #b91c1c;
+  --bad-soft: #fde8e8;
+  --bad-border: #f5c6c6;
+  --term-bg: #f1f3f6;
+  --on-accent: #ffffff;
+
+  /* The type scale, smallest to largest. The body is --fs-md. */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 17px;
+  --fs-2xl: 20px;
+
+  /* The strip row is the window's title bar (KYO-253): the traffic lights sit in it
+     over the rail, and each column's strip starts at the top edge, Chrome-style. */
+  --strip-h: 38px;
+  --statusbar-h: 26px;
+  --rail-w: 76px;
+
+  --radius-sm: 5px;
+  --radius: 7px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--fg);
+  background: var(--bg);
+  font-size: var(--fs-md);
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+body[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+#app {
+  height: 100%;
+}
+
+.grow {
+  flex-grow: 1;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: default;
+}
+
+button[disabled] {
+  opacity: 0.35;
+}
+
+/* ------------------------------------------------------------------ the window */
+
+.window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* There is no title bar element (KYO-253): the top row of the window is the rail's
+   traffic-light spacer, the sidebar's head and each column's strip, every one of them
+   a drag region so the window still moves by its top edge. Anything a reader clicks
+   inside that row -- a tab, a strip button -- opts out below. */
+[data-drag-region] {
+  -webkit-app-region: drag;
+}
+
+[data-drag-region] button,
+[data-drag-region] input,
+[data-drag-region] select,
+[data-drag-region] .tab {
+  -webkit-app-region: no-drag;
+}
+
+.statusbar {
+  height: var(--statusbar-h);
+  flex: 0 0 var(--statusbar-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.app-name {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+}
+
+.store-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-line[data-ok="false"] {
+  color: var(--bad);
+}
+
+.currency {
+  white-space: nowrap;
+}
+
+/* The windows open on this desk, one chip each, and a "+" for another (KYO-249). */
+.windows {
+  display: flex;
+  gap: 2px;
+}
+
+.window-chip {
+  width: 22px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.window-chip:hover {
+  background: var(--sunken);
+  color: var(--fg);
+}
+
+.window-chip[data-self="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.currency[data-state="database-ahead"],
+.currency[data-state="export-ahead"] {
+  color: var(--warn);
+}
+
+.currency[data-state="cannot-tell"],
+.currency[data-state="unavailable"] {
+  color: var(--bad);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+/* -------------------------------------------------------------------- the rail */
+
+.rail {
+  position: relative;
+  width: var(--rail-w);
+  flex: 0 0 var(--rail-w);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 6px;
+  overflow: hidden;
+}
+
+/* The rail's right edge, drawn from below the title row rather than as a border: a
+   full-height line ran up between the traffic lights and the sidebar title, close
+   enough to the lights to read as touching them. */
+.rail::after {
+  content: "";
+  position: absolute;
+  top: var(--strip-h);
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+/* Where macOS draws the traffic lights (`trafficLightPosition` in main.ts): empty,
+   the strip's height, and the window's drag handle on this side. Its bottom edge is
+   the title row's divider carried to the window's left edge, level with the sidebar
+   head's and the strips' own. */
+.rail-lights {
+  height: var(--strip-h);
+  flex: 0 0 var(--strip-h);
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rail-top {
+  flex: 1 1 auto;
+}
+
+.rail-top,
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-item {
+  position: relative;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  border-left: 2px solid transparent;
+}
+
+.rail-item:hover {
+  color: var(--fg);
+  background: var(--sunken);
+}
+
+.rail-item[data-selected="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.rail-label {
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.rail-project {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+/* ----------------------------------------------------------------- the sidebar */
+
+.sidebar {
+  flex: 0 0 auto;
+  width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar[data-open="false"] {
+  border-right: 0;
+}
+
+.sidebar-head {
+  height: var(--strip-h);
+  flex: 0 0 var(--strip-h);
+  display: flex;
+  align-items: center;
+  padding: 0 7px 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sidebar-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebar-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0 12px;
+}
+
+.sidebar-grip {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.sidebar-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+
+.search-icon {
+  color: var(--muted-2);
+  display: grid;
+  place-items: center;
+}
+
+.search-input,
+.base-picker {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: inherit;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 3px 6px;
+  min-width: 0;
+}
+
+.search-input {
+  flex: 1 1 auto;
+}
+
+/* --------------------------------------- the sort and filter boxes (KYO-250) */
+
+.tool-button {
+  flex: 0 0 24px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.tool-button:hover,
+.tool-button[data-active="true"] {
+  background: var(--sunken);
+  color: var(--fg);
+}
+
+.tool-button[data-active="true"] {
+  color: var(--accent);
+}
+
+/* A filter is on: the dot says so before the shortened list does. */
+.tool-button[data-filtering="true"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.sidebar-box {
+  margin: 0 10px 8px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+
+.box-title {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 6px 0 4px;
+}
+
+.box-title:first-child {
+  margin-top: 0;
+}
+
+.box-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 4px;
+}
+
+/* Rows under one title, and the clear row under the last group, sat edge to edge. */
+.box-row + .box-row {
+  margin-top: 5px;
+}
+
+.box-row:has(> .box-clear) {
+  margin-bottom: 8px;
+}
+
+.box-choice {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.box-choice:hover {
+  color: var(--fg);
+}
+
+.box-choice[data-on="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.box-clear {
+  border-style: dashed;
+}
+
+/* A filter group that cannot answer, drawn where its chips would be (KYO-290.c2):
+   why it cannot, and nothing to press. */
+.box-note {
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--muted-2);
+  padding: 2px 0;
+}
+
+/* The sort box (KYO-257): the field dropdown takes the row, the direction beside it. */
+.sort-row {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+/* The field dropdown draws its own chevron: the native one sits against the right edge
+   and no padding moves it, and the chevron belongs inset from the right as far as
+   "Name" is from the left (padding 6px + border 1px). The glyph's 10px box carries
+   2.5px of empty stroke-box on its right, so the box sits 5px in. */
+.sort-field-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+}
+
+.sort-field-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  background-color: var(--muted);
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>")
+    center / contain no-repeat;
+  pointer-events: none;
+}
+
+.sort-field {
+  flex: 1 1 auto;
+  appearance: none;
+  padding-right: 22px;
+}
+
+.sort-direction {
+  flex: 0 0 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.sort-direction:hover {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------ the ideas folder tree (KYO-250) */
+
+/* Folders come first and stand out from files (KYO-257): a tinted block with the
+   folder icon, where a file is a plain line in regular weight. */
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 6px;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.folder-row:hover {
+  background: color-mix(in srgb, var(--sunken) 55%, var(--border));
+}
+
+.folder-row[data-drop-target="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.folder-icon {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.sidebar[data-list="ideas"] .row-label {
+  font-weight: 400;
+}
+
+.folder-chevron {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  color: var(--muted-2);
+}
+
+.folder-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-count {
+  font-size: var(--fs-2xs);
+  color: var(--muted-2);
+}
+
+.folder-children {
+  padding-left: 14px;
+}
+
+.folder-children .folder-children {
+  padding-left: 14px;
+}
+
+/* ------------------------------------------------------------ activity (KYO-251) */
+
+.dispatch {
+  padding: 5px 10px 6px;
+  border-left: 2px solid transparent;
+}
+
+.dispatch:hover {
+  background: var(--sunken);
+}
+
+.dispatch[data-dispatch-state="running"] {
+  border-left-color: var(--accent);
+}
+
+.dispatch[data-classes~="terminated-no-report"] {
+  border-left-color: var(--bad);
+}
+
+.dispatch-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+/* Nothing on a line wraps: the ids and counts stay whole and the verdicts give way. */
+.dispatch-line > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.dispatch-second,
+.dispatch-doing {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.dispatch-doing {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one thing on line one that gives way. It was already written to ellipsize,
+   but `.dispatch-line > *` pins every child at `flex: 0 0 auto`, so it never could
+   -- which did not show until KYO-284 put a token figure on the line beside it and
+   the id, the model, the tokens and the clock stopped fitting a 280px sidebar
+   together (observed: the clock clipped off the right edge). The model is the right
+   one to shrink: the id is a link, the tokens and the clock are numbers, and half a
+   model name still reads as the model. */
+.dispatch-model {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.dispatch-time {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* KYO-284: beside the model, so line one reads "opus · 160k tokens" as one fact
+   about the worker rather than as two columns. The run time on line two keeps
+   `.dispatch-time`'s auto margin, which is what puts it immediately left of the
+   +added −removed counts at the right end of the line. */
+.dispatch-tokens {
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* KYO-284: a finished row's run time, on line two. It carries `.dispatch-time`
+   too, for that rule's auto margin and tabular figures; this is the hook for
+   telling the pair apart, and for keeping the run time a shade quieter than the
+   date above it. */
+.dispatch-runtime {
+  color: var(--muted);
+}
+
+.dispatch-lines {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.dispatch-verdicts {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dispatch-mark {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.dispatch-records {
+  margin-top: 2px;
+  padding-left: 6px;
+}
+
+.dispatch-records .row {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.activity-link {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sidebar-divider {
+  height: 1px;
+  margin: 6px 10px;
+  background: var(--border);
+}
+
+/* ------------------------------------------------------------ the prompts (KYO-250) */
+
+.prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgb(22 24 29 / 25%);
+}
+
+.prompt-dialog {
+  min-width: 320px;
+  max-width: 460px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prompt-question {
+  font-weight: 500;
+}
+
+.prompt-input {
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: inherit;
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.prompt-button {
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.prompt-ok {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.sidebar-write-problem {
+  color: var(--bad);
+}
+
+.group {
+  padding-bottom: 2px;
+}
+
+.group .results {
+  padding-bottom: 2px;
+}
+
+.group-head {
+  padding: 8px 10px 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+}
+
+.row:hover {
+  background: var(--sunken);
+  border-left-color: var(--border-strong);
+}
+
+/* KYO-278: a row whose tab is open somewhere in this window, and the one whose tab is
+   where a plain click lands. The left border is the mark, so it composes with hover
+   and with the list's own badges; the active one also lifts its label. */
+.row[data-open="true"] {
+  border-left-color: var(--accent);
+}
+
+.row[data-open-active="true"] {
+  background: var(--accent-soft);
+}
+
+.row[data-open-active="true"] .row-label {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* The label gives way last. Beside a detail it does not shrink at all (an ellipsis
+   costs two glyphs, so "KYO-240" shrunk by a pixel reads "KYO-2…"), capped at
+   three-quarters of the row so a long document title still leaves the detail room;
+   alone, or with only a badge, it shrinks and ellipsizes like any text. */
+.row-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-label:has(+ .row-detail) {
+  flex-shrink: 0;
+  max-width: 75%;
+}
+
+.row-detail {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.row-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+
+.sidebar-problem,
+.sidebar-loading {
+  padding: 10px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* ----------------------------------------------------------------- the columns */
+
+.columns {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 1px;
+  background: var(--border);
+}
+
+.column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.col-grip {
+  flex: 0 0 5px;
+  margin: 0 -2px;
+  z-index: 1;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.col-grip:hover {
+  background: var(--accent-soft);
+}
+
+.column[data-drop-target="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.strip {
+  height: var(--strip-h);
+  flex: 0 0 var(--strip-h);
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 7px 4px 0;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* The tabs scroll; the controls after them do not (KYO-246). Tabs shrink toward a
+   floor first, Chrome-style, and only then does the row overflow -- and when it
+   does, the selected tab is scrolled into view by `paintState`. No scrollbar is
+   drawn: the wheel and the selection are the two ways a reader moves it. */
+.strip-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.strip-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The active column, stated where the record says it is: "one column is active
+   (highlighted tab strip)". */
+.strip[data-active="true"] {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent);
+}
+
+.strip-gap {
+  flex: 1 1 auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 200px;
+  min-width: 104px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+}
+
+.tab:hover {
+  background: rgb(255 255 255 / 60%);
+  color: var(--fg);
+}
+
+.tab[data-selected="true"] {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* KYO-282: the tab a plain click lands in -- the active column's selected tab -- is
+   marked on the tab itself, not only by its strip's tint, so two columns read at a
+   glance. A bar, deliberately not a weight: a selected tab that changes width moves
+   every tab beside it, and a drag in flight lands where the tabs no longer are
+   (measured: the reorder check failed 1 in 5 with a bold here, 0 in 6 without). */
+.strip[data-active="true"] .tab[data-selected="true"] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  flex: 0 0 16px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--muted-2);
+  visibility: hidden;
+}
+
+.tab:hover .tab-close,
+.tab[data-selected="true"] .tab-close {
+  visibility: visible;
+}
+
+.tab-close:hover {
+  background: var(--border-strong);
+  color: var(--fg);
+}
+
+.strip-action {
+  flex: 0 0 26px;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.strip-action[data-split-on="true"] {
+  color: var(--accent);
+}
+
+.strip-nav {
+  flex-basis: 22px;
+  width: 22px;
+}
+
+.strip-nav[disabled] {
+  opacity: 0.25;
+}
+
+/* Where a window dragged over this strip would land (KYO-246): shown while it hovers,
+   gone the moment it leaves or drops. */
+.strip-insert {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.strip-action:hover:not([disabled]) {
+  color: var(--fg);
+  background: rgb(255 255 255 / 60%);
+}
+
+.bodies {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+
+.tab-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-body[hidden] {
+  display: none;
+}
+
+.empty {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  max-width: 420px;
+}
+
+.empty p {
+  margin: 4px 0;
+}
+
+/* ------------------------------------------------------------ the home page */
+
+.empty-column {
+  overflow: auto;
+}
+
+.home {
+  margin: 0 auto;
+  padding: 40px 28px 48px;
+  max-width: 640px;
+  width: 100%;
+}
+
+.home-head {
+  margin-bottom: 20px;
+}
+
+.home-title {
+  margin: 0 0 4px;
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.home-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.home-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: default;
+}
+
+.home-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.home-card-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--accent);
+}
+
+.home-card:hover .home-card-icon {
+  background: var(--surface);
+}
+
+.home-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.home-card-label {
+  font-weight: 600;
+}
+
+.home-card-detail {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* -------------------------------------------------------- dragging and the menu */
+
+.ghost {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+
+/* The pointer has left the window: the drop will go to another window, or open one. */
+.ghost[data-outside="true"] {
+  opacity: 0.55;
+}
+
+.menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.menu-item:hover:not([disabled]) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  max-width: 380px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--fg);
+  color: var(--on-accent);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- the link strip */
+
+.link-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+/* KYO-279: `hidden` lost to `display: flex` above, so the X "did nothing". */
+.link-strip[hidden] {
+  display: none;
+}
+
+.link-strip[data-tone="refusal"] {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.link-strip-text {
+  flex: 1 1 auto;
+}
+
+.link-strip-close::after {
+  content: "×";
+  font-size: var(--fs-lg);
+  color: var(--muted);
+}
+
+/* --------------------------------------------------- the placeholder renderings */
+
+.raw {
+  padding: 16px 20px 40px;
+  user-select: text;
+  max-width: 900px;
+}
+
+.raw h1 {
+  font-size: var(--fs-xl);
+  margin: 0 0 4px;
+}
+
+.raw h2 {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 18px 0 4px;
+}
+
+.raw-section {
+  border-top: 1px solid var(--border);
+  padding-top: 2px;
+}
+
+.gate {
+  margin: 6px 0 10px;
+}
+
+.gate-head {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 2px 14px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.facts dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.facts-empty {
+  color: var(--muted-2);
+}
+
+.prose,
+pre.raw {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  background: var(--sunken);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 6px 0;
+}
+
+/* ------------------------------------------------------- the terminal and claude */
+
+.term-host,
+.claude-host {
+  padding: 0;
+  overflow: hidden;
+}
+
+.term-status,
+.claude-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.term-status-tag {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+/* The session pills (KYO-283).
+
+   The row scrolls sideways and the "bare shell" control does not: a machine with a
+   dozen sessions must not be able to push the one control that gets the reader OUT of
+   them off the edge of the pane. */
+
+.term-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.term-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.term-pills-empty {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.term-pill,
+.term-bare {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.term-bare {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.term-pill:hover,
+.term-bare:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.term-bare:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* The project's own pill is set apart -- weight and a full border, not colour alone,
+   so it reads as different on a screen and in a screenshot. */
+.term-pill[data-terminal-pill-project="true"] {
+  font-weight: 650;
+  border-color: var(--fg);
+}
+
+/* A session that is not running yet: the project's own, offered so it can be started.
+   Drawn as an outline so it cannot be mistaken for something already alive. */
+.term-pill[data-terminal-pill-live="false"] {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+/* And the one this pane is IN, which is the question the reader asks the row. Filled,
+   because a highlight that was only a border would compete with the project's. */
+.term-pill[data-terminal-pill-current="true"] {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.term-pill[data-terminal-pill-current="true"]:hover {
+  color: var(--surface);
+}
+
+/* What the pane offers when it is not attached (KYO-474.c4): the sentence, one button,
+   and what ssh, kyo or tmux said, verbatim. Functional styling only, not yet polished. */
+.term-offer {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+
+.term-offer-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.term-offer-why {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.term-offer-action {
+  flex: 0 0 auto;
+  font: inherit;
+  color: var(--surface);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.term-offer-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.term-offer-said {
+  margin: 6px 0 0;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
+.term-status-text,
+.claude-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-status[data-tone="problem"] {
+  color: var(--bad);
+}
+
+/* Waiting on Claude Code's trust prompt (KYO-567): not a failure, but something only
+   the reader can do, so it reads apart from an ordinary status line. */
+.claude-status[data-tone="waiting"] {
+  color: var(--warn);
+}
+
+/* How to open a record a message names (KYO-263). Quieter than the caption beside it:
+   it is a standing instruction rather than news, and it gives way first when the head
+   runs out of room. */
+.claude-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.term-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--term-bg);
+  padding: 6px 8px;
+}
+
+/* One box per surface (KYO-293): the tmux client and the bare login shell each have an
+   xterm of their own, stacked here and shown one at a time. Hidden rather than cleared
+   or re-opened, because the whole point of the second screen is that it KEEPS what is
+   on it -- a command still printing into the bare shell while the session is up writes
+   into rows that are still there when the reader comes back. */
+.term-surface {
+  height: 100%;
+}
+
+.term-surface[hidden] {
+  display: none;
+}
+
+.term-screen .xterm {
+  height: 100%;
+}
+
+.claude-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+/* The still shown while the view steps aside for a menu: the view's own pixels, stretched
+   to the frame it was captured at, so the column looks unchanged. */
+.claude-frame[data-covered] {
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+.pane-action {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.pane-action:hover {
+  background: var(--sunken);
+  color: var(--fg);
+}
+
+/* A window holding one tab: no rail, no sidebar, no strip -- the tab fills it. */
+body[data-view="pane"] #app {
+  display: flex;
+}
+
+.pane-body {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------- connect to a dev box (KYO-370) */
+
+.remote-dialog {
+  min-width: 380px;
+}
+
+.remote-hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  /* A certificate fingerprint is one 95-character word (KYO-377): break it, not the box. */
+  overflow-wrap: anywhere;
+}
+
+.remote-field {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The project row waits for the dev box's answer: `display: grid` above would otherwise
+   outrank the `hidden` attribute and show an empty list before anything is asked. */
+.remote-field[hidden] {
+  display: none;
+}
+
+.remote-field > span {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.prompt-problem {
+  min-height: 1.2em;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.prompt-problem[data-state="none"] {
+  display: none;
+}
+
+.prompt-problem[data-state="refused"] {
+  color: var(--bad);
+}
+
+.prompt-problem[data-state="pending"] {
+  color: var(--muted);
+}
+
+.term-remote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 24px;
+}
+
+.term-remote-title {
+  font-weight: 500;
+}
+
+.term-remote-why {
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.rail-host {
+  font-size: var(--fs-2xs);
+  line-height: 1.1;
+  color: var(--muted);
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-all;
+  text-align: center;
+}
+
+.remote-field > .prompt-input {
+  min-width: 0;
+  width: 100%;
+}
+
+/* ------------------------------------------------- New project's folder picker (KYO-460) */
+
+.new-project-dialog {
+  width: min(520px, calc(100vw - 48px));
+  max-width: none;
+}
+
+.picker,
+.picker-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picker[hidden],
+.picker-result[hidden],
+.picker-new-folder[hidden] {
+  display: none;
+}
+
+.picker-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-sm);
+}
+
+.picker-crumb {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+}
+
+.picker-crumb:not(:first-child)::before {
+  content: "›";
+  margin-right: 6px;
+  color: var(--muted);
+}
+
+.picker-crumb:last-child {
+  color: inherit;
+  font-weight: 500;
+}
+
+.picker-crumb:hover {
+  background: var(--hover, rgb(0 0 0 / 6%));
+}
+
+.picker-list {
+  height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  outline: none;
+}
+
+.picker-list[data-state="loading"] {
+  opacity: 0.6;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: default;
+  user-select: none;
+}
+
+.picker-row[data-selected="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.picker-empty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.picker-new-folder {
+  display: flex;
+  gap: 6px;
+}
+
+.picker-new-folder > .prompt-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+/* Where the store lives (KYO-573): two long labels, so each wraps beside its radio. */
+.picker-store {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.picker-store legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: var(--fs-sm);
+}
+
+.picker-store .picker-check {
+  align-items: flex-start;
+}
+
+.picker-result-line {
+  overflow-wrap: anywhere;
+}
+
+/* KYO-459.c2: the one state a window shows when its kyo serve does not answer. */
+.serve-down {
+  max-width: 520px;
+}
+
+.serve-down-command {
+  margin: 6px 0;
+}
+
+.serve-down-command code {
+  font-family: var(--mono, ui-monospace, monospace);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgb(127 127 127 / 15%);
+  user-select: text;
+}
+
+/* KYO-465.c3: a recent in the project switcher, with its remove control at the end. */
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.menu-row > .menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.menu-remove:hover {
+  background: var(--sunken);
+  color: var(--fg);
+}

@@ -1,0 +1,7 @@
+2
+--out--
+
+--err--
+kyo: contract branch-touches-store not met:
+  -   against: main (default), this repository's trunk (git config init.defaultBranch)
+  - touches-the-store diffs ideas/sneaky.md, under kyosei/ or ideas/ relative to main — a worker branch must never touch the structured store or the ideas layer (kyosei/procedures.md's merge guard, KYO-13.c5)

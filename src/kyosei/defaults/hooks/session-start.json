@@ -1,0 +1,13 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "Injects the compact session brief, so a session opens with what changed, in-flight dispatches, gated work and stale flags instead of re-deriving state from files. The reasoning is the Kyosei charter's 'Shift continuity' section, docs/design/charter.md (in Kyosei's own repository), which is provenance for this design and not a file your project has. KYO-94: `--session-start` records this brief as a session anchor, and every brief later in the session re-surfaces the last shift note written before that anchor, even under --compact; without it a note appeared in exactly one brief. Claude Code fires SessionStart on resume and compaction as well as startup, which suits a session whose context was just compacted. A settings file still running the bare `kyo brief --compact` gets the most recent note instead, and the brief says so; `kyo doctor` reports that line as superseded and `kyo install-hooks` replaces it. KYO-316: every packaged hook begins with the same PATH guard. When `kyo` is not on PATH and the directory belongs to a Kyosei project, the guard prints one line to stderr naming the install command and exits 127, which Claude Code treats as a non-blocking error on every event Kyosei installs into, so a missing CLI never blocks a tool call, a stop or a session; on the Bash PreToolUse hooks a block would refuse every command, since without `kyo` the hook cannot tell which commands it is about. When `kyo` is present the guard is one `command -v` and changes nothing, exit status included. `install_hooks.hook_action` strips the guard wherever Kyosei asks what a hook runs, so a settings file carrying the unguarded line compares equal and `kyo install-hooks` upgrades it in place (install_hooks.SUPERSEDED_HOOK_COMMANDS).",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo brief --compact --session-start"
+        }
+      ]
+    }
+  ]
+}

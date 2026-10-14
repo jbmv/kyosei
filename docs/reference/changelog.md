@@ -1,0 +1,613 @@
+# `kyo` changelog
+
+**This file is generated from Kyosei's own store — one line per completed record, grouped by scope, newest first. Do not edit it by hand.** Kyosei's own copy is `docs/reference/changelog.md` (in Kyosei's own repository), regenerated with `.venv/bin/python -m kyosei changelog --all --output docs/reference/changelog.md` — this checkout's own generator, not `kyo` on PATH, which is commonly an installed build whose `changelog` command reads a snapshot baked in at build time rather than this store (KYO-372) — and kept honest by `tests/test_kyo226_version_and_changelog.py` (in Kyosei's own repository), which fails if that copy and the store disagree.
+
+The same entries ship inside the installed package and are readable without this repository: `kyo changelog` prints what changed since the build you are running, and `kyo version` says which build that is. Both the stamp and the packaged entries are written at wheel build time, so neither can be older than the build carrying it.
+
+Dates are UTC, so a record completed in the evening west of Greenwich can carry the next day's date.
+
+## app-desktop
+
+- **2026-10-13** — `KYO-623` (task) — Prepare apps/desktop for publication as the maintainer's working viewer
+- **2026-10-12** — `KYO-587` (task) — kyo serve and the desktop app mark a recx search artifact as stranger-written before showing it
+- **2026-10-10** — `KYO-550` (bug) — The desktop app ignores kyo serve's stale flag, so a server left running an old build after a reinstall gives no sign in the window
+- **2026-10-10** — `KYO-474` (task) — The terminal tab attaches to the controller's tmux server: locally, and in a dev-box window over the user's SSH; plus kyo controller attach
+- **2026-10-10** — `KYO-473` (bug) — The app cannot be used as a pure network client: with no local kyo serve the not-running overlay blocks connecting to another machine
+- **2026-10-10** — `KYO-471` (bug) — An open window does not notice kyo serve stopping until its next facts read
+- **2026-10-10** — `KYO-470` (bug) — A tab dropped onto another project's window opens against that window's project
+- **2026-10-10** — `KYO-469` (bug) — A tab torn off (or popped out of) a dev-box window opens on this machine's project at the same path
+- **2026-10-10** — `KYO-465` (bug) — The app reopens a project last used through a server as the local copy, and recents cannot be edited
+- **2026-10-10** — `KYO-463` (bug) — Desktop links drop the server connection: a link in a window connected to a remote project opens the local project with the same prefix
+- **2026-10-10** — `KYO-460` (task) — Desktop app: New project (graphical directory picker) and Start controller, run over the user's SSH
+- **2026-10-10** — `KYO-459` (task) — Desktop app: a kyo serve client for every project; its own server deleted (G6)
+- **2026-10-10** — `KYO-450` (task) — Desktop app: drop the bundled runtime and its own server; read through kyo serve
+- **2026-10-10** — `KYO-439` (bug) — The desktop app's idea tab promotes selections into records; remove that path (scratchpad -> idea stays)
+- **2026-10-09** — `KYO-571` (bug) — Desktop app lacks a blocked board class; its fixture's ready record is blocked
+- **2026-09-26** — `KYO-441` (proposal) — Reach the home project server off the LAN through Tailscale instead of a VPN
+- **2026-09-25** — `KYO-399` (task) — The pack notarizes with an App Store Connect API key file, so a controller session in tmux can run a notarized re-pack
+- **2026-09-25** — `KYO-390` (bug) — The claude tab shows two contradictory lines when a controller session runs outside the launcher: 'the Claude Code session running in <root>' and 'no controller session for KYO on <machine>'
+- **2026-09-24** — `KYO-391` (bug) — Controller launcher reads the code root as the store: split-store projects cannot Start
+- **2026-09-21** — `KYO-365` (bug) — The Records list's status filter files every decision and evidence record under "open"
+- **2026-09-21** — `KYO-364` (bug) — The terminal tab sometimes stops repainting -- cursor drawn below the entry line, or the prompt hidden behind blank space -- and a resize does not always recover it
+- **2026-09-19** — `KYO-334` (bug) — A pending layout save lands under the new project on a switch
+- **2026-09-19** — `KYO-320` (proposal) — The claude view gets a preload of its own: one click listener on href-less anchors, nothing exposed to the page
+- **2026-09-19** — `KYO-319` (bug) — closeMatching says it closes every matching tab but closes only the first: a record open in both columns can survive a project switch
+- **2026-09-19** — `KYO-315` (bug) — An app-only install has no kyo outside the app's own panes: the app offers no way to put its bundled CLI on a terminal's PATH
+- **2026-09-19** — `KYO-310` (bug) — The Records, Notes and Ideas lists are snapshots: a record filed from the CLI does not appear until the list is clicked away from and back
+- **2026-09-19** — `KYO-263` (bug) — kyosei:// links in a claude.ai message are styled as links in the claude view but a click does nothing
+- **2026-09-19** — `KYO-256` (bug) — After the claude tab was moved to a second column and that column closed, clicking the claude tab did not select it (not reproduced)
+- **2026-09-18** — `KYO-306` (bug) — About one desktop launch in 250 ends with a sidebar list that never renders its rows (three checks, three lists, one of them with nothing else running)
+- **2026-09-18** — `KYO-296` (task) — Record page: a dispatch that covers other records lists them, as kyo show does
+- **2026-09-18** — `KYO-293` (task) — Terminal rework 2: open in the project's tmux session (create if missing), and attach through a pty of its own so a busy bare shell cannot block it
+- **2026-09-18** — `KYO-292` (bug) — Activity token figures: the listing sums the wrong 24 dispatches (lexical id order), and the row passes output tokens off as the whole
+- **2026-09-18** — `KYO-290` (task) — Records filter: a board-class filter with 'dispatchable', read from kyo next
+- **2026-09-18** — `KYO-286` (bug) — A reported dispatch that was never closed shows a run time and a finished-when that keep growing, because the activity JSON has no report timestamp to stop the clock
+- **2026-09-18** — `KYO-284` (task) — Activity rows carry token use for running and finished dispatches, drop 'so far', show a date past one day, and put run time beside the diff counts
+- **2026-09-18** — `KYO-283` (task) — Terminal rework: bare login shell by default, session pills that attach or type or copy, the project's own pill set apart, and a detach-to-bare button
+- **2026-09-18** — `KYO-282` (task) — Row menu opens into the left or right column by name, and the active tab is marked clearly
+- **2026-09-18** — `KYO-281` (task) — Open policy: a record or idea opens into the one browsing tab and focuses it; terminal, claude and compose tabs are never replaced
+- **2026-09-18** — `KYO-280` (bug) — A sidebar filter empties the standing pills of a plan's members that fall outside it
+- **2026-09-18** — `KYO-279` (bug) — The X on a status-bar message does nothing
+- **2026-09-18** — `KYO-278` (task) — Sidebar rows mark the records, ideas and awaiting entries that are open in a tab
+- **2026-09-18** — `KYO-277` (bug) — Closing the last tab in a column folds the split; the split should close only from its own button
+- **2026-09-18** — `KYO-276` (plan) — UI list of 2026-09-16: tab and split rules, open-tab marks, open policy, column menus, terminal rework, activity stats
+- **2026-09-18** — `KYO-262` (task) — Activity list: clicking anywhere on a dispatch block opens it, not only its id link
+- **2026-09-18** — `KYO-261` (task) — Pre-warm one hidden shell window per window with two or more tabs, so a tear-off shows a ready shell
+- **2026-09-18** — `KYO-260` (bug) — Tearing a tab off: ~500ms with nothing under the pointer, a release or drag-back in that time does not re-dock, and the new window is not focused
+- **2026-09-18** — `KYO-259` (task) — Shell tweaks of 2026-09-14: Clear filters first, no base dropdown in records, a tab dragged anywhere but a strip tears off
+- **2026-09-18** — `KYO-258` (bug) — Reopening the terminal tab shows a blank screen (only tmux's status line) until the pane is resized
+- **2026-09-18** — `KYO-257` (task) — Shell polish of 2026-09-14: menu dismissal, sidebar collapse button, title-row divider, sort dropdown, folders-first ideas tree, idea metadata line, home page trimmed
+- **2026-09-18** — `KYO-255` (bug) — The claude.ai view is composited above the shell, so a context menu or prompt over the claude column is underneath it and cannot be clicked
+- **2026-09-18** — `KYO-253` (task) — Theming pass: every emitted class styled (KYO-242), one type scale and token set across the shell
+- **2026-09-18** — `KYO-252` (task) — Scratchpad promotes to an idea file, not a record; dialog with name, folder, remove-from-scratchpad, path copied
+- **2026-09-18** — `KYO-251` (task) — Activity as a sidebar list: running, divider, history; two lines per dispatch with its records beneath
+- **2026-09-18** — `KYO-250` (task) — Sidebar browsers: sort and filter controls; ideas as a folder tree with new folder, rename, move, delete
+- **2026-09-18** — `KYO-249` (task) — One project per window: New Window opens the chooser; the popped-out claude.ai window belongs to no project
+- **2026-09-18** — `KYO-248` (task) — Rail rework: five lists only; Awaiting as a sidebar list; Briefs becomes Notes with handoffs marked
+- **2026-09-18** — `KYO-247` (task) — Click model: per-tab history with back/forward, preview tab on single click, pin on double click
+- **2026-09-18** — `KYO-246` (task) — Tab and window system: two columns, scrolling strip, home page, app menu, tab menu, pop-out as a full window
+- **2026-09-18** — `KYO-242` (bug) — 56 of the v3 renderer's 171 class names have no rule in any stylesheet
+- **2026-09-18** — `KYO-227` (plan) — v3: the Kyosei desktop app, designed from scratch
+- **2026-09-18** — `KYO-170` (investigation) — Can the app replace its terminal with the Remote Control chat interface?
+- **2026-09-17** — `KYO-287` (bug) — compose.spec.ts: the Mod-click on a typed [[id]] fails when the file runs in full and passes alone, on main and on the UI branch
+- **2026-09-16** — `KYO-275` (bug) — A suite-launched app shares the packaged app's userData: every desktop suite run rewrites the live kyo shim to the working-tree CLI, and two consumers' panes were switched to a schema-20 CLI against schema-18 stores
+- **2026-09-16** — `KYO-266` (bug) — A login-shell capture that fails once at launch is cached for the whole app session: every pane bare on launchd's PATH until relaunch
+- **2026-09-16** — `KYO-265` (bug) — Panes the desktop app opens inherit the tmux server's global environment, not the app's: a suite-launched app left a temp KYOSEI_HOME and fixture PATH on the default server, and kyo in every pane created worktrees under /var/folders
+- **2026-09-16** — `KYO-264` (bug) — Activity polling blocks the main process: synchronous git per row on every tick, spinning beachball every ~10s while dispatches run
+- **2026-09-16** — `KYO-254` (bug) — The desktop suite inherits the host pane's TMUX_TMPDIR and KYOSEI_* when run from inside the app's own terminal, and three tmux-owner checks fail
+- **2026-09-16** — `KYO-238` (bug) — Two smoke checks failed once on a memory-starved full run after KYO-229 and pass in isolation: fixture removal ENOTEMPTY, and a switch's tmux socket missing
+- **2026-09-14** — `KYO-245` (plan) — Post-v3 UI rework: tabs, windows, one project per window, browsers, activity, promote-to-idea, theming
+- **2026-09-12** — `KYO-244` (task) — Give the rail's project switcher a recents menu instead of only the native folder dialog
+- **2026-09-11** — `KYO-243` (bug) — Switching projects left record/compose tabs showing (and writing) the previous project's content
+- **2026-09-11** — `KYO-240` (bug) — v3 integration: a launch-time deep link is dropped before the shell subscribes, the placeholder check is stale, and per-tab CSS needs one convention
+- **2026-09-11** — `KYO-239` (bug) — The activity read model tests a dispatch's stored worktree token as a path, so every dispatch reads as directory-gone in the shipped app
+- **2026-09-11** — `KYO-236` (task) — v3 stage 3d: the activity tab -- running dispatches and the most recent finished ones, with worktree, branch, report and ingest state
+- **2026-09-11** — `KYO-235` (task) — v3 stage 3c: views -- the records list with saved bases, the awaiting-human view and badge, the brief tab with links, the docs tab
+- **2026-09-11** — `KYO-234` (task) — v3 stage 3b: compose -- scratchpad and ideas as editable tabs, select-and-promote as a chosen kind, ideas as the human's folder
+- **2026-09-11** — `KYO-233` (task) — v3 stage 3a: the record page -- every child object as a section, deep-link anchors, clickable [[id]] links with child ids
+- **2026-09-11** — `KYO-232` (task) — v3 stage 2: the shell -- rail, collapsible sidebar, columns of tabs, layouts per display, terminal and claude as tabs
+- **2026-09-11** — `KYO-231` (task) — v3 stage 1c: the read model -- the full record document, the awaiting-human query, activity rows, and the brief as data
+- **2026-09-11** — `KYO-230` (task) — v3 stage 1b: the kyosei:// scheme, registered with macOS, intercepted in the claude view, resolving any id shape
+- **2026-09-11** — `KYO-229` (task) — v3 stage 1a: the app captures the login shell's environment and owns the per-project tmux session
+- **2026-09-11** — `KYO-72` (plan) — v2: the Kyosei desktop app
+- **2026-09-08** — `KYO-218` (bug) — After KYO-184.d1 merged, a project switch no longer moves the terminal pane's tmux session in the maintainer's checkout, and the dispatch worktree never showed it
+- **2026-09-08** — `KYO-217` (bug) — The desktop suite's third intermittent: the claude pop-out re-fetch check fails under load, cause unknown
+- **2026-09-08** — `KYO-205` (bug) — The desktop suite has a second intermittent test, and the brief said there was one
+- **2026-09-08** — `KYO-189` (bug) — A dev build and the packaged build share one userData directory, so whichever launched last owns the other's kyo shim
+- **2026-09-08** — `KYO-185` (bug) — The no-tmux message tells a Finder-launched app's reader to set a shell variable, which they have no shell to set
+- **2026-09-08** — `KYO-183` (bug) — The desktop suite is green in every dispatch worktree and red in the maintainer's own checkout
+- **2026-09-05** — `KYO-203` (task) — A gate filter beside the kind/status/scope chips, fed by the rows the pane already has
+- **2026-09-01** — `KYO-192` (task) — The claude pane belongs in the bottom dock, tabbed with Terminal
+- **2026-09-01** — `KYO-191` (bug) — The claude pane has no reload, so a bad load is unrecoverable without restarting the app
+- **2026-09-01** — `KYO-190` (bug) — Redocking the claude pane shows the pre-login view, not the session the popped-out window logged into
+- **2026-09-01** — `KYO-186` (task) — A claude.ai pane beside Terminal, deep-linked to this project's Remote Control session
+- **2026-09-01** — `KYO-176` (bug) — The app has never been packaged, and its own code already states the contract for doing it
+- **2026-09-01** — `KYO-175` (bug) — The app can only ever look at one project, and it is this one
+- **2026-08-31** — `KYO-161` (bug) — Opening one idea file still rewrites the one being left
+- **2026-08-30** — `KYO-155` (bug) — Opening an idea still rewrites it, to keep a check's barrier alive
+- **2026-08-30** — `KYO-150` (bug) — The editor cannot tell a programmatic write from a keystroke, so every one arms autosave
+- **2026-08-30** — `KYO-146` (bug) — An ideas-mode fixture is truncated by an earlier test, seen once by two dispatches
+- **2026-08-30** — `KYO-141` (bug) — Records mode's calendar tool still jumps to the top, and every mode wants one scroll mechanism
+- **2026-08-30** — `KYO-139` (task) — Docs mode: a read-only view of the governance layer
+- **2026-08-30** — `KYO-127` (bug) — Ideas mode's left pane has no scroll preservation at all, so every rebuild jumps the reader to the top
+- **2026-08-29** — `KYO-126` (bug) — The left pane restores a scroll position that is always zero, so every rebuild jumps the reader to the top
+- **2026-08-29** — `KYO-125` (task) — Two desktop checks whose verdict depends on what ran before them
+- **2026-08-28** — `KYO-124` (task) — One owner for a pty: the terminal session outlives its window without aborting the process
+- **2026-08-28** — `KYO-123` (task) — Adopt CodeMirror 6: solid markdown editing over styled source
+- **2026-08-28** — `KYO-122` (task) — Post-v2 UI: the maintainer's triage list, less the editor component
+- **2026-08-28** — `KYO-121` (bug) — Records-mode ribbon groups by raw status, so decisions render as open
+- **2026-08-28** — `KYO-119` (bug) — Quitting the app within its first quarter-second segfaults Electron
+- **2026-08-28** — `KYO-118` (bug) — Electron 44.0.0 segfaults intermittently at launch with a stable native signature
+- **2026-08-28** — `KYO-117` (bug) — Ideas-mode debounced save can lose scratchpad text just typed
+- **2026-08-28** — `KYO-116` (bug) — Desktop smoke suite hangs at window acquisition under load, cause unfound
+- **2026-08-28** — `KYO-115` (task) — Terminal: rail toggle and attaching to the PyCharm tmux session
+- **2026-08-28** — `KYO-114` (task) — Ideas mode: scratchpad, ideas tree, editor, and registry autocomplete
+- **2026-08-28** — `KYO-113` (task) — Records mode: bubbles and graph renderings
+- **2026-08-28** — `KYO-112` (task) — Records mode: folder tree, Base view, and the read-only record editor
+- **2026-08-27** — `KYO-111` (task) — The shell's live seams: kyo resolver, direct store read, and the terminal
+- **2026-08-27** — `KYO-110` (task) — The Electron scaffold: apps/desktop/ and the constant window shell
+- **2026-08-26** — `KYO-78` (proposal) — The v2 app's shape: where it lives, how it ships, and what a human may do in it
+
+## cli
+
+- **2026-10-14** — `KYO-632` (task) — Switch: archive the history, fresh single-commit repository at the same path
+- **2026-10-13** — `KYO-631` (task) — Rehearse the public tree: suite, wheel, fresh install, secret scan
+- **2026-10-13** — `KYO-630` (task) — Move this project's store out of the code repository (split layout)
+- **2026-10-13** — `KYO-629` (task) — Back up the repository and the store before the migration
+- **2026-10-13** — `KYO-628` (task) — Private-names guard over the whole public tree, names kept out of it
+- **2026-10-13** — `KYO-626` (task) — Scrub the tests: fixtures, private-file reads and old commit shas
+- **2026-10-13** — `KYO-625` (task) — Scrub the Python source outside the shipped assets
+- **2026-10-13** — `KYO-624` (task) — Apache-2.0 license, dependency licenses, and the root and build files
+- **2026-10-13** — `KYO-620` (task) — Scrub the shipped assets: defaults, onboarding prompt and the plugin skill
+- **2026-10-13** — `KYO-617` (proposal) — Inventory of what the public tree must lose before release: private names, private-doc links, KYO-n citations
+- **2026-10-13** — `KYO-614` (task) — Recx-Checked trailer (RECX-24) for workers answering a RECX.yaml module obligation
+- **2026-10-12** — `KYO-613` (bug) — The CLAUDE.md section kyo init writes says kyo install-skill replaces it, which on the plugin route is wrong advice
+- **2026-10-12** — `KYO-612` (bug) — On the plugin route nothing writes the advisory git pre-push hook, so a push typed by hand in an in-repo project gets no warning that it publishes the store
+- **2026-10-12** — `KYO-610` (task) — Move Kyosei's own repository onto the plugin -- kyo harness migrate in the source checkout, and the tests and instructions that assumed the skill mirror
+- **2026-10-12** — `KYO-609` (bug) — Parallel test workers can run uv build in the repository at once and collide in its build/ directory
+- **2026-10-12** — `KYO-608` (bug) — The session-start brief tells a project on the plugin that all its copied hooks are missing and to run kyo install-hooks, which would double every hook
+- **2026-10-12** — `KYO-607` (task) — kyo onboard asks which worker agent types the operator wants, with examples, and kyo install-agents writes them
+- **2026-10-12** — `KYO-606` (task) — A comment-only change under a recx module's path raises no obligation, as KYO-530 already rules for every other governed target
+- **2026-10-12** — `KYO-605` (task) — The plugin's hooks call one short script inside the plugin, so a failing hook prints a short command instead of the PATH guard
+- **2026-10-12** — `KYO-604` (task) — An earlier Kyosei build's hooks and unedited skill copies are doctor notices, not problems, so an upgrade does not fail every project's stop hook
+- **2026-10-12** — `KYO-603` (bug) — Trunk fails test_the_committed_changelog_is_what_the_store_yields_right_now whenever a record completes outside kyo close-wave
+- **2026-10-12** — `KYO-602` (task) — Rename kyo prior-art-search on|off to kyo prior-art-setting on|off, which writes a setting and searches nothing
+- **2026-10-12** — `KYO-601` (bug) — test_doctor_hook_cost flakes in the whole suite because test_kyo226's wheel-build and stamp tests rewrite top-level package files the round-trip cache key reads
+- **2026-10-12** — `KYO-600` (task) — RECX.yaml as a governed document -- a recx-manifest format whose sections are the manifest's modules, each governing its own path
+- **2026-10-12** — `KYO-599` (proposal) — Measure how well /recx:manifest writes a RECX.yaml in one invocation, and how precise path-prefix drift is against narrower signals
+- **2026-10-12** — `KYO-596` (task) — One harness item in kyo onboard --check and kyo doctor -- present, missing, behind, copied or doubled, each with its fix
+- **2026-10-12** — `KYO-595` (task) — kyo harness migrate removes what install-skill and install-hooks wrote; the tracked copies stay available behind an explicit flag
+- **2026-10-12** — `KYO-594` (task) — kyo harness install claude-code -- the stable path to the installed build's plugin, the marketplace registration, and enabling it for a project at local scope
+- **2026-10-12** — `KYO-593` (task) — The Claude Code plugin and its one-entry marketplace ship inside the kyosei package, carrying the skill, its reference and the hooks
+- **2026-10-12** — `KYO-592` (task) — Blocking stop checks honour stop_hook_active -- report the finding on a repeat stop, record it, and do not block again
+- **2026-10-12** — `KYO-591` (task) — Every hook mode exits 0 silently outside a Kyosei project
+- **2026-10-12** — `KYO-586` (task) — Opting a project into prior-art search -- the onboarding question, an on/off command, and a brief line while a project has not chosen
+- **2026-10-12** — `KYO-585` (task) — Prior-art search on proposal creation through the optional extra kyosei[recx], with kyo prior-art on demand
+- **2026-10-12** — `KYO-581` (proposal) — How Kyosei installs into a harness -- whether a Claude Code plugin should replace the copies install-skill and install-hooks write
+- **2026-10-11** — `KYO-582` (proposal) — The recx integration -- RECX.yaml as a governed document, kyo manifest, and a configurable prior-art search
+- **2026-10-11** — `KYO-580` (bug) — kyo in a dispatch worktree of a split project cannot find its store unless .kyosei is committed, so a repository that keeps the link untracked cannot dispatch
+- **2026-10-10** — `KYO-567` (bug) — Start orchestrator silently stalls on Claude Code's 'trust this folder?' prompt
+- **2026-10-10** — `KYO-558` (task) — Bare `kyo init` in a new project writes nothing and points to onboarding
+- **2026-10-10** — `KYO-549` (bug) — make install-tool can fail mid-removal while kyo serve runs from the tool directory, leaving no kyo on PATH
+- **2026-10-10** — `KYO-472` (bug) — Reinstalling a LaunchAgent (kyo serve / kyo controller --install --apply) bootstraps before the bootout finishes and leaves it unloaded
+- **2026-10-09** — `KYO-572` (task) — kyo where prints the scratchpad's path
+- **2026-10-09** — `KYO-569` (bug) — kyo init: missing dir reads as no git; symlinked store home crashes
+- **2026-10-09** — `KYO-565` (task) — kyo rules add: write a well-formed project rule into procedures.md
+- **2026-10-09** — `KYO-561` (bug) — Onboarding's [E4] kyosei:// link answer is stored nowhere
+- **2026-10-09** — `KYO-560` (task) — onboard --check reports declined and deferred decisions as missing
+- **2026-10-09** — `KYO-559` (bug) — Recording a missing code-repo identity needs kyo init --adopt
+- **2026-10-05** — `KYO-548` (bug) — A vocabulary-only rewording of procedures.md (controller -> orchestrator) marks every rule CHANGED and prints each in full, most of a 29 KB session-start brief
+- **2026-10-05** — `KYO-547` (task) — `kyo dispatch`'s broad-directory warning lists every file of every other open record in the tree, over a screen per dispatch
+- **2026-10-05** — `KYO-545` (task) — `kyo show <report-id>` refuses, so a stored report can only be read back by digging through kyosei/export/<record>.json
+- **2026-10-05** — `KYO-544` (bug) — `kyo report --check` passes a commits[] listed newest-first, which `kyo accept` then refuses as accept-branch-moved-past-report although the branch never moved
+- **2026-10-05** — `KYO-543` (bug) — touch-drift keeps a file the branch created and the trunk later deleted (a notes fragment `kyo docs assemble` consumed), so `kyo accept`'s touches step refuses
+- **2026-10-04** — `KYO-541` (bug) — The session-start brief can be too large for the hook to show inline; the BUILD CHANGED notice lists every record the build adds
+- **2026-10-04** — `KYO-540` (task) — kyo accept should refuse when the branch moved past the report's last commit, and accept and report should open with a one-line summary
+- **2026-10-04** — `KYO-539` (task) — kyo dispatch should warn when a touch claims a broad directory that other open records also touch
+- **2026-10-04** — `KYO-538` (bug) — Write commands' receipts differ (created vs spawned), --json receipts lack a top-level id, and an identical record filed twice is only warned about
+- **2026-10-04** — `KYO-537` (bug) — A worker's report can label its own verdict human-observed; kyo report --check should refuse it
+- **2026-10-04** — `KYO-536` (task) — kyo close-wave: one command for the merged wave's closing sequence
+- **2026-10-04** — `KYO-535` (bug) — A dispatched worker can write outside its worktree (the main checkout, ~/kyosei, projects.json) and no stop check notices
+- **2026-10-04** — `KYO-534` (plan) — Orchestrator friction from 2026-10-04: worker leaks, wave closing, provenance labels, receipts, pinned outputs, broad claims, moved tips, output length
+- **2026-10-04** — `KYO-531` (task) — The session brief prints every orchestrator rule in full each session; one line per rule would read better
+- **2026-10-04** — `KYO-528` (task) — kyo flag resolve takes one flag id, and kyo docs settle --record <id> --all is refused, so bulk settling is one call per id
+- **2026-10-04** — `KYO-524` (task) — Rename landing 2: the packaged procedures say orchestrator (audience token, section heading, rule text, preamble)
+- **2026-10-04** — `KYO-522` (bug) — kyo spawn into a decision from a reminder needs no evidence, so a conversational decision can still reach the store without the operator's words
+- **2026-10-04** — `KYO-519` (task) — Rename landing 1: the build reads both controller and orchestrator spellings and says orchestrator (KYO-513 R1, R3-R6, R9, R10 read side, R12-R15, living docs)
+- **2026-10-04** — `KYO-518` (bug) — kyo brief's asset-drift block still shows a rule on an earlier packaged wording as reworded by the project, with no remedy
+- **2026-10-04** — `KYO-515` (bug) — kyo install-procedures leaves a rule the project never edited stuck on an older packaged wording, reported as a deliberate difference forever
+- **2026-10-04** — `KYO-514` (task) — kyo onboard prints the build's own agent setup prompt, and kyo onboard --check audits an existing project against the same checklist
+- **2026-10-04** — `KYO-513` (proposal) — Proposal: rename controller to orchestrator across the CLI, config, skill and procedures without breaking an installed project
+- **2026-10-04** — `KYO-511` (bug) — A rerun of kyo accept re-applies a report's older verdict over a newer one the orchestrator recorded
+- **2026-10-04** — `KYO-509` (bug) — No command changes a record's kind, so removing a kind from kinds.yml leaves its records as doctor problems at every stop with no remedy
+- **2026-10-04** — `KYO-508` (bug) — Nothing writes the CLAUDE.md line that makes the kyosei skill load, so a project can have the skill installed and never use it
+- **2026-10-04** — `KYO-507` (bug) — kyo init in a folder with no git repository, or no commit, leaves the project without the code-repository identity the store records
+- **2026-10-04** — `KYO-494` (task) — kyo confirm <record> --quote(-file): verify the gate's criterion human-observed with the maintainer's words, clear the answered human gate, walk to completion
+- **2026-10-04** — `KYO-492` (task) — Merged-not-live as a deploy gate: kyo ungate clears several gates, or every open gate with a tag, in one act
+- **2026-10-04** — `KYO-489` (task) — Write acknowledgements explain once: short inline forms, full text under Output notes in kyo reference <command>
+- **2026-10-04** — `KYO-488` (task) — Write acknowledgements print each explanation once per invocation, not once per entry
+- **2026-10-04** — `KYO-487` (bug) — A dispatch onto an existing branch records the code repository's HEAD as its base, not the branch tip its worktree starts from
+- **2026-10-04** — `KYO-485` (task) — kyo dispatch creates the dispatch's worktree when --branch is given, and --base records a deliberate starting point
+- **2026-10-04** — `KYO-484` (proposal) — Proposal: kyo dispatch creates the worktree when asked (--create-worktree), and records an intended base (--base)
+- **2026-10-04** — `KYO-482` (proposal) — Proposal: a terse text mode for routine write acknowledgements
+- **2026-10-04** — `KYO-481` (proposal) — Proposal: one verb (kyo confirm) for 'the maintainer looked and approves': verify with their words, clear the gate, attempt the move
+- **2026-10-04** — `KYO-478` (bug) — kyo move's unsettled-criteria refusal points at kyo split when an ingested, unapplied report already holds met verdicts for those criteria
+- **2026-10-04** — `KYO-477` (task) — Workers cannot check their report before handing it back; add kyo report --check and a filled example in the brief
+- **2026-10-04** — `KYO-476` (bug) — Repeating --also-covers keeps only the last occurrence, silently
+- **2026-10-04** — `KYO-475` (bug) — kyo worktrees --prune removes a running dispatch's worktree when a finished dispatch recorded the same path
+- **2026-10-04** — `KYO-467` (task) — kyo serve gaps the app needs: document text, list timestamps, idea created time
+- **2026-09-27** — `KYO-466` (task) — Retire the remaining bundled-runtime wording: skill reference, schema-mismatch sentence, this repo's hooks
+- **2026-09-26** — `KYO-464` (bug) — A test's monkeypatch.undo() stripped the KYOSEI_HOME redirect and kyo init registered a temp project in the real ~/kyosei
+- **2026-09-26** — `KYO-462` (task) — controller_command: a machine-level setting in $KYOSEI_HOME/settings.yml (default: claude, no arguments)
+- **2026-09-26** — `KYO-461` (task) — README: serving a store, the Tailscale Serve recipe and SSH access (G8)
+- **2026-09-26** — `KYO-458` (task) — kyo controller start|stop|list: detached claude Remote Control sessions in the desktop session's tmux, reachable over SSH
+- **2026-09-26** — `KYO-457` (task) — kyo serve --install/--uninstall/--status/--restart: launchd agent or systemd user unit (G5)
+- **2026-09-26** — `KYO-456` (task) — kyo serve's write boundary (serve_files.py) and change events (G4)
+- **2026-09-26** — `KYO-455` (task) — kyo projects list|add|remove, the registry's one writer; kyo init registers (G3)
+- **2026-09-26** — `KYO-454` (task) — CLI read commands for what the desktop app reads by SQL today: briefs, shift notes, open gates, dispatch activity (G2)
+- **2026-09-26** — `KYO-453` (task) — kyo serve: loopback-only read server over the CLI's own --json (G1)
+- **2026-09-26** — `KYO-448` (proposal) — kyo serve: the CLI serves the store to any viewer (API, write boundary, process model, localhost-only)
+- **2026-09-26** — `KYO-447` (task) — make release: tag, build the wheel only, verify the stamp, publish -- refusing every unmet precondition
+- **2026-09-26** — `KYO-446` (task) — Dogfood on the uv tool: make install-tool, and KYO-335's remedy names the re-snapshot
+- **2026-09-26** — `KYO-445` (task) — kyo version --json carries schema_version and release; the stamp records whether the build is a release
+- **2026-09-26** — `KYO-442` (bug) — kyo brief --session-start hangs forever on an open stdin pipe (KYO-418 reads to EOF)
+- **2026-09-26** — `KYO-440` (proposal) — Ship the CLI on its own (PyPI, uv tool install) and make the desktop app a viewer that states CLI/schema compatibility
+- **2026-09-26** — `KYO-438` (task) — doctor: no cross-module private cache helpers; MAX_FINDING_CHARS in the registry module
+- **2026-09-26** — `KYO-437` (bug) — test_kyo186_sessions' shell probe breaks under a path with a space, so it fails in every dispatch worktree
+- **2026-09-26** — `KYO-436` (bug) — touches-from-drift keeps a claimed file the branch deleted, then refuses its own correction
+- **2026-09-26** — `KYO-435` (task) — Split cmd_dispatch.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-434` (task) — Split docs_check.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-433` (task) — Split doctor.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-432` (task) — Split scaffold.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-431` (task) — Split cmd_review.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-430` (task) — Split cmd_guard.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-429` (task) — Split export.py by subject into flat modules (pure move, then history into docs/design)
+- **2026-09-26** — `KYO-428` (task) — Output defaults per KYO-427: slim mutation --json (+--full), compact JSON off a tty (+--pretty), honest check-push publishes, no redact aliases
+- **2026-09-26** — `KYO-424` (proposal) — Decide whether kyo's output defaults change: slim mutation --json, active-only kyo list, compact JSON, check-push publishes:null, redact without alias keys
+- **2026-09-26** — `KYO-423` (task) — Six human-output lines misdescribe or repeat what they report: undated-zone changelog, 'did not resolve' on a hand-run check-branch, doubled governs format, relisted legacy paths, stop census in kyo worktrees, 'stored' on counts
+- **2026-09-26** — `KYO-422` (task) — Per-turn hooks pay avoidable latency: ps walk, description-edit scan, symbol-index tree walk, two PreToolUse interpreters
+- **2026-09-26** — `KYO-421` (task) — An unexpected exception, a locked database or a mistyped subcommand breaks the CLI's error contract
+- **2026-09-26** — `KYO-420` (task) — Agents cannot opt into small CLI output: mutation --json embeds whole records, list and show cannot be narrowed
+- **2026-09-26** — `KYO-415` (bug) — Report application misreports its own outcome: kyo accept says ok with steps refused, verify --from-report re-applies on rerun, and verify silently reopens criteria on done records
+- **2026-09-26** — `KYO-411` (bug) — Dispatch lifecycle gaps: re-dispatch into the same worktree, empty reports accepted, docs obligations from touched_files[], absolute paths in stop-audit rows
+- **2026-09-26** — `KYO-410` (bug) — Stop guards read the wrong thing: check-clean obeys showUntrackedFiles=no, check-branch assumes a main trunk
+- **2026-09-26** — `KYO-409` (bug) — The PreToolUse push and suite guards misread wrapped commands, judge the wrong directory, and scan the ledger on every Bash call
+- **2026-09-26** — `KYO-402` (bug) — kyo worktrees --prune deletes any directory a dispatch recorded, and judges merged-ness from the declared branch instead of the worktree HEAD
+- **2026-09-26** — `KYO-401` (bug) — check-branch passes renames out of kyosei/ and ideas/ and C-quoted non-ASCII paths under them
+- **2026-09-21** — `KYO-361` (bug) — kyo install-hooks reports the skill files it wrote above a full settings.json dump, so a tailed run hides the write and the next install-skill reads as wrong
+- **2026-09-21** — `KYO-360` (bug) — A same-named property in an object literal, or a sibling with no blank line before it, vetoes every region of a governs: path#symbol method
+- **2026-09-21** — `KYO-359` (bug) — A config rewrite drops the full stop between a key's generated 'read by ...' comment and the text the project appended to it
+- **2026-09-21** — `KYO-358` (bug) — governs: path#symbol never regions a class method with a modifier in front of its name (private, async, static, get ...), which is most methods a TypeScript consumer's documents describe
+- **2026-09-20** — `KYO-356` (bug) — Controllers cite records to the maintainer as bare ids, because the kyosei:// link form is one sentence in the skill and no surface a session re-reads shows it
+- **2026-09-20** — `KYO-353` (bug) — kyo accept prints REFUSED on its touches step for a report with no commits, where there is nothing to compare
+- **2026-09-20** — `KYO-352` (task) — governs: path#symbol narrows for file types other than .py and .md, starting with TypeScript and JavaScript
+- **2026-09-20** — `KYO-351` (bug) — kyo report tells every consumer that governs: path#symbol narrows an obligation, which holds only for .py and .md, and kyo docs check accepts a #symbol it can never region
+- **2026-09-20** — `KYO-350` (task) — kyo link echoes the edge as a sentence, so a reversed direction reads as wrong
+- **2026-09-20** — `KYO-349` (bug) — The kyo gate line kyo verify suggests fills --do with the reason the criterion is unobserved, which is not an instruction
+- **2026-09-20** — `KYO-348` (bug) — kyo dispatch warns that a duration in the task prose is unmeasured when the record's own criteria state that duration
+- **2026-09-20** — `KYO-347` (bug) — The brief's dragged-in table prints each dragged file once per declared file that drags it
+- **2026-09-20** — `KYO-346` (bug) — Sweep flags outlive the record they were raised under: every open flag in this store sits under a done record
+- **2026-09-20** — `KYO-345` (task) — A dispatch frozen by mistake and never handed to a worker can be closed as withdrawn, not as died mid-work
+- **2026-09-20** — `KYO-344` (bug) — kyo accept after the merged branch is deleted loses the touches step, though the report's commits are on main and would answer it
+- **2026-09-20** — `KYO-343` (task) — kyo accept --except <criterion-id>: accept a report while holding named verdicts back
+- **2026-09-20** — `KYO-340` (bug) — kyo promote --from refuses the body and the plan: line that kyo new --from accepts, so one drafted file cannot be filed by whichever route its kind demands
+- **2026-09-20** — `KYO-338` (bug) — Build stamp says dirty for the store's own ledger churn
+- **2026-09-20** — `KYO-333` (task) — Warn on long titles and bundled criteria
+- **2026-09-19** — `KYO-336` (task) — Compact brief: one line per controller rule
+- **2026-09-19** — `KYO-335` (bug) — A config or schema change ahead of the PATH build silently blinds every hook
+- **2026-09-19** — `KYO-332` (task) — Brief asks for a short hand-back
+- **2026-09-19** — `KYO-331` (task) — kyo accept: one act to apply a report you have read
+- **2026-09-19** — `KYO-330` (task) — kyo new --from: a whole record from one file
+- **2026-09-19** — `KYO-327` (task) — A smaller, better-oriented worker brief: one-line standing rules with the essay on demand, and where the declared symbols and their tests are
+- **2026-09-19** — `KYO-326` (task) — kyo dispatch stops printing the whole brief back, and the compact brief counts sweep flags instead of listing them
+- **2026-09-19** — `KYO-325` (bug) — No dispatch of 2026-09-19 had a matched stop, so worker tokens and context_rewrites read 'unknown' for the whole day
+- **2026-09-19** — `KYO-322` (bug) — kyo init's store .gitignore misses SQLite's -shm and -wal sidecars, which exist whenever the app has the WAL database open
+- **2026-09-19** — `KYO-318` (bug) — In Kyosei's own repository kyo install-skill still overwrites the newer skill with the running build's older one, and the hook-drift check probably has the same reversal
+- **2026-09-19** — `KYO-317` (bug) — Every upgrade instruction names the uv route, even when printed by the app's bundled CLI; an app-only user has no stated way to update or to retire an older uv install
+- **2026-09-19** — `KYO-316` (bug) — With no kyo on PATH every installed hook fails with a bare 'command not found' and the guards silently do not run
+- **2026-09-19** — `KYO-314` (bug) — Terminated-no-report dispatches stay in every brief for good: five settled controller errors are listed each session and nothing can clear them
+- **2026-09-19** — `KYO-309` (bug) — In Kyosei's own repository, doctor's skill check goes red after every skill edit and names a remedy that would overwrite the newer skill with the installed build's older one
+- **2026-09-19** — `KYO-308` (bug) — kyo move closes a plan over open members without saying so
+- **2026-09-18** — `KYO-307` (bug) — kyo edit --touches-from-drift is refused after the merge for any record with a +path touch, which is when the skill says to run it
+- **2026-09-18** — `KYO-303` (task) — kyo docs suggest: draft document declarations from what the repository looks like (numbered documents, generated files), suggested and never enforced
+- **2026-09-18** — `KYO-300` (task) — Symbol-aware sweep and drift, and an additive touch claim, so a much-claimed file stops colliding and re-flagging as a whole
+- **2026-09-18** — `KYO-299` (task) — Doc fragments: workers add numbered sections as per-dispatch fragment files, and the controller assembles them with the next number
+- **2026-09-18** — `KYO-298` (task) — The worker-suite policy as a mechanism: declared controller-only commands, a PreToolUse refusal inside a running dispatch's worktree, a doctor notice, and re-writes counted per dispatch
+- **2026-09-18** — `KYO-295` (bug) — kyo dispatch hands out a record whose every criterion is settled, while kyo next withholds it
+- **2026-09-18** — `KYO-294` (bug) — A worktree cut after the controller commits the dispatch inherits a store diff, and check-branch blocks the worker's stop for it while the brief calls that state normal
+- **2026-09-18** — `KYO-291` (task) — A record covered by another record's dispatch names that dispatch and its report, in kyo show and on the desktop record page
+- **2026-09-18** — `KYO-289` (bug) — kyo next and the brief offer a record as dispatchable when every criterion is settled and no dispatch ever reported on it (23 of 28 on this store)
+- **2026-09-17** — `KYO-285` (bug) — kyo check-branch --against main blames a worker for the controller's store commits when the dispatch was cut from another branch
+- **2026-09-16** — `KYO-272` (bug) — kyo verify --from-report applies an unmet-unobserved verdict without the kyo gate prompt KYO-267 added to kyo verify
+- **2026-09-16** — `KYO-271` (bug) — kyo list --plan refuses a bad plan id with exit 1 and the generic message while kyo new/edit --plan refuse with exit 2 and name the reason (KYO-237)
+- **2026-09-16** — `KYO-270` (bug) — commits[].summary is retired from the report schema; subject is the only first-line field (a report still writing summary is refused, naming subject)
+- **2026-09-16** — `KYO-267` (bug) — A criterion left unmet-unobserved for a person's observation raises no awaiting gate, so the desktop's Awaiting list never shows it and the brief files it nowhere
+- **2026-09-16** — `KYO-241` (bug) — Workers keep writing plausible keys the report schema refuses (severity, message), and the brief never names the key set
+- **2026-09-16** — `KYO-237` (bug) — kyo new --plan with an empty or unknown plan id raises sqlite3.IntegrityError instead of a refusal naming the plan
+- **2026-09-11** — `KYO-228` (chore) — v3 stage 0: intake on every work kind in the packaged default, and kyo promote consumes the idea file
+- **2026-09-11** — `KYO-226` (task) — A consumer can tell which build it runs and what changed since: kyo version, kyo changelog, and an Upgrading entry point
+- **2026-09-11** — `KYO-223` (bug) — kyo worktrees prints every unaudited stop event beside every pruned worktree, and six old rows push the two live ones off the screen
+- **2026-09-11** — `KYO-221` (task) — kyo reference <command> prints one command's section instead of the 1,074-line dump
+- **2026-09-11** — `KYO-220` (bug) — Flags have no read path, and kyo show rejects criterion, evidence, and flag ids while accepting shift-note ids
+- **2026-09-11** — `KYO-219` (bug) — kyo show on a record with docs obligations is unreadable: 59 obligations, one 400-character note repeated 59 times, 87 KB
+- **2026-09-08** — `KYO-215` (task) — Retire `kyo html`: the desktop app is the viewer now
+- **2026-09-08** — `KYO-184` (bug) — No kyo command's subject is where the project is or whether this build can open it, so the app borrows two and pays for both
+- **2026-09-08** — `KYO-177` (bug) — No command reads a frozen brief back, and the skill offers --brief-out -- which dispatches -- as if it did
+- **2026-09-08** — `KYO-133` (bug) — kyo dispatch silently ignores --terminated-no-report with a record id and dispatches instead
+- **2026-09-07** — `KYO-213` (task) — The session brief announces which packaged assets differ from the store's copies
+- **2026-09-07** — `KYO-208` (bug) — kyo report prints obligations and drift ahead of the review order the skill mandates, and the schema lets premise_false carry clarifications
+- **2026-09-05** — `KYO-198` (task) — `kyo verify --from-report`: apply a report's own criteria_verdicts as one controller act
+- **2026-09-05** — `KYO-196` (bug) — kyo worktrees --prune lists every branch any dispatch ever declared, not the ones this run left behind
+- **2026-09-05** — `KYO-195` (bug) — kyo edit prints the derived-scope line on every edit, including a note append
+- **2026-09-05** — `KYO-194` (bug) — The minted id is top-level in some write commands' JSON and nested in others, and kyo new is one of the others
+- **2026-09-05** — `KYO-174` (bug) — kyo worktrees --prune leaves git's admin state stale, so every pruned worktree becomes a git worktree list ghost
+- **2026-09-01** — `KYO-173` (bug) — Finished-but-not-moved names a remedy that succeeds, changes nothing, and leaves the record in the list
+- **2026-08-31** — `KYO-160` (bug) — A multi-line gate payload renders collapsed in kyo html and the desktop app
+- **2026-08-31** — `KYO-156` (bug) — Generated output cites source-tree paths, and KYO-149's check does not cover it
+- **2026-08-30** — `KYO-148` (task) — A gate's payload can be written as prose and corrected without a false clearing
+- **2026-08-30** — `KYO-138` (task) — Generate the command reference from the parser instead of writing one
+- **2026-08-30** — `KYO-130` (task) — A gate's tags are correctable in place, without a false clearing
+- **2026-08-28** — `KYO-120` (task) — kyo base run --group-by: the engine answers every grouping the folder tree offers
+- **2026-08-27** — `KYO-99` (bug) — kyo list --status open returns knowledge records rendered current
+- **2026-08-26** — `KYO-91` (bug) — check_not_shell_mangled fires on an odd delimiter count, which is not the signature of command substitution
+- **2026-08-26** — `KYO-86` (bug) — --why takes prose as a shell argument while the rule forbidding it claims mechanism enforcement
+- **2026-08-26** — `KYO-84` (bug) — KYO-77's check cannot see a message whose correct remedy is not a kyo command
+- **2026-08-26** — `KYO-83` (bug) — KYO-77's check keys error sites by file:lineno, so an unrelated edit above one breaks the suite
+- **2026-08-26** — `KYO-77` (task) — Check that an error message names a remedy that applies, not merely one that works
+- **2026-08-26** — `KYO-68` (bug) — Nothing checks that an error names the best remedy, only that a named one works
+- **2026-08-26** — `KYO-66` (bug) — A phrase search is not proof of absence in hard-wrapped prose
+- **2026-08-26** — `KYO-64` (bug) — kyo new's refusal lists every way in except the one that now works
+- **2026-08-25** — `KYO-57` (chore) — commands.py is in every record's touches, so dispatch disjointness only ever serialises
+- **2026-08-25** — `KYO-47` (bug) — kyo link echoes the edge it stored but never says what it means
+- **2026-08-24** — `KYO-27` (task) — Plan members, viewer freshness, and rule audiences
+- **2026-08-24** — `KYO-26` (bug) — Four errors that knew the remedy and did not say it
+- **2026-08-21** — `KYO-11` (task) — M7: static viewer — kyo html
+
+## docs
+
+- **2026-10-13** — `KYO-622` (task) — Edit eight design documents for publication; codex plan stays private
+- **2026-10-13** — `KYO-621` (task) — Scrub the public docs: README, AGENTS.md, llms.txt, the guide and topics
+- **2026-10-12** — `KYO-611` (task) — Documentation pass after the 2026-10-12 changes -- the plugin route, prior-art search, recx governance, agent types and the doctor and brief changes
+- **2026-10-09** — `KYO-566` (bug) — Skill and guide still send ideas to ideas/scratchpad.md, which the app and CLI hide
+- **2026-10-09** — `KYO-563` (task) — Setup keys and rule forms onboarding names are hidden in shipped files
+- **2026-10-06** — `KYO-556` (task) — Onboarding for document sets: SSOT styles at setup, id-heading suggestions, upgrade notices for kind policy
+- **2026-10-06** — `KYO-551` (proposal) — An `ssot:` document-set declaration for current-state documents
+- **2026-10-04** — `KYO-533` (chore) — The packaged procedures' Rule format says each rule's title, enforced-by and one-line summary reach a brief; the session brief now prints only the title and enforcement kind
+- **2026-10-04** — `KYO-530` (task) — A branch that changes only comments and docstrings raises a docs obligation per governed section
+- **2026-10-04** — `KYO-527` (bug) — The skill says kyo accept reruns with --again; kyo accept has no --again, only kyo verify --from-report does
+- **2026-10-04** — `KYO-521` (task) — Rename carry to reminder; a decision can be filed directly with evidence or come from a reminder; the skill says what is a reminder and what is not
+- **2026-10-04** — `KYO-520` (task) — kyo docs index renders named metadata fields (index_fields) and counts sections at index_depth
+- **2026-10-04** — `KYO-517` (task) — The operator's guide (docs/guide/), llms.txt routing the two kinds of visiting agent, and AGENTS.md for agents working on Kyosei itself
+- **2026-10-04** — `KYO-516` (task) — The README becomes a one-screen front page; its reference material moves to docs/reference/ topic pages with nothing dropped
+- **2026-10-04** — `KYO-512` (task) — kyo docs index can list every section, one row each, so a project's per-section table of contents can come from it
+- **2026-10-04** — `KYO-510` (bug) — A3 (cited back) reads only a section's text above its first sub-heading, so a citation inside a ### subsection is never seen
+- **2026-10-04** — `KYO-506` (plan) — Onboarding: the setup decisions, kyo onboard and its audit, the human guide, and the gaps setup found
+- **2026-10-04** — `KYO-505` (bug) — section_status cannot be turned on for a numbered set: a bare section number in amended_by/superseded_by never resolves to its `## N. <title>` heading, and A3 never accepts `§N` as a cite-back
+- **2026-10-04** — `KYO-503` (chore) — Stale comments KYO-501's backfill found outside its touches, KYO-487's missing design section, and review.md#kyo-63's unconsumed coverage claim
+- **2026-10-04** — `KYO-502` (task) — kyo docs index renders docs/reference/design-sections.md from section status; a test holds the committed file to it (KYO-491)
+- **2026-10-04** — `KYO-501` (task) — Backfill: read the 96 unsampled docs/design sections against HEAD and mark the amended/superseded ones (KYO-491)
+- **2026-10-04** — `KYO-500` (task) — A branch that changes a code region holding a docs/design pointer raises a docs obligation on that section (cause: pointer) (KYO-491)
+- **2026-10-04** — `KYO-499` (task) — kyo docs check enforces section status/link agreement: pairs agree everywhere; links resolve, are cited back, and live pointers avoid superseded sections in opted-in sets (KYO-491)
+- **2026-10-04** — `KYO-495` (task) — Document kyo confirm: README, the controller skill and its reference, and the quote-file shape
+- **2026-10-04** — `KYO-491` (proposal) — Proposal: design-record sections carry a status and an amended-by/superseded-by link, enforced to agree, with a generated index
+- **2026-10-04** — `KYO-480` (proposal) — Proposal: let a numbered-doc fragment declare which earlier sections it amends, and have kyo docs assemble mark them
+- **2026-09-18** — `KYO-304` (chore) — The /kyosei skill says what a scope is and when to declare one
+- **2026-09-18** — `KYO-302` (chore) — The skill names what a controller would otherwise do by hand, and the skill/parser sync check runs both ways
+- **2026-09-18** — `KYO-301` (chore) — The /kyosei skill and the operating guide say a touch can name a symbol or a document section
+- **2026-09-08** — `KYO-166` (bug) — test_hook_templates_sync.py's header states a falsehood about what kyo install-hooks ships, and was false when written
+- **2026-09-08** — `KYO-165` (bug) — Two prose checks demand incompatible shapes of the same sentence, and marking a citation always costs its section verification
+- **2026-09-08** — `KYO-144` (task) — Dogfood governs: in this repo, and measure how often an obligation actually fires
+- **2026-09-07** — `KYO-210` (bug) — The skill never names the plan kind, the mid-dispatch criterion channel, or which gate type a sequencing hold is
+- **2026-09-05** — `KYO-197` (bug) — The skill and the README derive worktrees/<name>, the tool derives dispatch worktrees/<name>, and nothing checks they agree
+- **2026-09-05** — `KYO-193` (bug) — Piping a long test run through tail reports tail's exit code and loses the log, which cost two measurements in one day
+- **2026-08-31** — `KYO-162` (bug) — Thirteen citations in shipped files point at the source tree, including in the skill
+- **2026-08-30** — `KYO-152` (task) — The skill does not point at the generated reference, so a reader is still stranded
+- **2026-08-30** — `KYO-140` (bug) — Wave 1's prose sites fell behind, and the desktop command list will drift again
+- **2026-08-30** — `KYO-131` (bug) — Two surfaces name RECORD.nN and neither names the command that writes one
+- **2026-08-27** — `KYO-103` (bug) — Shipped hook templates quote the pre-KYO-97 store-write rule, kyo doctor clause included
+- **2026-08-27** — `KYO-98` (bug) — Two charter absolutes state mechanisms that do not exist: Layer 3's amended-by check and law 10's criterion lints
+- **2026-08-27** — `KYO-97` (bug) — The never-write-to-the-store rule credits kyo doctor with a branch guard it has never had
+- **2026-08-27** — `KYO-96` (bug) — The charter's law 5 states an absolute the tool no longer claims
+- **2026-08-27** — `KYO-95` (bug) — Nothing compares this repo's procedures.md against the packaged default, so a hand-applied rule can drift silently
+- **2026-08-27** — `KYO-93` (bug) — The law-5 rule understates its own enforcement after KYO-91, and KYO-86's comparison cannot see it
+- **2026-08-26** — `KYO-92` (bug) — The controller skill names scope unknown but not the finished-but-not-moved class beside it
+- **2026-08-25** — `KYO-36` (bug) — Two prose copies of the Stop recipe fell behind the fragment they describe
+- **2026-08-25** — `KYO-35` (bug) — Twenty-six code citations name a CLAUDE.md section that moved to the charter
+- **2026-08-25** — `KYO-34` (bug) — The /kyosei skill names four sweep flag classes that do not exist
+- **2026-08-24** — `KYO-15` (chore) — Distribute the /kyosei skill into consumer projects
+
+## engine
+
+- **2026-10-10** — `KYO-504` (bug) — A test run registered tests/test_kyo5_error_remedies.py's provoked fixture project in the real ~/kyosei/projects.json
+- **2026-10-09** — `KYO-570` (bug) — kyo next, the brief and kyo dispatch ignore blocks links
+- **2026-10-05** — `KYO-546` (bug) — `kyo move <id> verified` succeeds when no criterion has a recorded verdict
+- **2026-10-04** — `KYO-542` (task) — Pinned-output tests store only a hash, so every wording change needs a restore-the-old-text experiment to review
+- **2026-10-04** — `KYO-532` (bug) — A resolved near-duplicate-criteria flag is raised again by every sweep, though nothing about the two criteria changed
+- **2026-10-04** — `KYO-529` (bug) — A resolved description-predates-claim flag is raised again by the next kyo sweep
+- **2026-10-04** — `KYO-490` (task) — A record cannot settle past an open gate - kyo move, accept --close and wont-do refuse, naming the gate; --force overrides
+- **2026-10-04** — `KYO-479` (proposal) — Proposal: track whether a record's merged work is deployed, and list merged-not-live in the brief
+- **2026-09-26** — `KYO-417` (task) — Every git subprocess goes through one run_git() that pins output config, scrubs GIT_DIR, and cannot hang
+- **2026-09-26** — `KYO-413` (bug) — Rule and contract inputs fail silently: zero-criteria records reach verified, malformed rules and duplicate YAML keys vanish, bad report fields crash the validator
+- **2026-09-20** — `KYO-355` (bug) — In a dispatch worktree the changelog reads the main checkout's export, so a worker's test_kyo226 fails on records the controller filed after the worktree was cut
+- **2026-09-20** — `KYO-342` (bug) — A worker in a fresh dispatch worktree cannot read its own brief: kyosei.db is not there, and the refusal names kyo rebuild, which a worker may not run
+- **2026-09-18** — `KYO-311` (chore) — The additive touch marker moves beside its sibling constants in contracts.py
+- **2026-09-11** — `KYO-224` (bug) — kyo report refuses a report whose optional notes field is JSON null
+- **2026-09-08** — `KYO-216` (bug) — After a schema bump, kyo rebuild --force leaves every export document stamped with the old version and doctor lists each one twice
+- **2026-09-08** — `KYO-188` (bug) — _allocations.json carries no schema_version, the one export artifact left unversioned after KYO-181
+- **2026-09-08** — `KYO-182` (bug) — The db and export stale-build refusals duplicate three clauses verbatim, including the one written for the app's reader
+- **2026-09-08** — `KYO-172` (bug) — The tick measurement full-scans a 119 MB events table to read 520 rows, now once per subagent per 32 seconds
+- **2026-09-05** — `KYO-187` (bug) — A raise site that assigns its payload before raising is invisible to the remedy-coverage walk, so a new one can ship off the surface
+- **2026-09-01** — `KYO-181` (bug) — The export ledgers carry no schema_version, so a bump that changed only a ledger still rebuilds silently and lossily
+- **2026-09-01** — `KYO-180` (bug) — The config/db schema mismatch names the destructive remedy first, when the cheap one is always the correct one at that site
+- **2026-09-01** — `KYO-179` (bug) — Every export document stamps a schema_version and kyo rebuild never reads it, so an export from a later build rebuilds silently and lossily
+- **2026-09-01** — `KYO-178` (bug) — The schema-mismatch refusal carries no structured payload, so the app can tell ahead from behind only by matching prose
+- **2026-09-01** — `KYO-168` (bug) — The schema-mismatch refusal is direction-blind, and tells a store that is ahead of the build to downgrade itself
+- **2026-08-30** — `KYO-158` (bug) — kyo rebuild silently deletes config keys write_config was never taught
+- **2026-08-30** — `KYO-142` (bug) — Two registries ship paths: with two glob dialects, and a copied line changes meaning silently
+- **2026-08-27** — `KYO-109` (task) — Base over ideas and docs: the other two sources, one engine
+- **2026-08-27** — `KYO-108` (task) — Base definitions and the engine over records
+- **2026-08-27** — `KYO-107` (task) — Section-level promotion: one section becomes a record, the file survives
+- **2026-08-27** — `KYO-106` (task) — Promotion moves the text into the store and leaves a stub
+- **2026-08-27** — `KYO-104` (task) — Fold kinds.py onto the shared registry shape once it has three real users
+- **2026-08-27** — `KYO-102` (task) — Gates gain a tag registry; the payload stops being search-proof free text
+- **2026-08-27** — `KYO-101` (task) — Statuses become a per-project registry; contracts key off archetype roles
+- **2026-08-27** — `KYO-100` (task) — Scope becomes a schema dimension: the scope registry and the scope field
+- **2026-08-26** — `KYO-82` (bug) — A store with no kinds.yml is told to run kyo init, which refuses — and no kyo command applies
+- **2026-08-26** — `KYO-81` (bug) — kyo export --refresh does KYO-75's damage by a route the transaction guard cannot see
+- **2026-08-26** — `KYO-75` (bug) — Any mutating command over a database behind its export reissues an id
+- **2026-08-26** — `KYO-74` (bug) — A database behind its export reads as complete, and doctor states the direction backwards
+- **2026-08-26** — `KYO-73` (bug) — A second checkout of a split store dead-ends on the remedy its own error names
+- **2026-08-26** — `KYO-50` (bug) — The kind registry declares kind-to-kind flows that no command can traverse
+- **2026-08-26** — `KYO-30` (chore) — Promotion stamp as top-of-file YAML frontmatter (Obsidian-visible) (split from KYO-14)
+- **2026-08-25** — `KYO-52` (bug) — The store records absolute filesystem paths in git-canonical files
+- **2026-08-25** — `KYO-44` (bug) — A knowledge-kind record cannot be retired and shows a status it cannot leave
+- **2026-08-25** — `KYO-43` (bug) — kyo new files any kind directly, ignoring the registry's accepts_from
+- **2026-08-25** — `KYO-33` (bug) — kyo ideas review flags existing directories and line-suffixed paths as broken
+- **2026-08-24** — `KYO-24` (bug) — A defect that arrives written up can be filed as one
+- **2026-08-24** — `KYO-22` (task) — Schema v6: dispatch worktrees and evidence redaction
+- **2026-08-24** — `KYO-21` (task) — kyo unlink: an edge stops being permanent
+- **2026-08-24** — `KYO-20` (task) — Configuration that has fallen behind the build says so
+- **2026-08-24** — `KYO-16` (task) — Touches settable at intake and correctable afterwards
+- **2026-08-24** — `KYO-14` (chore) — Promotion stamp as top-of-file YAML frontmatter (Obsidian-visible)
+- **2026-08-21** — `KYO-6` (chore) — An explicit export refresh: rewrite drifted export docs from the db
+- **2026-08-21** — `KYO-5` (bug) — rebuild leaves config.yml at the old schema_version; drift error names a remedy that cannot fix it
+- **2026-08-21** — `KYO-4` (task) — M4: provenance — claims, verifications, evidence
+- **2026-08-21** — `KYO-3` (bug) — Schema/export format changed with no version bump or migration path
+- **2026-08-21** — `KYO-2` (chore) — Generated config.yml documents only consumed fields
+- **2026-08-21** — `KYO-1` (task) — M3: ideas layer + promotion
+
+## store-governance
+
+- **2026-10-13** — `KYO-627` (task) — Retitle completed records whose titles carry private text
+- **2026-10-11** — `KYO-579` (bug) — The shipped templates name consumer projects, so kyo install-skill and install-procedures copy those names into every consumer
+- **2026-10-09** — `KYO-564` (bug) — onboard --check always shows kyo doctor as not-run
+- **2026-10-09** — `KYO-562` (bug) — docs suggest calls an in-place numbered plan append-only
+- **2026-10-06** — `KYO-555` (task) — History lint in ssot: sets: warn on diary prose a branch introduces, block per set
+- **2026-10-06** — `KYO-554` (task) — Decision obligations: a decision naming a section raises a standing docs obligation on it
+- **2026-10-06** — `KYO-553` (task) — `ssot:` without ids: the three id keys optional together
+- **2026-10-06** — `KYO-552` (task) — `ssot:` sets, slice 1: id owners, bare-id resolution, tombstones
+- **2026-10-04** — `KYO-493` (task) — kyo docs assemble writes the amended-by back-link and status a fragment's header names (KYO-480)
+- **2026-10-04** — `KYO-486` (bug) — A fragment holding two numbered sections assembles them under one number; one section per fragment
+- **2026-10-04** — `KYO-483` (proposal) — Proposal: carry-forward decisions as lightweight tracked items with computed day counts in the brief
+- **2026-09-26** — `KYO-426` (bug) — kyo redact cannot reach text quoted in a record's title, description or criteria, so an edit after a redaction re-copies it into the ledger
+- **2026-09-26** — `KYO-419` (task) — The session-start brief runs ~146 screen lines, half of it rule text and empty sections
+- **2026-09-26** — `KYO-418` (task) — The events ledger grows ~3.8 MB/day, mostly unchanged fields and no-op hook writes; one schema bump to log diffs and stop recording nothing
+- **2026-09-26** — `KYO-416` (bug) — kyo init links a repo to another project's store by basename, and writes to the host outside the project
+- **2026-09-26** — `KYO-414` (bug) — Concurrent kyo writers can lower _allocations.json, file duplicate sweep flags, skip brief events and double-log an unlink
+- **2026-09-26** — `KYO-412` (bug) — Docs governance suppresses real obligations: region finders cut sections short and common governs: spellings govern nothing
+- **2026-09-26** — `KYO-408` (task) — kyo doctor --hook rebuilds the whole store from export on every Stop (~850 MB RSS, 300 MB temp db)
+- **2026-09-26** — `KYO-407` (bug) — Export writes are truncate-then-write, so a torn _allocations.json crashes every command and rebuild --force deletes the db before failing
+- **2026-09-26** — `KYO-406` (bug) — Symbol narrowing reads regions from the working tree while hunks come from commits, dropping real touch-changed flags
+- **2026-09-26** — `KYO-405` (bug) — kyo redact cannot be retried after a failed scrub, leaves the text in the db events table, and reports success while the record document still quotes it
+- **2026-09-26** — `KYO-404` (bug) — An event committed to the db but never appended to the ledger is lost on the next rebuild, and doctor's remedy says nothing is lost
+- **2026-09-26** — `KYO-403` (bug) — Split-layout dispatch worktrees resolve to the live store as an in-repo project, and a branch may delete the .kyosei store link unguarded
+- **2026-09-25** — `KYO-398` (task) — A session is told when the kyo under it changed since its project's last brief, and which records that build added; build dates are UTC
+- **2026-09-25** — `KYO-397` (bug) — A bare-symbol governs: target resolves to every code file that mentions it, and a change to any of them raises the section
+- **2026-09-25** — `KYO-396` (bug) — governs: path#Class.attribute never narrows in Python: the region finder locates defs and classes, not a class body's fields
+- **2026-09-25** — `KYO-395` (bug) — kyo dispatch refuses a +path new file under a directory another running dispatch claims, when warning would do
+- **2026-09-25** — `KYO-394` (bug) — kyo doctor is silent when a store's kinds.yml grants less than the packaged default, so a pre-KYO-228 store refuses kyo new with no warning
+- **2026-09-25** — `KYO-393` (bug) — kyo accept leaves docs verdicts unapplied when the report's heading text differs from the document's, and says so only mid-output
+- **2026-09-21** — `KYO-363` (bug) — governs path#symbol narrows nothing in .json, .yml/.yaml and .css -- no region finder exists for them
+- **2026-09-21** — `KYO-362` (bug) — A failing kyo doctor in the Stop hook fills the whole terminal -- the round-trip check prints both allocation maps whole, and the hook has no short form
+- **2026-09-20** — `KYO-357` (bug) — kyo check-push --acknowledge run from a linked worktree writes the main checkout's tracked config.yml, past the refusal every other store writer goes through
+- **2026-09-20** — `KYO-354` (chore) — An editing pass on the /kyosei workflow tier: command grammar moves to the reference, and the inflow that filled it is named
+- **2026-09-20** — `KYO-341` (task) — The default kind registry lets an investigation spawn a bug
+- **2026-09-20** — `KYO-337` (bug) — Finished workers keep being woken after hand-back
+- **2026-09-20** — `KYO-328` (task) — A two-tier /kyosei skill: the workflow a controller follows, with the incident histories one read away; and how to choose a worker model
+- **2026-09-19** — `KYO-324` (task) — A worker rule for spending turns: batch independent tool calls, keep test output out of the context
+- **2026-09-19** — `KYO-312` (bug) — A worker waited 10 and 6 minutes in one foreground loop and re-wrote 506k tokens; the rule it broke also told it to 'look once', which for a worker is the same mistake
+- **2026-09-18** — `KYO-305` (bug) — A worker that hands back with its own background process still running is woken when it ends, and the wake re-writes its whole context (2 of 5 workers, 249,443 and 179,570 tokens)
+- **2026-09-18** — `KYO-297` (chore) — Workers stop running the full suite: provisioning that does not run it, the 5-minute cache stated in the worker rule, wave suites run with no worker running
+- **2026-09-16** — `KYO-274` (bug) — Event snapshots still embed every frozen brief and ingested report of the record (68 MB and 49 MB of this ledger); name them by id and sha as KYO-268 did for evidence
+- **2026-09-16** — `KYO-269` (bug) — SessionEnd hooks as packaged set no timeout, so Claude Code's 1.5 s SessionEnd budget cuts off kyo doctor at every session end in every consumer -- after upgrading, run kyo install-hooks
+- **2026-09-16** — `KYO-268` (bug) — The events ledger embeds every record's evidence in every snapshot and is exported as one file: 224 MB here, 331 MB in a consumer project, and each commit's repack swaps the machine
+- **2026-09-11** — `KYO-225` (task) — A touches line can declare a single file the dispatch will create, so new files stop reporting as drift
+- **2026-09-11** — `KYO-222` (bug) — The brief lists four touch-changed flags raised by one commit as four findings under worked records; group them by the sha range that raised them
+- **2026-09-08** — `KYO-199` (task) — Docs obligations are raised per governs line, and the not-affected call costs a document read each time
+- **2026-09-08** — `KYO-167` (bug) — The two ledger copies are compared rule by rule, so their preambles diverge unchecked -- and now do
+- **2026-09-08** — `KYO-164` (bug) — The brief renders worktree_setup's commands and drops the caveats beside them
+- **2026-09-08** — `KYO-157` (bug) — The unresolved-stops check reports one problem per stop, and most stops are not workers
+- **2026-09-08** — `KYO-151` (bug) — A dispatch that changes a standing rule cannot leave this repo green, and nothing says so
+- **2026-09-08** — `KYO-147` (task) — Say what the disjointness check is worth, and tell a dispatch what its declared files usually drag in
+- **2026-09-08** — `KYO-145` (bug) — The brief's live-dispatch count is true when frozen and false when read
+- **2026-09-07** — `KYO-214` (bug) — kyo doctor exits 3 on the unresolved-stops finding, so every Stop in a session with a running dispatch is rendered as a hook error
+- **2026-09-07** — `KYO-212` (bug) — A consumer's procedures ledger is written once by kyo init and never updated, so a rule added to the packaged default reaches no existing project
+- **2026-09-07** — `KYO-211` (bug) — Ingesting a report after its branch is merged raises zero docs obligations and calls that none
+- **2026-09-07** — `KYO-209` (bug) — A record cannot declare scope over a path its work will create
+- **2026-09-07** — `KYO-207` (bug) — kyo worktrees --prune treats reported as finished and removes a worktree whose branch nobody has merged
+- **2026-09-07** — `KYO-206` (bug) — The brief makes the worker commit its report into the tree, so it merges into main and drift proposes it as a touch
+- **2026-09-07** — `KYO-201` (bug) — A worker that stops after its report is ingested is matched to any other running dispatch its prompt names
+- **2026-09-05** — `KYO-204` (task) — A section whose status is dead keeps its `governs:` list as history, and `kyo docs check` skips it
+- **2026-09-05** — `KYO-202` (task) — Expand glob and brace shorthand in a `governs:` target, as the consumer's own checker does
+- **2026-09-05** — `KYO-200` (task) — Read a YAML-list `governs:` block, a `path:symbol` separator, and a per-set path base
+- **2026-08-31** — `KYO-169` (bug) — Every phantom tick prints a four-line explanation twice, and the controller reads ~3800 lines of it a shift
+- **2026-08-31** — `KYO-163` (bug) — 321 stop-audit rows name agent ids that exist nowhere, arriving at 30 a minute
+- **2026-08-31** — `KYO-159` (task) — Settle once for a governed-file set, which is where the obligation rate actually gives
+- **2026-08-30** — `KYO-154` (bug) — A worker's own helper is blocked by the worker's dirty worktree
+- **2026-08-30** — `KYO-153` (bug) — The obligation join ignores the #symbol it validates, and the measured rate is intolerable
+- **2026-08-30** — `KYO-149` (bug) — Every brief cites templates/report.schema.json, which no consumer project has
+- **2026-08-30** — `KYO-143` (bug) — A fresh dispatch worktree has no tooling, and the brief asserts it does
+- **2026-08-30** — `KYO-137` (bug) — Docs obligations: doc-refs, section-level, asserted, and blocking at report time
+- **2026-08-30** — `KYO-135` (proposal) — Docs: what the governance model should be, and what the app should show
+- **2026-08-30** — `KYO-134` (bug) — An unresolved SubagentStop says nothing was checked, and only to a transcript
+- **2026-08-30** — `KYO-132` (task) — Ship the dispatch-economy defaults: who runs the suite, and when records travel together
+- **2026-08-30** — `KYO-129` (bug) — kyo docs check is silent on a project whose documents are not under docs/
+- **2026-08-30** — `KYO-128` (bug) — The stop hook's clean check reads the controller's checkout, never the worker's worktree
+- **2026-08-27** — `KYO-105` (bug) — The brief's base-sha bullet calls a one-commit offset structural, and zero-offset workers flag it
+- **2026-08-27** — `KYO-94` (bug) — A shift note is surfaced in exactly one brief and can never be read again by any command
+- **2026-08-26** — `KYO-90` (bug) — A worker resumed after reporting has nowhere to put its corrected report; the ledger keeps the pre-fix account
+- **2026-08-26** — `KYO-89` (bug) — A dispatch worktree's path is spaceless by design, so a worker verifies in a strictly narrower environment than main
+- **2026-08-26** — `KYO-88` (bug) — A record can sit gated on a question its own verified claim already answered, and nothing relates the two
+- **2026-08-26** — `KYO-87` (bug) — kyo brief counts finished work as dispatchable because it reads status and not the dispatch and criteria behind it
+- **2026-08-26** — `KYO-85` (bug) — kyo touch-drift reports none once the branch is merged — a clean bill of health for real drift
+- **2026-08-26** — `KYO-80` (bug) — kyo brief refuses where the write guard permits, and states a consequence that would not occur
+- **2026-08-26** — `KYO-76` (bug) — A dispatch brief states only the primary record's touches, so --also-covers work falls outside the worker's stated boundary
+- **2026-08-26** — `KYO-71` (bug) — A declared touch list is never checked against the files a dispatch actually edited
+- **2026-08-26** — `KYO-70` (bug) — Dispatch worktrees appear beside the user's other projects and are never cleaned up
+- **2026-08-26** — `KYO-69` (bug) — touch-changed re-files the same finding every sweep, so the flag list becomes unreadable
+- **2026-08-26** — `KYO-65` (bug) — A dispatch's --also-covers records are invisible to the disjointness check
+- **2026-08-26** — `KYO-63` (bug) — Sweep's bookkeeping describes a history its own repository may not have
+- **2026-08-26** — `KYO-62` (bug) — The law-2 consumer registry names symbols that do not exist, and nothing checks
+- **2026-08-26** — `KYO-61` (task) — A dispatch declares which model its worker runs on
+- **2026-08-26** — `KYO-60` (bug) — Nothing warns before a push publishes everything ever written to the store
+- **2026-08-26** — `KYO-59` (bug) — Clearing a gate does not flag the criteria written under it
+- **2026-08-26** — `KYO-58` (bug) — Criterion immutability has no correction path, and voided criteria reach briefs
+- **2026-08-26** — `KYO-48` (bug) — kyo next offers a zero-touch record as ready, because unknown scope reads as disjoint
+- **2026-08-25** — `KYO-54` (bug) — By default, Kyosei commits a consumer's private thinking to their code repository
+- **2026-08-25** — `KYO-32` (task) — A dispatch declares its branch, and a report's commits must be on it
+- **2026-08-25** — `KYO-31` (bug) — The Stop hook runs doctor ahead of the remedy doctor names
+- **2026-08-24** — `KYO-29` (bug) — Embedded prose surfaces get the same visibility as redactable ones
+- **2026-08-24** — `KYO-28` (bug) — Redaction misses copies embedded in briefs and reports
+- **2026-08-24** — `KYO-25` (bug) — Redaction covers every verbatim-prose store
+- **2026-08-24** — `KYO-23` (task) — doctor's export diff names the right side
+- **2026-08-24** — `KYO-19` (task) — A void criterion is not a desynced one
+- **2026-08-24** — `KYO-18` (task) — The brief stops understating what needs doing
+- **2026-08-24** — `KYO-17` (task) — kyo check-clean: the stop hook's two halves stop contradicting each other
+- **2026-08-21** — `KYO-13` (task) — M8: integration — hooks, skill, docs validator, merge guard
+- **2026-08-21** — `KYO-12` (bug) — A report cannot carry verdicts for co-dispatched records
+- **2026-08-21** — `KYO-10` (bug) — Dispatch brief base sha is stale by construction
+- **2026-08-21** — `KYO-9` (bug) — Brief generation truncates procedure rules mid-sentence
+- **2026-08-21** — `KYO-8` (task) — M6: sweep, next, brief, shift notes
+- **2026-08-21** — `KYO-7` (task) — M5: dispatch loop — briefs, structured reports, split
+
+## (no scope declared)
+
+- **2026-10-12** — `KYO-590` (plan) — Kyosei's Claude Code plugin, shipped in the package (the KYO-581 decision)
+- **2026-10-12** — `KYO-588` (reminder) — Revisit how Kyosei governs recx's documents, other than as KYO-582's pieces 1-2 proposed
+- **2026-10-12** — `KYO-584` (plan) — recx prior-art search in Kyosei (the KYO-582 decision)
+- **2026-10-10** — `KYO-578` (task) — kyo reference re-parses every source file once per command (6240 parses), so it takes about 15 s
+- **2026-10-10** — `KYO-577` (bug) — After kyo confirm closes records outside a wave, the next make test fails on the stale committed changelog, and close-wave refuses before its own regeneration can fix it
+- **2026-10-10** — `KYO-576` (task) — Remove the app's launch-time retirement of its old server (oldserver.ts) and the remote token scrub
+- **2026-10-10** — `KYO-575` (bug) — Two editors of one scratchpad or idea file overwrite each other: the app's save names a version shared across windows, or re-read at save time
+- **2026-10-10** — `KYO-574` (bug) — The serve-and-desktop reference still shows bare kyo init making a project, which writes nothing since KYO-558
+- **2026-10-10** — `KYO-573` (task) — New Project dialog asks where the store lives
+- **2026-10-05** — `KYO-526` (reminder) — Confirm that CLAUDE.md's @AGENTS.md import brings the venv, worktree and store rules into a session
+- **2026-10-04** — `KYO-523` (reminder) — Rename landing 2 (packaged procedures say orchestrator) waits until every machine's kyo is at least landing 1 -- the maintainer's call
+- **2026-10-04** — `KYO-498` (task) — records.since_note: a carried item's age counts from the shift note that first recorded it (schema 26)
+- **2026-10-04** — `KYO-497` (task) — Carried items: a default `carry` kind, `policy.carried`, a brief section with computed ages, and settling that clears gates
+- **2026-10-04** — `KYO-496` (task) — kyo brief prints each open gate's age
+- **2026-09-25** — `KYO-389` (bug) — A window on a stopped dev box shows its sidebar list's refusal inside Electron's 'Error invoking remote method…: RemoteRefusal:' frame
+- **2026-09-25** — `KYO-388` (bug) — The headless server's bundle pulls in node-pty through the launcher: controller.ts imports terminal.ts, and KYO-378.c5 fails on merged main
+- **2026-09-25** — `KYO-387` (bug) — Connecting while the window is on an unreachable or re-keyed dev box shows the refusal behind a 'kyosei: Error:' prefix
+- **2026-09-25** — `KYO-386` (task) — The packed app is signed with Developer ID and notarized, so a copy moved to another Mac opens without un-quarantining and the firewall stops asking after every re-pack
+- **2026-09-25** — `KYO-385` (bug) — Switching projects on a connected dev box asks for the token every time
+- **2026-09-25** — `KYO-383` (task) — Start the controller from the app: the claude tab says whether a controller session runs for this project and starts one in a named tmux session on the machine that holds it
+- **2026-09-25** — `KYO-382` (bug) — The claude tab keeps showing the previous controller session after a new one starts in the same project
+- **2026-09-25** — `KYO-381` (task) — A password on the server issues each client a revocable token: host, port and password replace the token copy-paste, and the server is administered over its socket
+- **2026-09-25** — `KYO-379` (task) — One project list, in a config file the desktop and the server share; a client adds a project by path
+- **2026-09-25** — `KYO-378` (task) — The app is a client of this machine's server when one runs: a headless entry under ELECTRON_RUN_AS_NODE on a Unix socket, the local service directly when none does
+- **2026-09-25** — `KYO-377` (task) — The server speaks TLS with a certificate it generates; a client pins its fingerprint on first use, SSH-style
+- **2026-09-24** — `KYO-374` (task) — A remote project's window: New Window opens the local default, layouts key on the dev-box path alone, and the rail caption truncates the address
+- **2026-09-23** — `KYO-375` (bug) — Tick stops still cost a committed ledger row every 32 seconds per running agent, and two sentences still count them as candidate worker stops
+- **2026-09-23** — `KYO-373` (bug) — `kyo worktrees` prints every unmatched stop audit by default -- thousands of lines -- and 96% of recorded stops are agents that were never workers
+- **2026-09-23** — `KYO-372` (bug) — The changelog test's remedy does not clear it when `kyo` on PATH is a packaged build
+- **2026-09-23** — `KYO-371` (bug) — Three desktop specs fail from a dispatch worktree and pass from the main checkout
+- **2026-09-23** — `KYO-370` (task) — Connect to a dev box -- the app opens a remote project as a thin client of another app's server
+- **2026-09-23** — `KYO-369` (task) — The app serves its StoreService over HTTP and pushes storeChanged over a WebSocket, localhost by default
+- **2026-09-23** — `KYO-368` (task) — Store service seam -- every store-facing IPC handler behind one interface with a local implementation
+- **2026-09-23** — `KYO-367` (plan) — Dev-box app as server, laptop app as thin client
+- **2026-09-22** — `KYO-366` (bug) — Test fixtures assume `init.defaultBranch=main` from the host's global git config
+- **2026-09-21** — `KYO-339` (plan) — A consumer project's report of 2026-09-20: one draft file for every filing route, accept and dispatch-close gaps, and flags that outlive their records
+- **2026-09-20** — `KYO-329` (plan) — Tooling for writing records and accepting reports
+- **2026-09-20** — `KYO-323` (plan) — Token efficiency: fewer turns, less standing context, and an instrument that can see it
+- **2026-09-19** — `KYO-288` (bug) — With the same record open in both columns, closing the left copy leaves the right copy (last in its column) impossible to close or focus until the split is collapsed

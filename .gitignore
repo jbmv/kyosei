@@ -1,0 +1,59 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.DS_Store
+
+# JetBrains IDEs: per-developer project settings, not project content.
+.idea/
+
+# Per-developer agent configuration. CLAUDE.md and .claude/ hold one contributor's
+# harness settings and instructions; AGENTS.md is the shared contributor guide. .kyosei
+# is the link file a split-layout Kyosei store writes into the code checkout, and points
+# at a directory on one machine.
+/CLAUDE.md
+/.claude/
+/.kyosei
+
+# JavaScript artifacts from apps/desktop (KYO-110). `dist/` above already covers
+# apps/desktop/dist; `package-lock.json` is tracked, since the app's checks are
+# only reproducible with it.
+node_modules/
+apps/desktop/playwright-report/
+apps/desktop/test-results/
+
+# `npm run pack`'s output (KYO-176.c6): the packaged .app, a few hundred megabytes.
+# `dist/` above does not cover it, because the pack lands beside `dist/`, not inside it.
+apps/desktop/release/
+
+# A global npm install landing in a leaked npm_config_prefix.
+# `npm --prefix apps/desktop ...` leaves npm_config_prefix pointing here, so an
+# `npm install -g` from that environment writes apps/desktop/{bin,lib} rather than the
+# node install. Ignored so it cannot be swept into a commit by a wide `git add`.
+/apps/desktop/bin/
+/apps/desktop/lib/
+
+# a dispatched worker's structured report — written here, ingested by `kyo report`, never committed (KYO-206)
+.kyosei-report.json
+
+# KYO-226: the two build-time products, written into the package by the build hook
+# (`build_backend/kyosei_build.py`) and read by `kyo version` and `kyo changelog`. They
+# are derived from git and from the store at the moment a wheel is built, so a committed
+# copy would be a second, stale answer to the question they exist to answer correctly.
+src/kyosei/_build_stamp.json
+src/kyosei/_changelog.json
+
+# The v3 shell's tab registry (KYO-232.c5): `build.mjs` writes it from the
+# directories under `apps/desktop/src/renderer/tabs/`. Output, not source — a stage 3
+# worker who adds a tab directory must get a diff holding their own directory and
+# nothing else, which is what "adds a tab kind by adding a directory and edits no
+# shared file" has to mean. `npm run typecheck` regenerates it first (`pretypecheck`).
+apps/desktop/src/renderer/tabs/registry.generated.ts
+
+# KYO-407: an interrupted atomic write (kyo docs assemble) can leave its temp file beside the target
+*.kyosei-tmp

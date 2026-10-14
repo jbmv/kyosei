@@ -1,0 +1,277 @@
+# kyosei/kinds.yml — the default kind registry, shipped by `kyo init`.
+#
+# Schema -- from docs/design/charter.md (in Kyosei's own repository), "The kind registry".
+# The charter is Kyosei's own design record: it ships with Kyosei's source, never into your
+# project, which is why the schema is written out in full below rather than cited away. Every
+# charter reference further down this file is to that same upstream document, and none of
+# them is something you have to open to edit this registry:
+#   <kind-name>:
+#     archetype: work | knowledge
+#     summary: <one line>
+#     accepts_from: [ ... ]   # promotion/spawn sources: intake | idea | another kind name
+#     produces: [ ... ]       # promotion/spawn targets: another kind name (never intake/idea)
+#     policy:
+#       # archetype: work uses:
+#       requires_criteria: bool
+#       dispatchable: bool
+#       unattended_ok: bool
+#       write_scope: none | queries-only | code | prod-data
+#       swept: bool
+#       counted: bool
+#       carried: bool     # optional, default false; true = `kyo brief` lists unsettled records
+#                         # of this kind with their age (KYO-497; needs a kyo that knows the key)
+#       worker_model: <model id>   # optional; the model a dispatch of this kind runs on,
+#                                  # over config.yml's worker_model; `kyo dispatch --model`
+#                                  # overrides both (KYO-61). Omit to inherit the project's.
+#       # archetype: knowledge uses instead:
+#       amendable: bool
+#       requires_evidence_links: bool   # optional; true = filing directly needs --evidence-file
+#       raises_docs_obligations: bool   # optional, default false; true = filing or editing a
+#                                       # record raises a standing docs obligation on each ssot
+#                                       # section it names by id, and on each doc-ref (KYO-554)
+#       swept: bool
+#       counted: bool
+#
+# `intake` = a human files this kind directly (the "Bugs" surface in the Kyosei charter's
+# "human's surfaces are Scratchpad, Ideas, and Bugs"). `idea` = promoted from the ideas layer
+# (kyo promote). Everything else in accepts_from/produces must be a kind defined below —
+# validated by `kyo doctor` on load (Law 2: a field with no consumer is decoration) — and is
+# traversed by `kyo spawn <source-id> --kind <this-kind>`, which refuses unless the source
+# record's kind is listed here (KYO-50). So each of the three sources is a real command:
+# intake -> `kyo new`, idea -> `kyo promote`, another kind -> `kyo spawn`. Edit an edge here
+# and the transition it describes becomes makeable, in both directions, with no code change.
+#
+# Internal-consistency rule this file holds: for every kind X and every Y in X.produces, Y must be
+# defined and Y.accepts_from must contain X; for every kind Y and every kind-token Z in
+# Y.accepts_from (i.e. not `intake`/`idea`), Z must be defined and Z.produces must contain Y.
+# `kyo promote`'s flow validation depends on this holding, not just on names existing.
+#
+# `bug`, `investigation`, `decision`, `evidence` below are the four kinds the Kyosei charter
+# (docs/design/charter.md, "The kind registry") spells out as illustrative defaults, kept in
+# the charter's policy shape. `task`, `chore`, `experiment`, `proposal`, `plan` and `reminder`
+# are authored here on the same schema. The charter's example is internally inconsistent in
+# two places, and the registry departs from it there: see `bug.produces` and
+# `evidence.accepts_from` below.
+
+kinds:
+  # --- archetype: work -------------------------------------------------------
+
+  bug:
+    archetype: work
+    summary: A defect. Criteria are the reproduction.
+    # KYO-24: `idea` added. `[intake]` alone meant a defect could never be promoted from
+    # the ideas layer, so every defect filed from a written-up report had to be recorded as
+    # a `task` with a note explaining why it was not a bug (KYO-17 and KYO-23 both carry
+    # that note; two occurrences is what stopped this being cosmetic). Additive: humans
+    # still file bugs directly with `kyo new bug`, and `idea` is a promotion source rather
+    # than a kind, so no other entry's `produces` has to change to stay symmetric.
+    #
+    # KYO-341: `investigation` added. "The investigation found the defect" is the most
+    # natural kind-to-kind edge there is, and before this the registry had none for it at
+    # all: `kyo spawn <investigation-id> --kind bug` was refused outright, forcing a
+    # `produced-by` link to be added by hand after filing the bug directly. Symmetric with
+    # `investigation.produces` below.
+    # KYO-497: `reminder` added (its name since KYO-521), symmetric with
+    # `reminder.produces` below -- a reminder that turns out to be a defect is filed with
+    # `kyo spawn <reminder-id> --kind bug`.
+    accepts_from: [intake, idea, investigation, reminder]   # intake = filed without a promotion step -- NOT "by a human"
+    # Departs from the charter's illustrative block, which gave `produces: [task, evidence]`
+    # while its own `investigation.accepts_from: [idea, bug]` implies bug -> investigation is a
+    # valid promotion. Two fields that must agree and don't is exactly the failure Law 3 exists
+    # to prevent. Smallest defensible fix: extend (additive only, nothing removed) rather than
+    # narrow investigation's accepts_from.
+    produces: [task, evidence, investigation]
+    policy:
+      requires_criteria: true         # the criteria are the reproduction
+      dispatchable: true
+      unattended_ok: true             # as the charter ships it; "usually" is closer to the truth, so
+                                       # a project may reasonably set this false
+      write_scope: code
+      swept: true                     # fast-decaying: the symptom may vanish
+      counted: true
+
+  task:
+    archetype: work
+    summary: >-
+      A unit of work with obvious, authorable acceptance criteria. The default kind for
+      anything that is not a defect, a knowledge artifact, or a container for other records.
+    # KYO-228: `intake` added to every archetype: work kind. `intake` lets a record be
+    # filed directly, and `kyo new` takes criteria and touches, so nothing is lost but the
+    # idea file. `ideas/` is for a thought that is not being filed in that session.
+    accepts_from: [intake, idea, bug, investigation, reminder]   # idea: the core promotion path (Law 13);
+                                                           # bug, investigation, reminder: mirrors their `produces: [..., task]`
+    produces: []                      # deliberately empty (Law 2): splitting a task (`kyo split`) makes
+                                       # more tasks through a different mechanism, not kind-promotion;
+                                       # nothing needs a task to spawn a kind-record
+    policy:
+      requires_criteria: true         # obvious ones
+      dispatchable: true
+      unattended_ok: true             # ideally by default
+      write_scope: code
+      swept: true                     # fast; the code moves
+      counted: true
+
+  chore:
+    archetype: work
+    summary: >-
+      Mechanical, low-risk maintenance (rename, dependency bump, formatting cleanup) where the
+      criteria are self-evident from the request itself.
+    # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
+    accepts_from: [intake, idea]      # chores are typically noticed mid-work and jotted as an idea first
+    produces: []                      # kept minimal (Law 2); a project can add edges once something
+                                       # actually consumes them
+    policy:
+      requires_criteria: true         # still authored at promotion, even if trivially short (Law 13)
+      dispatchable: true
+      unattended_ok: true             # the clearest "safe unattended" shape -- mechanical,
+                                       # well-understood, low blast radius by definition
+      write_scope: code
+      swept: true
+      counted: true
+
+  investigation:
+    archetype: work
+    summary: Answer a question without modifying production code.
+    # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
+    accepts_from: [intake, idea, bug, reminder]   # reminder: KYO-497, mirrors reminder.produces
+    # `experiment` lets an investigation lead straight to a test: "investigate, then run the
+    # experiment" is a natural direct flow, and the charter text is amended to match.
+    #
+    # KYO-341: `bug` added, symmetric with `bug.accepts_from` above -- "the investigation
+    # found the defect" is a promotion `kyo spawn <investigation-id> --kind bug` can now
+    # make.
+    produces: [evidence, decision, task, experiment, bug]
+    policy:
+      requires_criteria: true
+      dispatchable: true
+      unattended_ok: true
+      write_scope: queries-only       # consumed by brief generation — workers are TOLD this (the Kyosei charter)
+      swept: true
+      counted: true
+
+  experiment:
+    archetype: work
+    summary: >-
+      A controlled test of a hypothesis that mutates non-authoritative data (a copy, a staging
+      run, a dry-run-then-apply probe) to measure something before a decision commits to it.
+    # `investigation` is symmetric with investigation.produces above; `proposal` remains
+    # for the deliberate propose-then-test path. KYO-228 added `intake` -- see the `task`
+    # entry above for the reasoning.
+    accepts_from: [intake, idea, proposal, investigation]
+    produces: [evidence]              # NOT decision — an experiment's conclusion reaches a decision
+                                       # via a proposal record, or is filed directly as one with the
+                                       # experiment's evidence attached (KYO-521), not by a direct
+                                       # promotion edge
+    policy:
+      requires_criteria: true         # the hypothesis's pass/fail condition
+      dispatchable: true
+      unattended_ok: false            # DESIGN DECISION: touches prod-data even under dry-run-by-default
+                                       # (Law 11); a dry run can reveal a far larger blast radius than
+                                       # expected, which only a person watching catches
+      write_scope: prod-data          # inherits dry-run-by-default per Law 11
+      swept: true
+      counted: true
+
+  proposal:
+    archetype: work
+    summary: >-
+      A drafted recommendation — alternatives considered, tradeoffs, evidence cited — argued
+      before it becomes binding. Structure (its criteria: e.g. "cites >=2 evidence-backed
+      alternatives") is authored at promotion, per Law 13.
+    # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
+    accepts_from: [intake, idea, reminder]   # nothing but `reminder` (KYO-497) produces `proposal`
+    produces: [decision, plan, experiment]   # symmetric with experiment.accepts_from including proposal
+    policy:
+      requires_criteria: true
+      dispatchable: true
+      unattended_ok: true             # produces prose/evidence only; write_scope: none makes this safe
+      write_scope: none
+      swept: true
+      counted: true
+
+  plan:
+    archetype: work                   # DESIGN DECISION / FLAGGED GAP: the charter defines archetype: work
+                                       # as "has criteria, a status flow, dispatches" (docs/design/charter.md, "The kind
+                                       # registry"), but also says a plan's completion is reported as a
+                                       # status *distribution* over its member records, never a single
+                                       # criteria set ("Core schema", records). Plan does not cleanly fit
+                                       # either archetype as specified. Smallest defensible choice: keep
+                                       # archetype: work for its open/working/done status flow, but turn
+                                       # off criteria and dispatch — see policy below. A genuine charter
+                                       # gap, deliberately not resolved by inventing a third archetype.
+    summary: >-
+      A record that owns a set of member records (task, bug, ... — assigned by membership, not
+      by promotion) and reports their status distribution. There is no separate milestone entity.
+    # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
+    accepts_from: [intake, idea, proposal]
+    produces: []                      # a plan's downstream is member-record assignment, a separate
+                                       # mechanism (`kyo new ... --plan <id>`), not a promotion edge
+    policy:
+      requires_criteria: false        # completion is a status distribution over members, not criteria
+      dispatchable: false             # a plan itself is not handed to one worker; its members are
+      unattended_ok: false            # n/a while dispatchable is false; set conservatively
+      write_scope: none
+      swept: true                     # a plan can go stale relative to its members' actual progress
+      counted: false                  # not itself "actionable work" in the queue-count sense
+
+  reminder:
+    archetype: work
+    summary: >-
+      A decision waiting on the operator, or a reminder tied to a date or an event, that the
+      next shift must see -- kept until it is settled or filed as the record it turns into.
+    # KYO-497; renamed by KYO-521 to a name that is clearer to the people reading the
+    # brief. `kyo brief` lists every unsettled record of a
+    # `carried: true` kind with its age, oldest first; a decision waiting on the operator is
+    # a reminder with an open `awaiting:human-review` gate. Settle one with `kyo move <id>
+    # done --why "..."` (the reason is required) or `kyo wont-do <id> --why "..."`; either
+    # clears the record's open gates. File the follow-up with `kyo spawn <id> --kind task`
+    # (or `--kind decision` once the operator has decided), then settle the item.
+    # NOT a reminder: a defect is a `bug`, a settled rule is a `decision` filed with the
+    # operator's words, and buildable work is a `task`.
+    # `carried` is a key an older `kyo` refuses: upgrade `kyo` before adding it to a registry.
+    accepts_from: [intake]
+    produces: [task, bug, investigation, proposal, decision]   # decision: KYO-521
+    policy:
+      requires_criteria: false        # an item is settled by a decision, not by checked criteria
+      dispatchable: false             # never handed to a worker; file a task from it instead
+      unattended_ok: false
+      write_scope: none
+      swept: false                    # the brief shows its age; a sweep flag would say it twice
+      counted: false                  # not work in the queue-count sense
+      carried: true                   # the brief's "reminders" section, and the settle rule
+
+  # --- archetype: knowledge ----------------------------------------------------
+
+  decision:
+    archetype: knowledge                 # amendable-in-place, claim-bearing, no status flow
+    summary: Shapes architecture. Cites the evidence that supports it.
+    # KYO-521: `intake` and `reminder` added. A decision made in conversation is filed
+    # directly, `kyo new decision --title ... --evidence-file words.md`, the operator's
+    # words as evidence (who, when, where, then the words verbatim); `kyo new` refuses it
+    # without `--evidence-file` because of `requires_evidence_links` below. A decision that
+    # needs design work first still goes through a `proposal`. Symmetric with
+    # `reminder.produces` above.
+    accepts_from: [intake, proposal, investigation, reminder]
+    produces: []
+    policy:
+      amendable: true
+      requires_evidence_links: true   # consumed by `kyo new`: filing directly needs --evidence-file
+      raises_docs_obligations: true   # KYO-554: a decision naming a section obliges someone to
+                                      # bring that section into line, or say it needs no change
+      swept: false
+      counted: false
+
+  evidence:
+    archetype: knowledge
+    summary: Captured observations with method and instrument. Can be marked wrong.
+    # Departs from the charter's example: its bug.produces includes `evidence`, but its
+    # evidence.accepts_from example omits `bug` — a genuine inconsistency in the charter's
+    # illustrative text. Smallest defensible fix: add `bug` here so the registry is
+    # internally consistent (bug repro/root-cause captures are exactly the kind of evidence this
+    # kind exists for).
+    accepts_from: [investigation, experiment, intake, bug]
+    produces: []
+    policy:
+      amendable: true
+      swept: true
+      counted: false

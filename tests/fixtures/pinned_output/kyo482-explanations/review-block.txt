@@ -1,0 +1,34 @@
+summary: report TST-1.r1 of TST-1.d1 — premise_false 1, disagreements 1, verdicts proposed: 1 met, 1 unmet-unobserved, open docs obligations 2
+ingested report TST-1.r1 for dispatch TST-1.d1 (worked_from_sha <SHA> is a descendant of the dispatch's recorded base sha <SHA> — expected by construction, KYO-10; not itself worth reconciling)
+branch check: VERIFIED — all 1 reported commit(s) are reachable from kyo-489
+  warning (branch-did-not-advance): kyo-489 has no commits past worked_from_sha <SHA>, so `git merge kyo-489` will ship nothing
+premise_false (1):
+  - the file exists
+    -> it did not
+disagreements (1):
+  - naming: brief said 'call it x'; worker did 'called it y'
+    because: y is clearer
+corrected_numbers (1):
+  - lines: 10 -> 12 (wc -l)
+criteria_verdicts (2):
+  - TST-1.c1: met (machine-checked)
+  - TST-1.c2: unmet-unobserved (reasoned-about)
+commits (1):
+  - <SHA>  work
+  docs/architecture.md — 1 section(s)
+      TST-1.o1  [Why the CLI is wired this way]
+          docs/architecture.md [Why the CLI is wired this way] governs src/app.py, and this dispatch changed src/app.py
+          worker proposes not-affected (reasoned-about): the wiring did not change
+      kyo docs settle TST-1.o1 --verdict updated|not-affected --method '<how you decided>'
+  docs/guide.md — 1 section(s)
+      TST-1.o2  [Running the CLI]
+          docs/guide.md [Running the CLI] governs src/app.py, and this dispatch changed src/app.py
+      kyo docs settle TST-1.o2 --verdict updated|not-affected --method '<how you decided>'
+  docs_verdicts: 1 matched an obligation this dispatch raised, 0 matched none. NOT applied — `kyo docs settle --from-report TST-1.d1` applies them as one orchestrator act (`--only <obligation-id> ...` for the ones you have checked)
+  + src/other.py
+correct TST-1 with `kyo edit TST-1 --touches-file FILE`, where FILE holds exactly these lines:
+    src/app.py
+    src/other.py
+or apply it without writing a file, exactly as printed:
+    printf '%s\n' src/app.py src/other.py | kyo edit TST-1 --touches-file -
+  (note: 1 file(s) the branch changed are not in the report's touched_files[]: TST-1-touches.txt — the finding above is computed from the report, which is the list that survives the merge; this line is the diff disagreeing with it while it still can)

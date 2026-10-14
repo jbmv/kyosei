@@ -1,0 +1,39 @@
+0
+--out--
+{
+  "against": "main",
+  "against_source": "main-unmatched",
+  "branch": "kyo-137",
+  "changed_files": [
+    "src/app.py"
+  ],
+  "checked_the_worker_tree": true,
+  "command": "check-branch",
+  "dispatch_base_sha": null,
+  "fragment_refusals": [],
+  "guarded_dirs": [
+    "kyosei/",
+    "ideas/"
+  ],
+  "guarded_files": [],
+  "guarding": true,
+  "history_lint": {
+    "blocking": 0,
+    "documents": [],
+    "matches": [],
+    "overrides": []
+  },
+  "layout": "in-repo",
+  "numbered_sections_added": [],
+  "ok": true,
+  "repo": "<TMP>/json/proj",
+  "section_status_problems": [],
+  "store_root": "<TMP>/json/proj",
+  "subject": null,
+  "trunk": {
+    "ref": "main",
+    "source": "init-default-branch"
+  }
+}
+
+--err--

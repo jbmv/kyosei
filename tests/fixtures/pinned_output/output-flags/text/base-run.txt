@@ -1,0 +1,8 @@
+0
+--out--
+base 'open-work' over records: every open record
+TST-1      bug            open      gates:0  -            A record
+TST-3      task           open      gates:0  -            A withdrawn dispatch
+2 row(s), sorted by seq
+
+--err--

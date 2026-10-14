@@ -1,0 +1,7 @@
+0
+--out--
+check-clean: nothing uncommitted in <TMP>/text/proj outside kyosei/ or ideas/ (those are the orchestrator's to commit, not a worker's) or .kyosei-report.json (KYO-206: your report is output, not work — write it there, leave it uncommitted, and your orchestrator ingests it with `kyo report <dispatch-id> --file <report-path>`)
+store layout: in-repo — kyosei/ and ideas/ live inside <TMP>/text/proj and are committed to the same git repository as its code
+  so kyosei/ or ideas/ are in this very repository, and what is outstanding there is the orchestrator's to commit, never a worker's — which is why they are excluded here and forbidden by `kyo check-branch`
+
+--err--

@@ -1,0 +1,6 @@
+0
+--out--
+moved TST-2
+stored status: open -> working
+
+--err--

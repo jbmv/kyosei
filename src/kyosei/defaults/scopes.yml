@@ -1,0 +1,71 @@
+# kyosei/scopes.yml -- the scope registry (KYO-100).
+#
+# A scope is the part of the system a record's work belongs to: `server`, `web-app`,
+# `app-desktop`, `cli`. It is optional on a record and validated against this file when
+# it is given, so `kyo new --scope server` on a project that has not declared `server`
+# is refused with the list of scopes this file does hold, rather than silently storing
+# a word nothing else will ever agree with.
+#
+# THE SHAPE, which every Kyosei registry shares (see src/kyosei/registry.py):
+#
+#   <plural>:              one top-level key, the dimension's plural -- here `scopes`
+#     <name>:              a lowercase slug: a-z, digits and hyphens, starting a-z
+#       summary:           REQUIRED, one non-empty line. This file is reviewed by
+#                          people who did not write it; a name with no summary is a
+#                          magic word.
+#       paths:             optional, a list of globs, root-relative
+#
+# `paths` is what lets `kyo new` / `promote` / `spawn` / `edit` look at a record's
+# touches and SUGGEST a scope. It is a suggester and a validator, never the source:
+# nothing derives a record's scope from its touches, every such
+# suggestion is printed labeled as derived, and nothing is stored without --scope.
+# Records with no touches, and documents, have nothing to derive from at all.
+#
+# GLOB DIALECT: fnmatch over the root-relative path, so `*` crosses `/`:
+# `src/server/*` matches `src/server/api/handlers.ts`, at any depth. Stated here
+# because a glob dialect a reader has to discover by experiment is a config field
+# written wrong. The example uses the same made-up `src/server` as the commented
+# scopes at the foot of this file, deliberately: an example that named a real
+# directory of Kyosei's own repository would read as a claim that your project has
+# it, which is exactly the confusion this file's `paths` key exists to avoid.
+#
+# THIS IS NOT documents.yml's DIALECT, AND THAT IS WHY THIS FIELD IS CALLED `paths:` AND
+# THAT ONE IS CALLED `globs:` (KYO-142). The jobs differ and the dialects follow:
+#
+#   this file       MATCHES a path a record already declared, by filtering a list --
+#                   fnmatch, `*` crosses `/`
+#   documents.yml   ENUMERATES the files that exist, by walking the tree -- pathlib,
+#                   `*` stops at `/` and only `**` crosses
+#
+# fnmatch cannot enumerate without walking the tree itself, so the divergence is forced
+# and is not going away. What was fixed is that both fields used to be called `paths:`,
+# which made the single most likely mistake -- copying a line from one file into the
+# other -- succeed and select a DIFFERENT SET, with no error. `src/server/*` here
+# matches at any depth; in documents.yml the same string matches direct children only.
+# `docs/**/*.md` there reaches every depth under docs/; here the same string does not
+# match `docs/top.md` at all.
+#
+# So the two are spelled differently, and a copied line now lands on a key its new file
+# does not accept and is refused, naming both dialects. Not a style rule: the dialect
+# owns the field name in registry.py (PathDialect), and any future registry with a
+# path-shaped field inherits the spelling from the dialect it picks rather than choosing
+# a name of its own.
+#
+# Edited as ordinary reviewable config in v1, exactly like kinds.yml. Proposal-gating
+# the edit is KYO-72 step 6 and does not exist yet.
+#
+# No scopes are shipped, deliberately: a scope name is a claim about how THIS project
+# is divided, and a default set would be four names to delete before the first true
+# one is written. Seeding scopes by project type may come later.
+# Uncomment the example below, or write your own.
+
+scopes: {}
+# scopes:
+#   server:
+#     summary: The API service, its handlers, its jobs and its database access.
+#     paths:
+#       - src/server/*
+#   web-app:
+#     summary: The browser client -- routes, components, client-side state.
+#     paths:
+#       - src/web/*

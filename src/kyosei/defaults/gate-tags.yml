@@ -1,0 +1,63 @@
+# kyosei/gate-tags.yml -- the gate-tag registry (KYO-102).
+#
+# A gate holds a record until something outside the store clears it. Its TYPE is one of
+# four (awaiting:event, awaiting:human-run, awaiting:human-review, holding-for) and has
+# been a closed registry since v1; its PAYLOAD was free text, and free text is not
+# searchable: "everything waiting on a human to review a UI element" was not a query.
+#
+# A tag from this file is that query. `kyo gate <id> awaiting:human-review --tag
+# ui-review` records the classification; `kyo list --gate-tag ui-review` asks for it
+# back. The free text does not go away -- `--do` is still where the exact condition or
+# the exact thing to run lives, and it is still required for the three gate types that
+# nobody could clear without it. The tag says WHAT KIND of waiting this is; the payload
+# says WHICH ONE.
+#
+# THE SHAPE, which every Kyosei registry shares (see src/kyosei/registry.py):
+#
+#   gate-tags:           one top-level key, the dimension's plural
+#     <name>:            a lowercase slug: a-z, digits and hyphens, starting a-z
+#       summary:         REQUIRED, one non-empty line. This file is reviewed by people
+#                        who did not write it; a tag with no summary is a magic word.
+#
+# There are no other fields, deliberately. A tag does not declare which gate types it
+# may appear on: nothing decided that, and a rule in every project's config file that
+# no consumer reads is the rot law 2 exists against.
+#
+# GATES STAY ORTHOGONAL TO STATUS. Tagging one changes nothing about a record's status,
+# and there is no `gated` status to move it to -- a record must be able to be `working`
+# AND blocked. A view that shows "everything gated" as though it were a column is a
+# rendering, and rendering derives from these two orthogonal dimensions rather than
+# replacing them.
+#
+# An unknown tag is refused at write time, naming this file and the tags it does hold.
+# A tag removed from this file after gates were tagged with it is NOT rewritten -- that
+# is a decision for whoever made it -- and `kyo doctor`'s `gate_tags` check is what
+# makes the dangling reference loud.
+#
+# Edited as ordinary reviewable config in v1, exactly like kinds.yml. Proposal-gating
+# the edit is KYO-72 step 6 and does not exist yet.
+#
+# No tags are shipped, deliberately, for the same reason scopes.yml ships none: what a
+# project waits on is a claim about THAT project, and a seeded set would be names to
+# delete before the first true one is written. Seeding tags by project type may come
+# later. Uncomment the examples below, or write your own.
+#
+# `deploy` is the one pattern worth knowing before you uncomment it (KYO-479, KYO-492):
+# when a record's work merges, gate it
+#   kyo gate <id> awaiting:event --tag deploy --do "live after the next deploy"
+# so "merged, not live" is `kyo list --gate-tag deploy`; after a deploy, clear what
+# shipped -- `kyo ungate <gate-id> <gate-id> ... --why "deployed <date>"` for a subset,
+# or `kyo ungate --tag deploy --why "..."` to list every open one and `--apply` to clear
+# them all in one transaction. A record holding an open gate cannot settle, so done
+# means live.
+
+gate-tags: {}
+# gate-tags:
+#   ui-review:
+#     summary: A person has to look at a rendered interface and judge it.
+#   deploy:
+#     summary: Merged, not live -- waiting on the next deploy to reach production.
+#   external-dependency:
+#     summary: Waiting on something owned outside this project -- a vendor, an upstream.
+#   design-decision:
+#     summary: Held until a decision record settles the question this work assumes.

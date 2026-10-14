@@ -1,0 +1,14 @@
+{
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "Closeout is a hook, not a ritual; the reasoning is the Kyosei charter's 'Shift continuity' section, docs/design/charter.md (in Kyosei's own repository), which is provenance for this design and not a file your project has. The chain runs the flag-only staleness sweep, then the tool's own invariant checks in their hook form. KYO-362: `kyo doctor --hook` prints one line to stderr (the problem count, each failing check's name and the path of the full report it writes beside `kyosei.db`) and gives the same verdict bare `kyo doctor` would, because a whole report rendered as a failing stop hook fills the terminal. KYO-408: the hook form also re-verifies only what moved in the export since the last passing round-trip, kept in kyosei/.doctor-cache/, and falls back to the full rebuild bare `kyo doctor` runs for anything it cannot prove; `kyo doctor --hook --json` names the mode it used. Order is load-bearing (KYO-31): a check that names a remedy must not sit ahead of that remedy in the same `&&` chain, so the sweep writes its event first and doctor validates last. `kyo install-hooks` installs this block under both Stop and SessionEnd, and rewrites an installed chain that still names `kyo html` or runs `kyo doctor` without `--hook` (install_hooks.SUPERSEDED_HOOK_COMMANDS). KYO-269: the `timeout` is for SessionEnd, whose hooks otherwise share a 1.5 second budget that cut the chain off silently; `scaffold.merge_hooks` removes it under Stop, which has the 600 second default. The PATH guard is described in session-start.json's comment; on Stop, exit 2 would keep the conversation going every turn over a condition nobody in the session can clear, which is why it exits 127.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo sweep --hook && kyo doctor --hook",
+          "timeout": 20
+        }
+      ]
+    }
+  ]
+}

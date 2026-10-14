@@ -1,0 +1,51 @@
+0
+--out--
+TST-1  [bug]  open
+  title:   A record
+  scope:   (none declared)
+  created: 2026-01-02T03:04:05.678Z
+  updated: 2026-01-02T03:04:05.678Z
+
+description:
+  (empty)
+
+criteria (1):
+  TST-1.c1  unmet-unbuilt  the CLI is wired
+
+touches (1):
+  TST-1.t1  src/app.py
+
+doc-refs (0):
+  (none)
+
+docs obligations (0 open of 0):
+  (none)
+
+gates (0 open of 0):
+  (none)
+
+claims (0):
+  (none)
+
+evidence artifacts (1):
+  TST-1.e1  sha256:<DIGEST>  orchestrator  2026-01-02T03:04:05.678Z
+
+dispatches (0):
+  (none)
+
+reports (0, 0 superseded):
+  (none)
+
+flags (0, 0 unresolved):
+  (none)
+
+links (1):
+  TST-L1  incoming
+    TST-2 "A second record"
+      BLOCKS
+    TST-1 "A record"
+
+notes (0, append-only):
+  (none)
+
+--err--

@@ -1,0 +1,56 @@
+0
+--out--
+{
+  "command": "list",
+  "db_export_currency": {
+    "db_ahead_scopes": [],
+    "db_is_behind": false,
+    "direction": "in-step",
+    "export_ahead_scopes": [],
+    "records_only_in_db": [],
+    "records_only_in_export": [],
+    "remedy": "",
+    "says": "the database and kyosei/export/ are in step",
+    "undecidable_because": null
+  },
+  "ok": true,
+  "records": [
+    {
+      "counted": true,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "gate_tags": [],
+      "gate_types": [],
+      "gates_open": 0,
+      "id": "TST-1",
+      "kind": "bug",
+      "scope": null,
+      "seq": 1,
+      "standing": "open",
+      "status": "open",
+      "title": "A record",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "counted": true,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "gate_tags": [],
+      "gate_types": [],
+      "gates_open": 0,
+      "id": "TST-3",
+      "kind": "task",
+      "scope": null,
+      "seq": 3,
+      "standing": "open",
+      "status": "open",
+      "title": "A withdrawn dispatch",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "summary": {
+    "counted": 2,
+    "not_counted": 0,
+    "total": 2
+  }
+}
+
+--err--

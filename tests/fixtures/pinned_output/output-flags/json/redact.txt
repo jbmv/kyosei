@@ -1,0 +1,88 @@
+0
+--out--
+{
+  "command": "redact",
+  "complete": true,
+  "embedded_copies_removed": 0,
+  "event_rows_scrubbed": 1,
+  "global_scrub_ran": true,
+  "ledger_lines_scrubbed": 1,
+  "ok": true,
+  "record": {
+    "claims": [],
+    "created_at": "2026-01-02T03:04:05.678Z",
+    "criteria": [
+      {
+        "created_at": "2026-01-02T03:04:05.678Z",
+        "id": "TST-2.c1",
+        "reason": null,
+        "seq": 1,
+        "state": "met",
+        "text": "it holds",
+        "updated_at": "2026-01-02T03:04:05.678Z",
+        "verifications": [
+          {
+            "author": "orchestrator",
+            "created_at": "2026-01-02T03:04:05.678Z",
+            "evidence_id": null,
+            "id": "TST-2.v1",
+            "method": "reasoned-about",
+            "reason": null,
+            "seq": 1,
+            "verdict": "met"
+          }
+        ]
+      }
+    ],
+    "description": "",
+    "dispatches": [],
+    "doc_refs": [],
+    "docs_obligations": [],
+    "evidence_artifacts": [
+      {
+        "author": "orchestrator",
+        "created_at": "2026-01-02T03:04:05.678Z",
+        "id": "TST-2.e1",
+        "redacted_at": "2026-01-02T03:04:05.678Z",
+        "redacted_why": "a test",
+        "seq": 1,
+        "sha256": "017ad73325fcf108a972edac618f9edfc957c5b1de10f8b371b0a8bfa4f59e2d",
+        "supports_id": null,
+        "text": "[redacted]"
+      }
+    ],
+    "flags": [],
+    "gates": [],
+    "id": "TST-2",
+    "kind": "task",
+    "links": [
+      {
+        "created_at": "2026-01-02T03:04:05.678Z",
+        "direction": "outgoing",
+        "id": "TST-L1",
+        "other": "TST-1",
+        "seq": 1,
+        "type": "blocks"
+      }
+    ],
+    "notes": [],
+    "plan": null,
+    "reports": [],
+    "schema_version": 27,
+    "scope": null,
+    "since_note": null,
+    "status": "working",
+    "title": "A second record",
+    "touches": [],
+    "updated_at": "2026-01-02T03:04:05.678Z",
+    "wont_do_reason": null
+  },
+  "record_id": "TST-2",
+  "retry": false,
+  "surviving_occurrences": [],
+  "target_id": "TST-2.e1",
+  "target_kind": "evidence",
+  "why": "a test"
+}
+
+--err--

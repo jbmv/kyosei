@@ -1,0 +1,5 @@
+2
+
+--err--
+kyo: contract dispatch-touch-disjointness not met:
+  - TST-2.d1 (dispatching TST-2) shares src/a.py with this dispatch — pass --force to override

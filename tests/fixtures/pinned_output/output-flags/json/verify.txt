@@ -1,0 +1,69 @@
+0
+--out--
+{
+  "command": "verify",
+  "completed_with_unmet": null,
+  "ok": true,
+  "record": {
+    "claims": [],
+    "created_at": "2026-01-02T03:04:05.678Z",
+    "criteria": [
+      {
+        "created_at": "2026-01-02T03:04:05.678Z",
+        "id": "TST-2.c1",
+        "reason": null,
+        "seq": 1,
+        "state": "met",
+        "text": "it holds",
+        "updated_at": "2026-01-02T03:04:05.678Z",
+        "verifications": [
+          {
+            "author": "orchestrator",
+            "created_at": "2026-01-02T03:04:05.678Z",
+            "evidence_id": null,
+            "id": "TST-2.v1",
+            "method": "reasoned-about",
+            "reason": null,
+            "seq": 1,
+            "verdict": "met"
+          }
+        ]
+      }
+    ],
+    "description": "",
+    "dispatches": [],
+    "doc_refs": [],
+    "docs_obligations": [],
+    "evidence_artifacts": [],
+    "flags": [],
+    "gates": [],
+    "id": "TST-2",
+    "kind": "task",
+    "links": [
+      {
+        "created_at": "2026-01-02T03:04:05.678Z",
+        "direction": "outgoing",
+        "id": "TST-L1",
+        "other": "TST-1",
+        "seq": 1,
+        "type": "blocks"
+      }
+    ],
+    "notes": [],
+    "plan": null,
+    "reports": [],
+    "schema_version": 27,
+    "scope": null,
+    "since_note": null,
+    "status": "working",
+    "title": "A second record",
+    "touches": [],
+    "updated_at": "2026-01-02T03:04:05.678Z",
+    "wont_do_reason": null
+  },
+  "record_id": "TST-2",
+  "ungated_unobserved": null,
+  "verification_id": "TST-2.v1"
+}
+
+--err--

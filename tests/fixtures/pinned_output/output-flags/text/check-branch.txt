@@ -1,0 +1,8 @@
+0
+--out--
+  against: main (default), this repository's trunk (git config init.defaultBranch)
+check-branch kyo-137 against main: clean (1 file(s) changed, none under kyosei/ or ideas/)
+store layout: in-repo — kyosei/ and ideas/ live inside <TMP>/text/proj and are committed to the same git repository as its code
+  so this diff check is what stands between a worker branch and the store: kyosei/ or ideas/ are real paths in this repository, and a commit touching them is a real merge that would reach the store
+
+--err--

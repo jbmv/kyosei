@@ -1,0 +1,12 @@
+1
+--out--
+{
+  "command": "show",
+  "error": "no record 'TST-99' in <TMP>/json/proj/kyosei/kyosei.db",
+  "exit_code": 1,
+  "ok": false,
+  "store_unreadable": false
+}
+
+--err--
+kyo: no record 'TST-99' in <TMP>/json/proj/kyosei/kyosei.db

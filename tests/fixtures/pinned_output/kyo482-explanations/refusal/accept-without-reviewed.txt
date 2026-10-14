@@ -1,0 +1,13 @@
+2
+
+--err--
+kyo: contract accept-needs-review not met:
+  - report TST-1.r1 (dispatch TST-1.d1) carries 1 premise_false and 1 disagreements entry(s), and reading them is the act this command cannot do for you
+  - premise_false[1] claim: the file exists
+  -   correction: it did not
+  -   impact: none
+  - disagreements[1] topic: naming
+  -   the brief said: call it x
+  -   the worker did: called it y
+  -   rationale: y is clearer
+  - nothing was applied. Read the entries above; then pass --reviewed to say you have, and this runs every step

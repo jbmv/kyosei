@@ -1,0 +1,12 @@
+0
+--out--
+redacted evidence TST-2.e1 on TST-2
+scrubbed from prior ledger lines: 1
+scrubbed from the database's events table: 1
+embedded copies removed (briefs, reports): 0
+stored reason (6 chars, sha256:<DIGEST>):
+  | a test
+
+This fixed the working tree, not history: any commit that already contains this text still does. Rewriting that is a separate, deliberate decision with a cost to every clone and branch.
+
+--err--

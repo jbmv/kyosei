@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyosei.local/schemas/report.schema.json",
+  "title": "Kyosei structured worker report",
+  "description": "Shape of the JSON file a dispatched worker writes to `.kyosei-report.json` at the root of its worktree (KYO-206: one named path, gitignored by `kyo init`/`kyo install-hooks`, not counted by `kyo check-clean` and never named by `kyo touch-drift`, so a worker commits its work without committing its report) and the orchestrator ingests with `kyo report <dispatch-id> --file .kyosei-report.json` (docs/design/charter.md, 'Core schema': 'reports: structured worker output ... Ingested by `kyo report`, not retyped by the orchestrator.'). Reading this file structurally is what lets the orchestrator review corrections first instead of transcribing a prose report by hand, which was the costliest step of the dispatch loop and the one that lost the most fidelity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dispatch_id",
+    "record_id",
+    "worked_from_sha",
+    "criteria_verdicts",
+    "premise_false",
+    "disagreements",
+    "corrected_numbers",
+    "commits"
+  ],
+  "properties": {
+    "dispatch_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The dispatch object this report closes out. Required even though `kyo report` also takes it as a CLI argument: ingestion fails loudly (Law 6) if the two disagree, instead of silently filing a report against the wrong dispatch."
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The record the dispatch's frozen brief was generated from. Echoed here for the same cross-check reason as dispatch_id, and so a report is self-describing if read outside the ingest path."
+    },
+    "worked_from_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "The base commit SHA the worker actually started from — read from the worker's own worktree (e.g. `git rev-parse HEAD` at start), never copied from the brief or typed from memory (Law 16). Compared by the orchestrator against the dispatch's recorded base SHA to detect a worker that branched from somewhere unexpected."
+    },
+    "criteria_verdicts": {
+      "type": "array",
+      "description": "One entry per criterion the dispatch's brief listed, or that the work touched -- and at most one entry per criterion_id: a repeated criterion_id is refused by `kyo report` (a validator-only rule, since JSON Schema cannot express uniqueness by key; KYO-413). Can be empty for a dispatch whose kind carries no criteria (e.g. a `plan`-kind record), but the key must still be present (Law 6: absence must be visible, not inferred from a missing key).",
+      "items": { "$ref": "#/$defs/criterionVerdict" }
+    },
+    "premise_false": {
+      "type": "array",
+      "description": "First-class, reviewed-first slot -- the reports row of 'Core schema' in docs/design/charter.md (in Kyosei's own repository: Kyosei's design record, which ships with its source and not with this schema, so the two charter references in this file are provenance and not reading you are expected to do) -- for every claim in the brief that turned out to be wrong. Present and empty when nothing was false — an empty array is a real, positive statement ('I checked and found no false premises'), not the absence of a check. This is what previously survived only as prose in a worker's final message, legible only if a human happened to read closely enough to catch it. KYO-208: an entry here names a claim the brief made and the observation that falsified it, and nothing else. A clarification of a premise that HELD does not belong in this slot; it belongs in 'summary'. One worker filed an entry whose correction began 'This is consistent, not false' -- this slot is read before anything else precisely because everything in it is supposed to be a falsified premise, and a note that is not one dilutes the only field carrying that guarantee.",
+      "items": { "$ref": "#/$defs/premiseFalse" }
+    },
+    "disagreements": {
+      "type": "array",
+      "description": "First-class slot for every place the worker contradicted the brief or the orchestrator's stated approach and did something else on purpose, with its reasoning — distinct from premise_false (a premise_false entry is about a fact being wrong; a disagreements entry is about a judgment call). This is the mechanism behind the standing stance every brief carries: flag conflicts, do not resolve them silently; contradicting the brief must be cheaper than complying with it.",
+      "items": { "$ref": "#/$defs/disagreement" }
+    },
+    "corrected_numbers": {
+      "type": "array",
+      "description": "Every number stated in the brief (a count, a measurement, an estimate) that the worker found to be different from reality, with the corrected value and how it was obtained. Numbers decay (Law 16); this is where a worker hands a corrected one back structurally instead of burying it in paragraph six of a report.",
+      "items": { "$ref": "#/$defs/correctedNumber" }
+    },
+    "commits": {
+      "type": "array",
+      "description": "Every commit the worker produced on this dispatch, in order. Can be empty only for a dispatch whose entire output is findings (e.g. an `investigation` or `evidence`-kind dispatch with write_scope: queries-only or none) — a dispatch with write_scope: code or prod-data and zero commits is exactly the state Law 8 calls a loud, blocking state ('terminated-no-report' is one shape of it; committed-nothing is the other), and the orchestrator should treat it as such rather than as a quiet success.",
+      "items": { "$ref": "#/$defs/commitRef" }
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "description": "Optional short free-text account of what was done and why, in the worker's own judgment. Not a substitute for the structured fields above — a fact that belongs in premise_false, disagreements, or corrected_numbers still belongs there even if it is also mentioned here, because only the structured fields are guaranteed to survive being read quickly. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+    },
+    "touched_files": {
+      "type": ["array", "null"],
+      "description": "Optional list of files the worker actually touched, for the orchestrator to cross-check against the record's declared `touches` (Core schema) and the dispatch's touch-disjointness check. A mismatch here is worth a disagreements[] entry, not silent correction. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report.",
+      "items": { "type": "string" }
+    },
+    "docs_verdicts": {
+      "type": ["array", "null"],
+      "description": "Optional. One entry per governed document section this dispatch's work put a question to — the worker's PROPOSED verdict on it, keyed by document path and section heading because obligation ids do not exist until the orchestrator ingests this report. Run `kyo docs preview --against <the base your worktree was branched from>` to see exactly which sections your branch raises, grouped per document; read them, and answer each one here. `kyo report` matches every entry to the obligation it raised and prints the match beside that obligation, and names any entry that matched nothing as unmatched — a verdict against a section you never touched, or misspelled, cannot pass silently. Applying them is a separate orchestrator act (`kyo docs settle --from-report <dispatch-id>`), so nothing you write here settles anything: the orchestrator settles, the worker proposes. Measured cause (two consumer stores): obligations settled `not-affected` outnumber `updated` roughly nine to one in one store and two to one in the other, and one dispatch raised sixty — a reading nobody does at that size, so it was being done from the file diff by the party who no longer had the diff in their head. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report.",
+      "items": { "$ref": "#/$defs/docsVerdict" }
+    },
+    "amends": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "Optional, and only for a worker RESUMED on this same dispatch after its first report was already ingested (KYO-90). Set it to the id of the report the orchestrator ingested — e.g. \"KYO-83.r1\" — and `kyo report` ingests this document as a new, current report and marks that one superseded, instead of refusing the whole thing as `dispatch-already-terminal`. The superseded report is never overwritten and never deleted: it keeps its own id, its ingest time and every word it said, and `kyo show` renders which of the two is current. Filing it corrects the ledger's account of one attempt, so `kyo report`'s own consumers — schema validation, the branch check over commits[], touch drift over touched_files[] — all run again over THIS document, which is the point (KYO-90.c2): a corrected report used to survive only as prose nothing checked. The value must name the report the dispatch currently carries; naming an older one is refused (`report-amends-wrong-report`) rather than reconciled, because a correction written against an account that has itself since been superseded was written without reading what it replaces. Omit the key entirely for a first report — a dispatch that has never reported has nothing to amend, and saying otherwise is refused too. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+    }
+  },
+  "$defs": {
+    "criterionVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_id", "verdict", "method"],
+      "properties": {
+        "criterion_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The stable opaque criterion id from the record (Law 4: ids are never reused, never positional). Never a positional reference like 'criterion 3'."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["met", "unmet-unbuilt", "unmet-unobserved", "void-premise-gone", "void-withdrawn"],
+          "description": "Criterion state, not a boolean (Law 10). 'met': observed true. 'unmet-unbuilt': the work isn't done yet. 'unmet-unobserved': the work may be done but hasn't been checked. 'void-premise-gone': the criterion no longer makes sense (its premise died) — requires `reason`. 'void-withdrawn': deliberately dropped though the premise still holds — requires `reason`; distinct from void-premise-gone so that state cannot be used as a lie."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["machine-checked", "human-observed", "reasoned-about"],
+          "description": "How the verdict was reached (Core schema: verifications.method). 'machine-checked': a script, test, or query produced the verdict. 'human-observed': a person looked and confirmed — the orchestrator's label (`kyo verify`, `kyo confirm`); a worker's report may NOT use it, and `kyo report` refuses it in criteria_verdicts[] and docs_verdicts[] (KYO-537). 'reasoned-about': inferred from code/logic without a direct check — the weakest method, and should be named as such rather than dressed up as machine-checked."
+        },
+        "evidence": {
+          "type": ["string", "null"],
+          "description": "Pointer to or short description of the evidence for this verdict — a command's output, a query result, an evidence_artifact id. Strongly recommended whenever verdict is 'met' with method 'machine-checked' or 'human-observed'; the schema does not force this because a reasoned-about verdict may have no artifact to point at, only logic to state in `notes`. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Required when verdict is 'unmet-unobserved', 'void-premise-gone', or 'void-withdrawn' (Core schema: criteria.reason, 'required for void/unobserved'). Says why the criterion wasn't checked, or why its premise is gone. JSON null is accepted here and read exactly as an absent key (KYO-224), which for this field means the if/then above still refuses it by name when the verdict requires a reason — a null reason under a void verdict is a missing reason, and is reported as one."
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Optional free text: reasoning, caveats, or context that doesn't fit the other fields. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+        }
+      },
+      "if": {
+        "properties": { "verdict": { "enum": ["unmet-unobserved", "void-premise-gone", "void-withdrawn"] } }
+      },
+      "then": {
+        "required": ["criterion_id", "verdict", "method", "reason"]
+      }
+    },
+    "premiseFalse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim", "correction"],
+      "properties": {
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The premise as the brief stated it, quoted or closely paraphrased — specific enough that the orchestrator can find where it came from."
+        },
+        "correction": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What is actually true, and (briefly) how the worker found out."
+        },
+        "impact": {
+          "type": ["string", "null"],
+          "description": "Optional: what this changes about the dispatch's scope, risk, or the criteria as brief-written. Leave unset if the false premise was incidental. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+        }
+      }
+    },
+    "disagreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic", "brief_said", "worker_did", "rationale"],
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short label for what the disagreement is about."
+        },
+        "brief_said": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the brief or orchestrator instructed."
+        },
+        "worker_did": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the worker did instead (or recommends instead, if it stopped short of acting unilaterally)."
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why — this is the field the orchestrator reviews first. A disagreement without a rationale is indistinguishable from noncompliance."
+        }
+      }
+    },
+    "correctedNumber": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim", "brief_value", "actual_value", "method"],
+      "properties": {
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the number describes (e.g. 'orders whose total is below their subtotal')."
+        },
+        "brief_value": {
+          "type": "string",
+          "description": "The value as stated in the brief. String-typed so units, ranges, and 'unknown' are all representable without schema gymnastics."
+        },
+        "actual_value": {
+          "type": "string",
+          "description": "The corrected value, same free-form-but-string convention as brief_value."
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The instrument that produced actual_value (a query, a script, a manual count) — required, because two true numbers with different instruments are not a contradiction, they're two different measurements (a raw SQL count and a validation script's count of the same thing can differ, and a measurement needs its instrument recorded alongside it)."
+        }
+      }
+    },
+    "docsVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_path", "section", "verdict", "method", "reason"],
+      "properties": {
+        "doc_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The document, exactly as `kyo docs preview` names it: relative to the project root, posix-style (e.g. \"README.md\", \"docs/design/charter.md\")."
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The section's heading text, verbatim and without its leading `#` characters — the same string `kyo docs preview` prints in brackets. `(preamble)` for a `governs:` line before the first heading. This and doc_path together are what `kyo report` matches on, so a paraphrased heading matches nothing and is reported as unmatched rather than guessed at."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["updated", "not-affected"],
+          "description": "'updated': you changed the document to match this work. 'not-affected': you read the section against your diff and it needs no change. There is deliberately no verdict for 'not looked at yet' — that is what leaving the entry out already is — and none for 'some of each', which is two entries about two sections."
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How you decided (law 9). A verdict without its instrument is a claim whose weight cannot be judged later, and 'I re-read the section against the diff' and 'a test asserts this' are both honest answers a reader must be able to tell apart."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One line: what in the section, read against your diff, made this the answer. This is the field an orchestrator reviews before applying the verdict under their own name, and the one thing a rubber stamp cannot supply cheaply."
+        }
+      }
+    },
+    "commitRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha"],
+      "properties": {
+        "sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Git commit SHA, read from git, never typed from memory (Law 16)."
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Optional: the commit's first line (its git subject), the name KYO-241 chose deliberately over the two keys workers reached for and this schema refused (`severity`, `message` — KYO-233.d1, KYO-234.d1). `kyo report` prints it beside the sha, and `kyo show <dispatch-id>` renders it in the reports block; a report that omits it leaves both unchanged from before this field existed. It is the only first-line field; `summary` was retired by KYO-270 — the same idea under an older name (KYO-224) that made a worker choose between two keys with no signal for which one the schema wanted. A report that still carries `summary` is refused, and the unknown-key message names `subject` as what this entry accepts. A report already ingested with `summary` is history and is not rewritten; it is still read tolerantly for display, though only `subject` is rendered going forward. JSON null is accepted here and read exactly as an absent key (KYO-224): a worker serialising an unset optional out of a typed struct writes null for it, and refusing a field this schema calls optional for the shape of its absence is a refusal about serialisation, not about the report."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "KYO-398: tells a session, on the prompt after it happens, that the `kyo` under it changed since the session's opening brief. One installed `kyo` serves every project on a machine, so an upgrade lands under running sessions that did not cause it; the session-start brief reports an upgrade between sessions, and this hook reports one mid-session. `kyo check-build --hook` compares the build stamp of the `kyo` on PATH with the build this session's own opening brief recorded, through one read-only SQLite query, and prints one line naming both builds and the `kyo changelog --since` command that lists the change, only when they differ. It prints nothing otherwise, including when there is no project or no opening brief of this session, because UserPromptSubmit's stdout is added to the session's context on every turn. The PATH guard is described in session-start.json's comment; its exit 127 is a non-blocking error here, so the prompt goes through.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo check-build --hook"
+        }
+      ]
+    }
+  ]
+}

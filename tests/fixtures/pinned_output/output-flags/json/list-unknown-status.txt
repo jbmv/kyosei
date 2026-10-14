@@ -1,0 +1,12 @@
+64
+--out--
+{
+  "command": "list",
+  "error": "'nonsense' is not a status; <TMP>/json/proj/kyosei/statuses.yml declares: open, working, built, verified, done, wont-do (or current, void for knowledge-archetype records)",
+  "exit_code": 64,
+  "ok": false,
+  "store_unreadable": false
+}
+
+--err--
+kyo: 'nonsense' is not a status; <TMP>/json/proj/kyosei/statuses.yml declares: open, working, built, verified, done, wont-do (or current, void for knowledge-archetype records)

@@ -1,0 +1,26 @@
+0
+--out--
+{
+  "checked_the_worker_tree": true,
+  "command": "check-clean",
+  "dirty_entries": [],
+  "excluded_dirs": [
+    "kyosei/",
+    "ideas/"
+  ],
+  "excluded_report_path": ".kyosei-report.json",
+  "flagged_entries": [],
+  "layout": "in-repo",
+  "ok": true,
+  "outside_the_worktree": null,
+  "population_looks_like_the_tick": null,
+  "repeat_stop": false,
+  "root": "<TMP>/json/proj",
+  "stat_only_entries": [],
+  "stop_audit": null,
+  "stop_audit_event": null,
+  "store_root": "<TMP>/json/proj",
+  "subject": null
+}
+
+--err--

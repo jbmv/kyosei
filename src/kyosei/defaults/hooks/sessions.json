@@ -1,0 +1,14 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "KYO-186: records this session in the store's local `kyosei/sessions.json` (which Claude Code sessions this project has, and which claude.ai Remote Control page each one is on), so the desktop app's claude.ai pane can open on this project's orchestrator session. It installs under three events, each doing what the other two cannot: SessionStart creates the entry; Stop looks again, because a session that connects to Remote Control after it began gains its record only at the end of its transcript; and SessionEnd marks the entry ended, which a scan of transcripts cannot tell from a running session. The file is local state beside `kyosei.db`, gitignored and never exported, and it stores only the session id the URL needs. The `bridge-session` transcript record it reads is an undocumented harness format, so every step of the read degrades to a named outcome rather than a guess. It is silent and exits 0, because SessionStart's stdout enters the session's context and a session that could not be recorded must still start, turn and end. KYO-269: the `timeout` matters only under SessionEnd, whose hooks share a 1.5 second budget unless a hook sets its own, up to 60 seconds (code.claude.com/docs/en/hooks); `scaffold.merge_hooks` removes it under the other events. The PATH guard in front of the command is described in session-start.json's comment.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo sessions --hook",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

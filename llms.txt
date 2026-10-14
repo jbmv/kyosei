@@ -1,0 +1,33 @@
+# Kyosei
+
+> Kyosei (共生) is a provenance-first task board for software built by a person and coding
+> agents together. Its CLI, `kyo`, keeps a project's ideas, records and evidence in a git-backed
+> store, generates the brief each agent works from, and enforces its rules through Claude Code
+> hooks.
+
+Two kinds of agent visit this repository. If you were asked to **use Kyosei in a project**,
+install the CLI with `uv tool install kyosei`, then run `kyo onboard` inside that project and
+follow the setup prompt it prints. If you were asked to **work on Kyosei itself**, read
+AGENTS.md first.
+
+## Use Kyosei in my project
+
+- [Getting started](docs/guide/04-getting-started.md): install `kyo`, run `kyo onboard`, and what `kyo init` does in an empty folder or an existing project
+- [Setup decisions](docs/guide/setup-decisions.md): every question setup asks, with its default and the reason for it
+- [Install and upgrading](docs/reference/topics/install.md): the Claude Code plugin (`kyo harness install claude-code`, the default) or the tracked copies (`--copies`), moving a project to the plugin with `kyo harness migrate`, and what an upgrade needs on each route
+- [Prior-art search](docs/guide/06-kinds-scopes-documents.md#prior-art-search): the optional extra `kyosei[recx]`, which searches recx's index of published repositories when a proposal is created, off until a project turns it on
+- [Docs governance](docs/reference/topics/docs-governance.md): documents that name the code they describe, including a recx manifest (`RECX.yaml`) governed module by module
+- [The operator's guide](docs/guide/README.md): what Kyosei is, records, sessions and hooks, dispatching, kinds, and machine layouts, in reading order
+- [Command reference](docs/reference/cli.md): every `kyo` command and flag, generated from the CLI
+
+## Work on Kyosei
+
+- [AGENTS.md](AGENTS.md): building, testing and contributing; the venv rules and the store rules for dispatched workers
+- [Design charter](docs/design/charter.md): the laws, the architecture and the reasoning behind them
+- [Desktop app](apps/desktop/README.md): the Electron viewer that reads projects through `kyo serve`, built from source with its own checks
+
+## Optional
+
+- [README](README.md): the front page: what Kyosei is, installing, and where to go next
+- [Operating reference](docs/reference/topics/README.md): the full reference by topic -- install and upgrading, the store, registries, the dispatch loop, docs governance, serve and the desktop app
+- [Topic references](docs/reference/topics/): one page per mechanism, in depth

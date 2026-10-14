@@ -1,0 +1,28 @@
+0
+--out--
+summary: report TST-1.r1 of TST-1.d1 — premise_false 0, disagreements 0, verdicts proposed: 1 met, open docs obligations 1
+ingested report TST-1.r1 for dispatch TST-1.d1 (worked_from_sha <SHA> differs from the dispatch's recorded base sha <SHA> and is not a known descendant of it — worth checking what branched from where)
+branch check: BRANCH DID NOT ADVANCE — kyo-137 has no commits past worked_from_sha <SHA>, and this report carries no commits. If this dispatch did any work, it never landed on kyo-137 (a detached HEAD, another branch) and `git merge kyo-137` will ship nothing; if it deliberately changed nothing, this is expected
+premise_false (0):
+  (none)
+disagreements (0):
+  (none)
+corrected_numbers (0):
+  (none)
+criteria_verdicts (1):
+  - TST-1.c1: met (machine-checked)
+commits (0):
+  (none)
+note: verdicts above are NOT applied; apply them via `kyo verify --from-report TST-1.d1` (all of them, or `--only <criterion-id> ...` for the ones you have checked), or one at a time with `kyo verify <criterion-id> --verdict ... --method ...` (KYO-7.c4)
+docs obligations: 1 raised across 1 document(s) — each needs a verdict before completion
+  docs/architecture.md — 1 section(s)
+      TST-1.o1  [How the CLI is wired]
+          docs/architecture.md [How the CLI is wired] governs src/app.py, and this dispatch changed src/app.py
+      this document governs whole files (src/app.py) — `governs: <path>#<symbol>` narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets only
+      kyo docs settle TST-1.o1 --verdict updated|not-affected --method '<how you decided>'
+  changed paths: read from the union of `git diff <SHA>..kyo-137` (the two-dot diff from TST-1.d1's recorded base sha) and the report's touched_files[] — 1 named by both; 6 only by the git diff (missing from touched_files[]: kyosei/bases.yml, kyosei/export/TST-1.json, kyosei/export/TST-2.json, kyosei/export/TST-3.json, kyosei/export/_allocations.json and 1 more) — because kyo-137 is already merged into main, so the three-dot diff `git diff main...kyo-137` compares kyo-137 against itself and examines nothing — an empty answer there is the absence of a finding, not a clean one
+touch drift: none — all 1 file(s) the report's touched_files[] names are claimed by TST-1
+  (symbol-level drift not-run: the evidence for this finding is a list of FILES, so which lines of them changed — and therefore which symbol's region — cannot be asked of it)
+explained in `kyo reference report`
+
+--err--

@@ -1,0 +1,132 @@
+# kyosei/bases.yml -- saved view definitions (KYO-108, KYO-109).
+#
+# A BASE is a saved query with an arrangement: a source, filters, the columns a
+# rendering shows, a sort, and an optional `group-by`. The board, the status view, the
+# bubble view and the typed-edge graph are not four features but four RENDERINGS of one
+# base -- so the question is written down once, here, and the
+# renderings differ only in how they draw the answer.
+#
+#   kyo base list            what this project has saved
+#   kyo base run <name>      run one, read-only
+#   kyo base run <name> --json    rows, applied columns/sort, grouping, per-row detail,
+#                                 and the db/export currency direction
+#
+# THE SHAPE, which every Kyosei registry shares (see src/kyosei/registry.py):
+#
+#   bases:                 one top-level key
+#     <name>:              a lowercase slug: a-z, digits and hyphens, starting a-z
+#       summary:           REQUIRED, one non-empty line. A saved view with no summary
+#                          is a name only its author can read.
+#       source:            REQUIRED: records, ideas or docs. See THE THREE SOURCES.
+#       filters:           optional mapping; what it may hold depends on the source.
+#       columns:           optional list of field names, in display order. Omit it to
+#                          get every field the source's rows carry.
+#       sort:              optional list of field names, most significant first.
+#                          Prefix one with `-` to reverse it.
+#       group-by:          optional single field name. The grouping is computed by the
+#                          engine so that all four renderings group identically. A
+#                          multi-valued field is never groupable -- a row with two
+#                          values would be in two groups.
+#
+# THE THREE SOURCES. One engine, one result document: whichever source a base names,
+# `--json` comes back with the same keys (rows, applied, groups, summary,
+# db_export_currency), so a rendering built for one draws all three. What differs is
+# the FIELD SET, because a record has an id and a file has a path.
+#
+#   source: records    the records in this project's store.
+#     fields   id, seq, kind, scope, status, standing, gates_open, gate_tags, title,
+#              counted   (default sort: seq -- record order, what `kyo list` prints)
+#     filters  kind, scope, status, plan, gate-tag -- exactly the filters `kyo list`
+#              offers, because both surfaces read them from one declaration in
+#              src/kyosei/query.py. A value naming a kind, status, scope or gate tag
+#              this project has not declared is refused when this file is READ, naming
+#              the registry that would make it valid. A base cannot ask a question the
+#              project's own registries do not license.
+#     detail   each row carries `links`: its typed edges, both directions.
+#
+#   source: ideas      the markdown files in ideas/.
+#     fields   id (the file's path), title, stamped, promoted, promoted_at,
+#              section_count, promoted_section_count, properties
+#              (default sort: id -- path order)
+#     detail   each row carries `sections`: every heading, and the record a promoted
+#              section's stub points at (KYO-107).
+#
+#   source: docs       this project's Layer 3 documents -- which files those are is
+#              declared in kyosei/documents.yml, and defaults to root-level *.md plus
+#              docs/**/*.md (KYO-129). This source and `kyo docs check` enumerate one
+#              set through one resolver, so a base can never be asking about a
+#              narrower tree than the build checks.
+#     fields   id (the file's path), title, section_count, governs, governs_broken,
+#              amended, staleness, staleness_says, properties
+#     detail   each row carries `sections`: every heading with its governs:, status:
+#              and amended-by: metadata. A heading or a metadata line inside a fenced
+#              code block is quoted, not declared, and is read as neither -- which is
+#              what keeps a README's own example of the format out of the results.
+#     staleness is one of: current, stale, ungoverned, cannot-tell. `cannot-tell` is
+#              a real answer, not a failure -- git could not date the file or something
+#              it governs -- and `staleness_says` carries why. A banner that painted
+#              that case "current" would report a clean docs tree on no evidence.
+#
+# FILTERING A FILE SOURCE (ideas and docs). Three kinds of key:
+#
+#       path:            a glob matched against the file's path -- `ideas/v2*/*.md`
+#       contains:        a phrase in the file's BODY. Whitespace-normalised on both
+#                        sides, so a phrase that hard-wrapped in the file still
+#                        matches (KYO-66: a filter that fails to find a note the user
+#                        knows exists teaches them not to trust it).
+#       <field>:         equality against one of the source's fields. A multi-valued
+#                        field matches if ANY of its values does, which is what makes
+#                        `governs: src/kyosei/brief.py` and `promoted: KYO-30` ask the
+#                        obvious question.
+#       properties.<key>: equality against a frontmatter property. The key is whatever
+#                        the file states -- `author`, `area`, `promoted`, anything.
+#                        Nothing here decides which keys are legitimate: ideas have
+#                        zero required ceremony (law 13), so a property no file
+#                        declares is an empty column and never an error. The same
+#                        dotted name works as a column, a sort key and a group-by.
+#
+# DELIBERATELY NOT HERE YET: `color-by` and `size-by`. They belong beside `group-by`,
+# and KYO-108 keeps them rendering-side because nothing in v1 would read them -- a stored field with no consumer is what law 2 forbids. They become two more
+# optional keys on the day a rendering consumes them.
+#
+# Edited as ordinary reviewable config in v1, exactly like kinds.yml. Proposal-gating
+# the edit is KYO-72 step 6 and does not exist yet.
+#
+# No bases are shipped, deliberately, and for a sharper reason than scopes.yml's. A
+# seeded base would have to name a status (`open`) or a kind (`bug`) from THIS
+# project's registries -- and a project that renames its ladder or drops that kind
+# would then have a bases.yml that fails to load, taking every base it wrote itself
+# down with it. A saved view is a question this project actually asks; the first one
+# is written by whoever has it. Uncomment an example below, or write your own.
+
+bases: {}
+# bases:
+#   open-work:
+#     summary: Everything open, oldest first -- the queue.
+#     source: records
+#     filters:
+#       status: open
+#     columns: [id, kind, standing, gates_open, title]
+#     sort: [seq]
+#
+#   blocked:
+#     summary: Open work waiting on a human, grouped by what it waits on.
+#     source: records
+#     filters:
+#       gate-tag: awaiting-review   # must be declared in kyosei/gate-tags.yml
+#     group-by: kind
+#     sort: [-gates_open, id]
+#
+#   unpromoted:
+#     summary: Ideas nobody has turned into a record yet.
+#     source: ideas
+#     filters:
+#       stamped: "false"
+#     columns: [id, title, section_count]
+#
+#   stale-docs:
+#     summary: Documents the code they govern has moved out from under.
+#     source: docs
+#     filters:
+#       staleness: stale
+#     columns: [id, title, governs, staleness_says]

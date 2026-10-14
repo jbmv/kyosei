@@ -1,0 +1,5 @@
+64
+--out--
+
+--err--
+kyo: 'nonsense' is not a status; <TMP>/text/proj/kyosei/statuses.yml declares: open, working, built, verified, done, wont-do (or current, void for knowledge-archetype records)

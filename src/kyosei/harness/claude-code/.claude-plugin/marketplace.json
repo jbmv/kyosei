@@ -1,0 +1,16 @@
+{
+  "name": "kyosei",
+  "owner": {
+    "name": "James Bullard"
+  },
+  "metadata": {
+    "description": "The Claude Code plugin that ships inside the kyosei Python package."
+  },
+  "plugins": [
+    {
+      "name": "kyosei",
+      "source": "./plugin",
+      "description": "The kyosei orchestrator skill and the session hooks that drive a Kyosei-tracked project."
+    }
+  ]
+}

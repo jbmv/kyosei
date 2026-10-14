@@ -1,0 +1,24 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "KYO-60: blocks an agent's `git push`, or a `gh pr create` / `gh repo create`, which push implicitly, from a repository that carries this project's Kyosei store and whose publication nobody has accepted yet. Every other command passes without a word, because a blocking hook that fires on commands that publish nothing gets trained away (KYO-33). When it fires it exits 2, so the tool call never runs, and it states as counts measured at that moment what would become public: idea files, records, evidence artifacts, shift notes, frozen briefs and the events ledger. The git `pre-push` hook `kyo install-hooks` writes beside it only warns, because a person pushing their own repository owns that call while an agent does not. `kyo check-push --acknowledge` records the acceptance in kyosei/config.yml and silences this hook; under the split layout, where the code repository holds no store, it is silent from the start. The PATH guard in front of the command is described in session-start.json's comment.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo check-push --pre-tool-use"
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "KYO-298: blocks a dispatched worker from running a command the project reserves for the orchestrator, such as the whole test suite, inside its own worktree while its dispatch is running. The prose rule alone loses to instructions that tell workers to run the suite anyway, and concurrent suite runs cost context and contend with the orchestrator's own run. The commands are declared in `controller_only_commands` in kyosei/config.yml and never guessed; a project that declares none gets no refusals, and the hook exits 0 without opening a database. It follows the `cd`s in the command line and matches the invoked command rather than a substring, so `make test-data` is not `make test` while `make test LOG=/tmp/t.log` is. The refusal names the remedy and the override, a `KYOSEI_SUITE_OK=1` prefix that the worker reports as a disagreement. It is a second group rather than a second entry in the group above because `kyo install-hooks` decides what is already present per group. The PATH guard in front of the command is described in session-start.json's comment.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo check-command --pre-tool-use"
+        }
+      ]
+    }
+  ]
+}

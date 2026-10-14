@@ -1,0 +1,117 @@
+0
+--out--
+{
+  "applied": {
+    "columns": [
+      "id",
+      "seq",
+      "kind",
+      "scope",
+      "status",
+      "standing",
+      "gates_open",
+      "gate_tags",
+      "gate_types",
+      "title",
+      "counted",
+      "created_at",
+      "updated_at"
+    ],
+    "filters": {
+      "status": "open"
+    },
+    "group-by": null,
+    "sort": [
+      "seq"
+    ],
+    "source": "records"
+  },
+  "base": {
+    "columns": [
+      "id",
+      "seq",
+      "kind",
+      "scope",
+      "status",
+      "standing",
+      "gates_open",
+      "gate_tags",
+      "gate_types",
+      "title",
+      "counted",
+      "created_at",
+      "updated_at"
+    ],
+    "filters": {
+      "status": "open"
+    },
+    "group-by": null,
+    "name": "open-work",
+    "sort": [
+      "seq"
+    ],
+    "source": "records",
+    "summary": "every open record"
+  },
+  "command": "base run",
+  "db_export_currency": {
+    "db_ahead_scopes": [],
+    "db_is_behind": false,
+    "direction": "in-step",
+    "export_ahead_scopes": [],
+    "records_only_in_db": [],
+    "records_only_in_export": [],
+    "remedy": "",
+    "says": "the database and kyosei/export/ are in step",
+    "undecidable_because": null
+  },
+  "groups": null,
+  "ok": true,
+  "rows": [
+    {
+      "counted": true,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "gate_tags": [],
+      "gate_types": [],
+      "gates_open": 0,
+      "id": "TST-1",
+      "kind": "bug",
+      "links": [
+        {
+          "direction": "incoming",
+          "other": "TST-2",
+          "type": "blocks"
+        }
+      ],
+      "scope": null,
+      "seq": 1,
+      "standing": "open",
+      "status": "open",
+      "title": "A record",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "counted": true,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "gate_tags": [],
+      "gate_types": [],
+      "gates_open": 0,
+      "id": "TST-3",
+      "kind": "task",
+      "links": [],
+      "scope": null,
+      "seq": 3,
+      "standing": "open",
+      "status": "open",
+      "title": "A withdrawn dispatch",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "summary": {
+    "counted": 2,
+    "not_counted": 0,
+    "total": 2
+  }
+}
+
+--err--

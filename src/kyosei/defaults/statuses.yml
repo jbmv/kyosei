@@ -1,0 +1,88 @@
+# kyosei/statuses.yml -- the status registry (KYO-101).
+#
+# The work archetype's ladder, as configuration. This file is where a project says what
+# its statuses are CALLED; what each one MEANS to the enforcement core is the `role` it
+# declares, and the roles are Kyosei's, not the project's.
+#
+# THAT SPLIT IS THE WHOLE FEATURE. Transition contracts key off the role and never off
+# the name, so a project that renames `done` to `shipped` below keeps every contract:
+# `complete-requires-settled-criteria` refuses an unqualified move into `shipped` for
+# exactly the reason it refused one into `done`, because it was always a statement about
+# the status where work is completed and only incidentally about the word.
+#
+# THE SHAPE, which every Kyosei registry shares (see src/kyosei/registry.py):
+#
+#   statuses:            one top-level key, the dimension's plural
+#     <name>:            a lowercase slug: a-z, digits and hyphens, starting a-z
+#       summary:         REQUIRED, one non-empty line. Reviewed by people who did not
+#                        write it; a status name with no summary is a magic word.
+#       role:            REQUIRED. One of the six below. This is what binds.
+#
+# THE ROLES (src/kyosei/contracts.py, STATUS_ROLES -- a closed set; a project may rename
+# any status, and may not invent a seventh role for one):
+#
+#   initial             filed; nothing has started
+#   active              work is underway
+#   needs-verification  built, but no verdict has been recorded yet
+#   verified            a verdict is recorded; only the decision to complete remains
+#   complete            finished, with the criteria to say so
+#   retired             settled without completing; the id is retired and never reused
+#
+# Exactly one status must carry `initial`, exactly one `complete`, and exactly one
+# `retired` -- those three are statuses the tool has to NAME (where `kyo new` files a
+# record, what `kyo wont-do` moves to, what "finished" means to `kyo next`), and "which
+# of your three completions did you mean" has no answer. The other three roles may be
+# carried by any number of statuses, including none.
+#
+# WHAT EACH ROLE COSTS YOU, stated so a rename is made with the contracts in view:
+#
+#   active     entering it requires at least one criterion, on a kind whose
+#              policy.requires_criteria is true      (active-requires-criteria)
+#   needs-verification, verified
+#              entering either requires at least one criterion, on the same kinds --
+#              a record may skip `active`, and a verdict needs something to be about
+#                                                    (verification-requires-criteria)
+#   complete   entering it requires every criterion settled and at least one met
+#                                                    (complete-requires-settled-criteria,
+#                                                     complete-requires-a-met-criterion)
+#   retired    entering it requires --why, and nothing may leave it afterwards
+#                                                    (retired-requires-reason,
+#                                                     terminal-status-is-terminal)
+#   complete and retired alike: entering either requires no open gate on the record,
+#              unless --force             (settled-requires-no-open-gates, KYO-490)
+#
+# THE ORDER OF THIS FILE IS THE LADDER. Every "the work archetype's ladder is ..."
+# message reads the declaration order, so there is no `position:` field to keep in step
+# with it.
+#
+# Edited as ordinary reviewable config in v1, exactly like kinds.yml. Proposal-gating
+# the edit is KYO-72 step 6 and does not exist yet.
+#
+# This is Kyosei's default ladder, and it is also what a project with NO statuses.yml
+# gets: every store written before this registry existed keeps precisely these six
+# names and behaves precisely as it did.
+
+statuses:
+  open:
+    summary: Filed, with nothing started on it yet.
+    role: initial
+  working:
+    summary: Someone or something is working on this right now.
+    role: active
+  built:
+    summary: >-
+      Written, but nothing has been checked. This rung exists because "finished but not
+      verified live" is a state a plain to-do board cannot express, and it is the one
+      `kyo next` reports as awaiting verification.
+    role: needs-verification
+  verified:
+    summary: A verdict has been recorded against the criteria; only the move to done remains.
+    role: verified
+  done:
+    summary: Finished -- every criterion settled, at least one of them met.
+    role: complete
+  wont-do:
+    summary: >-
+      Retired without being done -- a dead premise, a supersession, a decision not to.
+      Requires a reason, nothing leaves it, and the id is never reused.
+    role: retired
