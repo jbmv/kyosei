@@ -212,3 +212,87 @@ def test_init_defaults_under_a_symlinked_store_home(
     text = invoke(["init", "--defaults", str(code2)])
     assert text.code == 0, text.err
     assert "files in the store" in text.out
+
+
+# ------------------------------------------------------------------ KYO-635
+
+
+def _replaced_history(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    """A project whose store records its first root commit, after which the code
+    repository's history is replaced by a fresh one-commit history (a new root)."""
+    code = tmp_path / "proj"
+    code.mkdir()
+    _git(code, "init", "-q", "-b", "main")
+    old_root = _commit(code, "old")
+    run = invoke(["init", "--defaults", str(code), "--json"])
+    assert run.code == 0, run.err
+    store = Path(json.loads(run.out)["store_root"])
+    assert load_config(store).code_repo_id == old_root
+    _git(code, "checkout", "-q", "--orphan", "fresh")
+    _git(code, "-c", "user.name=T", "-c", "user.email=t@e", "commit", "-q", "-m", "fresh")
+    _git(code, "branch", "-q", "-D", "main")
+    _git(code, "branch", "-q", "-m", "main")
+    new_root = _git(code, "rev-list", "--max-parents=0", "HEAD").stdout.strip()
+    assert new_root != old_root
+    return code, store, old_root, new_root
+
+
+def test_adopt_re_records_a_differing_identity(tmp_path: Path) -> None:
+    """KYO-635.c1: `kyo init --store <store> --adopt` in a repository whose root commit
+    differs from the recorded one records the new root and says it replaced the old,
+    both from a fresh checkout (no link) and from the checkout already linked."""
+    code, store, old_root, new_root = _replaced_history(tmp_path)
+    (code / ".kyosei").unlink()
+    run = invoke(["init", str(code), "--store", str(store), "--adopt"])
+    assert run.code == 0, run.err
+    assert load_config(store).code_repo_id == new_root
+    line = next(ln for ln in run.out.splitlines() if "replacing" in ln)
+    assert new_root in line and old_root in line
+    assert "re-records" in _git(store, "log", "-1", "--format=%s").stdout
+    assert _git(store, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_adopt_re_records_through_an_existing_link(tmp_path: Path) -> None:
+    code, store, old_root, new_root = _replaced_history(tmp_path)
+    assert (code / ".kyosei").is_file()
+    run = invoke(["init", str(code), "--store", str(store), "--adopt"])
+    assert run.code == 0, run.err
+    assert load_config(store).code_repo_id == new_root
+    assert any(old_root in ln and new_root in ln for ln in run.out.splitlines())
+
+
+def test_differing_identity_without_adopt_is_still_refused(tmp_path: Path) -> None:
+    """KYO-635.c2: without --adopt the differing identity is refused, linked or not,
+    and nothing is re-recorded."""
+    code, store, old_root, _ = _replaced_history(tmp_path)
+    linked = invoke(["init", str(code), "--store", str(store)])
+    assert linked.code == 1 and "already links to a store" in linked.err
+    (code / ".kyosei").unlink()
+    refused = invoke(["init", str(code), "--store", str(store)])
+    assert refused.code == 1
+    assert "different code repository" in refused.err and "--adopt" in refused.err
+    assert not (code / ".kyosei").exists()
+    assert load_config(store).code_repo_id == old_root
+
+
+def test_doctor_reports_a_differing_identity_and_the_remedy_clears_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KYO-635.c3: doctor reports the mismatch as a problem naming the exact command,
+    never rewrites the identity itself, and running that command clears the finding."""
+    code, store, old_root, new_root = _replaced_history(tmp_path)
+    monkeypatch.chdir(code)
+    run = invoke(["doctor", "--json"])
+    assert run.code == 3
+    check = json.loads(run.out)["checks"]["code_repo_identity_mismatch"]
+    assert check["tier"] == "problem"
+    [finding] = check["failures"]
+    assert old_root in finding and new_root in finding
+    remedy = f"kyo init --store {store} --adopt"
+    assert f"`{remedy}`" in finding
+    assert load_config(store).code_repo_id == old_root, "doctor never rewrites it"
+    argv = remedy.split()[1:]
+    assert invoke(argv).code == 0
+    after = json.loads(invoke(["doctor", "--json"]).out)
+    assert after["checks"]["code_repo_identity_mismatch"]["failures"] == []
+    assert load_config(store).code_repo_id == new_root

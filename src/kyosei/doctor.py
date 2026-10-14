@@ -24,6 +24,10 @@ The checks, and the law each one keeps honest:
 
 ============================  =====================================================
 ``check_schema_version``      the db and this build agree
+``check_code_repo_identity_mismatch``  KYO-635 — a split store's recorded
+                              ``code_repo_id`` shares no root commit with the linked
+                              code repository; `kyo init --store <store> --adopt` is
+                              the remedy it names
 ``check_column_consumers``    law 2 — no stored field without a consumer, and no
                               registered consumer that names nothing (KYO-62)
 ``check_config_consumers``    law 2, for ``kyosei/config.yml``, same both ways
@@ -144,6 +148,7 @@ from .doctor_exports import (
 )
 from .doctor_install import (
     check_code_repo_identity,
+    check_code_repo_identity_mismatch,
     check_harness,
     check_harness_hook,
     check_hook_config,
@@ -203,6 +208,9 @@ CHECK_ORDER = (
     # KYO-559: first after the schema check, because it writes -- the store's config gains
     # the code repository's identity -- and every later check then reads that config.
     "code_repo_identity",
+    # KYO-635: beside the fill-in and after it -- the one identity question that check
+    # will not answer (a recorded root commit this repository no longer has), a problem.
+    "code_repo_identity_mismatch",
     # KYO-596: the Claude Code plugin, for a project on it; the copy checks below fall
     # silent there, so it sits ahead of them.
     "harness",
@@ -322,6 +330,7 @@ CHECK_ORDER = (
 CHECKS = {
     "schema_version": check_schema_version,
     "code_repo_identity": check_code_repo_identity,
+    "code_repo_identity_mismatch": check_code_repo_identity_mismatch,
     "harness": check_harness,
     "hook_config": check_hook_config,
     "hook_config_superseded": check_hook_config_superseded,
