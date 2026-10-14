@@ -12,7 +12,7 @@ executable, found on your login shell's PATH. The desktop app ships no Python an
 here, and says so plainly when there is none.
 
 ```sh
-uv tool install kyosei   # or: pipx install kyosei -- once the package is on PyPI
+uv tool install kyosei   # a release from PyPI; or: pipx install kyosei
 uv tool install .        # from a Kyosei checkout: a snapshot of that source
 ```
 

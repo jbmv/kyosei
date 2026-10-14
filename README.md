@@ -37,17 +37,16 @@ reliably preserve those facts. Kyosei records them as data:
 
 ## Install
 
-Kyosei needs Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Install `kyo`
-once per machine, from a checkout of this repository:
+Kyosei needs Python 3.12 or newer. Install `kyo` once per machine from PyPI with
+[uv](https://docs.astral.sh/uv/) (or `pipx install kyosei`):
 
 ```sh
-git clone https://github.com/jbmv/kyosei.git && cd kyosei
-uv tool install .      # a snapshot of this source; re-run with --force to upgrade
-kyo version            # which build is on your PATH, and how it was installed
+uv tool install kyosei   # `uv tool upgrade kyosei` moves it to a later release
+kyo version              # which build is on your PATH, and how it was installed
 ```
 
-Once the package is published on PyPI, `uv tool install kyosei` (or
-`pipx install kyosei`) replaces the first two lines.
+To run unreleased source instead, install a snapshot from a checkout with
+`uv tool install .`, and rerun it with `--force` to take later changes.
 
 Then, in the project you want to track, run:
 
