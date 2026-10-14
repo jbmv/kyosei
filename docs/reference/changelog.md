@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-10-14** — `KYO-633` (task) — First push to the public repository jbmv/kyosei
 - **2026-10-14** — `KYO-632` (task) — Switch: archive the history, fresh single-commit repository at the same path
 - **2026-10-13** — `KYO-631` (task) — Rehearse the public tree: suite, wheel, fresh install, secret scan
 - **2026-10-13** — `KYO-630` (task) — Move this project's store out of the code repository (split layout)
