@@ -402,6 +402,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## engine
 
 - **2026-11-06** — `KYO-653` (task) — kyo credit --recheck and --batch, and live go-ahead credits not read as reconstructed
+- **2026-11-06** — `KYO-651` (proposal) — Capturing a decision process as it happens, not reconstructed from transcripts
 - **2026-11-06** — `KYO-648` (investigation) — Refresh the backfill candidates against the transcripts recovered from Time Machine
 - **2026-11-06** — `KYO-647` (task) — Credits in kyo show, kyo list, the export and the changelog
 - **2026-11-06** — `KYO-646` (task) — kyo doctor credit_coverage
