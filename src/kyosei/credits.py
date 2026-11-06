@@ -273,13 +273,15 @@ def resolve(
     act: str,
     remedies: list[str],
     decision_text: str | None = None,
+    reconstructed: bool = False,
 ) -> Credit:
     """Resolve and check one credit from the invocation's flags. Writes nothing.
 
     ``contract`` and ``act`` name the enforcement point the refusal is raised under when
     a part of the credit is missing, and ``remedies`` are its ready lines. ``decision_text``
     is the decision's YAML when a caller holds it (``kyo credit --batch``), in place of a
-    ``--decision-file``.
+    ``--decision-file``. ``reconstructed`` is true for a credit written with a ``--basis``:
+    only such a credit may leave its decision's outcome unrecorded (KYO-666).
     """
     session = getattr(args, "session", None)
     other = getattr(args, "source_other", None)
@@ -356,7 +358,7 @@ def resolve(
     if role == ROLE_DECIDED:
         if decision_text is None:
             decision_text = read_prose(decision_path, what="--decision-file")
-        credit.decision = _decision(ctx, decision_text, credit)
+        credit.decision = _decision(ctx, decision_text, credit, reconstructed=reconstructed)
     elif decision_path is not None:
         raise UsageError(
             f"--decision-file belongs to a decided credit; this one is {role}, which records "
@@ -401,8 +403,16 @@ def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str
     return result
 
 
-def _decision(ctx: Context, text: str, credit: Credit) -> dict:
-    """The ``--decision-file``: what was recommended, the outcome, the alternatives."""
+def _decision(
+    ctx: Context, text: str, credit: Credit, *, reconstructed: bool = False
+) -> dict:
+    """The ``--decision-file``: what was recommended, the outcome, the alternatives.
+
+    A reconstructed credit (one with a ``--basis``) that names neither an outcome nor a
+    recommendation records both empty: nobody observed whether a recommendation preceded
+    the decision, and a stored outcome would be one nobody measured (KYO-666). A live
+    credit must state its outcome.
+    """
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -416,19 +426,29 @@ def _decision(ctx: Context, text: str, credit: Credit) -> dict:
             f"{', '.join(sorted(DECISION_FILE_KEYS))}"
         )
     outcome = raw.get("outcome")
-    if outcome not in CREDIT_OUTCOMES:
+    unrecorded = outcome is None and raw.get("recommended") is None
+    if outcome not in CREDIT_OUTCOMES and not (reconstructed and unrecorded):
+        extra_hint = (
+            "; state one in the decision file (a credit written after the fact with "
+            "--basis may leave outcome and recommended both out)"
+            if outcome is None and not reconstructed
+            else ""
+        )
         raise UsageError(
-            f"--decision-file outcome is {outcome!r}; it is one of {', '.join(CREDIT_OUTCOMES)}"
+            f"--decision-file outcome is {outcome!r}; it is one of "
+            f"{', '.join(CREDIT_OUTCOMES)}{extra_hint}"
         )
     recommended = raw.get("recommended")
     if recommended is not None:
         recommended = single_line(str(recommended), what="--decision-file recommended")
-    if outcome == "unprompted" and recommended:
+    if outcome is None:
+        pass
+    elif outcome == "unprompted" and recommended:
         raise UsageError(
             "--decision-file says the person decided unprompted and also names a "
             "recommendation; an unprompted decision had none"
         )
-    if outcome != "unprompted" and not recommended:
+    if outcome is not None and outcome != "unprompted" and not recommended:
         raise UsageError(
             f"--decision-file outcome {outcome!r} is an answer to a recommendation, and "
             "names none in `recommended`"
@@ -738,6 +758,7 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
             f"give the missing parts to the same command: {rerun} with --person, "
             "--quote-file and --session or --source-other"
         ],
+        reconstructed=args.basis is not None,
     )
 
     already = {
@@ -1083,6 +1104,7 @@ def _batch_line(ctx: Context, store, args: Namespace, row: dict[str, str]) -> di
         act="a batch credit",
         remedies=["fill the missing column of that line"],
         decision_text=decision_text,
+        reconstructed=True,
     )
     if role == ROLE_DECIDED and credit.decision.get("outcome") == CREDIT_OUTCOME_REFINED:
         raise UsageError(

@@ -672,6 +672,8 @@ def decision_header_lines(doc: dict, evidence: dict[str, str]) -> list[str]:
             out.append(f"  recommended:  {credit['recommended']}{by}{ending}")
         elif credit.get("outcome"):
             out.append(f"  outcome:      {credit['outcome']}")
+        else:
+            out.append("  outcome:      not recorded")
         if credit.get("alternatives"):
             out.append(
                 "  alternatives: "
