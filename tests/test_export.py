@@ -160,6 +160,8 @@ def test_the_export_carries_the_full_record(kyo, project: Path, write_file) -> N
         "dispatches",
         "reports",
         "flags",
+        # KYO-642: the credits filed on the record, subjects inline; empty when none.
+        "credits",
     }
 
 

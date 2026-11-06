@@ -16,6 +16,13 @@ from . import ids
 from .clock import now
 from .config import Config, load_config, refuse_store_write
 from .contracts import (
+    CREDIT_OUTCOME_REFINED,
+    CREDIT_OUTCOMES,
+    CREDIT_ROLES,
+    CREDIT_SOURCE_KINDS,
+    CREDIT_SUBJECT_KINDS,
+    CREDIT_TRANSCRIPT_CHECKS,
+    CREDIT_WORDS_FORMS,
     installed_build_clause,
     stale_build_clause,
     upgrade_the_build_clause,
@@ -44,6 +51,11 @@ SCOPE_SHIFT_NOTE = "shift_note"
 
 def scope_for_child(record_id: str, child_kind: str) -> str:
     return f"{child_kind}:{record_id}"
+
+
+def _one_of(what: str, value: str, allowed: tuple[str, ...]) -> None:
+    if value not in allowed:
+        raise KyoseiError(f"{what} {value!r} is not one of {', '.join(allowed)}")
 
 
 class Store:
@@ -262,6 +274,165 @@ class Store:
                 "SELECT * FROM touches WHERE record_id = ? ORDER BY seq", (record_id,)
             )
         )
+
+    # ------------------------------------------------------- credits (KYO-642)
+
+    def credits(self, record_id: str) -> list[sqlite3.Row]:
+        """The credits filed on this record, in sequence (``credits``)."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM credits WHERE record_id = ? ORDER BY seq", (record_id,)
+            )
+        )
+
+    def credit_subjects(self, credit_id: str) -> list[sqlite3.Row]:
+        """The rows one credit answers, in the order they were stored."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM credit_subjects WHERE credit_id = ? ORDER BY rowid",
+                (credit_id,),
+            )
+        )
+
+    def add_credit(
+        self,
+        record_id: str,
+        *,
+        person: str,
+        role: str,
+        quote_id: str,
+        source_kind: str,
+        transcript_check: str,
+        subjects: list[tuple[str, str]],
+        author: str,
+        source_session: str | None = None,
+        source_turn: str | None = None,
+        source_note: str | None = None,
+        observed_at: str | None = None,
+        recommended: str | None = None,
+        recommended_by: str | None = None,
+        outcome: str | None = None,
+        alternatives: list[dict] | None = None,
+        refining_session: str | None = None,
+        refining_turn: str | None = None,
+        basis_id: str | None = None,
+        words_form: str | None = None,
+        span_session: str | None = None,
+        span_first_turn: str | None = None,
+        span_last_turn: str | None = None,
+        span_person_turns: int | None = None,
+        span_agent_turns: int | None = None,
+        span_active_seconds: int | None = None,
+        span_started_at: str | None = None,
+        span_ended_at: str | None = None,
+    ) -> str:
+        """Store one credit and its subjects; return the credit's id.
+
+        KYO-642: the one writer of the ``credits`` tables, validating the closed
+        vocabularies in :mod:`kyosei.contracts`. It does not check that ``person`` is
+        declared (:func:`kyosei.config.declared_people`) or read a transcript: those are
+        the commands' (KYO-644), which call this inside their own transaction.
+
+        ``words_form`` is how the matched words were sent (typed, mid-turn, choice,
+        accepted-suggestion). The ``span_*`` arguments cite a discussion by id and by what
+        was measured, and are all given or all omitted; no transcript text is stored.
+
+        ``outcome`` takes ``accepted``, ``refined``, ``overrode`` or ``unprompted`` and
+        belongs to a ``decided`` credit. A ``refined`` credit must carry the refining
+        turn (``refining_session`` and ``refining_turn``) beside the accepting one in
+        ``source_*``; any other outcome must carry neither.
+        """
+        _one_of("role", role, CREDIT_ROLES)
+        _one_of("source_kind", source_kind, CREDIT_SOURCE_KINDS)
+        _one_of("transcript_check", transcript_check, CREDIT_TRANSCRIPT_CHECKS)
+        if outcome is not None:
+            _one_of("outcome", outcome, CREDIT_OUTCOMES)
+        if outcome is not None and role != "decided":
+            raise KyoseiError(
+                f"a credit's outcome belongs to role 'decided', not {role!r}: drop outcome, "
+                "or credit the person as 'decided'"
+            )
+        refining = (refining_session, refining_turn)
+        if outcome == CREDIT_OUTCOME_REFINED:
+            if not all(refining):
+                raise KyoseiError(
+                    "a 'refined' credit cites the turn that refined the recommendation: "
+                    "pass both refining_session and refining_turn, or use outcome "
+                    "'accepted' if the person changed nothing"
+                )
+        elif any(refining):
+            raise KyoseiError(
+                f"refining_session and refining_turn belong to outcome "
+                f"{CREDIT_OUTCOME_REFINED!r}, not {outcome!r}: drop them, or pass "
+                f"outcome={CREDIT_OUTCOME_REFINED!r}"
+            )
+        if words_form is not None:
+            _one_of("words_form", words_form, CREDIT_WORDS_FORMS)
+        span = (
+            span_session, span_first_turn, span_last_turn, span_person_turns,
+            span_agent_turns, span_active_seconds, span_started_at, span_ended_at,
+        )  # fmt: skip
+        if any(v is not None for v in span) and any(v is None for v in span):
+            raise KyoseiError(
+                "a discussion span is cited whole or not at all: pass every span_* argument "
+                "(session, first and last turn, the person's and the agent's turn counts, "
+                "active seconds, start and end), or none"
+            )
+        if not subjects:
+            raise KyoseiError(
+                "a credit answers at least one verification, gate or record: pass subjects"
+            )
+        for kind, _ in subjects:
+            _one_of("subject kind", kind, CREDIT_SUBJECT_KINDS)
+        credit_id, seq = self.new_child_id(record_id, "credit")
+        self.conn.execute(
+            "INSERT INTO credits (id, record_id, seq, person, role, quote_id, source_kind,"
+            " source_session, source_turn, source_note, transcript_check, observed_at,"
+            " recommended, recommended_by, outcome, alternatives_json, refining_session,"
+            " refining_turn, words_form, span_session, span_first_turn, span_last_turn,"
+            " span_person_turns, span_agent_turns, span_active_seconds, span_started_at,"
+            " span_ended_at, basis_id, author, created_at)"
+            " VALUES (" + ", ".join("?" * 30) + ")",
+            (
+                credit_id,
+                record_id,
+                seq,
+                person,
+                role,
+                quote_id,
+                source_kind,
+                source_session,
+                source_turn,
+                source_note,
+                transcript_check,
+                observed_at,
+                recommended,
+                recommended_by,
+                outcome,
+                json.dumps(alternatives) if alternatives else None,
+                refining_session,
+                refining_turn,
+                words_form,
+                span_session,
+                span_first_turn,
+                span_last_turn,
+                span_person_turns,
+                span_agent_turns,
+                span_active_seconds,
+                span_started_at,
+                span_ended_at,
+                basis_id,
+                author,
+                now(),
+            ),
+        )
+        for kind, subject_id in subjects:
+            self.conn.execute(
+                "INSERT INTO credit_subjects (credit_id, subject_kind, subject_id)"
+                " VALUES (?, ?, ?)",
+                (credit_id, kind, subject_id),
+            )
+        return credit_id
 
     # ------------------------------------------------------- docs governance (KYO-137)
 

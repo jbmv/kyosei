@@ -291,7 +291,18 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: an obligation whose ``dispatch_id`` is null, which a build at 26 would refuse half-way
 #: through a rebuild on its NOT NULL column. With the bump that build refuses the export
 #: by name and says to upgrade instead.
-SCHEMA_VERSION = 27
+#: Bumped to 28 for KYO-642 (provenance credits, KYO-638 section 3 as amended by KYO-640):
+#: the ``credits`` and ``credit_subjects`` tables, ``gates.cleared_as``, the ``p`` child id
+#: letter and the optional ``people:`` config key. A credit names the person whose judgement
+#: a verification, a gate clearing or a decision record rests on, and cites the words and
+#: the session they came from; it is a row of its own so that one act of a person answers
+#: several rows once (law 3) and so that crediting a historical verdict updates nothing
+#: already written (law 4). A record document written at 27 or earlier carries no
+#: ``credits`` and no gate ``cleared_as`` (:data:`EXPORT_FIELD_DEFAULTS` [28],
+#: :data:`GATE_FIELD_DEFAULTS` [28]); the empty list and NULL are what was true of it, and
+#: nothing is derived from a gate's ``cleared_why`` prose. A real DDL change, so a real new
+#: hash.
+SCHEMA_VERSION = 28
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -386,6 +397,10 @@ CREATE TABLE gates (
     created_at  TEXT NOT NULL,
     cleared_at  TEXT,
     cleared_why TEXT,
+    -- KYO-642: HOW a gate was cleared. 'answered' (the person answered, and a credit
+    -- names this gate among its subjects) or 'withdrawn' (the wait stopped mattering).
+    -- NULL on a clearing written before schema 28, and on an open gate.
+    cleared_as  TEXT,
     UNIQUE (record_id, seq)
 );
 
@@ -762,6 +777,81 @@ CREATE TABLE doc_refs (
     UNIQUE (record_id, seq)
 );
 
+-- KYO-642 (KYO-638 section 3, amended by KYO-640): a credit names the person whose
+-- judgement a verification, a gate clearing or a decision record rests on. A row of its
+-- own, not columns on the rows it credits: a backfill credits rows that already exist
+-- (law 4 keeps a verdict history append-only), and one act of a person can answer
+-- several rows, so the words, session and check are stored once (law 3).
+--
+-- `person` is a key under `people:` in kyosei/config.yml. `quote_id` is the person's
+-- words, verbatim, held as an evidence artifact so `kyo redact` and the sha256 already
+-- cover them. `source_*` say where the words were said: a Claude Code session and the
+-- transcript turn they matched, or one line of prose for anywhere else. The
+-- reconstructed marker is deliberately NOT a column: a credit is reconstructed when its
+-- `created_at` is later than the write time of its subject, a fact the timestamps
+-- already hold (law 3).
+--
+-- `recommended`, `recommended_by`, `outcome` and `alternatives_json` exist only for a
+-- 'decided' credit, where the recommendation was made in conversation and nothing else
+-- in the store holds it. `outcome` is accepted | refined | overrode | unprompted
+-- (KYO-640 added `refined`: the person took a recommendation and changed it in a
+-- following turn). A refined credit stores that refining turn in `refining_session` and
+-- `refining_turn`, beside the accepting turn in `source_session` and `source_turn`.
+--
+-- KYO-640.n1 adds two things. `words_form` is the form of the matched words: typed,
+-- mid-turn, choice or accepted-suggestion (a prompt sent from Claude Code's suggestions is
+-- creditable as the person's choice, never shown as their writing); NULL when no
+-- transcript turn matched. The `span_*` columns cite the discussion that led to a decided
+-- credit BY ID ONLY, with no transcript text: the session, the first and last turn uuid,
+-- and what kyo measured when the credit was written -- the person's turn count, the
+-- agent's turn count, active seconds (gaps long enough to be breaks excluded) and the
+-- span's start and end timestamps. All NULL when no span is cited.
+CREATE TABLE credits (
+    id                TEXT PRIMARY KEY,
+    record_id         TEXT NOT NULL REFERENCES records(id),
+    seq               INTEGER NOT NULL,
+    person            TEXT NOT NULL,
+    role              TEXT NOT NULL,
+    quote_id          TEXT NOT NULL REFERENCES evidence_artifacts(id),
+    source_kind       TEXT NOT NULL,
+    source_session    TEXT,
+    source_turn       TEXT,
+    source_note       TEXT,
+    transcript_check  TEXT NOT NULL,
+    observed_at       TEXT,
+    recommended       TEXT,
+    recommended_by    TEXT,
+    outcome           TEXT,
+    alternatives_json TEXT,
+    refining_session  TEXT,
+    refining_turn     TEXT,
+    words_form        TEXT,
+    span_session      TEXT,
+    span_first_turn   TEXT,
+    span_last_turn    TEXT,
+    span_person_turns INTEGER,
+    span_agent_turns  INTEGER,
+    span_active_seconds INTEGER,
+    span_started_at   TEXT,
+    span_ended_at     TEXT,
+    basis_id          TEXT REFERENCES credits(id),
+    author            TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    superseded_by     TEXT REFERENCES credits(id),
+    superseded_at     TEXT,
+    UNIQUE (record_id, seq)
+);
+
+-- KYO-642: the rows one credit answers. `subject_kind` is verification | gate | record
+-- and `subject_id` the id of that row. No foreign key on `subject_id`: it points into
+-- three tables, and `kyo rebuild` loads the records one at a time.
+CREATE TABLE credit_subjects (
+    credit_id    TEXT NOT NULL REFERENCES credits(id),
+    subject_kind TEXT NOT NULL,
+    subject_id   TEXT NOT NULL,
+    PRIMARY KEY (credit_id, subject_id)
+);
+
 -- KYO-137.c2-c5: one document SECTION a dispatch's work put a question to. Raised
 -- by `kyo report` at the moment the work is fresh in memory -- a document is updated
 -- at report time, while the change is fresh -- never by a sweep, which is the next
@@ -846,6 +936,8 @@ CREATE INDEX idx_flags_record          ON flags(record_id);
 CREATE INDEX idx_flags_other_record    ON flags(other_record_id);
 CREATE INDEX idx_flags_resolved        ON flags(resolved_at);
 CREATE INDEX idx_doc_refs_record       ON doc_refs(record_id);
+CREATE INDEX idx_credits_record        ON credits(record_id);
+CREATE INDEX idx_credit_subjects_subject ON credit_subjects(subject_id);
 CREATE INDEX idx_docs_obl_record       ON docs_obligations(record_id);
 CREATE INDEX idx_docs_obl_dispatch     ON docs_obligations(dispatch_id);
 CREATE INDEX idx_docs_obl_verdict      ON docs_obligations(verdict);
@@ -1043,6 +1135,9 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "created_at": ("export.record_document",),
         "cleared_at": ("export.record_document", "render.show_text", "cmd_links.cmd_ungate"),
         "cleared_why": ("export.record_document", "render.show_text"),
+        # KYO-642: how the gate was cleared. The export carries it and rebuild restores
+        # it; `kyo ungate` (KYO-644) writes it and `kyo show` (KYO-647) renders it.
+        "cleared_as": ("export.record_document", "rebuild._load"),
     },
     # Milestone 3: `kyo promote` writes these; export/render show them. Milestone 6
     # (KYO-8) gives `path`/`symbol` their promised FULL consumer: `kyo sweep`'s
@@ -1079,6 +1174,50 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
             "touch_drift._symbol_drift",
         ),
         "created_at": ("export.record_document",),
+    },
+    # KYO-642 (KYO-638 section 3). Every column ships with the reader it has today: the
+    # export (a credit travels in its record's document), the rebuild that restores it,
+    # and `store.Store.credits`. The renderers (`kyo show`, `kyo list`: KYO-647) and the
+    # commands that write a credit and read these back to refuse (`kyo credit`: KYO-644)
+    # add their entries when they arrive.
+    "credits": {
+        "id": ("export.record_document", "store.Store.credits"),
+        "record_id": ("export.record_document", "doctor_exports.check_orphans"),
+        "seq": ("export.record_document", "doctor_exports.check_allocations"),
+        "person": ("export.record_document", "config.declared_people", "config.person_label"),
+        "role": ("export.record_document", "store.Store.add_credit"),
+        "quote_id": ("export.record_document", "store.Store.add_credit"),
+        "source_kind": ("export.record_document", "store.Store.add_credit"),
+        "source_session": ("export.record_document", "store.Store.add_credit"),
+        "source_turn": ("export.record_document", "store.Store.add_credit"),
+        "source_note": ("export.record_document", "store.Store.add_credit"),
+        "transcript_check": ("export.record_document", "store.Store.add_credit"),
+        "observed_at": ("export.record_document",),
+        "recommended": ("export.record_document", "store.Store.add_credit"),
+        "recommended_by": ("export.record_document", "store.Store.add_credit"),
+        "outcome": ("export.record_document", "store.Store.add_credit"),
+        "alternatives_json": ("export.record_document", "store.Store.add_credit"),
+        "refining_session": ("export.record_document", "store.Store.add_credit"),
+        "refining_turn": ("export.record_document", "store.Store.add_credit"),
+        "words_form": ("export.record_document", "store.Store.add_credit"),
+        "span_session": ("export.record_document", "store.Store.add_credit"),
+        "span_first_turn": ("export.record_document", "store.Store.add_credit"),
+        "span_last_turn": ("export.record_document", "store.Store.add_credit"),
+        "span_person_turns": ("export.record_document", "store.Store.add_credit"),
+        "span_agent_turns": ("export.record_document", "store.Store.add_credit"),
+        "span_active_seconds": ("export.record_document", "store.Store.add_credit"),
+        "span_started_at": ("export.record_document", "store.Store.add_credit"),
+        "span_ended_at": ("export.record_document", "store.Store.add_credit"),
+        "basis_id": ("export.record_document", "store.Store.add_credit"),
+        "author": ("export.record_document",),
+        "created_at": ("export.record_document",),
+        "superseded_by": ("export.record_document",),
+        "superseded_at": ("export.record_document",),
+    },
+    "credit_subjects": {
+        "credit_id": ("export.record_document", "store.Store.credit_subjects"),
+        "subject_kind": ("export.record_document", "store.Store.credit_subjects"),
+        "subject_id": ("export.record_document", "store.Store.credit_subjects"),
     },
     # KYO-137.c1: the back path. Every column has a reader in the
     # same commit as the column (law 2) — the export, the `kyo show` rendering, and the
@@ -1712,6 +1851,12 @@ CONFIG_CONSUMERS: dict[str, tuple[str, ...]] = {
     # so a malformed block refuses `kyo prior-art` and is named by `kyo doctor`, and never
     # blinds a hook; the doctor check also names a kind or command that does not exist.
     "recx": ("prior_art.read_prior_art_config", "prior_art.check_prior_art_config"),
+    # KYO-642 (KYO-638 section 3.1). The persons this project credits, by the key every
+    # credit stores, each with an optional display `name`. `declared_people` is what every
+    # credit-writing command calls to refuse an undeclared person, and `person_label` is
+    # what a renderer shows for one. An older `kyo` refuses a config key it does not know,
+    # so declare `people:` only once every `kyo` reading the store is at schema 28.
+    "people": ("config.declared_people", "config.person_label"),
 }
 
 #: Config keys a project may legitimately not carry (KYO-60).
@@ -1788,6 +1933,9 @@ OPTIONAL_CONFIG_KEYS: frozenset[str] = frozenset(
         # KYO-585: absent means the project has not chosen whether to search for prior
         # art, which is a state of its own beside `state: on` and `state: off`.
         "recx",
+        # KYO-642: absent in every project written before the key; absence means no
+        # person is declared, so no credit can name one.
+        "people",
     }
 )
 
@@ -1828,6 +1976,12 @@ EXPORT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     #: counts from its own ``created_at`` as it always did. Never derived from the
     #: description's prose at load time, for the reason KYO-100 refused to derive scope.
     26: {"since_note": None},
+    #: KYO-642: a record exported before credits existed carries none, which is exactly what
+    #: the empty list says. Never derived from the quoted words in its evidence at load time:
+    #: naming the person who said them is the claim a credit exists to make, and
+    #: manufacturing it across the whole store at once would invent that claim silently
+    #: (the move KYO-100 refused for `scope`). The backfill is KYO-639's, and approved first.
+    28: {"credits": []},
 }
 
 #: Milestone 4 also adds a field *within* each criterion (its verification history),
@@ -1894,6 +2048,9 @@ NOTE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
 #: same thing KYO-100 refused to do to ``scope`` from ``touches``.
 GATE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     15: {"tags": []},
+    #: KYO-642: a gate cleared before ``cleared_as`` existed has no recorded way of having
+    #: been cleared, and ``None`` says that. Never derived from ``cleared_why``'s prose.
+    28: {"cleared_as": None},
 }
 
 #: KYO-63: the same per-version defaults idea applied to a **ledger** file rather than a

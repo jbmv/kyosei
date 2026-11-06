@@ -691,7 +691,45 @@ def criterion_standing(state: str, reason: str | None) -> str:
 CLAIM_LEVELS: tuple[str, ...] = ("asserted", "derived", "verified")
 
 #: Milestone 4 (law 9/10). How a ``kyo verify`` verdict was reached.
-VERIFICATION_METHODS: tuple[str, ...] = ("machine-checked", "human-observed", "reasoned-about")
+#:
+#: KYO-642 adds ``agent-observed``: an agent looked at the running system itself (the
+#: live store, a command's output, the app's state as a tool reports it) and judged the
+#: result. ``machine-checked`` keeps its meaning (a script, test or query whose own
+#: result is the verdict) and ``human-observed`` then means only that a person observed.
+#: Appended, so the existing members keep their position in every message that lists them.
+VERIFICATION_METHODS: tuple[str, ...] = (
+    "machine-checked",
+    "human-observed",
+    "reasoned-about",
+    "agent-observed",
+)
+
+#: KYO-642 (KYO-638 section 3, as amended by KYO-640): the vocabularies of the ``credits``
+#: table, held here so the writer (:meth:`kyosei.store.Store.add_credit`) and its
+#: commands (KYO-644) name one list. ``observed``: the person looked at something;
+#: ``decided``: the person decided a decision record.
+CREDIT_ROLES: tuple[str, ...] = ("observed", "decided")
+CREDIT_SOURCE_KINDS: tuple[str, ...] = ("claude-code", "other")
+CREDIT_TRANSCRIPT_CHECKS: tuple[str, ...] = (
+    "matched",
+    "matched-paste-unknown",
+    "transcript-absent",
+    "not-applicable",
+)
+#: What the person did with the agent's recommendation. KYO-640 amends P9: ``refined``
+#: is a recommendation the person took and changed in a following turn, by a question or a
+#: counter-proposal; a refined credit cites that refining turn as well as the accepting one.
+CREDIT_OUTCOMES: tuple[str, ...] = ("accepted", "refined", "overrode", "unprompted")
+CREDIT_OUTCOME_REFINED = "refined"
+#: KYO-640.n1: the form of the words a credit matched. ``accepted-suggestion`` is a prompt the
+#: person sent from Claude Code's suggestions: creditable as their choice, never shown as
+#: their writing.
+CREDIT_WORDS_FORMS: tuple[str, ...] = ("typed", "mid-turn", "choice", "accepted-suggestion")
+CREDIT_SUBJECT_KINDS: tuple[str, ...] = ("verification", "gate", "record")
+
+#: ``gates.cleared_as``: ``answered`` (the person answered and a credit names the gate) or
+#: ``withdrawn`` (the wait stopped mattering). NULL on a clearing written before schema 28.
+GATE_CLEARED_AS: tuple[str, ...] = ("answered", "withdrawn")
 
 #: KYO-4.c3: the states ``kyo verify`` may record — verified facts about the world,
 #: derived from a verification event, never set as a bare flip. Disjoint from

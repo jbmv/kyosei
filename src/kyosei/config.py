@@ -48,7 +48,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -318,6 +318,10 @@ class Config:
     #: beside it, and a store that recorded it would be recording one machine's
     #: checkout layout into a git-canonical file (KYO-52).
     store_via_main_checkout: Path | None = None
+    #: KYO-642. The persons this project credits, ``{key: display name or None}`` in the
+    #: file's order; empty in every project that declares none, and empty means no credit
+    #: can name anyone. Read through :func:`declared_people` and :func:`person_label`.
+    people: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def repo_root(self) -> Path:
@@ -1441,6 +1445,7 @@ def load_config(
             f"the notice on; found {policy_notice!r} — write `kind_policy_notice: false` "
             "to turn the notice off, or delete the line"
         )
+    people = parse_people(raw.get(PEOPLE_KEY), path)
     layout_at_init = raw.get("layout_at_init")
     return Config(
         root=root,
@@ -1461,6 +1466,7 @@ def load_config(
         trunk=trunk.strip() if trunk is not None else None,
         code_repo_id=code_repo_id.strip() if code_repo_id is not None else None,
         store_via_main_checkout=store_via_main_checkout,
+        people=people,
     )
 
 
@@ -1721,6 +1727,95 @@ def _parse_timeout_ceiling_seconds(value: object, path: Path) -> int | None:
     return value
 
 
+# ------------------------------------------------------------------ KYO-642: people
+
+#: The config key that declares the persons a credit may name.
+PEOPLE_KEY = "people"
+
+#: What one person's entry may carry. Closed, and nothing else is added for roles, contact
+#: or signing keys until something reads it (law 2): a misspelled ``names:`` that parsed to
+#: a person with no display text would drop what the operator wrote.
+PEOPLE_ENTRY_KEYS = frozenset({"name"})
+
+_PEOPLE_KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _people_example(path: Path) -> str:
+    return (
+        f"hand edit {path}: write it as, e.g.,\n"
+        "  people:\n"
+        "    jbmv: {}\n"
+        "    ada:\n"
+        "      name: Ada\n"
+        "or delete the key"
+    )
+
+
+def parse_people(value: object, path: Path) -> dict[str, str | None]:
+    """KYO-642: ``people:`` into ``{key: display name or None}``, in the file's order.
+
+    The key is the identifier every credit stores. ``name`` is optional display text, and
+    a person with none is shown by key. Refused rather than coerced, on ``onboarding``'s
+    reasoning: a mapping that is not one is a project trying to declare someone this
+    parser cannot read, and treating it as no one would let a credit-writing command
+    refuse a person the operator believes they declared.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise KyoseiError(
+            f"{path} key 'people' must be a mapping from a person's key to their entry, "
+            f"or absent; found {type(value).__name__} — " + _people_example(path)
+        )
+    people: dict[str, str | None] = {}
+    for key, entry in value.items():
+        if not isinstance(key, str) or not _PEOPLE_KEY_RE.fullmatch(key):
+            raise KyoseiError(
+                f"{path} key 'people' has the person key {key!r}, which is not a word "
+                "of letters, digits, '.', '_' or '-' — " + _people_example(path)
+            )
+        if entry is None:
+            people[key] = None
+            continue
+        if not isinstance(entry, dict):
+            raise KyoseiError(
+                f"{path} key 'people' entry {key!r} must be a mapping (or empty); found "
+                f"{type(entry).__name__} — " + _people_example(path)
+            )
+        extra = sorted(str(k) for k in set(entry) - PEOPLE_ENTRY_KEYS)
+        if extra:
+            raise KyoseiError(
+                f"{path} key 'people' entry {key!r} carries {', '.join(extra)}; the only "
+                f"key an entry reads is {', '.join(sorted(PEOPLE_ENTRY_KEYS))} — "
+                + _people_example(path)
+            )
+        name = entry.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise KyoseiError(
+                f"{path} key 'people' entry {key!r} has name {name!r}; it must be the text "
+                "a reader should see, or absent to show the key — " + _people_example(path)
+            )
+        people[key] = name.strip() if name is not None else None
+    return people
+
+
+def declared_people(config: Config) -> dict[str, str | None]:
+    """KYO-642: the persons this project declares, ``{key: display name or None}``.
+
+    The one answer every credit-writing command asks before it stores a person: a key
+    that is not here is refused, naming the keys that are.
+    """
+    return dict(config.people)
+
+
+def person_label(config: Config, key: str) -> str:
+    """KYO-642: what a renderer shows for a credit's person: the display name when the
+    project declared one, otherwise the key. A key the project no longer declares is shown
+    as it was stored, never dropped: a credit outlives the configuration that admitted it.
+    """
+    return config.people.get(key) or key
+
+
 # ---------------------------------------------------------------- KYO-560: onboarding
 
 #: The config key that records the setup decisions an operator declined or deferred.
@@ -1849,6 +1944,19 @@ def parse_onboarding(value: object, path: Path) -> dict[str, OnboardingAnswer]:
 #: project had to work out where and in what shape from prose, because the file it was
 #: editing offered neither.
 CONFIG_KEY_EXAMPLES: dict[str, str] = {
+    "people": (
+        "# KYO-642. Uncomment to declare the persons a credit may name, by the key every\n"
+        "# credit stores, each with an optional display `name`. A credit says whose\n"
+        "# judgement a human-observed verdict, a gate cleared on a person's answer or a\n"
+        "# decision rests on; a person not declared here cannot be credited. A kyo older\n"
+        "# than schema 28 refuses this key, so declare it only once every kyo that reads\n"
+        "# this store has it.\n"
+        "#\n"
+        "# people:\n"
+        "#   jbmv: {}\n"
+        "#   ada:\n"
+        "#     name: Ada"
+    ),
     "worker_model": (
         "# KYO-61. Uncomment to name the model this project's dispatched workers run on\n"
         "# by default (setup decision D1): every brief then states it. A kind may\n"

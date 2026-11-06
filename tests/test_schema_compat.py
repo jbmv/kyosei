@@ -719,6 +719,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # raised by a record when it is filed or edited, has no dispatch. A real DDL
         # change, so a real new hash.
         27: "8a8a8fa22e24c1dd087c1d5d6bb2a767b8bd97bf4ecb89052ead5c756e8f83ee",
+        # KYO-642: the credits and credit_subjects tables and gates.cleared_as -- who a
+        # verification, a gate clearing or a decision rests on, and the words and session
+        # it cites. A real DDL change, so a real new hash.
+        28: "968520f4377dc54d0dbf2a17dd51c87119f3e0f9d62eb4727533c6508d279d25",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2349,3 +2353,262 @@ def test_rebuild_accepts_a_schema_25_export_with_no_since_note(kyo, project: Pat
     shown = kyo("show", carried, "--json").json
     assert shown["carried"]["since"] == shown["created_at"]
     assert shown["title"] == "an old item"
+
+
+# --------------------------------------------------------------------- KYO-642.c1
+
+
+def _credited_record(kyo, project: Path, **credit) -> tuple[str, str]:
+    """A record with one met verdict, its evidence, and one credit on both; returns the
+    record id and the credit id. Written through the store's one credit writer, because
+    the commands that call it are KYO-644's."""
+    from kyosei.store import open_store
+
+    record = new_record(kyo, criteria=["a"])
+    result = kyo(
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "reasoned-about",
+        "--evidence-file", "-", "--json", stdin="the person's words",
+    )
+    assert result.code == 0, result
+    store = open_store(project)
+    try:
+        evidence = store.evidence_artifacts(record)[0]["id"]
+        verification = store.verifications_for_criterion(f"{record}.c1")[0]["id"]
+        with store.transaction():
+            credit_id = store.add_credit(
+                record,
+                person="jbmv",
+                role=credit.pop("role", "observed"),
+                quote_id=evidence,
+                source_kind="claude-code",
+                source_session="7212f0bb-a568-49c4-9b87-d3209a201b6b",
+                source_turn="turn-1",
+                transcript_check="matched",
+                subjects=[("verification", verification)],
+                author="orchestrator",
+                **credit,
+            )
+        from kyosei.export import write_export
+
+        write_export(store, record)
+    finally:
+        store.close()
+    return record, credit_id
+
+
+def test_rebuild_accepts_a_schema_27_export_with_no_credits(kyo, project: Path) -> None:
+    """`credits` and `gates.cleared_as` arrived at schema_version 28. A record exported
+    under 27 has neither key, and that absence must rebuild as "no credit was ever
+    written and no gate says how it was cleared" -- the empty list and NULL -- and never
+    as a credit manufactured from the quoted words in the record's evidence."""
+    record = new_record(kyo, criteria=["a"])
+    kyo("gate", record, "holding-for", "--do", "the design lands")
+    gate_ids = [g["id"] for g in kyo("show", record, "--json").json["gates"]]
+    cleared = kyo("ungate", gate_ids[0], "--why", "landed")
+    assert cleared.code == 0, cleared
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    assert doc["credits"] == [] and "cleared_as" in doc["gates"][0], "this build writes both"
+    doc["schema_version"] = 27
+    del doc["credits"]
+    del doc["gates"][0]["cleared_as"]
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        assert conn.execute("SELECT count(*) FROM credits").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM credit_subjects").fetchone()[0] == 0
+        assert conn.execute("SELECT DISTINCT cleared_as FROM gates").fetchall() == [(None,)]
+    finally:
+        conn.close()
+    rebuilt = kyo("show", record, "--json").json
+    assert rebuilt["credits"] == [] and rebuilt["gates"][0]["cleared_as"] is None
+
+
+def test_a_credit_round_trips_through_export_and_rebuild(kyo, project: Path) -> None:
+    record, credit_id = _credited_record(kyo, project)
+    assert credit_id == f"{record}.p1"
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    before = json.loads(export_path.read_text(encoding="utf-8"))
+    assert before["credits"][0]["subjects"][0]["kind"] == "verification"
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    after = json.loads(export_path.read_text(encoding="utf-8"))
+    assert after["credits"] == before["credits"]
+    assert after["credits"][0]["person"] == "jbmv"
+
+
+# --------------------------------------------------------------------- KYO-642.c4
+
+
+def test_a_refined_credit_stores_the_refining_turn_beside_the_accepting_one(
+    kyo, project: Path
+) -> None:
+    record, _ = _credited_record(
+        kyo, project, role="decided", recommended="adopt A", recommended_by="orchestrator",
+        outcome="refined", alternatives=[{"text": "A", "chosen": True}],
+        refining_session="aaaaaaaa-0000-0000-0000-000000000000", refining_turn="turn-2",
+    )
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    credit = json.loads(export_path.read_text(encoding="utf-8"))["credits"][0]
+    assert credit["outcome"] == "refined"
+    assert (credit["source_session"], credit["source_turn"]) == (
+        "7212f0bb-a568-49c4-9b87-d3209a201b6b", "turn-1",
+    )
+    assert (credit["refining_session"], credit["refining_turn"]) == (
+        "aaaaaaaa-0000-0000-0000-000000000000", "turn-2",
+    )
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert json.loads(export_path.read_text(encoding="utf-8"))["credits"][0] == credit
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "overrode", "unprompted"])
+def test_every_other_outcome_is_accepted_and_carries_no_refining_turn(
+    kyo, project: Path, outcome: str
+) -> None:
+    record, _ = _credited_record(kyo, project, role="decided", outcome=outcome)
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    credit = json.loads(export_path.read_text(encoding="utf-8"))["credits"][0]
+    assert credit["outcome"] == outcome and credit["refining_turn"] is None
+
+
+def test_a_refined_credit_without_its_refining_turn_is_refused(kyo, project: Path) -> None:
+    from kyosei.errors import KyoseiError
+
+    with pytest.raises(KyoseiError, match="refining_session and refining_turn"):
+        _credited_record(kyo, project, role="decided", outcome="refined")
+    with pytest.raises(KyoseiError, match="not one of accepted, refined, overrode, unprompted"):
+        _credited_record(kyo, project, role="decided", outcome="changed")
+    with pytest.raises(KyoseiError, match="belong to outcome 'refined'"):
+        _credited_record(
+            kyo, project, role="decided", outcome="accepted",
+            refining_session="s", refining_turn="t",
+        )
+
+
+# --------------------------------------------------------------------- KYO-642.c2
+
+
+def test_the_people_key_is_declared_read_and_refused_when_malformed(
+    kyo, project: Path
+) -> None:
+    from kyosei.config import declared_people, person_label, read_raw_config
+    from kyosei.errors import KyoseiError
+
+    config_path = project / "kyosei" / "config.yml"
+    original = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        original + "people:\n  jbmv: {}\n  ada:\n    name: Ada L\n", encoding="utf-8"
+    )
+    config = load_config(project)
+    assert declared_people(config) == {"jbmv": None, "ada": "Ada L"}
+    assert person_label(config, "jbmv") == "jbmv"
+    assert person_label(config, "ada") == "Ada L"
+    assert person_label(config, "gone") == "gone"
+    assert "people" in read_raw_config(project)
+
+    config_path.write_text(original + "people:\n  jbmv:\n    names: x\n", encoding="utf-8")
+    with pytest.raises(KyoseiError, match="only key an entry reads is name"):
+        load_config(project)
+    config_path.write_text(original + "people: [jbmv]\n", encoding="utf-8")
+    with pytest.raises(KyoseiError, match="must be a mapping"):
+        load_config(project)
+    config_path.write_text(original, encoding="utf-8")
+    assert declared_people(load_config(project)) == {}
+
+
+def test_a_rebuild_carries_the_people_key_forward(kyo, project: Path) -> None:
+    config_path = project / "kyosei" / "config.yml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8") + "people:\n  jbmv: {}\n", encoding="utf-8"
+    )
+    new_record(kyo, criteria=["a"])
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert "jbmv" in config_path.read_text(encoding="utf-8")
+    assert kyo("doctor").code in (0, 1)
+
+
+def test_every_new_column_has_a_consumer_and_the_doctor_check_passes(kyo, project: Path) -> None:
+    from kyosei.doctor_consumers import check_column_consumers, check_config_consumers
+    from kyosei.schema import COLUMN_CONSUMERS, CONFIG_CONSUMERS
+    from kyosei.store import open_store
+
+    assert len(COLUMN_CONSUMERS["credits"]) == 32
+    assert len(COLUMN_CONSUMERS["credit_subjects"]) == 3
+    assert COLUMN_CONSUMERS["gates"]["cleared_as"]
+    assert CONFIG_CONSUMERS["people"]
+    store = open_store(project)
+    try:
+        assert check_column_consumers(store) == []
+        assert check_config_consumers(store) == []
+    finally:
+        store.close()
+
+
+# --------------------------------------------------------------------- KYO-642.c3
+
+
+def test_agent_observed_is_a_method_kyo_verify_and_a_worker_report_accept(
+    kyo, project: Path
+) -> None:
+    from kyosei.report_schema import WORKER_REPORT_METHODS
+
+    assert "agent-observed" in WORKER_REPORT_METHODS
+    record = new_record(kyo, criteria=["a"])
+    verified = kyo(
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed",
+        "--evidence-file", "-", "--json", stdin="read the live store myself",
+    )
+    assert verified.code == 0, verified
+    shown = kyo("show", record, "--json").json
+    assert "agent-observed" in json.dumps(shown)
+
+
+# --------------------------------------------------------------------- KYO-642.c5
+
+_SPAN = dict(
+    span_session="7212f0bb-a568-49c4-9b87-d3209a201b6b", span_first_turn="u-1",
+    span_last_turn="u-9", span_person_turns=4, span_agent_turns=5, span_active_seconds=620,
+    span_started_at="2026-11-06T10:00:00.000Z", span_ended_at="2026-11-06T11:30:00.000Z",
+)  # fmt: skip
+
+
+def test_a_credit_stores_the_form_of_its_words_and_a_discussion_span(
+    kyo, project: Path
+) -> None:
+    record, _ = _credited_record(
+        kyo, project, role="decided", outcome="accepted",
+        words_form="accepted-suggestion", **_SPAN,
+    )
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    credit = json.loads(export_path.read_text(encoding="utf-8"))["credits"][0]
+    assert credit["words_form"] == "accepted-suggestion"
+    assert {k: credit[k] for k in _SPAN} == _SPAN
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert kyo("show", record, "--json").json["credits"][0] == credit
+
+
+@pytest.mark.parametrize("form", ["typed", "mid-turn", "choice", "accepted-suggestion"])
+def test_every_form_of_words_is_accepted_and_a_span_is_optional(
+    kyo, project: Path, form: str
+) -> None:
+    record, _ = _credited_record(kyo, project, words_form=form)
+    credit = kyo("show", record, "--json").json["credits"][0]
+    assert credit["words_form"] == form and credit["span_session"] is None
+
+
+def test_an_unknown_form_or_a_partial_span_is_refused(kyo, project: Path) -> None:
+    from kyosei.errors import KyoseiError
+
+    with pytest.raises(KyoseiError, match="not one of typed, mid-turn, choice"):
+        _credited_record(kyo, project, words_form="pasted")
+    with pytest.raises(KyoseiError, match="whole or not at all"):
+        _credited_record(kyo, project, span_session="s")

@@ -64,6 +64,9 @@ CHILD_KIND_BY_LETTER = {
     "f": "flag",
     "x": "doc-ref",
     "o": "docs-obligation",
+    # KYO-642: a credit -- the person whose judgement a verification, a gate clearing or
+    # a decision rests on. ``p`` reads as *person*; ``c`` was the criterion.
+    "p": "credit",
 }
 CHILD_LETTER_BY_KIND = {v: k for k, v in CHILD_KIND_BY_LETTER.items()}
 

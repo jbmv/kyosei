@@ -168,7 +168,8 @@ def test_no_schema_bump_ships_with_this() -> None:
     # bump to 26 is KYO-498's (records.since_note), not this dedupe's; a further bump must
     # move this pin and name the record that owns it. The bump to 27 is KYO-554's
     # (docs_obligations.dispatch_id nullable, for a record's standing obligations).
-    assert SCHEMA_VERSION == 27
+    # The bump to 28 is KYO-642's (credits, credit_subjects, gates.cleared_as).
+    assert SCHEMA_VERSION == 28
 
 
 # ------------------------------------------------------------------------- c7, c8

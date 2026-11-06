@@ -364,6 +364,51 @@ def _docs_obligation(row: sqlite3.Row) -> dict:
     }
 
 
+def _credit(store: Store, row: sqlite3.Row) -> dict:
+    """KYO-642: one credit, its subjects inline as ``{"kind", "id"}`` entries.
+
+    ``alternatives`` is the decoded list or ``[]``; ``null`` columns are exported as
+    explicit nulls so "not stated" survives the round trip as a stated fact.
+    """
+    return {
+        "id": row["id"],
+        "seq": row["seq"],
+        "person": row["person"],
+        "role": row["role"],
+        "quote_id": row["quote_id"],
+        "source_kind": row["source_kind"],
+        "source_session": row["source_session"],
+        "source_turn": row["source_turn"],
+        "source_note": row["source_note"],
+        "transcript_check": row["transcript_check"],
+        "observed_at": row["observed_at"],
+        "recommended": row["recommended"],
+        "recommended_by": row["recommended_by"],
+        "outcome": row["outcome"],
+        "alternatives": json.loads(row["alternatives_json"]) if row["alternatives_json"] else [],
+        "refining_session": row["refining_session"],
+        "refining_turn": row["refining_turn"],
+        "words_form": row["words_form"],
+        "span_session": row["span_session"],
+        "span_first_turn": row["span_first_turn"],
+        "span_last_turn": row["span_last_turn"],
+        "span_person_turns": row["span_person_turns"],
+        "span_agent_turns": row["span_agent_turns"],
+        "span_active_seconds": row["span_active_seconds"],
+        "span_started_at": row["span_started_at"],
+        "span_ended_at": row["span_ended_at"],
+        "basis_id": row["basis_id"],
+        "author": row["author"],
+        "created_at": row["created_at"],
+        "superseded_by": row["superseded_by"],
+        "superseded_at": row["superseded_at"],
+        "subjects": [
+            {"kind": s["subject_kind"], "id": s["subject_id"]}
+            for s in store.credit_subjects(row["id"])
+        ],
+    }
+
+
 def _gate(row: sqlite3.Row) -> dict:
     return {
         "id": row["id"],
@@ -378,6 +423,8 @@ def _gate(row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
         "cleared_at": row["cleared_at"],
         "cleared_why": row["cleared_why"],
+        # KYO-642: ``answered``, ``withdrawn`` or null (cleared before schema 28, or open).
+        "cleared_as": row["cleared_as"],
     }
 
 
@@ -509,6 +556,7 @@ def record_document(store: Store, record_id: str) -> dict:
         "dispatches": [_dispatch(d) for d in store.dispatches(record_id)],
         "reports": [_report(r) for r in store.reports(record_id)],
         "flags": [_flag(f) for f in store.flags(record_id)],
+        "credits": [_credit(store, c) for c in store.credits(record_id)],
     }
 
 
