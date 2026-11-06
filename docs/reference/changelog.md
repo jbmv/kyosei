@@ -401,6 +401,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-06** — `KYO-667` (bug) — Doctor's credit_coverage_legacy counts human-observed verdicts already restated as agent-observed
+- **2026-11-06** — `KYO-666` (task) — A reconstructed decided credit may leave its outcome unrecorded
 - **2026-11-06** — `KYO-665` (investigation) — Prepare and dry-run the backfill batches from the approved candidate sheet
 - **2026-11-06** — `KYO-653` (task) — kyo credit --recheck and --batch, and live go-ahead credits not read as reconstructed
 - **2026-11-06** — `KYO-651` (proposal) — Capturing a decision process as it happens, not reconstructed from transcripts
