@@ -43,7 +43,7 @@ def test_a_batch_writes_an_authorized_credit_on_a_verdict(kyo, project: Path, tm
     assert _subjects(project, credit["id"]) == [("verification", vid)]
 
 
-def test_decided_on_a_verdict_and_observed_on_a_record_stay_refused(
+def test_observed_on_a_record_and_a_mixed_credit_stay_refused(
     kyo, project: Path, tmp_path
 ) -> None:
     record = new_record(kyo, criteria=["a"])
@@ -51,12 +51,25 @@ def test_decided_on_a_verdict_and_observed_on_a_record_stay_refused(
     vid = _legacy_verdict(kyo, project, record)
     basis = _approval(kyo, project, tmp_path)
     words = _file(tmp_path / "w", "yes")
-    decided = kyo("credit", vid, "--role", "decided", "--quote-file", words, *CREDIT_ELSEWHERE,
-                  "--basis", basis)  # fmt: skip
-    assert decided.code == 64 and "decided credit names a record" in decided.err, decided
     observed = kyo("credit", record, "--role", "observed", "--quote-file", words,
                    *CREDIT_ELSEWHERE, "--basis", basis)  # fmt: skip
     assert observed.code == 64 and "not a record" in observed.err, observed
     mixed = kyo("credit", record, vid, "--role", "authorized", "--quote-file", words,
                 *CREDIT_ELSEWHERE, "--basis", basis)  # fmt: skip
     assert mixed.code == 64 and "not both" in mixed.err, mixed
+
+
+def test_a_reconstructed_decision_may_name_the_verdict_that_recorded_it(
+    kyo, project: Path, tmp_path
+) -> None:
+    """KYO-671: the review found decisions the agents recorded as a criterion's verdict."""
+    record = new_record(kyo, criteria=["a"])
+    declare_person(project)
+    vid = _legacy_verdict(kyo, project, record)
+    basis = _approval(kyo, project, tmp_path)
+    line = "\t".join([vid, "decided", "other:the test suite", "", "", "", "b. section"])
+    ran = kyo("credit", "--batch", _batch(tmp_path, line), "--basis", basis)
+    assert ran.code == 0, ran
+    (credit,) = [c for c in _credits(project) if c["basis_id"] == basis]
+    assert (credit["role"], credit["outcome"]) == ("decided", None)
+    assert _subjects(project, credit["id"]) == [("verification", vid)]

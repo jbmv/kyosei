@@ -411,17 +411,16 @@ def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str
 
 
 def _check_role_subjects(role: str, kinds: set[str]) -> None:
-    """Which subjects a role may name (KYO-668). A decided credit names a record; an observed
-    one names verifications or gates; an authorized go-ahead names either a record or the
-    verifications and gates it approved, never a mix, because the maintainer's rule is that a
-    one-word acceptance only authorizes, wherever the agent happened to record it."""
-    if role == ROLE_DECIDED and kinds != {"record"}:
-        raise UsageError(f"a decided credit names a record, and these subjects are {sorted(kinds)}")
+    """Which subjects a role may name (KYO-668, KYO-671). An observed credit names
+    verifications or gates. A decided credit or an authorized go-ahead names either a record
+    or the verifications and gates that recorded it, never a mix: the agents recorded some of
+    the person's decisions and go-aheads as a criterion's verdict or a gate's clearing, and
+    the credit follows the person's words, wherever the row that holds them is."""
     if role == ROLE_OBSERVED and "record" in kinds:
         raise UsageError("an observed credit names verifications or gates, not a record")
-    if role == ROLE_AUTHORIZED and "record" in kinds and kinds != {"record"}:
+    if role in (ROLE_DECIDED, ROLE_AUTHORIZED) and "record" in kinds and kinds != {"record"}:
         raise UsageError(
-            "an authorized credit names a record, or verifications and gates, not both: "
+            f"a {role} credit names a record, or verifications and gates, not both: "
             f"these subjects are {sorted(kinds)}"
         )
 
