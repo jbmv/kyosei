@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kyosei.cli import MUTATING_COMMANDS
 
-from .conftest import git_init, new_record
+from .conftest import CREDIT_ELSEWHERE, declare_person, git_init, new_record
 
 
 def _events(db) -> list[dict]:
@@ -80,7 +80,8 @@ def test_every_mutating_command_writes_an_event(kyo, db, write_file, project) ->
         "redo": ("redo", f"{record}.g1", "--do", "go and look at the staging banner"),
         # Ordered after `retag` and not before it: dict order is execution order here,
         # and `retag` on a cleared gate would be testing something this sweep is not.
-        "ungate": ("ungate", f"{record}.g1"),
+        # KYO-644: a gate waiting on a person names who answered, or says nobody did.
+        "ungate": ("ungate", f"{record}.g1", "--withdrawn", "--why", "no longer needed"),
         "link": ("link", record, "blocks", "TST-2"),
         "move": ("move", record, "working"),
         "wont-do": ("wont-do", record, "--why", "done thinking"),
@@ -136,6 +137,10 @@ def test_every_mutating_command_writes_an_event(kyo, db, write_file, project) ->
     non_dict_commands = {
         "dispatch", "report", "accept", "confirm", "split", "flag", "unlink", "redact", "docs",
         "close-wave",
+        # KYO-644: `credit` needs a declared person and the person's approval as its
+        # basis; its event is asserted in tests/test_kyo644_credits.py::
+        # test_kyo_credit_writes_an_event.
+        "credit",
     }
     assert set(invocations) | non_dict_commands == set(MUTATING_COMMANDS)
 
@@ -230,10 +235,11 @@ def test_every_mutating_command_writes_an_event(kyo, db, write_file, project) ->
     # own. Its own record, made last: the sweep above retired `record` and its ids are
     # pinned by the steps before it.
     confirm_record = new_record(kyo, criteria=["looked at"])
+    declare_person(project)
     before = len(_events(db))
     confirmed = kyo(
         "confirm", confirm_record, "--criterion", f"{confirm_record}.c1", "--no-close",
-        "--quote", "looked; it works",
+        "--quote", "looked; it works", *CREDIT_ELSEWHERE,
     )  # fmt: skip
     assert confirmed.code == 0, confirmed
     assert len(_events(db)) > before, "confirm mutated without writing an event"

@@ -159,7 +159,7 @@ def test_entries_carry_their_full_utc_completion_time(kyo, project: Path, tmp_pa
     record = new_record(kyo, criteria=["a criterion to settle"], title="a completed record")
     for status in ("working", "built"):
         assert kyo("move", record, status).code == 0
-    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     assert verified.code == 0, verified
     for status in ("verified", "done"):
         assert kyo("move", record, status).code == 0

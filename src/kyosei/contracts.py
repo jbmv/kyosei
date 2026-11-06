@@ -2108,7 +2108,7 @@ def check_transition(
                     else f"{g.id} ({g.gate_type}) is open: "
                     f"{gate_payload_first_line(g.detail)} — the person's answer clears it, "
                     "recorded with kyo confirm and their words; `kyo ungate "
-                    f"{g.id} --withdrawn --why <reason>` clears it if the wait no longer "
+                    f"{g.id} --why <reason> --withdrawn` clears it if the wait no longer "
                     "applies"
                     for g in open_gates
                 ),

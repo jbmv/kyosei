@@ -624,3 +624,18 @@ def test_redact_covers_a_credits_free_text_and_the_ledgers(kyo, project: Path, t
     doctor = kyo("doctor")
     assert "4421" not in doctor.out + doctor.err
     assert "credit" not in " ".join(l for l in doctor.out.splitlines() if "redact" in l), doctor
+
+
+def test_kyo_credit_writes_an_event(kyo, project: Path, tmp_path) -> None:
+    record = new_record(kyo, criteria=["a"])
+    declare_person(project)
+    vid = _legacy_verdict(kyo, project, record)
+    basis = _approval(kyo, project, tmp_path)
+    with _db(project) as conn:
+        before = conn.execute("SELECT count(*) FROM events").fetchone()[0]
+    ran = kyo("credit", vid, "--quote-file", _file(tmp_path / "w", "fast"), *CREDIT_ELSEWHERE,
+              "--basis", basis)  # fmt: skip
+    assert ran.code == 0, ran
+    with _db(project) as conn:
+        rows = list(conn.execute("SELECT command FROM events ORDER BY seq"))
+    assert len(rows) == before + 1 and rows[-1]["command"] == f"credit {vid}"

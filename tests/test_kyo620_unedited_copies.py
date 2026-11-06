@@ -211,5 +211,21 @@ def test_the_scrub_left_each_registry_s_values_unchanged(name: str) -> None:
     old = _pre_scrub_text(f"src/kyosei/defaults/{name}")
     if old is None:
         pytest.skip(f"{PRE_SCRUB_SHA} is not in this checkout's history")
-    new = (REPO / "src" / "kyosei" / "defaults" / name).read_text(encoding="utf-8")
-    assert yaml.safe_load(new) == yaml.safe_load(old)
+    new = yaml.safe_load(
+        (REPO / "src" / "kyosei" / "defaults" / name).read_text(encoding="utf-8")
+    )
+    # Values changed deliberately since the scrub, each by its own record.
+    for path in LATER_VALUE_CHANGES.get(name, ()):
+        *parents, key = path
+        holder = new
+        for part in parents:
+            holder = holder[part]
+        holder.pop(key)
+    assert new == yaml.safe_load(old)
+
+
+#: Keys a later record added to a packaged registry on purpose, as paths into the YAML:
+#: KYO-644 sets `requires_credit` on the shipped `decision` kind.
+LATER_VALUE_CHANGES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "kinds.yml": (("kinds", "decision", "policy", "requires_credit"),),
+}

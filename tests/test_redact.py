@@ -243,7 +243,7 @@ def test_verify_evidence_can_be_redacted_too(kyo, project: Path, write_file) -> 
         "--verdict",
         "met",
         "--method",
-        "human-observed",
+        "machine-checked",
         "--evidence-file",
         write_file("v.txt", SECRET),
         "--json",

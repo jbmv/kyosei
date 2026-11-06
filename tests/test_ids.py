@@ -85,6 +85,6 @@ def test_child_ids_are_scoped_to_their_record(kyo) -> None:
 def test_gate_ids_keep_climbing_after_a_gate_is_cleared(kyo) -> None:
     record = new_record(kyo)
     first = kyo("gate", record, "awaiting:human-review", "--json").json["gate_id"]
-    assert kyo("ungate", first).code == 0
+    assert kyo("ungate", first, "--withdrawn", "--why", "moot").code == 0
     second = kyo("gate", record, "awaiting:human-review", "--json").json["gate_id"]
     assert (first, second) == (f"{record}.g1", f"{record}.g2")

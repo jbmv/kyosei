@@ -145,8 +145,8 @@ individually (`kyo edit <id> --plan <plan-id>`, `--plan` on `kyo new`, `--no-pla
 Consult `kyosei/kinds.yml` for what a kind accepts and produces. All three write paths enforce
 it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo spawn` the source
 record's own kind (KYO-50). A decision made in conversation is filed directly, `kyo new decision
---evidence-file words.md`, with the operator's words (KYO-521); one needing design work first is
-a proposal.
+--quote-file words.md --decision-file d.yml`, credited (KYO-644); one needing
+design work first is a proposal.
 
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing
 still a want or a question, leave it in `ideas/`.
@@ -334,7 +334,8 @@ several; a met or already-void criterion is refused.
 `kyosei/export/` is git-canonical and evidence is stored verbatim, so **treat anything you paste
 as published**. `kyo redact <id> --why` removes stored text and scrubs the ledgers copying it --
 evidence (`REC.eN`, from `kyo attach --file`), claims (`REC.mN`, `kyo claim --file`), notes
-(`REC.nN`, `kyo edit --note-file`), shift notes (`PREFIX-SN`, `kyo note --shift`) -- but cannot
+(`REC.nN`, `kyo edit --note-file`), shift notes (`PREFIX-SN`, `kyo note --shift`), credits
+(`REC.pN`) -- but cannot
 un-publish a commit, which is a human's call (KYO-131).
 
 Verdicts (`kyo verify <cid> --verdict <v> --method <m> --evidence-file f.txt`) form a *history*.
@@ -344,10 +345,11 @@ Verdicts (`kyo verify <cid> --verdict <v> --method <m> --evidence-file f.txt`) f
 `kyo gate <id> awaiting:human-run --do "<what to look at>"` naming the criterion (`--do-file`,
 `--tag`). **When they approve, `kyo confirm <id> --quote-file q.txt` verifies met
 (human-observed, words as evidence), ungates and moves the record** (KYO-494; `--no-close` for
-a decision gate on unfinished work, `--gate` when it asks). q.txt is who, when, where, then the
-words verbatim. Completing a record, it also commits the regenerated
-`close_wave: generate:` files (KYO-577). A "no", a machine-checked measurement or a non-human
-gate stays `kyo verify` / `kyo ungate <gate-id> --why`.
+a decision gate on unfinished work, `--gate` when it asks), crediting the person: q.txt is
+their words alone, checked against the session transcript (KYO-644). On completion it commits
+the `close_wave: generate:` files (KYO-577). A "no" is `kyo verify`, credited; your own
+look `kyo verify --method agent-observed`; a lapsed wait `kyo ungate --withdrawn`;
+a credit after the fact `kyo credit <id> --basis <approval>`.
 
 **A gate that is wrong is corrected, never cleared and re-raised**: `kyo redo <gate-id> --do
 "<the corrected instruction>"` replaces an open gate's payload, `kyo retag <gate-id> --tag <tag>`

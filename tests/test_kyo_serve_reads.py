@@ -80,7 +80,7 @@ def history(git_project: Path, kyo, write_file, tmp_path: Path) -> dict:
     cleared = kyo("gate", quiet, "awaiting:human-run", "--do", "run it", "--json")
     assert cleared.code == 0, cleared
     cleared_id = kyo("show", quiet, "--json").json["gates"][0]["id"]
-    assert kyo("ungate", cleared_id, "--why", "ran it").code == 0
+    assert kyo("ungate", cleared_id, "--withdrawn", "--why", "ran it").code == 0
 
     assert kyo("note", "--shift", "--file", write_file("n1.md", "the first note")).code == 0
     first = kyo("brief", "--session-start", "--json")

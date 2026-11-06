@@ -15,6 +15,8 @@ import hashlib
 import shlex
 from pathlib import Path
 
+import pytest
+
 from kyosei.cmd_confirm import (
     CONTRACT_CONFIRM_AMBIGUOUS_CRITERIA,
     CONTRACT_CONFIRM_AMBIGUOUS_GATE,
@@ -28,12 +30,21 @@ from kyosei.cmd_confirm import (
 from kyosei.contracts import CONTRACT_SETTLED_REQUIRES_NO_OPEN_GATES, load_status_ladder
 from kyosei.errors import EXIT_CONTRACT
 
-from .conftest import new_record
+from .conftest import declare_person, new_record
 
 WORDS = "The maintainer: \"looks right\""
 
 
 # ------------------------------------------------------------------------ helpers
+
+
+@pytest.fixture(autouse=True)
+def credited(project: Path, monkeypatch) -> None:
+    """KYO-644: a confirmation credits the person who observed. Here the one declared
+    person, in a Claude Code session whose transcript is absent (recorded, not refused), so
+    each test below is about what it names and not about the credit."""
+    declare_person(project)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "0b0c6a1e-1111-4a2b-9c3d-0123456789ab")
 
 
 def _quote_file(tmp_path: Path, text: str = WORDS, name: str = "confirm.txt") -> str:
@@ -330,7 +341,7 @@ def test_a_non_human_or_cleared_gate_is_refused_and_its_line_clears_it(
     _unobserved(kyo, f"{record}.c1")
     event = _gate(kyo, record, "awaiting:event", "CI goes green")
     cleared = _gate(kyo, record, "awaiting:human-review")
-    assert kyo("ungate", cleared, "--why", "looked earlier").code == 0
+    assert kyo("ungate", cleared, "--withdrawn", "--why", "looked earlier").code == 0
     human = _gate(kyo, record, "awaiting:human-run", "run it")
     quote = _quote_file(tmp_path)
     for gate in (event, cleared):

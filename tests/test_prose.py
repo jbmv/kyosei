@@ -14,7 +14,7 @@ import pytest
 from kyosei.cli import PROSE_ARGUMENT_METAVAR, build_parser, prose_argument_flags
 from kyosei.prose import check_not_shell_mangled, contains_phrase, marked_residue, shell_residue
 
-from .conftest import new_record
+from .conftest import CREDIT_ELSEWHERE, declare_person, new_record
 
 PARAGRAPH = "The widget explodes when the cache is cold.\n\nIt only happens after a deploy."
 
@@ -49,7 +49,11 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
     # `--why` because it has a `--quote-file` twin.
     # KYO-565: `kyo rules add --enforced-by` is a sixth, warned rather than refused (no
     # `--enforced-by-file` twin).
-    text_bearing = {"--title", "--why", "--do", "--method", "--quote", "--enforced-by"}
+    # KYO-644: `--source-other` is one line naming where a person's words were said,
+    # single-line enforced; the words themselves come from --quote-file/--evidence-file.
+    text_bearing = {
+        "--title", "--why", "--do", "--method", "--quote", "--enforced-by", "--source-other",
+    }  # fmt: skip
     file_bearing = {f for f in value_flags if f.endswith("-file")}
     structural = {
         "--actor",
@@ -59,6 +63,16 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--gate",  # a gate id `kyo confirm` answers, not prose (KYO-494)
         "--state",
         "--supersede-note",
+        "--basis",  # a credit id (KYO-644)
+        "--supersede",  # a credit id (KYO-644)
+        "--turn",  # a transcript record uuid (KYO-644)
+        "--person",  # a key under `people:` (KYO-644)
+        "--session",  # a Claude Code session id (KYO-644)
+        "--span-first",  # a transcript record uuid (KYO-644)
+        "--span-last",  # a transcript record uuid (KYO-644)
+        "--span-session",  # a Claude Code session id (KYO-644)
+        "--credit",  # a credit id (KYO-644)
+        "--role",  # observed | decided | authorized (KYO-644)
         "--kind",
         "--status",
         "--level",
@@ -397,7 +411,12 @@ def _method(kyo, record, value, *, write_file):
 
 def _quote(kyo, record, value, **_):
     # KYO-494: named and --no-close, so an intact quote verifies the criterion and stops.
-    return kyo("confirm", record, "--criterion", f"{record}.c1", "--no-close", "--quote", value)
+    # KYO-644: credited to the declared person, words said outside Claude Code.
+    declare_person(kyo.project)
+    return kyo(
+        "confirm", record, "--criterion", f"{record}.c1", "--no-close", "--quote", value,
+        *CREDIT_ELSEWHERE,
+    )
 
 
 def _enforced_by(kyo, record, value, *, write_file):

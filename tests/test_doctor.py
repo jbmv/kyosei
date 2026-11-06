@@ -769,7 +769,7 @@ def test_settling_the_criterion_clears_the_notice(kyo) -> None:
     assert _ungated_unobserved_notices(kyo)
     assert (
         kyo(
-            "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed"
+            "verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed"
         ).code
         == 0
     )

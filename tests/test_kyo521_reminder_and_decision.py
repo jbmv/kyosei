@@ -26,7 +26,7 @@ from kyosei.contracts import CONTRACT_FILING_REQUIRES_EVIDENCE
 from kyosei.errors import EXIT_CONTRACT
 from kyosei.kinds import load_kind_registry
 
-from .conftest import kinds_yml, new_record
+from .conftest import decided, kinds_yml, new_record
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = REPO_ROOT / "src" / "kyosei" / "defaults"
@@ -121,7 +121,8 @@ def test_a_decision_is_filed_directly_and_spawned_from_a_reminder(kyo, write_fil
     """c7: both new routes, end to end on a fresh store."""
     words = write_file("words.md", WORDS)
     direct = kyo(
-        "new", "decision", "--title", "Use SQLite", "--evidence-file", words, "--json"
+        "new", "decision", "--title", "Use SQLite", "--evidence-file", words,
+        *decided(kyo.project), "--json",
     )
     assert direct.code == 0, direct
     assert kyo("show", direct.json["record_id"], "--json").json["kind"] == "decision"
@@ -138,6 +139,7 @@ def test_a_decision_is_filed_directly_and_spawned_from_a_reminder(kyo, write_fil
         "Keep the cache",
         "--evidence-file",
         words,
+        *decided(kyo.project),
         "--json",
     )
     assert spawned.code == 0, spawned
@@ -170,12 +172,16 @@ def test_the_named_flag_clears_the_refusal_and_stores_the_words_as_attach_does(
     attach` writes -- verbatim text, its sha256, on the new record -- in the same act."""
     assert kyo("new", "decision", "--title", "Use SQLite").code == EXIT_CONTRACT
     words = write_file("words.md", WORDS)
-    filed = kyo("new", "decision", "--title", "Use SQLite", "--evidence-file", words, "--json")
+    filed = kyo(
+        "new", "decision", "--title", "Use SQLite", "--evidence-file", words,
+        *decided(kyo.project), "--json",
+    )
     assert filed.code == 0, filed
     record_id = filed.json["record_id"]
     assert filed.json["evidence_id"] == f"{record_id}.e1"
 
-    (evidence,) = kyo("show", record_id, "--json").json["evidence_artifacts"]
+    # KYO-644: the second artifact is the credit's quote, the person's words alone.
+    evidence = kyo("show", record_id, "--json").json["evidence_artifacts"][0]
     stored = WORDS.rstrip("\n")
     assert evidence["text"] == stored
     assert evidence["sha256"] == hashlib.sha256(stored.encode("utf-8")).hexdigest()
@@ -192,14 +198,18 @@ def test_evidence_from_stdin_and_beside_from(kyo, write_file) -> None:
     """`--evidence-file -` reads stdin; it works beside `--from`; and two flags naming
     stdin at once are refused, since one stream is read once."""
     by_stdin = kyo(
-        "new", "decision", "--title", "Use SQLite", "--evidence-file", "-", "--json",
+        "new", "decision", "--title", "Use SQLite", "--evidence-file", "-",
+        *decided(kyo.project), "--json",
         stdin=WORDS,
     )
     assert by_stdin.code == 0, by_stdin
 
     record = write_file("decision.md", "---\ntitle: Keep the old cache warm\n---\n\nWhy.\n")
     words = write_file("words.md", WORDS)
-    beside = kyo("new", "decision", "--from", record, "--evidence-file", words, "--json")
+    beside = kyo(
+        "new", "decision", "--from", record, "--evidence-file", words, *decided(kyo.project),
+        "--json",
+    )
     assert beside.code == 0, beside
     assert beside.json["evidence_id"] is not None
 
@@ -322,7 +332,8 @@ def test_the_install_notes_steps_rename_a_carry_store_to_a_clean_doctor(
     # And the decision edges the step added work.
     words = write_file("spawn-words.md", WORDS)
     spawned = kyo(
-        "spawn", ids[1], "--kind", "decision", "--title", "Use SQLite", "--evidence-file", words
+        "spawn", ids[1], "--kind", "decision", "--title", "Use SQLite", "--evidence-file", words,
+        *decided(kyo.project),
     )
     assert spawned.code == 0, spawned
 

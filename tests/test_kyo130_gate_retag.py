@@ -223,7 +223,7 @@ def test_a_cleared_gate_is_retaggable_and_stays_cleared(kyo, project: Path) -> N
     record = new_record(kyo, criteria=["a"])
     kyo("gate", record, "awaiting:human-review")
     gate_id = only_gate(kyo, record)["id"]
-    kyo("ungate", gate_id, "--why", "the reviewer looked")
+    kyo("ungate", gate_id, "--withdrawn", "--why", "the reviewer looked")
     cleared_at = only_gate(kyo, record)["cleared_at"]
     assert cleared_at is not None
 

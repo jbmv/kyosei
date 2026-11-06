@@ -93,7 +93,7 @@ def test_the_queue_says_what_each_record_needs(kyo) -> None:
     guessed: the criteria not yet settled are what stands between the record and
     done, so they are what a verifier should look at."""
     record = _built_record(kyo, title="Two things to check", criteria=["the first", "the second"])
-    assert kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed").code == 0
+    assert kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed").code == 0
 
     awaiting = kyo("brief", "--json").json["awaiting_verification"][0]
     assert [c["id"] for c in awaiting["unsettled_criteria"]] == [f"{record}.c2"]
@@ -102,7 +102,7 @@ def test_the_queue_says_what_each_record_needs(kyo) -> None:
 
 def test_a_built_record_with_everything_settled_names_the_move(kyo) -> None:
     record = _built_record(kyo, title="Just needs the move", criteria=["the only one"])
-    assert kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed").code == 0
+    assert kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed").code == 0
 
     out = kyo("brief").out
     assert kyo("brief", "--json").json["awaiting_verification"][0]["unsettled_criteria"] == []
@@ -120,7 +120,7 @@ def test_the_queue_holds_only_built_records(kyo) -> None:
         if status in ("built", "verified", "done"):
             kyo("move", record, "built")
         if status in ("verified", "done"):
-            kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+            kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
             kyo("move", record, "verified")
         if status == "done":
             kyo("move", record, "done")

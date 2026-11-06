@@ -275,7 +275,7 @@ def test_a_cleared_gate_refuses_correction_and_says_why(kyo) -> None:
     follows that precedent rather than `retag`'s."""
     record = new_record(kyo)
     gate_id = _gate_with(kyo, record, "--do", "look at the banner")
-    assert kyo("ungate", gate_id, "--why", "looked").code == 0
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", "looked").code == 0
 
     result = kyo("redo", gate_id, "--do", "look at something else")
     assert result.code != 0, result
@@ -289,7 +289,7 @@ def test_the_remedy_the_cleared_refusal_names_works(kyo) -> None:
     honest new obligation rather than an edit to a finished one."""
     record = new_record(kyo)
     first = _gate_with(kyo, record, "--do", "look at the banner")
-    assert kyo("ungate", first, "--why", "looked").code == 0
+    assert kyo("ungate", first, "--withdrawn", "--why", "looked").code == 0
     second = _gate_with(kyo, record, "--do", "look at the other banner too")
     assert second != first
     assert _gate_doc(kyo, record, second)["do"] == "look at the other banner too"
@@ -446,7 +446,7 @@ def test_a_multi_line_payload_cannot_corrupt_the_stale_criteria_flag(
     gate_id = _gate_with(
         kyo, record, "--do-file", write_file("do.md", PROCEDURE), gate_type="holding-for"
     )
-    result = kyo("ungate", gate_id, "--why", "decided")
+    result = kyo("ungate", gate_id, "--withdrawn", "--why", "decided")
     assert result.code == 0, result
 
     flags = kyo("show", record, "--json").json["flags"]

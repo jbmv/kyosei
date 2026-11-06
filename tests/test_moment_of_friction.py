@@ -73,7 +73,7 @@ def test_a_kind_that_needs_no_criteria_says_nothing(kyo, project: Path, write_fi
 
 def test_move_done_names_kyo_split(kyo, write_file) -> None:
     record = new_record(kyo, kind="bug", title="Half done", criteria=["the first", "the second"])
-    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
 
     result = kyo("move", record, "done")
     assert result.code == 2, result
@@ -86,7 +86,7 @@ def test_the_split_the_message_names_actually_clears_it(kyo) -> None:
     """AGENTS.md's standing rule, applied to a remedy that was missing rather than
     wrong: run exactly what the message suggests and the transition succeeds."""
     record = new_record(kyo, kind="bug", title="Half done", criteria=["the first", "the second"])
-    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     assert kyo("move", record, "done").code == 2
 
     assert kyo("split", record, "--to-successor", f"{record}.c2").code == 0
@@ -95,7 +95,7 @@ def test_the_split_the_message_names_actually_clears_it(kyo) -> None:
 
 def test_the_message_lists_every_unmet_criterion_in_the_command(kyo) -> None:
     record = new_record(kyo, kind="bug", title="Three left", criteria=["a", "b", "c"])
-    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
 
     result = kyo("move", record, "done")
     assert f"{record}.c2 {record}.c3" in result.err, result.err

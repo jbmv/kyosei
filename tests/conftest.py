@@ -410,6 +410,22 @@ def declare_person(project: Path, key: str = TEST_PERSON) -> None:
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
+def decided(project: Path, words: str = "the person's words deciding it") -> list[str]:
+    """The flags of a decided credit for a test filing a decision about something else
+    (KYO-644): the person declared, their words and an unprompted decision file written
+    beside the project, said outside Claude Code."""
+    declare_person(project)
+    root = Path(project).parent
+    quote = root / "kyo644-decision-quote.txt"
+    quote.write_text(words, encoding="utf-8")
+    decision = root / "kyo644-decision.yml"
+    decision.write_text(DECISION_FILE, encoding="utf-8")
+    return [
+        "--quote-file", str(quote), "--decision-file", str(decision), "--person", TEST_PERSON,
+        *CREDIT_ELSEWHERE,
+    ]  # fmt: skip
+
+
 def requires_credit(project: Path, kind: str) -> bool:
     """Does this project's registry make `kyo new` refuse ``kind`` without a decided
     credit? (KYO-644: ``policy.requires_credit``)"""
@@ -426,7 +442,7 @@ def decision_credit_args(project: Path, cleanup: contextlib.ExitStack) -> list[s
     )
     handle.write(DECISION_FILE)
     handle.flush()
-    return ["--decision-file", handle.name, *CREDIT_ELSEWHERE]
+    return ["--decision-file", handle.name, "--person", TEST_PERSON, *CREDIT_ELSEWHERE]
 
 
 def new_record(
@@ -518,7 +534,7 @@ def verify_criterion(
         project = getattr(kyo, "project", None)
         if project is not None:
             declare_person(project)
-        args += list(CREDIT_ELSEWHERE)
+        args += ["--person", TEST_PERSON, *CREDIT_ELSEWHERE]
     result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result

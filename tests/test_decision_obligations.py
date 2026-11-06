@@ -18,7 +18,7 @@ import yaml
 from kyosei import doctor
 from kyosei.kinds import KNOWLEDGE_POLICY_OPTIONAL_KEYS, load_kind_registry
 
-from .conftest import kinds_yml
+from .conftest import decided, kinds_yml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_KINDS = REPO_ROOT / "src" / "kyosei" / "defaults" / "kinds.yml"
@@ -95,7 +95,7 @@ def specs(project: Path) -> Path:
 
 def _decision(kyo, write_file, title: str, description: str | None = None) -> dict:
     args = ["new", "decision", "--title", title, "--evidence-file",
-            write_file("words.md", WORDS), "--json"]
+            write_file("words.md", WORDS), *decided(kyo.project), "--json"]
     if description is not None:
         args += ["--description-file", write_file("desc.md", description)]
     result = kyo(*args)
@@ -178,7 +178,7 @@ def test_an_unresolved_id_raises_nothing_and_the_output_names_it(
     """c4: API-99 has a declared prefix and no owner -- nothing raised, the write says so."""
     result = kyo(
         "new", "decision", "--title", "API-99 and API-13",
-        "--evidence-file", write_file("w.md", WORDS),
+        "--evidence-file", write_file("w.md", WORDS), *decided(kyo.project),
     )
     assert result.code == 0, result
     assert "API-99" in result.out and "no heading in any ssot document owns it" in result.out
@@ -237,7 +237,7 @@ def test_spawn_and_promote_raise_too(kyo, specs: Path, write_file) -> None:
     reminder = kyo("new", "reminder", "--title", "Ask about retries", "--json").json["record_id"]
     spawned = kyo(
         "spawn", reminder, "--kind", "decision", "--title", "API-13 changes",
-        "--evidence-file", write_file("w.md", WORDS), "--json",
+        "--evidence-file", write_file("w.md", WORDS), *decided(kyo.project), "--json",
     )
     assert spawned.code == 0, spawned
     assert [o["section"] for o in _standing(kyo, spawned.json["record_id"])] == [

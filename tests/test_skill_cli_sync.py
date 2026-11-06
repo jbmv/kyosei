@@ -107,7 +107,11 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: debt entries below; the paragraph behind them is in REFERENCE.md.
 #: Raised by KYO-602 from 28,217 to 28,218 (+1 byte): the renamed command is one byte longer
 #: than its old name, and the tier names it once.
-WORKFLOW_TIER_CEILING_BYTES = 28_218
+#: Raised deliberately by KYO-644 from 28,218 to 28,279 (+61 bytes, the tier was at
+#: 28,154): crediting a person changes what an orchestrator types at five steps (verify,
+#: confirm, ungate, filing a decision, a late credit), and the workflow names each once;
+#: the flags themselves are left to the command reference below.
+WORKFLOW_TIER_CEILING_BYTES = 28_279
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -1104,7 +1108,64 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
 #: Flags of commands the skill DOES name, deliberately left to `kyo reference`. Same rule,
 #: same escape hatch. Keyed by ``(command, flag)`` so that a flag left out on one command
 #: and explained on another cannot be confused for one decision.
+#: KYO-644: why the credit flags are left to the command reference.
+CREDIT_DEFAULTED = (
+    "defaults to the only declared person and to $CLAUDE_CODE_SESSION_ID; the refusal "
+    "names it when the default does not apply"
+)
+CREDIT_NAMED_BY_REFUSAL = "named by the refusal that needs it, with the line to run"
+CREDIT_SPAN = "cites the discussion behind a decision; read from the command reference"
+CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by hand"
+
+
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-644: the flags a credit is given by. The workflow names the act at each step and
+    # the refusals name the flags they need, so the skill names none of them by heart.
+    ("confirm", "--person"): CREDIT_DEFAULTED,
+    ("confirm", "--session"): CREDIT_DEFAULTED,
+    ("confirm", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("confirm", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("credit", "--person"): CREDIT_DEFAULTED,
+    ("credit", "--role"): CREDIT_NAMED_BY_REFUSAL,
+    ("credit", "--session"): CREDIT_DEFAULTED,
+    ("credit", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("credit", "--span-first"): CREDIT_SPAN,
+    ("credit", "--span-last"): CREDIT_SPAN,
+    ("credit", "--span-session"): CREDIT_SPAN,
+    ("credit", "--supersede"): CREDIT_NAMED_BY_REFUSAL,
+    ("credit", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("move", "--person"): CREDIT_DEFAULTED,
+    ("move", "--session"): CREDIT_DEFAULTED,
+    ("move", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("move", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("new", "--person"): CREDIT_DEFAULTED,
+    ("new", "--session"): CREDIT_DEFAULTED,
+    ("new", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("new", "--span-first"): CREDIT_SPAN,
+    ("new", "--span-last"): CREDIT_SPAN,
+    ("new", "--span-session"): CREDIT_SPAN,
+    ("new", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("spawn", "--person"): CREDIT_DEFAULTED,
+    ("spawn", "--session"): CREDIT_DEFAULTED,
+    ("spawn", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("spawn", "--span-first"): CREDIT_SPAN,
+    ("spawn", "--span-last"): CREDIT_SPAN,
+    ("spawn", "--span-session"): CREDIT_SPAN,
+    ("spawn", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("ungate", "--credit"): CREDIT_COMPOSED,
+    ("ungate", "--person"): CREDIT_DEFAULTED,
+    ("ungate", "--session"): CREDIT_DEFAULTED,
+    ("ungate", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("ungate", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("verify", "--credit"): CREDIT_COMPOSED,
+    ("verify", "--person"): CREDIT_DEFAULTED,
+    ("verify", "--session"): CREDIT_DEFAULTED,
+    ("verify", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("verify", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    ("wont-do", "--person"): CREDIT_DEFAULTED,
+    ("wont-do", "--session"): CREDIT_DEFAULTED,
+    ("wont-do", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
+    ("wont-do", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     # KYO-647: filters on who is credited; an orchestrator's workflow does not reach them
     # until credits are in use, and the command reference lists them.
     ("list", "--person"): "a filter on credited persons, read from the command reference",

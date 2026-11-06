@@ -3,6 +3,7 @@
 {
   "command": "verify",
   "completed_with_unmet": null,
+  "credit_id": null,
   "ok": true,
   "record": {
     "claims": [],

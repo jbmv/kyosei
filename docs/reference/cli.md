@@ -36,6 +36,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo claim`](#kyo-claim) | yes | yes | record a claim about a record (law 9) |
 | [`kyo close-wave`](#kyo-close-wave) | yes | yes | close a merged wave: move each record to completion, run the declared generators, commit store and generated files together, then print (or, with --run-after, run) the declared after-steps — refused before any write unless every record can finish and the declared suite passed at this code (KYO-536) |
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
+| [`kyo credit`](#kyo-credit) | yes | yes | credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644) |
 | [`kyo dispatch`](#kyo-dispatch) | yes | yes | dispatch a record with a frozen brief, or `dispatch close` a dispatch (M5) |
 | [`kyo docs`](#kyo-docs) | yes | yes | Layer 3 docs-SOT skeleton validator (M8) |
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
@@ -391,9 +392,9 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+Top-level ids in `--json`: `record_id`, `credit_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--gate GATE_ID] [--no-close] RECORD_ID`
+Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--gate GATE_ID] [--person KEY] [--session ID] [--turn UUID] [--source-other WHERE] [--no-close] RECORD_ID`
 
 ### Positional arguments
 
@@ -405,6 +406,10 @@ Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--quote-file FILE` — optional. the maintainer's words from a file, or '-' for stdin; stored verbatim
 - `--criterion CRITERION_ID [CRITERION_ID ...]` — optional. the criteria the words answer; overrides resolution from the gate's payload or the record's sole unmet-unobserved criterion
 - `--gate GATE_ID` — optional. the awaiting:human-* gate the words answer; needed only when more than one is open
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--no-close` — optional. record the words and clear the gate, but leave the record's status alone
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -414,6 +419,39 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 Text output prints the quoted short form in place of the full text after it, which is what it printed there before KYO-489. When it printed any, its last line is: explained in `kyo reference confirm`. `<name>` stands for a value of that run.
 
 - "only holding-for does" — clearing it reports that something happened, not that something was decided (only holding-for does — KYO-59) (KYO-59)
+
+## `kyo credit`
+
+credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644)
+
+Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
+
+Writes to the store: **yes** — an events row and a fresh export.
+
+Top-level ids in `--json`: `credit_id`, `record_id`, `quote_id`, `basis_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+
+Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--role ROLE] [--basis CREDIT_ID] [--supersede CREDIT_ID] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] SUBJECT_ID [SUBJECT_ID ...]`
+
+### Positional arguments
+
+- `SUBJECT_ID [SUBJECT_ID ...]` — **required**. verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record
+
+### Options
+
+- `--role ROLE` — optional. observed | decided | authorized; defaults to decided for a record, observed otherwise. authorized: a go-ahead approving a plan already stated
+- `--basis CREDIT_ID` — optional. the person's own decided credit approving this batch of reconstructed credits
+- `--supersede CREDIT_ID` — optional. replace this current credit of a subject; it stays readable as superseded
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
+- `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
+- `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
 ## `kyo dispatch`
 
@@ -862,7 +900,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--force] id STATUS`
+Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--withdrawn] [--force] id STATUS`
 
 ### Positional arguments
 
@@ -873,6 +911,12 @@ Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 
 - `--why TEXT` — optional. one-line reason (required to enter wont-do)
 - `--why-file FILE` — optional. read the reason from a file, or '-' for stdin
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
 - `--force` — optional. close a plan over unsettled (not complete or retired) members, recording that it was closed over them; or enter a completion or retired status with a gate still open, leaving it open (KYO-490)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -885,9 +929,9 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `record_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+Top-level ids in `--json`: `credit_id`, `record_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--from FILE] [--check] [--force] [--no-prior-art] kind`
+Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--from FILE] [--check] [--force] [--no-prior-art] kind`
 
 ### Positional arguments
 
@@ -903,6 +947,15 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 - `--criteria-file FILE` — optional. one criterion per line, from a file or '-'; an empty file means zero criteria
 - `--touches-file FILE` — optional. one touch per line ('path', 'path#symbol', 'path#+' for additions to an existing file and nothing already in it, 'dir/' for a tree this work creates or owns, or '+path' for one file it creates), relative to the project root, validated against the repo now; optional here (unlike `kyo promote`) because this is the zero-ceremony intake path
 - `--evidence-file FILE` — optional. evidence stored with the record in the same act, verbatim with its sha256 as `kyo attach` stores it, from a file or '-'; required by a kind whose policy sets requires_evidence_links (the default `decision`: the operator's words -- who, when, where, then the words verbatim) and allowed beside --from (KYO-521)
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
+- `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
+- `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
 - `--from FILE` — optional. file the whole record from one markdown file instead of --title/--plan/--scope/--description-file/--criteria-file/--touches-file: front matter for title/scope/plan/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)
@@ -1374,9 +1427,9 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+Top-level ids in `--json`: `credit_id`, `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--check] [--force] [--no-prior-art] SOURCE_ID`
+Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--check] [--force] [--no-prior-art] SOURCE_ID`
 
 ### Positional arguments
 
@@ -1392,6 +1445,15 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--scope SCOPE` — optional. the part of the system this work belongs to, from kyosei/scopes.yml. Never defaulted from the source: a spawn crosses a kind boundary
 - `--from FILE` — optional. file the new record from one markdown file instead of --title/--description-file/--criteria-file/--touches-file: front matter for title/scope/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
 - `--evidence-file FILE` — optional. evidence stored with the new record in the same act, from a file or '-'; required when the target kind's policy sets requires_evidence_links and the SOURCE is a carried kind (a reminder becoming a decision: the operator's words -- who, when, where, then the words verbatim); not asked of a proposal or investigation source (KYO-522)
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
+- `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
+- `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)
 - `--no-prior-art` — optional. skip the prior-art search kyosei/config.yml's recx.prior_art would run for this record (KYO-585); `kyo prior-art <id>` runs it later
@@ -1476,7 +1538,9 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--tag TAG] [--apply] [--why TEXT] [--why-file FILE] [GATE_ID ...]`
+Top-level ids in `--json`: `credit_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+
+Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--tag TAG] [--apply] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--withdrawn] [--credit CREDIT_ID] [GATE_ID ...]`
 
 ### Positional arguments
 
@@ -1488,6 +1552,13 @@ Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--apply` — optional. with --tag: clear every gate the selection lists, in one transaction
 - `--why TEXT` — optional. one-line reason for clearing it
 - `--why-file FILE` — optional. read the reason from a file, or '-' for stdin
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
+- `--credit CREDIT_ID` — optional. add this clearing to an existing credit of the same act (kyo confirm uses it); the credit must be current and on the same record
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
@@ -1530,7 +1601,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--verdict VERDICT] [--method METHOD] [--evidence-file FILE] [--from-report DISPATCH_ID] [--only CRITERION_ID [CRITERION_ID ...]] [--again] [--why TEXT] [--why-file FILE] [CRITERION_ID]`
+Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--verdict VERDICT] [--method METHOD] [--evidence-file FILE] [--from-report DISPATCH_ID] [--only CRITERION_ID [CRITERION_ID ...]] [--again] [--why TEXT] [--why-file FILE] [--person KEY] [--session ID] [--turn UUID] [--source-other WHERE] [--credit CREDIT_ID] [CRITERION_ID]`
 
 ### Positional arguments
 
@@ -1546,6 +1617,11 @@ Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--again` — optional. with --from-report: apply a verdict even though the criterion's latest verification already came from this report (KYO-415), or was recorded after this report was ingested (KYO-511); without it such an entry is listed as already applied, or as a newer verdict kept, and skipped
 - `--why TEXT` — optional. one-line reason (required for unmet-unobserved)
 - `--why-file FILE` — optional. read the reason from a file, or '-' for stdin
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--credit CREDIT_ID` — optional. add this human-observed verdict to an existing credit of the same act and words (kyo confirm uses it)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
@@ -1611,7 +1687,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--force] id`
+Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--withdrawn] [--force] id`
 
 ### Positional arguments
 
@@ -1621,6 +1697,12 @@ Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 - `--why TEXT` — optional. one-line reason (required)
 - `--why-file FILE` — optional. read the reason from a file, or '-' for stdin
+- `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
+- `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
+- `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
+- `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
+- `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
+- `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
 - `--force` — optional. retire the record with a gate still open, leaving it open
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

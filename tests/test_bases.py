@@ -428,7 +428,7 @@ def test_every_row_carries_its_open_gate_types(kyo, project: Path) -> None:
     clear_id = kyo(
         "gate", cleared, "holding-for", "--do", "the measurement finishes", "--json"
     ).json["gate_id"]
-    assert kyo("ungate", clear_id, "--why", "measured").code == 0
+    assert kyo("ungate", clear_id, "--withdrawn", "--why", "measured").code == 0
 
     write_bases(project, base_of())
     rows = {
@@ -439,7 +439,7 @@ def test_every_row_carries_its_open_gate_types(kyo, project: Path) -> None:
     assert rows[ungated] == []
     assert rows[cleared] == []
 
-    assert kyo("ungate", review_gate, "--why", "reviewed").code == 0
+    assert kyo("ungate", review_gate, "--withdrawn", "--why", "reviewed").code == 0
     rows = {
         row["id"]: row["gate_types"]
         for row in kyo("base", "run", "only", "--json").json["rows"]

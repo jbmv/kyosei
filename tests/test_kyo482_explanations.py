@@ -209,7 +209,7 @@ def _tour(kyo, project: Path, tmp_path: Path) -> dict[str, object]:
     gated = new_record(kyo, criteria=["it shows"])
     runs["gate"] = kyo("gate", gated, "awaiting:human-run", "--do", "look at it")
     gate_id = kyo("show", gated, "--json").json["gates"][0]["id"]
-    runs["ungate"] = kyo("ungate", gate_id, "--why", "looked")
+    runs["ungate"] = kyo("ungate", gate_id, "--withdrawn", "--why", "looked")
     write_scopes(project, TWO_SCOPES)
     runs["new"] = kyo(
         "new", "bug", "--title", "A mislabelled thing", "--criteria-file", "-",

@@ -14,7 +14,7 @@ from kyosei import doctor_records, events_ledger, ledgers
 from kyosei.errors import EXIT_DOCTOR
 from kyosei.store import open_store
 
-from .conftest import new_record
+from .conftest import CREDIT_ELSEWHERE, declare_person, new_record
 
 LEGACY = "credit_coverage_legacy"
 NEW = "credit_coverage"
@@ -36,13 +36,33 @@ def _restamp(project: Path, version: int) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def _without_credits(project: Path) -> None:
+    """KYO-644: every write path now credits a person's judgement, so a row with none --
+    what this check exists to find -- is made by removing the credits the commands wrote,
+    as a store written by an older build, or a merged ledger, would hold it."""
+    store = open_store(project)
+    try:
+        with store.transaction():
+            store.conn.execute("DELETE FROM credit_subjects")
+            store.conn.execute("DELETE FROM credits")
+            store.conn.execute("UPDATE gates SET cleared_as = NULL")
+        from kyosei.export import write_export
+
+        for row in store.conn.execute("SELECT id FROM records").fetchall():
+            write_export(store, row["id"])
+    finally:
+        store.close()
+
+
 def _human_verdict(kyo) -> tuple[str, str]:
     record = new_record(kyo, criteria=["a"])
+    declare_person(kyo.project)
     result = kyo(
         "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
-        "--evidence-file", "-", "--json", stdin="the person's words",
+        "--evidence-file", "-", *CREDIT_ELSEWHERE, "--json", stdin="the person's words",
     )
     assert result.code == 0, result
+    _without_credits(kyo.project)
     return record, f"{record}.v1"
 
 
@@ -131,8 +151,9 @@ def test_a_gate_cleared_by_a_person_and_a_decision_are_counted_and_cleared(
     record = new_record(kyo, criteria=["a"])
     kyo("gate", record, "awaiting:human-review")
     gate = kyo("show", record, "--json").json["gates"][0]["id"]
-    assert kyo("ungate", gate, "--why", "reviewed").code == 0
+    assert kyo("ungate", gate, "--withdrawn", "--why", "reviewed").code == 0
     decision = new_record(kyo, kind="decision", title="A decision")
+    _without_credits(project)
     _restamp(project, 27)
     _, checks = _doctor(kyo)
     text = " ".join(_findings(checks, LEGACY))
@@ -149,7 +170,8 @@ def test_a_gate_withdrawn_names_no_person_and_is_not_counted(kyo, project, db) -
     record = new_record(kyo, criteria=["a"])
     kyo("gate", record, "awaiting:human-review")
     gate = kyo("show", record, "--json").json["gates"][0]["id"]
-    assert kyo("ungate", gate, "--why", "no longer matters").code == 0
+    assert kyo("ungate", gate, "--withdrawn", "--why", "no longer matters").code == 0
+    _without_credits(project)
     conn = db()
     conn.execute("UPDATE gates SET cleared_as = 'withdrawn' WHERE id = ?", (gate,))
     conn.close()

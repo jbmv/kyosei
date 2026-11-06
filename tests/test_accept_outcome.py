@@ -167,7 +167,7 @@ def test_close_leaves_a_gated_record_open_and_clearing_the_gate_completes_it(
     ]  # fmt: skip
     assert "left open" in line and record in line
 
-    assert kyo("ungate", gate_id, "--why", "reviewed on the call").code == 0
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", "reviewed on the call").code == 0
     again = kyo("accept", dispatch_id, "--close", "--json")
     assert again.code == 0, again
     assert [r["record_id"] for r in again.json["closed"]] == [record]

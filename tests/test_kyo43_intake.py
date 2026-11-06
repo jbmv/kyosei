@@ -33,7 +33,7 @@ import yaml
 from kyosei.contracts import CONTRACT_KIND_NOT_DIRECTLY_FILEABLE
 from kyosei.errors import EXIT_CONTRACT
 
-from .conftest import kinds_yml, new_record
+from .conftest import decided, kinds_yml, new_record
 
 #: The kinds the shipped registry lets a human file directly (`kyo init`'s kinds.yml).
 #: Read back from the file in the parametrised test below rather than trusted — this
@@ -92,7 +92,10 @@ def test_kyo_new_files_the_kinds_that_accept_intake(kyo, write_file) -> None:
     # KYO-521: `decision` is filed directly with the evidence its policy requires.
     words = write_file("words.md", "The maintainer:\n\"yes\"\n")
     for kind in DEFAULT_INTAKE_KINDS:
-        evidence = ["--evidence-file", words] if kind == "decision" else []
+        # KYO-644: and the credit of the person who decided it.
+        evidence = (
+            ["--evidence-file", words, *decided(kyo.project)] if kind == "decision" else []
+        )
         result = kyo("new", kind, "--title", f"a {kind}", *evidence)
         assert result.code == 0, result
         assert "created" in result.out

@@ -143,7 +143,9 @@ def add_credit_flags(
     )
     parser.add_argument(
         "--source-other",
-        metavar="TEXT",
+        # Not PROSE_ARGUMENT_METAVAR: one line naming a place, single-line enforced, like
+        # --why without its file twin; the words themselves always come from a file.
+        metavar="WHERE",
         help="one line saying where the words were said, when not in a Claude Code session",
     )
     if decision:
