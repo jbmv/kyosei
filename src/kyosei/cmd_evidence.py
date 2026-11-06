@@ -898,9 +898,14 @@ def _credit_for_verdict(
         return None, None
     if joined is not None:
         if credits.requested(args):
-            raise UsageError("--credit adds this verdict to an existing credit; give no other credit flag")
+            raise UsageError(
+                "--credit adds this verdict to an existing credit; give no other credit flag"
+            )
         if words is None:
-            raise UsageError("--credit holds the person's words, and this verdict gives none in --evidence-file")
+            raise UsageError(
+                "--credit holds the person's words, and this verdict gives none in "
+                "--evidence-file"
+            )
         return None, joined
     cid = args.criterion_id
     verdict = args.verdict

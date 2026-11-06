@@ -202,7 +202,6 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--suite-passed",
         # KYO-647: `kyo list --person` and `--decided-by` are keys under `people:` in the
         # config, refused unless declared; they narrow a read and store nothing.
-        "--person",
         "--decided-by",
     }
     assert value_flags <= text_bearing | file_bearing | structural, value_flags

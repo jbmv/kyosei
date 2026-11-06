@@ -894,7 +894,10 @@ def _clearing_lines(store, clearing: credits.GateClearing, credit_id: str | None
     if clearing.withdrawn:
         return [echo_value("cleared as", "withdrawn: no person answered")]
     if clearing.credit is not None and credit_id is not None:
-        return [echo_value("cleared as", "answered"), *credits.lines(store, credit_id, clearing.credit)]
+        return [
+            echo_value("cleared as", "answered"),
+            *credits.lines(store, credit_id, clearing.credit),
+        ]
     if clearing.joined is not None:
         return [echo_value("cleared as", f"answered, credit {clearing.joined}")]
     return []

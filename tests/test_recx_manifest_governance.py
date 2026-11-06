@@ -31,7 +31,8 @@ from kyosei import docs_check, docs_obligations, docs_parse, docs_recx, git_quer
 from kyosei import registry as registry_module
 from kyosei.docs_parse import PREAMBLE
 
-from .conftest import decided as credit_flags, new_record, valid_report, verify_criterion
+from .conftest import decided as credit_flags
+from .conftest import new_record, valid_report, verify_criterion
 from .test_kyo137_docs_obligations import _commit, _declare_touches, _git, _write
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

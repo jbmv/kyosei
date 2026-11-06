@@ -736,7 +736,8 @@ def test_a_cleared_awaiting_gate_stops_making_the_wait_findable(kyo) -> None:
     gate_id = kyo(
         "gate", record, "awaiting:human-run", "--do", "watch the app", "--json"
     ).json["gate_id"]
-    assert kyo("ungate", gate_id, "--withdrawn", "--why", "looked, and it was wrong again").code == 0
+    why = "looked, and it was wrong again"
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", why).code == 0
     result = kyo(
         "verify",
         f"{record}.c1",

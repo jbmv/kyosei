@@ -62,8 +62,8 @@ from pathlib import Path
 from . import cmd_close_wave, cmd_evidence, cmd_links, credits
 from .cmd_accept import _close, _incomplete_line, _incompleteness, _run, _Step
 from .commands import Context, Output, _load_status_ladder
-from .contracts import ROLE_RETIRED, SETTLED_CRITERION_STATES, VOID_CRITERION_STATES
 from .config import person_label
+from .contracts import ROLE_RETIRED, SETTLED_CRITERION_STATES, VOID_CRITERION_STATES
 from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .prose import STDIN, check_not_shell_mangled, read_prose, single_line
 
@@ -72,6 +72,9 @@ from .prose import STDIN, check_not_shell_mangled, read_prose, single_line
 #: look, and clearing ``holding-for`` raises ``gate-cleared-stale-criteria`` (KYO-59),
 #: which needs a deliberate ``kyo ungate``, not the side effect of an approval.
 HUMAN_GATE_TYPES: frozenset[str] = credits.HUMAN_GATE_TYPES
+
+#: KYO-644: what a retired record's person gate is cleared with.
+_WITHDRAWN = " --withdrawn"
 
 #: The one verdict and the one method a confirmation records.
 CONFIRM_VERDICT = "met"
@@ -194,9 +197,10 @@ def _refuse_retired(store, record_id: str, status: str, ladder) -> None:
             f"{record_id} is {status} (retired): confirming it would record approval of "
             "work that was retired, so nothing was written",
             *(
+                # KYO-644: a gate waiting on a person clears as withdrawn here, nobody
+                # having answered for work that was retired.
                 f"clear its open gate on its own: `kyo ungate {gate['id']} --why-file FILE"
-                + (" --withdrawn" if gate["gate_type"] in HUMAN_GATE_TYPES else "")
-                + "`"
+                f"{_WITHDRAWN if gate['gate_type'] in HUMAN_GATE_TYPES else ''}`"
                 for gate in gates
             ),
         ],
@@ -737,7 +741,9 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     )
 
 
-def _existing_credit(store, record_id: str, quote: _Quote, resolved: dict, skipped: list) -> str | None:
+def _existing_credit(
+    store, record_id: str, quote: _Quote, resolved: dict, skipped: list
+) -> str | None:
     """A rerun's credit: the current credit on a skipped target's latest verdict that holds
     these words, so the gate a first run left open joins the same act (KYO-644)."""
     for item in skipped:

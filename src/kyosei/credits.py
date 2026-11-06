@@ -61,7 +61,6 @@ no transcript the span's ids are stored and its measures left empty.
 
 from __future__ import annotations
 
-import json
 import shlex
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass, field
@@ -73,7 +72,7 @@ from .cmd_sessions import recorded_transcript_path
 from .commands import Context, Output, _add_evidence, _touch_record
 from .config import declared_people, person_label
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
-from .errors import ContractViolation, KyoseiError, NotFound, UsageError
+from .errors import ContractViolation, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .prose import read_prose, single_line
 
@@ -107,7 +106,14 @@ CONTRACT_CREDIT_SUBJECT_ALREADY_CREDITED = "credit-subject-already-credited"
 
 #: The keys a ``--decision-file`` may carry.
 DECISION_FILE_KEYS = frozenset(
-    {"recommended", "recommended_by", "outcome", "alternatives", "refining_turn", "refining_session"}
+    {
+        "recommended",
+        "recommended_by",
+        "outcome",
+        "alternatives",
+        "refining_turn",
+        "refining_session",
+    }
 )
 
 
@@ -307,7 +313,7 @@ def resolve(
             contract,
             [
                 f"{act} names the person whose judgement it records, and this invocation "
-                f"gives no {'; no '.join(missing)}: nothing was written",
+                f"lacks {'; '.join(missing)}: nothing was written",
                 *remedies,
             ],
         )
@@ -554,7 +560,11 @@ def lines(store, credit_id: str, credit: Credit) -> list[str]:
         d = credit.decision
         out.append(
             f"  outcome: {d['outcome']}"
-            + (f"; recommended by {d['recommended_by']}: {d['recommended']}" if d["recommended"] else "")
+            + (
+                f"; recommended by {d['recommended_by']}: {d['recommended']}"
+                if d["recommended"]
+                else ""
+            )
         )
     if credit.span:
         s = credit.span
@@ -686,7 +696,9 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     if superseded is not None:
         old = store.credit(superseded)
         if old["superseded_by"]:
-            raise UsageError(f"--supersede {superseded} was already superseded by {old['superseded_by']}")
+            raise UsageError(
+                f"--supersede {superseded} was already superseded by {old['superseded_by']}"
+            )
         named = {s["subject_id"] for s in store.credit_subjects(superseded)}
         if not named & set(subject_ids):
             raise UsageError(
@@ -702,7 +714,9 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
                 *(
                     f"{sid} already has a current credit: "
                     + ", ".join(
-                        f"{r['id']} ({r['role']} by {r['person']})" for r in rows if r["id"] != superseded
+                        f"{r['id']} ({r['role']} by {r['person']})"
+                        for r in rows
+                        if r["id"] != superseded
                     )
                     for sid, rows in blocking.items()
                 ),
@@ -1038,9 +1052,7 @@ def filing_credit_flag_problem(args: Namespace, kind_def) -> None:
     """A credit flag on a filing of a kind that takes no credit is refused, not dropped."""
     if kind_def.requires_credit:
         return
-    refuse_unused_flags(
-        args, f"kind {kind_def.name!r} does not set policy.requires_credit"
-    )
+    refuse_unused_flags(args, f"kind {kind_def.name!r} does not set policy.requires_credit")
     for name, flag in (("quote_file", "--quote-file"), ("decision_file", "--decision-file")):
         if getattr(args, name, None):
             raise UsageError(

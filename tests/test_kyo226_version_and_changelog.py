@@ -44,7 +44,13 @@ from kyosei.cli import COMMAND_TABLE, MUTATING_COMMANDS, build_parser
 from kyosei.commands import PROJECT_NONE
 from kyosei.registry import DEFAULT_DOCUMENT_GLOBS
 
-from .conftest import CREDIT_ELSEWHERE, declare_person, checkout_build_lock, checkout_build_lock_path, invoke
+from .conftest import (
+    CREDIT_ELSEWHERE,
+    checkout_build_lock,
+    checkout_build_lock_path,
+    declare_person,
+    invoke,
+)
 from .this_store import store_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

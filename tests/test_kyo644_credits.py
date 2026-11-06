@@ -53,7 +53,10 @@ def person(uuid: str, text: str, stamp: str, source: str = "typed") -> dict:
 
 def agent_text(uuid: str, text: str, stamp: str) -> dict:
     return _record(
-        "assistant", uuid, stamp, message={"role": "assistant", "content": [{"type": "text", "text": text}]}
+        "assistant",
+        uuid,
+        stamp,
+        message={"role": "assistant", "content": [{"type": "text", "text": text}]},
     )
 
 
@@ -62,7 +65,10 @@ def agent_tool(uuid: str, stamp: str) -> dict:
         "assistant",
         uuid,
         stamp,
-        message={"role": "assistant", "content": [{"type": "tool_use", "id": f"t-{uuid}", "name": "Bash"}]},
+        message={
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": f"t-{uuid}", "name": "Bash"}],
+        },
     )
 
 
@@ -71,7 +77,10 @@ def tool_result(uuid: str, stamp: str) -> dict:
         "user",
         uuid,
         stamp,
-        message={"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]},
+        message={
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}],
+        },
         toolUseResult={"stdout": "ok"},
     )
 
@@ -92,7 +101,9 @@ CONVERSATION = [
     tool_result("t-2", "2026-11-06T10:01:20.000Z"),
     agent_text("a-3", "Done, the banner shows.", "2026-11-06T10:01:40.000Z"),
     person("p-3", "yes", "2026-11-06T10:02:00.000Z"),
-    person("p-4", "the banner looks right", "2026-11-06T11:00:00.000Z", source="suggestion_accepted"),
+    person(
+        "p-4", "the banner looks right", "2026-11-06T11:00:00.000Z", source="suggestion_accepted"
+    ),
     agent_text("a-4", "Noted.", "2026-11-06T11:00:10.000Z"),
     person("p-5", "yes", "2026-11-06T11:01:00.000Z"),
 ]
@@ -154,7 +165,9 @@ def test_a_human_observed_verdict_is_refused_without_a_credit(kyo, project: Path
     assert credit["quote_id"] == verification["evidence_id"]
 
 
-def test_the_only_declared_person_is_the_default_and_is_echoed(kyo, project: Path, tmp_path) -> None:
+def test_the_only_declared_person_is_the_default_and_is_echoed(
+    kyo, project: Path, tmp_path
+) -> None:
     record = new_record(kyo, criteria=["a"])
     declare_person(project, "jbmv")
     ran = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
@@ -183,7 +196,9 @@ def test_the_quote_is_checked_against_the_sessions_transcript(kyo, project: Path
     absent = kyo("verify", f"{record}.c1", *base,
                  "--evidence-file", _file(tmp_path / "x", "words never said"))  # fmt: skip
     assert absent.code == 2 and "credit-quote-not-found" in absent.err, absent
-    ambiguous = kyo("verify", f"{record}.c1", *base, "--evidence-file", _file(tmp_path / "y", "yes"))
+    ambiguous = kyo(
+        "verify", f"{record}.c1", *base, "--evidence-file", _file(tmp_path / "y", "yes")
+    )
     assert ambiguous.code == 2 and "credit-quote-ambiguous" in ambiguous.err, ambiguous
     assert "p-3" in ambiguous.err and "p-5" in ambiguous.err
     chosen = kyo("verify", f"{record}.c1", *base, "--evidence-file", str(tmp_path / "y"),
@@ -201,7 +216,9 @@ def test_the_quote_is_checked_against_the_sessions_transcript(kyo, project: Path
     assert second["source_session"] == SESSION
 
 
-def test_the_session_defaults_to_claude_codes_variable(kyo, project: Path, tmp_path, monkeypatch) -> None:
+def test_the_session_defaults_to_claude_codes_variable(
+    kyo, project: Path, tmp_path, monkeypatch
+) -> None:
     record = new_record(kyo, criteria=["a"])
     declare_person(project)
     write_transcript(CONVERSATION)
@@ -250,7 +267,9 @@ def test_a_person_gate_needs_a_credit_or_withdrawn(kyo, project: Path, tmp_path)
     (credit,) = _credits(project)
     assert _subjects(project, credit["id"]) == [("gate", gate)]
     with _db(project) as conn:
-        row = conn.execute("SELECT cleared_as, cleared_at FROM gates WHERE id = ?", (gate,)).fetchone()
+        row = conn.execute(
+            "SELECT cleared_as, cleared_at FROM gates WHERE id = ?", (gate,)
+        ).fetchone()
     assert row["cleared_as"] == "answered"
     assert credit["created_at"] == row["cleared_at"]
 
@@ -277,7 +296,9 @@ def test_bulk_ungate_is_all_or_nothing_over_a_person_gate(kyo, project: Path) ->
     refused = kyo("ungate", other, human, "--why", "x")
     assert refused.code == 2, refused
     with _db(project) as conn:
-        assert conn.execute("SELECT count(*) FROM gates WHERE cleared_at IS NULL").fetchone()[0] == 2
+        assert (
+            conn.execute("SELECT count(*) FROM gates WHERE cleared_at IS NULL").fetchone()[0] == 2
+        )
 
 
 def test_a_carried_settle_over_a_person_gate_needs_a_credit(kyo, project: Path, tmp_path) -> None:
@@ -304,16 +325,16 @@ def test_confirm_writes_one_credit_naming_every_verdict_and_the_gate(kyo, projec
     """KYO-644.c2."""
     record = new_record(kyo, criteria=["a", "b"])
     declare_person(project)
-    gate = kyo("gate", record, "awaiting:human-review", "--do", f"check {record}.c1 and {record}.c2",
-               "--json").json["gate_id"]  # fmt: skip
-    ran = kyo("confirm", record, "--quote", "both look right", *CREDIT_ELSEWHERE, "--no-close", "--json")
+    do = f"check {record}.c1 and {record}.c2"
+    gate = kyo("gate", record, "awaiting:human-review", "--do", do, "--json").json["gate_id"]
+    ran = kyo(
+        "confirm", record, "--quote", "both look right", *CREDIT_ELSEWHERE, "--no-close", "--json"
+    )
     assert ran.code == 0, ran
     (credit,) = _credits(project)
     subjects = _subjects(project, credit["id"])
     with _db(project) as conn:
-        verifications = [
-            r["id"] for r in conn.execute("SELECT id FROM verifications ORDER BY seq")
-        ]
+        verifications = [r["id"] for r in conn.execute("SELECT id FROM verifications ORDER BY seq")]
     assert subjects == [*(("verification", v) for v in verifications), ("gate", gate)]
     assert len(verifications) == 2
     assert ran.json["credit_id"] == credit["id"]
@@ -335,7 +356,9 @@ def test_confirm_with_only_a_gate_credits_the_gate(kyo, project: Path) -> None:
     declare_person(project)
     kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "machine-checked")
     gate = kyo("gate", record, "awaiting:human-run", "--do", "run it", "--json").json["gate_id"]
-    ran = kyo("confirm", record, "--quote", "ran it, fine", *CREDIT_ELSEWHERE, "--no-close", "--json")
+    ran = kyo(
+        "confirm", record, "--quote", "ran it, fine", *CREDIT_ELSEWHERE, "--no-close", "--json"
+    )
     assert ran.code == 0, ran
     (credit,) = _credits(project)
     assert _subjects(project, credit["id"]) == [("gate", gate)]
@@ -364,8 +387,12 @@ def test_a_decision_is_refused_without_a_decided_credit(kyo, project: Path, tmp_
     assert _subjects(project, credit["id"]) == [("record", record)]
     # --quote-file alone is also the filing's evidence, stored once.
     with _db(project) as conn:
-        evidence = list(conn.execute("SELECT id FROM evidence_artifacts WHERE record_id = ?", (record,)))
-        created = conn.execute("SELECT created_at FROM records WHERE id = ?", (record,)).fetchone()[0]
+        evidence = list(
+            conn.execute("SELECT id FROM evidence_artifacts WHERE record_id = ?", (record,))
+        )
+        created = conn.execute("SELECT created_at FROM records WHERE id = ?", (record,)).fetchone()[
+            0
+        ]
     assert [e["id"] for e in evidence] == [credit["quote_id"]]
     assert credit["created_at"] == created
 
@@ -399,14 +426,17 @@ def test_a_refined_decision_cites_the_refining_turn(kyo, project: Path, tmp_path
     assert refused.code == 64 and "refining_turn a-1" in refused.err, refused
 
 
-def test_spawning_a_decision_from_a_proposal_needs_the_credit_too(kyo, project: Path, tmp_path) -> None:
+def test_spawning_a_decision_from_a_proposal_needs_the_credit_too(
+    kyo, project: Path, tmp_path
+) -> None:
     proposal = new_record(kyo, kind="proposal", title="Pick a store", criteria=["chosen"])
     declare_person(project)
     refused = kyo("spawn", proposal, "--kind", "decision", "--title", "Use SQLite")
     assert refused.code == 2 and "filing-requires-credit" in refused.err, refused
     ok = kyo("spawn", proposal, "--kind", "decision", "--title", "Use SQLite",
              "--quote-file", _file(tmp_path / "w", "approved, go with SQLite"),
-             "--decision-file", _decision_file(tmp_path, "recommended: SQLite\noutcome: accepted\n"),
+             "--decision-file",
+             _decision_file(tmp_path, "recommended: SQLite\noutcome: accepted\n"),
              *CREDIT_ELSEWHERE)  # fmt: skip
     assert ok.code == 0, ok
     assert _credits(project)[0]["outcome"] == "accepted"
@@ -421,7 +451,9 @@ def test_spawning_a_decision_from_a_proposal_needs_the_credit_too(kyo, project: 
         ("outcome: maybe\n", "outcome is"),
     ],
 )
-def test_a_malformed_decision_file_is_refused_by_name(kyo, project: Path, tmp_path, text, fragment) -> None:
+def test_a_malformed_decision_file_is_refused_by_name(
+    kyo, project: Path, tmp_path, text, fragment
+) -> None:
     declare_person(project)
     ran = kyo("new", "decision", "--title", "X", "--quote-file", _file(tmp_path / "w", "x"),
               "--decision-file", _decision_file(tmp_path, text), *CREDIT_ELSEWHERE)  # fmt: skip
@@ -469,7 +501,9 @@ def test_a_reply_ending_in_a_tool_call_is_not_a_reply_to_the_person(tmp_path, mo
     assert (measure.person_turns, measure.agent_turns) == (2, 1)
 
 
-def test_an_absent_transcript_stores_the_span_ids_with_empty_measures(kyo, project: Path, tmp_path) -> None:
+def test_an_absent_transcript_stores_the_span_ids_with_empty_measures(
+    kyo, project: Path, tmp_path
+) -> None:
     declare_person(project)
     ok = kyo("new", "decision", "--title", "Keep the cache",
              "--quote-file", _file(tmp_path / "w", "keep the cache"),
@@ -483,10 +517,13 @@ def test_an_absent_transcript_stores_the_span_ids_with_empty_measures(kyo, proje
     assert credit["span_person_turns"] is None and credit["span_active_seconds"] is None
 
 
-def test_a_span_naming_a_record_the_transcript_lacks_is_refused(kyo, project: Path, tmp_path) -> None:
+def test_a_span_naming_a_record_the_transcript_lacks_is_refused(
+    kyo, project: Path, tmp_path
+) -> None:
     declare_person(project)
     write_transcript(CONVERSATION)
-    ran = kyo("new", "decision", "--title", "X", "--quote-file", _file(tmp_path / "w", "keep the cache"),
+    ran = kyo("new", "decision", "--title", "X",
+              "--quote-file", _file(tmp_path / "w", "keep the cache"),
               "--decision-file", _decision_file(tmp_path, "outcome: unprompted\n"),
               "--session", SESSION, "--span-first", "p-1", "--span-last", "nope")  # fmt: skip
     assert ran.code == 64 and "nope" in ran.err, ran
@@ -514,7 +551,9 @@ def _approval(kyo, project: Path, tmp_path: Path) -> str:
     return ran.json["credit_id"]
 
 
-def test_kyo_credit_needs_a_basis_and_accepts_the_persons_approval(kyo, project: Path, tmp_path) -> None:
+def test_kyo_credit_needs_a_basis_and_accepts_the_persons_approval(
+    kyo, project: Path, tmp_path
+) -> None:
     """KYO-644.c4."""
     record = new_record(kyo, criteria=["a"])
     declare_person(project)
@@ -565,7 +604,9 @@ def test_an_authorized_go_ahead_takes_no_decision_file(kyo, project: Path, tmp_p
     record = new_record(kyo, criteria=["a"])
     declare_person(project)
     with _db(project) as conn:
-        conn.execute("UPDATE records SET created_at = '2026-11-06T09:00:00.000Z' WHERE id = ?", (record,))
+        conn.execute(
+            "UPDATE records SET created_at = '2026-11-06T09:00:00.000Z' WHERE id = ?", (record,)
+        )
     write_transcript(CONVERSATION)
     with_file = kyo("credit", record, "--role", "authorized",
                     "--quote-file", _file(tmp_path / "w", "keep the cache"), "--session", SESSION,
@@ -623,7 +664,8 @@ def test_redact_covers_a_credits_free_text_and_the_ledgers(kyo, project: Path, t
             assert "4421-XYZ" not in json.dumps(tuple(row)), row
     doctor = kyo("doctor")
     assert "4421" not in doctor.out + doctor.err
-    assert "credit" not in " ".join(l for l in doctor.out.splitlines() if "redact" in l), doctor
+    redaction_lines = [line for line in doctor.out.splitlines() if "redact" in line]
+    assert not any("credit" in line for line in redaction_lines), doctor
 
 
 def test_kyo_credit_writes_an_event(kyo, project: Path, tmp_path) -> None:

@@ -434,15 +434,12 @@ def requires_credit(project: Path, kind: str) -> bool:
     return policy.get("requires_credit") is True
 
 
-def decision_credit_args(project: Path, cleanup: contextlib.ExitStack) -> list[str]:
+def decision_credit_args(project: Path) -> list[str]:
     """The flags a decided credit takes, with the person declared and the files written."""
     declare_person(project)
-    handle = cleanup.enter_context(
-        tempfile.NamedTemporaryFile("w", suffix=".yml", encoding="utf-8")
-    )
-    handle.write(DECISION_FILE)
-    handle.flush()
-    return ["--decision-file", handle.name, "--person", TEST_PERSON, *CREDIT_ELSEWHERE]
+    path = Path(project).parent / "kyo644-decision.yml"
+    path.write_text(DECISION_FILE, encoding="utf-8")
+    return ["--decision-file", str(path), "--person", TEST_PERSON, *CREDIT_ELSEWHERE]
 
 
 def new_record(
@@ -476,7 +473,7 @@ def new_record(
             if requires_credit(project, kind):
                 args += ["--quote-file", handle.name]
         if project is not None and requires_credit(project, kind):
-            args += decision_credit_args(project, cleanup)
+            args += decision_credit_args(project)
         result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result.json["record"]["id"]

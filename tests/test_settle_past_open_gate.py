@@ -145,7 +145,8 @@ def test_ungating_then_repeating_the_move_succeeds(kyo) -> None:
     record = _met_record(kyo)
     gate_id = _gate(kyo, record)
     assert kyo("move", record, "done").code == 2
-    assert kyo("ungate", gate_id, "--withdrawn", "--why", "ran it; the summary is on the record").code == 0
+    why = "ran it; the summary is on the record"
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", why).code == 0
     moved = kyo("move", record, "done")
     assert moved.code == 0, moved
     assert _status(kyo, record) == "done"
