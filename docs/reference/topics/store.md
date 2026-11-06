@@ -524,7 +524,7 @@ so the first can never be used to disguise the second.
 
 A criterion's state is **derived**, never set directly, for the three states that
 are verified facts (`met`, `unmet-unbuilt`, `unmet-unobserved`): `kyo verify
-<criterion-id> --verdict ... --method machine-checked|human-observed|reasoned-about
+<criterion-id> --verdict ... --method machine-checked|human-observed|reasoned-about|agent-observed
 [--evidence-file f]` records the verification and moves the state to match its
 verdict. Only the two void states may still be set directly, via `kyo edit
 --criterion <id> --state void-premise-gone|void-withdrawn --why ...` — premise

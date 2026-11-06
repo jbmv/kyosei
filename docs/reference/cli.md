@@ -1536,7 +1536,7 @@ Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 ### Options
 
 - `--verdict VERDICT` — optional. met | unmet-unbuilt | unmet-unobserved
-- `--method METHOD` — optional. machine-checked | human-observed | reasoned-about
+- `--method METHOD` — optional. machine-checked | human-observed | reasoned-about | agent-observed
 - `--evidence-file FILE` — optional. captured evidence from a file, or '-' for stdin
 - `--from-report DISPATCH_ID` — optional. apply that dispatch's current report's own criteria_verdicts[] — verdict, method, evidence and reason each read from the report rather than retyped (KYO-198); takes no CRITERION_ID of its own
 - `--only CRITERION_ID [CRITERION_ID ...]` — optional. with --from-report: apply only these criteria's verdicts and leave the rest of the report's unapplied
