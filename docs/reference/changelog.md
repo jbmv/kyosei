@@ -406,6 +406,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-06** — `KYO-666` (task) — A reconstructed decided credit may leave its outcome unrecorded
 - **2026-11-06** — `KYO-665` (investigation) — Prepare and dry-run the backfill batches from the approved candidate sheet
 - **2026-11-06** — `KYO-653` (task) — kyo credit --recheck and --batch, and live go-ahead credits not read as reconstructed
+- **2026-11-06** — `KYO-652` (task) — Methodology of the provenance backfill, for readers of the credits
 - **2026-11-06** — `KYO-651` (proposal) — Capturing a decision process as it happens, not reconstructed from transcripts
 - **2026-11-06** — `KYO-649` (task) — Write the approved backfill credits
 - **2026-11-06** — `KYO-648` (investigation) — Refresh the backfill candidates against the transcripts recovered from Time Machine
