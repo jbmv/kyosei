@@ -380,3 +380,44 @@ def test_an_authorized_credit_is_never_shown_or_found_as_decided(kyo, project: P
     assert [r["id"] for r in kyo("list", "--person", "jbmv", "--json").json["records"]] == [
         decision
     ]
+
+
+# ------------------------------------------------------------------ KYO-653.c3
+
+
+def _doc_with_credit(**credit) -> tuple[dict, dict]:
+    doc = {"created_at": "2026-11-06T09:00:00.000Z", "gates": [], "criteria": []}
+    base = {
+        "created_at": "2026-11-06T09:00:00.000Z",
+        "basis_id": None,
+        "observed_at": None,
+        "subjects": [{"kind": "record", "id": "X-1"}],
+    }
+    return doc, {**base, **credit}
+
+
+def test_a_credit_one_second_after_its_subject_is_reconstructed() -> None:
+    """KYO-653.c3: there is no tolerance; writers stamp the subject's own time."""
+    from kyosei import render
+
+    assert not hasattr(render, "RECONSTRUCTED_WINDOW_SECONDS")
+    doc, same = _doc_with_credit()
+    assert render.credit_reconstructed(doc, same) is False
+    doc, late = _doc_with_credit(created_at="2026-11-06T09:00:01.000Z")
+    assert render.credit_reconstructed(doc, late) is True
+
+
+def test_a_go_ahead_given_after_its_subject_is_not_reconstructed_unless_it_has_a_basis() -> None:
+    """KYO-653.c3: matched turn later than the subject and no basis (written from the
+    session that holds the turn) is live; the same credit resting on a basis is not."""
+    from kyosei import render
+
+    later = {"created_at": "2026-11-06T10:05:00.000Z", "observed_at": "2026-11-06T10:01:00.000Z"}
+    doc, live = _doc_with_credit(**later)
+    assert render.credit_reconstructed(doc, live) is False
+    doc, based = _doc_with_credit(basis_id="X-1.p1", **later)
+    assert render.credit_reconstructed(doc, based) is True
+    doc, before = _doc_with_credit(
+        created_at="2026-11-06T10:05:00.000Z", observed_at="2026-11-06T08:00:00.000Z"
+    )
+    assert render.credit_reconstructed(doc, before) is True

@@ -612,8 +612,17 @@ def test_an_authorized_go_ahead_takes_no_decision_file(kyo, project: Path, tmp_p
                     "--quote-file", _file(tmp_path / "w", "keep the cache"), "--session", SESSION,
                     "--decision-file", _decision_file(tmp_path, "outcome: accepted\n"))  # fmt: skip
     assert with_file.code == 64, with_file
-    ok = kyo("credit", record, "--role", "authorized", "--quote-file", str(tmp_path / "w"),
-             "--session", SESSION, "--json")  # fmt: skip
+    # KYO-653: a go-ahead needs no basis only when credited from the session that holds it.
+    elsewhere = kyo("credit", record, "--role", "authorized", "--quote-file", str(tmp_path / "w"),
+                    "--session", SESSION)  # fmt: skip
+    assert elsewhere.code == 2 and "reconstructed-credit-requires-basis" in elsewhere.err
+    assert SESSION in elsewhere.err
+    os.environ["CLAUDE_CODE_SESSION_ID"] = SESSION
+    try:
+        ok = kyo("credit", record, "--role", "authorized", "--quote-file", str(tmp_path / "w"),
+                 "--session", SESSION, "--json")  # fmt: skip
+    finally:
+        del os.environ["CLAUDE_CODE_SESSION_ID"]
     assert ok.code == 0, ok
     credit = next(c for c in _credits(project) if c["id"] == ok.json["credit_id"])
     assert credit["role"] == "authorized"

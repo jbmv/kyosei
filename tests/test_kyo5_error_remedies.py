@@ -3786,6 +3786,21 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
+    "credits.py:recheck#4": (
+        "the transcript placed where Claude Code keeps it, then the same `kyo credit "
+        "--recheck <id>`; proved by test_kyo653_a_transcript_still_absent_is_cleared_by_placing_it"
+    ),
+    "credits.py:batch#5": (
+        "`kyo credit <id> --supersede <credit>` for the one subject, as for any credit; "
+        "proved by test_kyo644_an_already_credited_subject_is_cleared_by_superseding and "
+        "test_kyo653_a_batch_over_a_credited_subject_names_the_line"
+    ),
+    "credits.py:_batch_line#7": (
+        "`kyo credit` with --decision-file for the one refined credit, as for any; proved by "
+        "tests/test_kyo644_credits.py::test_a_refined_decision_cites_the_refining_turn and "
+        "test_kyo653_a_batch_line_with_a_refined_outcome_is_named"
+    ),
     # KYO-493.c7: a worker branch whose fragment's `amends:` header `kyo docs assemble`
     # would refuse. The `kyo docs assemble` the message quotes names the command that
     # WOULD refuse, not the remedy; each refusal line carries its own.
@@ -4294,9 +4309,30 @@ RECORDED: dict[str, str] = {
         "a re-invocation giving --span-session; proved by "
         "test_kyo644_a_span_with_no_session_is_cleared_by_naming_it"
     ),
-    "credits.py:cmd_credit#6": (
+    "credits.py:cmd_credit#7": (
         "a re-invocation with --supersede and the id the message names; proved by "
         "test_kyo644_an_already_credited_subject_is_cleared_by_superseding"
+    ),
+    # KYO-653: `kyo credit --recheck` and `--batch`, each remedy run by a test below.
+    "credits.py:cmd_credit#0": (
+        "a re-invocation naming a subject, --recheck or --batch; proved by "
+        "test_kyo653_a_credit_naming_nothing_is_cleared_by_naming_something"
+    ),
+    "credits.py:cmd_credit#8": (
+        "the same command run from the session that holds the go-ahead; proved by "
+        "tests/test_kyo644_credits.py::test_an_authorized_go_ahead_takes_no_decision_file"
+    ),
+    "credits.py:recheck#0": (
+        "a re-invocation dropping the flags the message names; proved by "
+        "test_kyo653_a_recheck_beside_other_credit_flags_is_cleared_by_dropping_them"
+    ),
+    "credits.py:batch#0": (
+        "a re-invocation dropping the flags the message names; proved by "
+        "test_kyo653_a_batch_beside_per_credit_flags_is_cleared_by_dropping_them"
+    ),
+    "credits.py:batch#6": (
+        "the corrected file and the same command; proved by "
+        "test_kyo653_a_batch_with_a_bad_line_is_cleared_by_correcting_the_line"
     ),
     "credits.py:gate_clearing#0": (
         "a re-invocation with either --withdrawn or the credit flags; proved by "
@@ -6929,6 +6965,168 @@ def test_kyo644_an_already_credited_subject_is_cleared_by_superseding(tmp_path: 
     named = re.search(r"--supersede (\S+)", refused.err).group(1)
     assert named == first.json["credit_id"]
     assert kyo(*line, "--basis", approval, "--supersede", named).code == 0
+
+
+def _k653_credits(kyo, any_id: str) -> list[dict]:
+    """The credits on the record that ``any_id`` (a record or a child id) belongs to."""
+    return kyo("show", any_id.split(".")[0], "--json").json["credits"]
+
+
+def _k653_credit_by_session(tmp_path: Path):
+    """A reconstructed credit whose session transcript is not on this machine."""
+    root, kyo, vid, approval, _line = _k644_late(tmp_path)
+    line = ("credit", vid, "--quote-file", _k644_file(tmp_path, "sw", "it is fast"),
+            "--session", _K644_SESSION, "--basis", approval, "--json")  # fmt: skip
+    made = kyo(*line)
+    assert made.code == 0, made
+    assert _k653_credits(kyo, vid)[0]["transcript_check"] == "transcript-absent"
+    return root, kyo, made.json["credit_id"]
+
+
+def test_kyo653_a_transcript_that_has_appeared_is_cleared_by_recheck(tmp_path: Path) -> None:
+    """`credit_transcripts_appeared` names `kyo credit --recheck <id>`; running it with the
+    id the notice names supersedes the credit with the new outcome and clears the notice."""
+    _root, kyo, credit = _k653_credit_by_session(tmp_path)
+    assert "credit_transcripts_appeared" not in str(kyo("doctor", "--json").json["notices"])
+    _k644_transcript([("u-1", "it is fast")])
+    noticed = kyo("doctor", "--json")
+    text = str(noticed.json["notices"])
+    assert "credit_transcripts_appeared" in text and credit in text
+    assert "kyo credit --recheck <id>" in text
+    argv, unbound = bind_remedy("kyo credit --recheck <id>", {"<id>": credit})
+    assert argv is not None, unbound
+    done = kyo(*argv[1:], "--json")
+    assert done.code == 0, done
+    assert done.json["transcript_check"].startswith("matched") and done.json["superseded"] == credit
+    assert "credit_transcripts_appeared" not in str(kyo("doctor", "--json").json["notices"])
+    credits_ = {c["id"]: c for c in _k653_credits(kyo, credit)}
+    assert credits_[credit]["superseded_by"] == done.json["credit_id"]
+    new = credits_[done.json["credit_id"]]
+    assert new["transcript_check"].startswith("matched") and new["source_turn"] == "u-1"
+    assert new["created_at"] == credits_[credit]["created_at"]
+    assert new["basis_id"] == credits_[credit]["basis_id"]
+    assert new["subjects"] == credits_[credit]["subjects"]
+
+
+def test_kyo653_a_transcript_still_absent_is_cleared_by_placing_it(tmp_path: Path) -> None:
+    """`credit-transcript-still-absent`: with the transcript in place the same line works;
+    and a credit that is not transcript-absent is not rechecked."""
+    _root, kyo, credit = _k653_credit_by_session(tmp_path)
+    refused = kyo("credit", "--recheck", credit)
+    assert refused.code == EXIT_CONTRACT and "credit-transcript-still-absent" in refused.err
+    assert [c["id"] for c in _k653_credits(kyo, credit)] == [credit]
+    _k644_transcript([("u-1", "it is fast")])
+    assert kyo("credit", "--recheck", credit).code == 0
+    again = kyo("credit", "--recheck", credit)
+    assert again.code == 64 and "superseded" in again.err
+
+
+def test_kyo653_a_recheck_whose_words_are_not_in_the_transcript_is_refused(
+    tmp_path: Path,
+) -> None:
+    """`credit-quote-not-found` at recheck: a present transcript decides, with no override."""
+    _root, kyo, credit = _k653_credit_by_session(tmp_path)
+    _k644_transcript([("u-1", "something else entirely")])
+    refused = kyo("credit", "--recheck", credit)
+    assert refused.code == EXIT_CONTRACT and "credit-quote-not-found" in refused.err
+
+
+def _k653_two_verdicts(tmp_path: Path) -> tuple[Run, str, str, str, str]:
+    """Two human-observed verdicts with no credit, and the person's approval of both."""
+    _root, kyo, first, approval, _line = _k644_late(tmp_path)
+    record = first.split(".")[0]
+    kyo("edit", record, "--add-criteria-file", "-", stdin="another\n")
+    second = kyo("verify", f"{record}.c2", "--verdict", "met", "--method", "agent-observed",
+                 "--json").json["verification_id"]  # fmt: skip
+    conn = sqlite3.connect(_root / "kyosei" / "kyosei.db")
+    conn.execute("UPDATE verifications SET method = 'human-observed' WHERE id = ?", (second,))
+    conn.commit()
+    conn.close()
+    return kyo, record, first, second, approval
+
+
+def test_kyo653_a_batch_with_a_bad_line_is_cleared_by_correcting_the_line(
+    tmp_path: Path,
+) -> None:
+    """`credit-batch-invalid` names each bad line and writes none; the corrected file is
+    written whole under one basis, and the count is reported."""
+    kyo, record, first, second, approval = _k653_two_verdicts(tmp_path)
+    good = f"{first}\t\tother:a call\t\t\t\tit is fast"
+    bad = f"{record}.v99\t\tother:a call\t\t\t\tit works"
+    path = _k644_file(tmp_path, "batch.tsv", "\n".join([good, bad, ""]))
+    refused = kyo("credit", "--batch", path, "--basis", approval)
+    assert refused.code == EXIT_CONTRACT and "credit-batch-invalid" in refused.err
+    assert "line 2" in refused.err and "line 1" not in refused.err, refused.err
+    assert _k653_credits(kyo, record) == []
+    fixed = _k644_file(
+        tmp_path, "fixed.tsv", f"# the backfill\n{good}\n{second}\t\tother:a call\t\t\t\tit works\n"
+    )
+    done = kyo("credit", "--batch", fixed, "--basis", approval, "--json")
+    assert done.code == 0, done
+    assert done.json["written"] == 2 and len(done.json["credit_ids"]) == 2
+    written = _k653_credits(kyo, record)
+    assert len(written) == 2 and {c["subjects"][0]["id"] for c in written} == {first, second}
+    assert all(c["quote_id"] for c in written)
+
+
+def test_kyo653_a_batch_without_a_basis_is_cleared_by_giving_one(tmp_path: Path) -> None:
+    kyo, _record, first, _second, approval = _k653_two_verdicts(tmp_path)
+    path = _k644_file(tmp_path, "b.tsv", f"{first}\t\tother:a call\t\t\t\tit is fast\n")
+    refused = kyo("credit", "--batch", path)
+    assert refused.code == EXIT_CONTRACT and "reconstructed-credit-requires-basis" in refused.err
+    assert kyo("credit", "--batch", path, "--basis", approval).code == 0
+
+
+def test_kyo653_a_credit_naming_nothing_is_cleared_by_naming_something(tmp_path: Path) -> None:
+    _root, kyo, credit = _k653_credit_by_session(tmp_path)
+    refused = kyo("credit")
+    assert refused.code == 64 and "--recheck" in refused.err and "--batch" in refused.err
+    _k644_transcript([("u-1", "it is fast")])
+    assert kyo("credit", "--recheck", credit).code == 0
+
+
+def test_kyo653_a_recheck_beside_other_credit_flags_is_cleared_by_dropping_them(
+    tmp_path: Path,
+) -> None:
+    _root, kyo, credit = _k653_credit_by_session(tmp_path)
+    _k644_transcript([("u-1", "it is fast")])
+    refused = kyo("credit", "--recheck", credit, "--role", "observed", "--person", "tester")
+    assert refused.code == 64 and "--role" in refused.err and "credit flag" in refused.err
+    assert kyo("credit", "--recheck", credit).code == 0
+
+
+def test_kyo653_a_batch_beside_per_credit_flags_is_cleared_by_dropping_them(
+    tmp_path: Path,
+) -> None:
+    kyo, _record, first, _second, approval = _k653_two_verdicts(tmp_path)
+    path = _k644_file(tmp_path, "b.tsv", f"{first}\t\tother:a call\t\t\t\tit is fast\n")
+    refused = kyo("credit", "--batch", path, "--basis", approval, "--role", "observed",
+                  "--source-other", "a call")  # fmt: skip
+    assert refused.code == 64 and "--role" in refused.err and "--source-other" in refused.err
+    assert kyo("credit", "--batch", path, "--basis", approval).code == 0
+
+
+def test_kyo653_a_batch_over_a_credited_subject_names_the_line(tmp_path: Path) -> None:
+    kyo, record, first, second, approval = _k653_two_verdicts(tmp_path)
+    one = _k644_file(tmp_path, "one.tsv", f"{first}\t\tother:a call\t\t\t\tit is fast\n")
+    assert kyo("credit", "--batch", one, "--basis", approval).code == 0
+    both = _k644_file(
+        tmp_path, "both.tsv",
+        f"{first}\t\tother:a call\t\t\t\tit is fast\n{second}\t\tother:a call\t\t\t\tok\n",
+    )  # fmt: skip
+    refused = kyo("credit", "--batch", both, "--basis", approval)
+    assert refused.code == EXIT_CONTRACT and "line 1" in refused.err and "line 2" not in refused.err
+    old = _k653_credits(kyo, record)[0]["id"]
+    assert kyo("credit", first, "--supersede", old, "--basis", approval,
+               "--quote-file", _k644_file(tmp_path, "q", "it is fast"),
+               "--source-other", "a call").code == 0  # fmt: skip
+
+
+def test_kyo653_a_batch_line_with_a_refined_outcome_is_named(tmp_path: Path) -> None:
+    kyo, record, _first, _second, approval = _k653_two_verdicts(tmp_path)
+    line = f"{record}\tdecided\tother:a call\t\trefined\ta plan\tdo it\n"
+    refused = kyo("credit", "--batch", _k644_file(tmp_path, "r.tsv", line), "--basis", approval)
+    assert refused.code == EXIT_CONTRACT and "line 1" in refused.err and "refined" in refused.err
 
 
 def test_kyo644_a_span_with_no_session_is_cleared_by_naming_it(tmp_path: Path) -> None:

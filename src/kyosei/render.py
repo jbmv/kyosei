@@ -405,12 +405,6 @@ def obligation_lines(obligations: list[dict], *, expand: bool = False) -> list[s
 # DOCUMENT (the export's shape: `credits[]` with their subjects inline), so `kyo show`,
 # `kyo list --overrode` and the tests derive from the same function (law 3).
 
-#: A credit written within this many seconds of its subject counts as written with it. The
-#: proposal says a credit written in the same transaction carries the same stamp; two
-#: `now()` calls in one transaction may still differ by milliseconds, and an hour late is
-#: what the marker is for.
-RECONSTRUCTED_WINDOW_SECONDS = 2
-
 _TRANSCRIPT_WORDS = {
     "matched": "transcript matched",
     "matched-paste-unknown": "transcript matched, paste unknown",
@@ -465,16 +459,24 @@ def _subject_written_at(doc: dict, kind: str, subject_id: str) -> str | None:
 def credit_reconstructed(doc: dict, credit: dict) -> bool:
     """Was this credit written after the fact? Derived, never stored (KYO-638 P8): its
     ``created_at`` is later than the write time of a subject -- ``verifications.created_at``,
-    ``gates.cleared_at`` or ``records.created_at``."""
+    ``gates.cleared_at`` or ``records.created_at``.
+
+    The comparison is exact: every writer that credits a row in its own transaction stamps
+    the credit with the subject's own time (KYO-644), so there is no tolerance (KYO-653).
+    One credit is later than its subject and still live: a go-ahead the person gave after
+    the subject was written, in words the transcript dates after it, credited from the
+    session that holds them. It carries no basis (a reconstructed credit always has one),
+    and `kyo credit` writes it only from that session.
+    """
     made = _instant(credit["created_at"])
+    observed = _instant(credit["observed_at"]) if credit.get("observed_at") else None
+    live = credit.get("basis_id") is None and observed is not None
     for subject in credit["subjects"]:
         written = _subject_written_at(doc, subject["kind"], subject["id"])
         written_at = _instant(written) if written else None
-        if (
-            made is not None
-            and written_at is not None
-            and made - written_at > RECONSTRUCTED_WINDOW_SECONDS
-        ):
+        if made is not None and written_at is not None and made > written_at:
+            if live and observed > written_at:
+                continue
             return True
     return False
 
