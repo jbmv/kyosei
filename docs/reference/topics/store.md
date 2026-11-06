@@ -623,7 +623,10 @@ writing. `kyo show --json` carries the same in `credits[]` (person, role, outcom
 derived `reconstructed`, `person_name` and `overrides`; the export holds `credits[]` and
 none of the derived fields. `kyo list --json` rows carry `people`, and `kyo changelog`
 adds "decided by" to the entry of a completed record carrying a decided credit (a decision
-record itself has no completion, so the changelog never lists it).
+record itself has no completion, so the changelog never lists it). A credit withdrawn with
+`kyo credit --withdraw` (KYO-670) is shown in its own `withdrawn credits` block, with its
+words, who withdrew it, when and why, and counts nowhere a current credit counts: not
+beside its rows, not in `people` and not in `--person`, `--decided-by` or `--overrode`.
 
 The link graph is the one view with no terminal equivalent; it is the desktop
 app's or nothing.
