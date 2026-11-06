@@ -508,8 +508,9 @@ def uncredited_rows(store: Store) -> list[dict]:
 
     A row is ``{"record": id, "type": "verdict"|"gate"|"decision", "id": row id,
     "schema": int}``. A gate cleared as ``withdrawn`` says plainly that nobody answered and
-    is not counted. The writing event is the record's first event at or after the row's own
-    timestamp (an event is stamped just after its row); a row with no such event, or whose
+    is not counted, and neither is a verdict a later agent-observed verdict on the same
+    criterion restates: that is the remedy the legacy notice names (KYO-667). The writing
+    event is the record's first event at or after the row's own timestamp (an event is stamped just after its row); a row with no such event, or whose
     line is not in the ledger, counts as written before credits, because the ledger-gap
     check is what names that and exit 3 here would name the wrong thing.
     """
@@ -520,7 +521,9 @@ def uncredited_rows(store: Store) -> list[dict]:
     found: list[tuple[str, str, str, str]] = []  # (type, record, id, written_at)
     for row in store.conn.execute(
         "SELECT v.id, v.record_id, v.created_at FROM verifications v WHERE v.method = "
-        "'human-observed' AND " + credited.format("v") + " ORDER BY v.record_id, v.seq",
+        "'human-observed' AND " + credited.format("v") + " AND NOT EXISTS (SELECT 1 FROM "
+        "verifications later WHERE later.criterion_id = v.criterion_id AND later.seq > v.seq "
+        "AND later.method = 'agent-observed') ORDER BY v.record_id, v.seq",
         ("verification",),
     ):
         found.append(("verdict", row["record_id"], row["id"], row["created_at"]))
