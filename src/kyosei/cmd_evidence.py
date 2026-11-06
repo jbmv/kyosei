@@ -24,6 +24,7 @@ from .commands import (
 from .contracts import (
     CLAIM_LEVELS,
     CONTRACT_VERIFY_FROM_REPORT_NEEDS_A_REPORT,
+    CONTRACT_VERIFY_FROM_REPORT_WORKER_HUMAN_OBSERVED,
     CONTRACT_VERIFY_ONLY_NAMES_AN_ABSENT_CRITERION,
     EDIT_DIRECT_CRITERION_STATES,
     ROLE_COMPLETE,
@@ -42,6 +43,7 @@ from .render import (
     echo_block,
     echo_value,
 )
+from .report_schema import WORKER_FORBIDDEN_METHOD
 
 
 def cmd_claim(ctx: Context, args: Namespace) -> Output:
@@ -324,6 +326,37 @@ def _selected_verdicts(
     return [entry for entry in verdicts if entry["criterion_id"] in wanted]
 
 
+def _refuse_worker_human_observed(
+    dispatch_id: str, report_id: str, selected: list[dict]
+) -> None:
+    """KYO-645 (decision KYO-640, P11): re-apply the KYO-537 worker ban at apply time.
+
+    ``human-observed`` says a person looked; a dispatched worker's report may not carry
+    it. Ingest refuses it, but the stored report is what gets applied, so it is checked
+    again here, before anything is written. Only the verdicts about to be applied are
+    checked, so ``--only`` / ``--except`` can still apply the others.
+    """
+    offending = [e["criterion_id"] for e in selected if e.get("method") == WORKER_FORBIDDEN_METHOD]
+    if not offending:
+        return
+    raise ContractViolation(
+        CONTRACT_VERIFY_FROM_REPORT_WORKER_HUMAN_OBSERVED,
+        [
+            f"report {report_id} gives {criterion_id} the method "
+            f"{WORKER_FORBIDDEN_METHOD!r}, which says a person looked and is reserved for "
+            "the orchestrator's own recording of a person's observation; a worker's report "
+            "may not carry it (KYO-537)"
+            for criterion_id in offending
+        ]
+        + [
+            "nothing was applied. File a corrected report that supersedes it, with the "
+            f"method changed to 'reasoned-about' and `amends` set to {report_id}: "
+            f"`kyo report {dispatch_id} --file <corrected-report>`. A person's own "
+            "observation is recorded by you with `kyo confirm`, not carried by a report"
+        ],
+    )
+
+
 def gate_prompt_lines(gate_prompts: list[dict]) -> list[str]:
     """What ``kyo verify --from-report`` prints for each wait nothing makes findable.
 
@@ -393,6 +426,7 @@ def _verify_from_report(ctx: Context, args: Namespace) -> Output:
     dispatch_id = args.from_report
     report_id, verdicts = _report_verdicts(store, dispatch_id)
     selected = _selected_verdicts(dispatch_id, report_id, verdicts, args.only)
+    _refuse_worker_human_observed(dispatch_id, report_id, selected)
 
     again = bool(getattr(args, "again", False))
 
