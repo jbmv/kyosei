@@ -35,7 +35,6 @@ from .contracts import (
     replaced_by,
 )
 from .errors import ContractViolation, KyoseiError, UsageError
-from .report_schema import WORKER_FORBIDDEN_METHOD
 from .prose import (
     read_prose,
     single_line,
@@ -44,6 +43,7 @@ from .render import (
     echo_block,
     echo_value,
 )
+from .report_schema import WORKER_FORBIDDEN_METHOD
 
 
 def cmd_claim(ctx: Context, args: Namespace) -> Output:
@@ -344,15 +344,15 @@ def _refuse_worker_human_observed(
         [
             f"report {report_id} gives {criterion_id} the method "
             f"{WORKER_FORBIDDEN_METHOD!r}, which says a person looked and is reserved for "
-            "`kyo confirm` / `kyo verify`; a worker's report may not carry it (KYO-537)"
+            "the orchestrator's own recording of a person's observation; a worker's report "
+            "may not carry it (KYO-537)"
             for criterion_id in offending
         ]
         + [
-            "nothing was applied. Either have the worker file a corrected report "
-            f"(`kyo report {dispatch_id} --file <corrected-report>`, with `amends` set "
-            f"to {report_id} and the method changed to 'reasoned-about'), or exclude "
-            f"{', '.join(offending)} with `--only` / `--except`, then record the "
-            "observation yourself with `kyo confirm` or `kyo verify --method human-observed`"
+            "nothing was applied. File a corrected report that supersedes it, with the "
+            f"method changed to 'reasoned-about' and `amends` set to {report_id}: "
+            f"`kyo report {dispatch_id} --file <corrected-report>`. A person's own "
+            "observation is recorded by you with `kyo confirm`, not carried by a report"
         ],
     )
 

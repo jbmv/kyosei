@@ -2298,6 +2298,47 @@ def _a_dispatch_that_has_not_reported(at: Path) -> Provocation:
     return Provocation(root, ("verify", "--from-report", dispatched.json["dispatch_id"]))
 
 
+def _a_stored_report_carrying_human_observed(at: Path) -> Provocation:
+    root, record = _project_with_a_record(at)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "-m", "work")
+    kyo = _runner(root)
+    dispatched = kyo("dispatch", record, "--json")
+    assert dispatched.code == 0, dispatched
+    dispatch_id = dispatched.json["dispatch_id"]
+    report = at / "stored-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "dispatch_id": dispatch_id,
+                "record_id": record,
+                "worked_from_sha": dispatched.json["worked_from_sha"],
+                "criteria_verdicts": [
+                    {"criterion_id": f"{record}.c1", "verdict": "met", "method": "reasoned-about"}
+                ],
+                "premise_false": [],
+                "disagreements": [],
+                "corrected_numbers": [],
+                "commits": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingested = kyo("report", dispatch_id, "--file", str(report), "--json")
+    assert ingested.code == 0, ingested
+    # Ingest refuses the method, so the stored body is rewritten the way a report stored
+    # before KYO-537 already reads.
+    conn = sqlite3.connect(root / "kyosei" / "kyosei.db")
+    row = conn.execute("SELECT body_json FROM reports").fetchone()
+    body = json.loads(row[0])
+    body["criteria_verdicts"][0]["method"] = "human-observed"
+    conn.execute("UPDATE reports SET body_json = ?", (json.dumps(body),))
+    conn.commit()
+    conn.close()
+    return Provocation(root, ("verify", "--from-report", dispatch_id))
+
+
 def _from_report_beside_a_typed_verdict(at: Path) -> Provocation:
     root, record = _project_with_a_record(at)
     _git(root, "init", "-q", "-b", "main")
@@ -3203,6 +3244,37 @@ PROVOKED: dict[str, Expectation] = {
                 }
             )
             + "\n"
+        },
+    ),
+    # KYO-645. About STATE: a corrected report that supersedes the stored one clears it.
+    "cmd_evidence.py:_refuse_worker_human_observed#0": Expectation(
+        _a_stored_report_carrying_human_observed,
+        bindings={"<corrected-report>": "{scratch}/corrected-report.json"},
+        scratch_files={
+            "corrected-report.json": json.dumps(
+                {
+                    "dispatch_id": "TST-1.d1",
+                    "record_id": "TST-1",
+                    "worked_from_sha": "0123456789abcdef0123456789abcdef01234567",
+                    "criteria_verdicts": [
+                        {
+                            "criterion_id": "TST-1.c1",
+                            "verdict": "met",
+                            "method": "reasoned-about",
+                        }
+                    ],
+                    "premise_false": [],
+                    "disagreements": [],
+                    "corrected_numbers": [],
+                    "commits": [],
+                    "amends": "TST-1.r1",
+                }
+            )
+            + "\n"
+        },
+        descriptive={
+            "kyo confirm": "names the orchestrator's own act, which needs the person's "
+            "words; it is not a way to clear this refusal"
         },
     ),
     # KYO-198. A verdict typed beside `--from-report`: the remedy is the one-criterion
