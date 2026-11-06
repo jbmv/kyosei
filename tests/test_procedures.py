@@ -608,6 +608,8 @@ STORE_ONLY_RULES = frozenset(
         "does at a step",
         "Declare the dispatch's branch with `kyo dispatch --branch`",
         "Quote the maintainer verbatim; never file their report as your own paraphrase",
+        # 2026-11-06: this repository is public; KYO-669 adds the mechanical half at push.
+        "Commit messages describe the change, never the maintainer's circumstances",
     }
 )
 
