@@ -118,6 +118,7 @@ export const RECORDS_READ_COMMANDS: readonly string[] = [
 export const KYO_WRITING_COMMANDS: readonly string[] = [
   "init",
   "new",
+  "credit",
   "promote",
   "spawn",
   "edit",
