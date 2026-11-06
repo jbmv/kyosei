@@ -2573,11 +2573,16 @@ def test_agent_observed_is_a_method_kyo_verify_and_a_worker_report_accept(
 
 # --------------------------------------------------------------------- KYO-642.c5
 
-_SPAN = dict(
-    span_session="7212f0bb-a568-49c4-9b87-d3209a201b6b", span_first_turn="u-1",
-    span_last_turn="u-9", span_person_turns=4, span_agent_turns=5, span_active_seconds=620,
-    span_started_at="2026-11-06T10:00:00.000Z", span_ended_at="2026-11-06T11:30:00.000Z",
-)  # fmt: skip
+_SPAN = {
+    "span_session": "7212f0bb-a568-49c4-9b87-d3209a201b6b",
+    "span_first_turn": "u-1",
+    "span_last_turn": "u-9",
+    "span_person_turns": 4,
+    "span_agent_turns": 5,
+    "span_active_seconds": 620,
+    "span_started_at": "2026-11-06T10:00:00.000Z",
+    "span_ended_at": "2026-11-06T11:30:00.000Z",
+}
 
 
 def test_a_credit_stores_the_form_of_its_words_and_a_discussion_span(

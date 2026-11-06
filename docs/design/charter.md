@@ -451,7 +451,8 @@ governs: src/kyosei/schema.py
   re-runnable form of the check). The shipped table carries neither, so nothing may be written
   or read against them.
 - **verifications**: criterion_id, verdict, method (`machine-checked | human-observed |
-  reasoned-about`), author, date, evidence_id.
+  reasoned-about | agent-observed`; the last is an agent's own look at the running system), author,
+  date, evidence_id.
 - **claims**: statement, level (`asserted|derived|verified`), instrument/method, author, date,
   verdict history (append-only), supersedes pointer, attached to any record.
 - **evidence_artifacts**: raw captures (request dumps, console excerpts, query outputs, pasted
@@ -472,6 +473,18 @@ governs: src/kyosei/schema.py
   A settled row is an assertion with provenance (law 9), which is what makes it different from a
   timestamp; an open one is `verdict IS NULL`, so there is no state where a row claims to have been
   settled by nobody.
+- **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a
+  verification, a gate clearing or a decision record rests on, as a row of its own rather than
+  columns on the rows it credits, so crediting a historical verdict updates nothing already
+  written (law 4) and one act of a person answers several rows once (law 3). A credit names a
+  person declared under `people:` in `kyosei/config.yml`, holds the person's words as an evidence
+  artifact, and cites where they were said: a session and transcript turn, or one line of prose.
+  It records the form of the matched words (typed, mid-turn, choice, accepted-suggestion), and,
+  for a decision, the recommendation, its outcome (`accepted | refined | overrode | unprompted`;
+  a refined credit also cites the refining turn) and an optional discussion span cited by id
+  with measured turn counts and active time. No transcript text is stored. A gate also carries
+  `cleared_as` (`answered | withdrawn`). Whether a credit is reconstructed is derived from
+  timestamps, not stored.
 - **links** (typed edges): `blocks`, `duplicates`, `supersedes`, `same-question-as`,
   `needs-same-change-as`, `depends-on-decision <record#claim>`, `produced-by`. Cycle-checked
   at write time.
