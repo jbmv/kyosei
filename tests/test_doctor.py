@@ -712,7 +712,11 @@ def _waiting_on_a_person(kyo, *, reason: str = "the maintainer has not looked ye
 
 def _ungated_unobserved_notices(kyo) -> list[str]:
     result = kyo("doctor", "--json")
-    assert result.code == 0, result
+    # KYO-646: a human-observed verdict recorded here has no credit, which doctor names as a
+    # problem; this helper reads the notice and is not about that.
+    assert result.code == 0 or all(
+        problem.startswith("[credit_coverage] ") for problem in result.json["problems"]
+    ), result
     return [
         notice
         for notice in result.json["notices"]

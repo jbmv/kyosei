@@ -55,8 +55,10 @@ def test_voiding_a_verified_criterion_by_hand_leaves_doctor_clean(kyo) -> None:
     """`kyo split` is not the only door: `kyo edit --criterion --state` sets the
     same two void states directly, and hit the same wall."""
     record = new_record(kyo, kind="task", title="Void me", criteria=["the only one"])
+    # KYO-646: not human-observed, which doctor reports as a problem until a credit names
+    # the person; the method is not what this test is about.
     assert kyo(
-        "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed"
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "reasoned-about"
     ).code == 0
     assert kyo(
         "edit",
