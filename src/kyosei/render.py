@@ -422,8 +422,33 @@ _ROLE_VERB = {
 
 
 def current_credits(doc: dict) -> list[dict]:
-    """The credits of ``doc`` that nothing has superseded."""
-    return [c for c in doc.get("credits") or [] if not c.get("superseded_by")]
+    """The credits of ``doc`` that nothing has superseded and nobody has withdrawn."""
+    return [
+        c
+        for c in doc.get("credits") or []
+        if not c.get("superseded_by") and not c.get("withdrawn_at")
+    ]
+
+
+def withdrawn_credit_lines(doc: dict, evidence: dict[str, str]) -> list[str]:
+    """KYO-670: the block ``kyo show`` gives the credits withdrawn with ``kyo credit
+    --withdraw``. A withdrawn credit is shown nowhere a current one is, so it is shown
+    here, with its words, who withdrew it, when and why. No block when there are none."""
+    withdrawn = [c for c in doc.get("credits") or [] if c.get("withdrawn_at")]
+    if not withdrawn:
+        return []
+    out = ["", f"withdrawn credits ({len(withdrawn)}):"]
+    for credit in withdrawn:
+        subjects = ", ".join(s["id"] for s in credit["subjects"])
+        out.append(
+            f"  {credit['id']}  {_ROLE_VERB.get(credit['role'], credit['role'])} "
+            f"{credit['person']} ({subjects}){_quote_clause(credit, evidence)}"
+        )
+        out.append(
+            f"      withdrawn {credit['withdrawn_at']} by {credit['withdrawn_by']}: "
+            f"{credit['withdrawn_why']}"
+        )
+    return out
 
 
 def credits_for(doc: dict, kind: str, subject_id: str) -> list[dict]:
@@ -1089,6 +1114,7 @@ def show_text(
         out.append(f"  {note['id']}  {note['created_at']}{marker}")
         out.extend(f"    | {line}" for line in note["text"].split("\n"))
 
+    out += withdrawn_credit_lines(doc, quotes)
     out += _members_block(members or [], standings)
     return "\n".join(out)
 

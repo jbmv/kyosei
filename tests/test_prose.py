@@ -73,6 +73,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--span-session",  # a Claude Code session id (KYO-644)
         "--credit",  # a credit id (KYO-644)
         "--recheck",  # a credit id (KYO-653)
+        "--withdraw",  # a credit id (KYO-670)
         "--batch",  # a file path to read credit lines from, not prose (KYO-653)
         "--role",  # observed | decided | authorized (KYO-644)
         "--kind",

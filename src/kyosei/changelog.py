@@ -267,7 +267,11 @@ def _decided_by(document: dict, people: dict[str, str | None]) -> tuple[str, ...
     in credit order, labelled as :func:`kyosei.config.person_label` labels them."""
     names: list[str] = []
     for credit in document.get("credits") or []:
-        if credit.get("role") != "decided" or credit.get("superseded_by"):
+        if (
+            credit.get("role") != "decided"
+            or credit.get("superseded_by")
+            or credit.get("withdrawn_at")
+        ):
             continue
         person = str(credit.get("person") or "")
         label = people.get(person) or person

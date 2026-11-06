@@ -1136,6 +1136,10 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("credit", "--span-session"): CREDIT_SPAN,
     ("credit", "--supersede"): CREDIT_NAMED_BY_REFUSAL,
     ("credit", "--turn"): CREDIT_NAMED_BY_REFUSAL,
+    # KYO-670: a correction to the credits already written, made when a review finds one
+    # that should not exist; the command reference names it.
+    ("credit", "--withdraw"): "a correction to a credit already written, read from the "
+    "command reference",
     ("move", "--person"): CREDIT_DEFAULTED,
     ("move", "--session"): CREDIT_DEFAULTED,
     ("move", "--source-other"): CREDIT_NAMED_BY_REFUSAL,

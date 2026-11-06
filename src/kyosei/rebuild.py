@@ -835,9 +835,10 @@ def _load(
                     " span_session, span_first_turn, span_last_turn, span_person_turns,"
                     " span_agent_turns, span_active_seconds, span_started_at,"
                     " span_ended_at, basis_id, author,"
-                    " created_at, superseded_by, superseded_at)"
+                    " created_at, superseded_by, superseded_at, withdrawn_at, withdrawn_by,"
+                    " withdrawn_why)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         credit["id"],
                         doc["id"],
@@ -871,6 +872,9 @@ def _load(
                         credit["created_at"],
                         credit["superseded_by"],
                         credit["superseded_at"],
+                        credit["withdrawn_at"],
+                        credit["withdrawn_by"],
+                        credit["withdrawn_why"],
                     ),
                 )
                 for subject in credit["subjects"]:

@@ -490,7 +490,10 @@ governs: src/kyosei/schema.py
   a refined credit also cites the refining turn) and an optional discussion span cited by id
   with measured turn counts and active time. No transcript text is stored. A gate also carries
   `cleared_as` (`answered | withdrawn`). Whether a credit is reconstructed is derived from
-  timestamps, not stored.
+  timestamps, not stored. A credit that should not exist is withdrawn rather than deleted
+  (schema_version 29, KYO-670): `withdrawn_at`, `withdrawn_by` and `withdrawn_why` record when,
+  by whom and why, the row and its words stay, and a credit is current only while it is neither
+  superseded nor withdrawn.
 - **links** (typed edges): `blocks`, `duplicates`, `supersedes`, `same-question-as`,
   `needs-same-change-as`, `depends-on-decision <record#claim>`, `produced-by`. Cycle-checked
   at write time.
@@ -534,6 +537,7 @@ kyo move <id> <status>            # enforces transition contracts AT the transit
 kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload the dashboard"
 kyo ungate <id> [--why]          # a gate waiting on a person: their credit, or --withdrawn (KYO-644)
 kyo credit <id>... --basis <credit>   # a credit for rows that already exist (KYO-644)
+kyo credit --withdraw <credit> --why  # retract a credit that should not exist, kept readable (KYO-670)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --criteria c3,c7   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles
