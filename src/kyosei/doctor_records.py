@@ -5,7 +5,10 @@ redactions, statuses, plan membership, links, flags. Registered in
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
+from pathlib import Path
 
 from . import contracts, ledger_scrub, links
 from . import registry as registry_module
@@ -394,4 +397,290 @@ def check_open_standing_obligations(store: Store) -> list[str]:
         "`kyo brief` lists them; settle each with `kyo docs settle <id> --verdict "
         "updated|not-affected --method <how>` once the section says what was decided "
         "(KYO-554)"
+    ]
+
+
+# ----------------------------------------------------------------------------- KYO-646
+#
+# P12 of decision KYO-640 (KYO-638 section 4.6): nothing written before credits existed is
+# rewritten, so `kyo doctor` says how many rows lack one (a NOTICE) and refuses the same
+# kind of row written after enforcement began (a PROBLEM). The tier is a property of a check
+# (:data:`kyosei.doctor.NOTICE_CHECKS`), so the two tiers are two checks.
+
+#: The schema_version from which a row that needs a credit carries one. The cut-off is read
+#: from the ledger line of the event that wrote the row, which every line stamps (KYO-181),
+#: and is not configured.
+CREDITS_SINCE_SCHEMA = 28
+
+_HUMAN_GATE_TYPES = ("awaiting:human-review", "awaiting:human-run")
+
+#: The end of an events-ledger line: the keys are written sorted, so the stamp and the
+#: sequence number are the last two, after any body however large. Reading them from the
+#: tail means a shard of 4 MB costs one pass and no JSON parse.
+_LINE_TAIL = re.compile(rb'(?:"schema_version": (\d+), )?"seq": (\d+)\}\s*$')
+
+#: Where a shard's runs are kept, in the doctor cache (``doctor_consumers``).
+_STAMP_CACHE_NAME = "ledger-stamps.json"
+
+
+def _shard_runs(path: Path) -> list[list[int]]:
+    """``[[first_seq, last_seq, schema_version], ...]`` for one ledger file, in line order.
+
+    A line with no stamp (written before KYO-181) is version 0. A line whose tail does not
+    read as above is parsed whole; one that does not parse at all is left out, which
+    ``check_ledger_gaps`` and the round trip name by line.
+    """
+    runs: list[list[int]] = []
+    with path.open("rb") as handle:
+        for raw in handle:
+            if not raw.strip():
+                continue
+            match = _LINE_TAIL.search(raw[-96:])
+            if match:
+                version = int(match.group(1) or 0)
+                seq = int(match.group(2))
+            else:
+                try:
+                    row = json.loads(raw)
+                    version, seq = int(row.get("schema_version") or 0), int(row["seq"])
+                except (ValueError, KeyError, TypeError):
+                    continue
+            if runs and runs[-1][2] == version and runs[-1][1] < seq:
+                runs[-1][1] = seq
+            else:
+                runs.append([seq, seq, version])
+    return runs
+
+
+def ledger_stamp_runs(store: Store) -> list[list[int]]:
+    """Every events-ledger line's ``schema_version``, as seq ranges.
+
+    Each file is scanned once and its runs kept in the doctor cache under the file's name,
+    size and mtime, so the next run reads only a file that changed (in practice the newest
+    shard): the ledger of this repository is 295 MB, which a Stop hook cannot parse each
+    turn.
+    """
+    from . import events_ledger
+    from .doctor_consumers import doctor_cache_dir, read_cache, write_cache
+
+    cache_path = doctor_cache_dir(store) / _STAMP_CACHE_NAME
+    cached = (read_cache(cache_path) or {}).get("files", {})
+    fresh: dict[str, dict] = {}
+    runs: list[list[int]] = []
+    for path in events_ledger.events_files(store):
+        stat = path.stat()
+        key = f"{path.parent.name}/{path.name}"
+        entry = cached.get(key)
+        if entry and entry.get("size") == stat.st_size and entry.get("mtime") == stat.st_mtime_ns:
+            file_runs = entry["runs"]
+        else:
+            file_runs = _shard_runs(path)
+        fresh[key] = {"size": stat.st_size, "mtime": stat.st_mtime_ns, "runs": file_runs}
+        runs.extend(file_runs)
+    if fresh != cached:
+        write_cache(cache_path, {"files": fresh})
+    return runs
+
+
+def _credit_kinds(store: Store) -> set[str]:
+    """The kinds whose records name the person who decided them.
+
+    ``policy.requires_credit`` where a kind declares it, and the kind ``decision`` where
+    nothing does (KYO-640: set on decision). A kind registry that does not load falls back
+    to ``decision``; ``kind_registry`` reports the file.
+    """
+    from . import kinds as kinds_module
+
+    try:
+        registry = kinds_module.load_kind_registry(store.config.kyosei_dir)
+    except KyoseiError:
+        return {"decision"}
+    return {
+        name
+        for name, kind in registry.kinds.items()
+        if kind.policy.get("requires_credit", name == "decision")
+    }
+
+
+def uncredited_rows(store: Store) -> list[dict]:
+    """Every human-observed verdict, human-gate clearing and decision record that no credit
+    names, each with the ``schema_version`` its writing event's ledger line is stamped with.
+
+    A row is ``{"record": id, "type": "verdict"|"gate"|"decision", "id": row id,
+    "schema": int}``. A gate cleared as ``withdrawn`` says plainly that nobody answered and
+    is not counted. The writing event is the record's first event at or after the row's own
+    timestamp (an event is stamped just after its row); a row with no such event, or whose
+    line is not in the ledger, counts as written before credits, because the ledger-gap
+    check is what names that and exit 3 here would name the wrong thing.
+    """
+    credited = (
+        "NOT EXISTS (SELECT 1 FROM credit_subjects cs WHERE cs.subject_kind = ? "
+        "AND cs.subject_id = {}.id)"
+    )
+    found: list[tuple[str, str, str, str]] = []  # (type, record, id, written_at)
+    for row in store.conn.execute(
+        "SELECT v.id, v.record_id, v.created_at FROM verifications v WHERE v.method = "
+        "'human-observed' AND " + credited.format("v") + " ORDER BY v.record_id, v.seq",
+        ("verification",),
+    ):
+        found.append(("verdict", row["record_id"], row["id"], row["created_at"]))
+    marks = ", ".join("?" * len(_HUMAN_GATE_TYPES))
+    for row in store.conn.execute(
+        f"SELECT g.id, g.record_id, g.cleared_at FROM gates g WHERE g.gate_type IN ({marks}) "
+        "AND g.cleared_at IS NOT NULL AND COALESCE(g.cleared_as, '') != 'withdrawn' AND "
+        + credited.format("g")
+        + " ORDER BY g.record_id, g.seq",
+        (*_HUMAN_GATE_TYPES, "gate"),
+    ):
+        found.append(("gate", row["record_id"], row["id"], row["cleared_at"]))
+    kinds = sorted(_credit_kinds(store))
+    if kinds:
+        kind_marks = ", ".join("?" * len(kinds))
+        for row in store.conn.execute(
+            f"SELECT r.id, r.created_at FROM records r WHERE r.kind IN ({kind_marks}) AND "
+            + credited.format("r")
+            + " ORDER BY r.seq",
+            (*kinds, "record"),
+        ):
+            found.append(("decision", row["id"], row["id"], row["created_at"]))
+    if not found:
+        return []
+    runs = ledger_stamp_runs(store)
+    events: dict[str, list[tuple[str, int]]] = {}
+    for event in store.conn.execute(
+        "SELECT record_id, at, seq FROM events WHERE record_id IS NOT NULL ORDER BY seq"
+    ):
+        events.setdefault(event["record_id"], []).append((event["at"], event["seq"]))
+
+    def schema_of(record: str, written_at: str) -> int:
+        for at, seq in events.get(record, ()):
+            if at >= written_at:
+                for low, high, version in runs:
+                    if low <= seq <= high:
+                        return version
+                return 0
+        return 0
+
+    return [
+        {"record": record, "type": kind, "id": row_id, "schema": schema_of(record, written_at)}
+        for kind, record, row_id, written_at in found
+    ]
+
+
+def _open_first(store: Store, records: set[str]) -> list[str]:
+    """``records`` with the unsettled ones first, each group in id order by sequence."""
+    from . import commands
+
+    try:
+        ladder = commands._load_status_ladder(store)
+    except KyoseiError:
+        ladder = None
+    status = {
+        row["id"]: row["status"]
+        for row in store.conn.execute("SELECT id, status FROM records ORDER BY seq")
+    }
+    order = {record: position for position, record in enumerate(status)}
+
+    def settled(record: str) -> bool:
+        return ladder is not None and ladder.is_settled(status.get(record, ""))
+
+    return sorted(records, key=lambda r: (settled(r), order.get(r, len(order))))
+
+
+def check_credit_coverage_legacy(store: Store) -> list[str]:
+    """KYO-646.c1: rows that need a credit and were written before schema 28 have none.
+
+    A NOTICE, and it argues the two things :data:`kyosei.doctor.NOTICE_CHECKS` asks of a
+    check whose finding names a remedy. The condition is EXPECTED: every verdict, gate
+    clearing and decision made before credits existed is in it, nothing is rewritten
+    (KYO-640), and it falls as the maintainer approves reconstructed credits in batches.
+    And failing would cost more than the finding is worth: exit 3 from the Stop hook over
+    history no command can change at once would paint every stop red until the last batch.
+    The same kind of row written at schema 28 or later is :func:`check_credit_coverage`'s.
+    """
+    rows = [r for r in uncredited_rows(store) if r["schema"] < CREDITS_SINCE_SCHEMA]
+    if not rows:
+        return []
+    count = {
+        kind: sum(1 for r in rows if r["type"] == kind) for kind in ("verdict", "gate", "decision")
+    }
+    by_record: dict[str, dict[str, int]] = {}
+    for r in rows:
+        tally = by_record.setdefault(r["record"], {})
+        tally[r["type"]] = tally.get(r["type"], 0) + 1
+    words = {"verdict": "verdict", "gate": "gate", "decision": "decision"}
+    listing = [
+        f"{record} ("
+        + ", ".join(
+            f"{n} {words[kind]}{'s' if n != 1 else ''}" for kind, n in by_record[record].items()
+        )
+        + ")"
+        for record in _open_first(store, set(by_record))
+    ]
+    from .currency import some_of
+
+    return [
+        f"{count['verdict']} human-observed verdicts, {count['gate']} human-gate clearings and "
+        f"{count['decision']} decision records were written before credits existed (before "
+        f"schema_version {CREDITS_SINCE_SCHEMA}) and credit no person; `kyo credit` adds a "
+        "reconstructed credit, and a verdict that was an agent's own observation is restated "
+        "with `kyo verify --method agent-observed` (KYO-646)",
+        "by record, open records first: " + some_of(listing, limit=6),
+    ]
+
+
+def check_credit_coverage(store: Store) -> list[str]:
+    """KYO-646.c2: a row that needs a credit, written at schema 28 or later, has none.
+
+    A PROBLEM: enforcement (``kyo verify``, ``kyo confirm``, ``kyo ungate``, ``kyo new`` of
+    a kind that requires a credit) refuses to write such a row, so one in the store means
+    the enforcement was bypassed, for example by a ledger merged from an older ``kyo``.
+    """
+    rows = [r for r in uncredited_rows(store) if r["schema"] >= CREDITS_SINCE_SCHEMA]
+    if not rows:
+        return []
+    from .currency import some_of
+
+    return [
+        f"{len(rows)} human-observed verdict(s), human-gate clearing(s) or decision record(s) "
+        f"written at schema_version {CREDITS_SINCE_SCHEMA} or later credit no person "
+        f"({some_of([r['id'] for r in rows])}): that cannot happen through the commands, so "
+        "the enforcement was bypassed, for example by a ledger merged from an older `kyo`. "
+        "`kyo credit` names the person who observed or decided it (KYO-646)"
+    ]
+
+
+def check_credit_transcripts_appeared(store: Store) -> list[str]:
+    """KYO-646: credits recorded as ``transcript-absent`` whose transcript is now here.
+
+    A NOTICE: the credit is valid as written, the check can simply be made now, and a
+    transcript reaching this machine later (a restored backup, a synced home directory) is
+    not a fault. ``kyo credit --recheck <id>`` redoes the check.
+    """
+    from . import cmd_sessions
+    from .currency import some_of
+    from .harness import claude_code_transcript as transcript
+
+    config = transcript.config_dir()
+    root = store.config.kyosei_dir.parent
+    appeared: list[str] = []
+    for row in store.conn.execute(
+        "SELECT id, source_session FROM credits WHERE transcript_check = 'transcript-absent' "
+        "AND source_kind = 'claude-code' AND source_session IS NOT NULL ORDER BY record_id, seq"
+    ):
+        try:
+            recorded = cmd_sessions.recorded_transcript_path(root, row["source_session"])
+            found = transcript.candidate_transcripts(
+                row["source_session"], config=config, recorded=recorded
+            )
+        except (ValueError, OSError):
+            continue
+        if found:
+            appeared.append(row["id"])
+    if not appeared:
+        return []
+    return [
+        f"{len(appeared)} credit(s) marked transcript-absent now have their transcript on "
+        f"this machine ({some_of(appeared)}): `kyo credit --recheck <id>` checks the quote "
+        "against it (KYO-646)"
     ]

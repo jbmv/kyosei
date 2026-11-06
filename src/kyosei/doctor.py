@@ -61,6 +61,11 @@ The checks, and the law each one keeps honest:
                               wait is in no Awaiting list. A NOTICE: the state is
                               expected, and the remedy is one `kyo gate` line
 ``check_criterion_verification_agreement``  law 3/KYO-4.c5 — state agrees with the latest verdict
+``check_credit_coverage``     KYO-646 — a human-observed verdict, human-gate clearing
+                              or decision record written at schema 28 or later credits
+                              no person (enforcement bypassed). Its two NOTICE siblings,
+                              ``credit_coverage_legacy`` (the same rows written earlier)
+                              and ``credit_transcripts_appeared``, name `kyo credit`
 ``check_completed_with_unmet_criteria``  KYO-415 — a record at its complete-role status
                               holding an unmet criterion. A NOTICE naming `kyo split
                               --to-successor` and reopening as the ways out
@@ -167,6 +172,9 @@ from .doctor_install import (
 )
 from .doctor_records import (
     check_completed_with_unmet_criteria,
+    check_credit_coverage,
+    check_credit_coverage_legacy,
+    check_credit_transcripts_appeared,
     check_criterion_states,
     check_criterion_verification_agreement,
     check_flag_resolution_consistency,
@@ -298,6 +306,12 @@ CHECK_ORDER = (
     # KYO-554: after the criterion checks and beside them -- another wait a record
     # carries, here on a document rather than on a person.
     "open_standing_obligations",
+    # KYO-646: after the criterion checks, because it reads verdicts; a problem for a row
+    # written at schema 28 or later, then two notices (rows from before credits, and
+    # credits whose transcript has since appeared).
+    "credit_coverage",
+    "credit_coverage_legacy",
+    "credit_transcripts_appeared",
     "redactions",
     "statuses",
     "plan_membership",
@@ -364,6 +378,9 @@ CHECKS = {
     "criterion_verification_agreement": check_criterion_verification_agreement,
     "completed_with_unmet_criteria": check_completed_with_unmet_criteria,
     "open_standing_obligations": check_open_standing_obligations,
+    "credit_coverage": check_credit_coverage,
+    "credit_coverage_legacy": check_credit_coverage_legacy,
+    "credit_transcripts_appeared": check_credit_transcripts_appeared,
     "redactions": check_redactions,
     "statuses": check_statuses,
     "plan_membership": check_plan_membership,
@@ -409,6 +426,11 @@ TIER_NOTICE = "notice"
 #: as a hook error on every stop — would cost the reader more than the finding is worth
 #: (docs/design/doctor.md#kyo-267). The members, and the argument each makes:
 #:
+#: * ``credit_coverage_legacy`` (KYO-646): every verdict, gate clearing and decision made
+#:   before credits existed is in it, nothing is rewritten, and it falls as reconstructed
+#:   credits are approved in batches; exit 3 would paint every stop red until the last.
+#: * ``credit_transcripts_appeared`` (KYO-646): the credit is valid as written; a transcript
+#:   arriving later only makes a stronger check possible.
 #: * ``unresolved_stops`` (KYO-214): it clears on its own; the only remedy is waiting.
 #: * ``procedures_rules_differ`` (KYO-212): the ledger is the project's to edit, so a
 #:   different wording may be deliberate, and nothing in the tool rewrites a rule that
@@ -465,6 +487,8 @@ NOTICE_CHECKS = frozenset(
         "kind_grants_missing",
         "kind_policy_missing",
         "open_standing_obligations",
+        "credit_coverage_legacy",
+        "credit_transcripts_appeared",
     }
 )
 
