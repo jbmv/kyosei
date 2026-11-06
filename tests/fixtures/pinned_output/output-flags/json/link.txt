@@ -15,6 +15,7 @@
     {
       "claims": [],
       "created_at": "2026-01-02T03:04:05.678Z",
+      "credits": [],
       "criteria": [
         {
           "created_at": "2026-01-02T03:04:05.678Z",
@@ -49,7 +50,7 @@
       "notes": [],
       "plan": null,
       "reports": [],
-      "schema_version": 27,
+      "schema_version": 28,
       "scope": null,
       "since_note": null,
       "status": "open",
@@ -61,6 +62,7 @@
     {
       "claims": [],
       "created_at": "2026-01-02T03:04:05.678Z",
+      "credits": [],
       "criteria": [
         {
           "created_at": "2026-01-02T03:04:05.678Z",
@@ -107,7 +109,7 @@
       "notes": [],
       "plan": null,
       "reports": [],
-      "schema_version": 27,
+      "schema_version": 28,
       "scope": null,
       "since_note": null,
       "status": "open",

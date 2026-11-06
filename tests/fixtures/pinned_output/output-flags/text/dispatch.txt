@@ -11,7 +11,7 @@ stored worker model: (not declared — nothing declared one — not kyosei/confi
 --force overrode the blocked refusal (1 blocker(s)):
   TST-2 (status working, not settled) through link TST-L1
 disjointness: computed from DECLARED touches. No other dispatch was running, so nothing was compared and nothing could have collided — this dispatch is unconstrained by the check rather than cleared by it.
-stored brief (15788 chars, sha256:<DIGEST>) — read it with `kyo show TST-1.d1` (or --print-brief)
+stored brief (15806 chars, sha256:<DIGEST>) — read it with `kyo show TST-1.d1` (or --print-brief)
 explained in `kyo reference dispatch`
 
 --err--

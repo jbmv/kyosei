@@ -4243,6 +4243,52 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-642: the `people:` refusals. Each remedy is a hand edit of kyosei/config.yml (the
+    # message prints the shape to write, or says to delete the key), which no `kyo` command
+    # performs. Proved by tests/test_schema_compat.py::
+    # test_the_people_key_is_declared_read_and_refused_when_malformed, which loads the
+    # corrected file and the file with the key deleted.
+    "config.py:parse_people#0": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_the_people_key_is_declared_read_and_refused_when_malformed"
+    ),
+    "config.py:parse_people#1": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_the_people_key_is_declared_read_and_refused_when_malformed"
+    ),
+    "config.py:parse_people#2": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_the_people_key_is_declared_read_and_refused_when_malformed"
+    ),
+    "config.py:parse_people#3": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_the_people_key_is_declared_read_and_refused_when_malformed"
+    ),
+    "config.py:parse_people#4": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_the_people_key_is_declared_read_and_refused_when_malformed"
+    ),
+    # KYO-642: `Store.add_credit`'s refusals, whose remedy is a different argument to the
+    # Python writer (no `kyo` command calls it until KYO-644). Proved by
+    # tests/test_schema_compat.py::test_a_refined_credit_without_its_refining_turn_is_refused
+    # and test_a_refined_credit_stores_the_refining_turn_beside_the_accepting_one, which
+    # run the corrected call.
+    "store.py:Store.add_credit#1": (
+        "a call passing both refining arguments; proved by "
+        "test_a_refined_credit_stores_the_refining_turn_beside_the_accepting_one"
+    ),
+    "store.py:Store.add_credit#2": (
+        "a call dropping the refining arguments; proved by "
+        "test_every_other_outcome_is_accepted_and_carries_no_refining_turn"
+    ),
+    "store.py:Store.add_credit#3": (
+        "a call passing the whole span or none; proved by "
+        "test_a_credit_stores_the_form_of_its_words_and_a_discussion_span"
+    ),
+    "store.py:Store.add_credit#4": (
+        "a call passing subjects; proved by every credit written in "
+        "tests/test_schema_compat.py"
+    ),
     # KYO-607: `kyo install-agents` refusals whose remedy is a flag or a re-invocation.
     "cmd_install_agents.py:cmd_install_agents#1": (
         "re-invoking with each template named once; proved by tests/test_install_agents.py"

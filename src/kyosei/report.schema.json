@@ -94,8 +94,8 @@
         },
         "method": {
           "type": "string",
-          "enum": ["machine-checked", "human-observed", "reasoned-about"],
-          "description": "How the verdict was reached (Core schema: verifications.method). 'machine-checked': a script, test, or query produced the verdict. 'human-observed': a person looked and confirmed — the orchestrator's label (`kyo verify`, `kyo confirm`); a worker's report may NOT use it, and `kyo report` refuses it in criteria_verdicts[] and docs_verdicts[] (KYO-537). 'reasoned-about': inferred from code/logic without a direct check — the weakest method, and should be named as such rather than dressed up as machine-checked."
+          "enum": ["machine-checked", "human-observed", "reasoned-about", "agent-observed"],
+          "description": "How the verdict was reached (Core schema: verifications.method). 'machine-checked': a script, test, or query produced the verdict. 'human-observed': a person looked and confirmed — the orchestrator's label (`kyo verify`, `kyo confirm`); a worker's report may NOT use it, and `kyo report` refuses it in criteria_verdicts[] and docs_verdicts[] (KYO-537). 'reasoned-about': inferred from code/logic without a direct check — the weakest method, and should be named as such rather than dressed up as machine-checked. 'agent-observed': you looked at the running system yourself (the live store, a command's output, the app's state as a tool reports it) and judged the result; use it in place of 'human-observed', which a worker may not claim."
         },
         "evidence": {
           "type": ["string", "null"],

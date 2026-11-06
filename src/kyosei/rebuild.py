@@ -557,6 +557,7 @@ ALLOCATED_CHILD_TABLES: tuple[tuple[str, str], ...] = (
     ("dispatches", "dispatch"),
     ("reports", "report"),
     ("flags", "flag"),
+    ("credits", "credit"),
     ("doc_refs", "doc-ref"),
     ("docs_obligations", "docs-obligation"),
 )
@@ -803,7 +804,8 @@ def _load(
             for gate in doc["gates"]:
                 conn.execute(
                     "INSERT INTO gates (id, record_id, seq, gate_type, detail, tags_json,"
-                    " created_at, cleared_at, cleared_why) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " created_at, cleared_at, cleared_why, cleared_as)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         gate["id"],
                         doc["id"],
@@ -819,8 +821,64 @@ def _load(
                         gate["created_at"],
                         gate["cleared_at"],
                         gate["cleared_why"],
+                        gate["cleared_as"],
                     ),
                 )
+            # KYO-642: a credit and the rows it answers. Loaded verbatim; the closed
+            # vocabularies are enforced where a credit is written, not rewritten here.
+            for credit in doc["credits"]:
+                conn.execute(
+                    "INSERT INTO credits (id, record_id, seq, person, role, quote_id,"
+                    " source_kind, source_session, source_turn, source_note,"
+                    " transcript_check, observed_at, recommended, recommended_by, outcome,"
+                    " alternatives_json, refining_session, refining_turn, words_form,"
+                    " span_session, span_first_turn, span_last_turn, span_person_turns,"
+                    " span_agent_turns, span_active_seconds, span_started_at,"
+                    " span_ended_at, basis_id, author,"
+                    " created_at, superseded_by, superseded_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        credit["id"],
+                        doc["id"],
+                        credit["seq"],
+                        credit["person"],
+                        credit["role"],
+                        credit["quote_id"],
+                        credit["source_kind"],
+                        credit["source_session"],
+                        credit["source_turn"],
+                        credit["source_note"],
+                        credit["transcript_check"],
+                        credit["observed_at"],
+                        credit["recommended"],
+                        credit["recommended_by"],
+                        credit["outcome"],
+                        json.dumps(credit["alternatives"]) if credit["alternatives"] else None,
+                        credit["refining_session"],
+                        credit["refining_turn"],
+                        credit["words_form"],
+                        credit["span_session"],
+                        credit["span_first_turn"],
+                        credit["span_last_turn"],
+                        credit["span_person_turns"],
+                        credit["span_agent_turns"],
+                        credit["span_active_seconds"],
+                        credit["span_started_at"],
+                        credit["span_ended_at"],
+                        credit["basis_id"],
+                        credit["author"],
+                        credit["created_at"],
+                        credit["superseded_by"],
+                        credit["superseded_at"],
+                    ),
+                )
+                for subject in credit["subjects"]:
+                    conn.execute(
+                        "INSERT INTO credit_subjects (credit_id, subject_kind, subject_id)"
+                        " VALUES (?, ?, ?)",
+                        (credit["id"], subject["kind"], subject["id"]),
+                    )
             # Milestone 5 (KYO-7): dispatches and reports point at each other
             # (dispatch.report_id -> reports, reports.dispatch_id -> dispatches);
             # foreign keys are OFF for the whole load (see module docstring), so
