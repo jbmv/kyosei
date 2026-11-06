@@ -428,19 +428,19 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `credit_id`, `record_id`, `quote_id`, `basis_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
-
-Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--role ROLE] [--basis CREDIT_ID] [--supersede CREDIT_ID] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] SUBJECT_ID [SUBJECT_ID ...]`
+Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--role ROLE] [--basis CREDIT_ID] [--supersede CREDIT_ID] [--recheck CREDIT_ID] [--batch FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [SUBJECT_ID ...]`
 
 ### Positional arguments
 
-- `SUBJECT_ID [SUBJECT_ID ...]` — **required**. verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record
+- `[SUBJECT_ID ...]` — optional. verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; none with --recheck or --batch
 
 ### Options
 
 - `--role ROLE` — optional. observed | decided | authorized; defaults to decided for a record, observed otherwise. authorized: a go-ahead approving a plan already stated
 - `--basis CREDIT_ID` — optional. the person's own decided credit approving this batch of reconstructed credits
 - `--supersede CREDIT_ID` — optional. replace this current credit of a subject; it stays readable as superseded
+- `--recheck CREDIT_ID` — optional. redo the transcript check of a credit recorded transcript-absent, and supersede it with the new outcome (what doctor's credit_transcripts_appeared notice names; KYO-653)
+- `--batch FILE` — optional. credit many rows at once, every line under the one --basis and --person, in one transaction or none at all (a bad line refuses the whole batch and is named). FILE is tab-separated, one credit per line, blank and #-lines skipped, with seven columns: subjects (ids, comma-separated, on one record); role (empty: decided for a record, observed otherwise); where (a Claude Code session id, or other:<where it was said>); turn (a transcript record uuid, or empty); outcome and recommended (a decided credit's accepted | overrode | unprompted and what was recommended, else empty; a refined outcome is credited alone); quote (the person's words, the rest of the line, with \n for a newline, \t for a tab and \\ for a backslash). Needs --basis (KYO-653)
 - `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript

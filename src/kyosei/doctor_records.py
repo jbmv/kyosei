@@ -655,7 +655,8 @@ def check_credit_transcripts_appeared(store: Store) -> list[str]:
 
     A NOTICE: the credit is valid as written, the check can simply be made now, and a
     transcript reaching this machine later (a restored backup, a synced home directory) is
-    not a fault. ``kyo credit --recheck <id>`` redoes the check.
+    not a fault. ``kyo credit --recheck <id>`` redoes the check (KYO-653) and supersedes the
+    credit, which then stops being named: only a current credit is looked at.
     """
     from . import cmd_sessions
     from .currency import some_of
@@ -666,7 +667,8 @@ def check_credit_transcripts_appeared(store: Store) -> list[str]:
     appeared: list[str] = []
     for row in store.conn.execute(
         "SELECT id, source_session FROM credits WHERE transcript_check = 'transcript-absent' "
-        "AND source_kind = 'claude-code' AND source_session IS NOT NULL ORDER BY record_id, seq"
+        "AND superseded_by IS NULL AND source_kind = 'claude-code' "
+        "AND source_session IS NOT NULL ORDER BY record_id, seq"
     ):
         try:
             recorded = cmd_sessions.recorded_transcript_path(root, row["source_session"])

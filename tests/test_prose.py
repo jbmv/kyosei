@@ -72,6 +72,8 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--span-last",  # a transcript record uuid (KYO-644)
         "--span-session",  # a Claude Code session id (KYO-644)
         "--credit",  # a credit id (KYO-644)
+        "--recheck",  # a credit id (KYO-653)
+        "--batch",  # a file path to read credit lines from, not prose (KYO-653)
         "--role",  # observed | decided | authorized (KYO-644)
         "--kind",
         "--status",

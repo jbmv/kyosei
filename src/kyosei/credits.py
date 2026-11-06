@@ -61,6 +61,7 @@ no transcript the span's ids are stored and its measures left empty.
 
 from __future__ import annotations
 
+import json
 import shlex
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass, field
@@ -103,6 +104,8 @@ CONTRACT_CREDIT_QUOTE_AMBIGUOUS = "credit-quote-ambiguous"
 CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS = "reconstructed-credit-requires-basis"
 CONTRACT_CREDIT_BASIS_NOT_APPROVAL = "credit-basis-not-approval"
 CONTRACT_CREDIT_SUBJECT_ALREADY_CREDITED = "credit-subject-already-credited"
+CONTRACT_CREDIT_BATCH_INVALID = "credit-batch-invalid"
+CONTRACT_CREDIT_TRANSCRIPT_STILL_ABSENT = "credit-transcript-still-absent"
 
 #: The keys a ``--decision-file`` may carry.
 DECISION_FILE_KEYS = frozenset(
@@ -269,11 +272,14 @@ def resolve(
     contract: str,
     act: str,
     remedies: list[str],
+    decision_text: str | None = None,
 ) -> Credit:
     """Resolve and check one credit from the invocation's flags. Writes nothing.
 
     ``contract`` and ``act`` name the enforcement point the refusal is raised under when
-    a part of the credit is missing, and ``remedies`` are its ready lines.
+    a part of the credit is missing, and ``remedies`` are its ready lines. ``decision_text``
+    is the decision's YAML when a caller holds it (``kyo credit --batch``), in place of a
+    ``--decision-file``.
     """
     session = getattr(args, "session", None)
     other = getattr(args, "source_other", None)
@@ -306,7 +312,7 @@ def resolve(
             "shell, or --source-other for anywhere else)"
         )
     decision_path = getattr(args, "decision_file", None)
-    if role == ROLE_DECIDED and decision_path is None:
+    if role == ROLE_DECIDED and decision_path is None and decision_text is None:
         missing.append("what was decided (--decision-file)")
     if missing:
         raise ContractViolation(
@@ -348,7 +354,9 @@ def resolve(
             check_why=result.why,
         )
     if role == ROLE_DECIDED:
-        credit.decision = _decision(ctx, read_prose(decision_path, what="--decision-file"), credit)
+        if decision_text is None:
+            decision_text = read_prose(decision_path, what="--decision-file")
+        credit.decision = _decision(ctx, decision_text, credit)
     elif decision_path is not None:
         raise UsageError(
             f"--decision-file belongs to a decided credit; this one is {role}, which records "
@@ -640,6 +648,36 @@ def _subject(store, subject_id: str) -> tuple[str, str, str]:
     )
 
 
+def check_basis(store, basis_id: str, person: str) -> None:
+    """``--basis`` must be ``person``'s own current ``decided`` credit, or a refusal."""
+    try:
+        basis = store.credit(basis_id)
+    except NotFound:
+        basis = None
+    if (
+        basis is None
+        or basis["role"] != ROLE_DECIDED
+        or basis["person"] != person
+        or basis["superseded_by"]
+    ):
+        what = (
+            "no credit"
+            if basis is None
+            else f"a {'superseded ' if basis['superseded_by'] else ''}{basis['role']} "
+            f"credit by {basis['person']}"
+        )
+        raise ContractViolation(
+            CONTRACT_CREDIT_BASIS_NOT_APPROVAL,
+            [
+                f"--basis {basis_id} is {what}, and the basis of a credit to "
+                f"{person} is {person}'s own current decided credit "
+                "approving it: nothing was written",
+                f"give as --basis the id of {person}'s decided credit on the "
+                "record that approved this batch",
+            ],
+        )
+
+
 def cmd_credit(ctx: Context, args: Namespace) -> Output:
     """``kyo credit <subject-id>... --person … --quote-file … (--session … |
     --source-other …) [--turn …] [--role …] [--decision-file …] [--span-first … --span-last
@@ -651,8 +689,21 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     person's own current ``decided`` credit approving the batch (P8). One exception, for
     the role KYO-644.c8 adds: an ``authorized`` go-ahead whose words the transcript dates
     after the record was filed is the go-ahead itself, credited when it was given, and
-    needs no basis.
+    needs no basis, provided it is credited from the session that holds those words
+    (KYO-653: the credit is then not derived as reconstructed either).
+
+    ``--recheck <credit-id>`` and ``--batch FILE`` are the two other forms: they are
+    :func:`recheck` and :func:`batch`.
     """
+    if args.recheck:
+        return recheck(ctx, args)
+    if args.batch:
+        return batch(ctx, args)
+    if not args.subject_ids:
+        raise UsageError(
+            "kyo credit names the rows to credit: give one or more SUBJECT_ID, or "
+            "--recheck CREDIT_ID, or --batch FILE"
+        )
     store = ctx.store()
     subject_ids = list(dict.fromkeys(args.subject_ids))
     resolved = [(sid, *_subject(store, sid)) for sid in subject_ids]
@@ -728,11 +779,14 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         )
 
     latest_subject = max(at for *_rest, at in resolved)
-    live_go_ahead = (
+    go_ahead_after = bool(
         role == ROLE_AUTHORIZED
         and credit.check.get("observed_at")
         and credit.check["observed_at"] > latest_subject
     )
+    # KYO-653: live only from the session that holds the words; credited from anywhere else
+    # it is a credit written after the fact, and rests on a basis like any other.
+    live_go_ahead = go_ahead_after and ctx.environ.get(ENV_SESSION) == credit.source_session
     basis_id = args.basis
     if basis_id is None and not live_go_ahead:
         raise ContractViolation(
@@ -743,35 +797,19 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
                 "approval of it: nothing was written",
                 "file the batch on a record, have the person approve it, credit that "
                 "approval with role decided, and give its id as --basis",
+                *(
+                    [
+                        f"or, for a go-ahead given in session {credit.source_session}, run "
+                        f"this command from that session (${ENV_SESSION} names it), which "
+                        "needs no basis"
+                    ]
+                    if go_ahead_after
+                    else []
+                ),
             ],
         )
     if basis_id is not None:
-        try:
-            basis = store.credit(basis_id)
-        except NotFound:
-            basis = None
-        if (
-            basis is None
-            or basis["role"] != ROLE_DECIDED
-            or basis["person"] != credit.person
-            or basis["superseded_by"]
-        ):
-            what = (
-                "no credit"
-                if basis is None
-                else f"a {'superseded ' if basis['superseded_by'] else ''}{basis['role']} "
-                f"credit by {basis['person']}"
-            )
-            raise ContractViolation(
-                CONTRACT_CREDIT_BASIS_NOT_APPROVAL,
-                [
-                    f"--basis {basis_id} is {what}, and the basis of a credit to "
-                    f"{credit.person} is {credit.person}'s own current decided credit "
-                    "approving it: nothing was written",
-                    f"give as --basis the id of {credit.person}'s decided credit on the "
-                    "record that approved this batch",
-                ],
-            )
+        check_basis(store, basis_id, credit.person)
 
     with store.transaction():
         before = {record_id: export.record_document(store, record_id)}
@@ -818,6 +856,387 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
             "basis_id": basis_id,
             "superseded": superseded,
             "record": after[record_id],
+        },
+    )
+
+
+# --------------------------------------------------------------------- --recheck
+
+
+def recheck(ctx: Context, args: Namespace) -> Output:
+    """``kyo credit --recheck <credit-id>`` (KYO-653): redo the transcript check of a credit
+    recorded ``transcript-absent`` and supersede it with the new outcome.
+
+    The new credit copies the old one whole (person, role, subjects, basis, decision, span,
+    the stored words, and its ``created_at``, so that a reconstructed credit stays
+    reconstructed) and takes only the transcript's outcome from the new check. The old one
+    stays readable as superseded. A transcript that is still absent changes nothing.
+    """
+    credit_id = args.recheck
+    extra = [
+        flag
+        for flag, given in (
+            ("a SUBJECT_ID", args.subject_ids),
+            ("--batch", args.batch),
+            ("--role", args.role),
+            ("--basis", args.basis),
+            ("--supersede", args.supersede),
+            ("--decision-file", args.decision_file),
+            ("--span-first", args.span_first),
+            ("--span-last", args.span_last),
+            ("--span-session", args.span_session),
+        )
+        if given
+    ]
+    if requested(args):
+        extra.append("a credit flag")
+    if extra:
+        raise UsageError(
+            f"--recheck re-reads the words and the place already stored on {credit_id}; "
+            f"give it no {', '.join(extra)}"
+        )
+    store = ctx.store()
+    try:
+        old = store.credit(credit_id)
+    except NotFound as exc:
+        raise UsageError(f"--recheck {credit_id}: no such credit") from exc
+    if old["superseded_by"]:
+        raise UsageError(
+            f"--recheck {credit_id}: it was superseded by {old['superseded_by']}; recheck that one"
+        )
+    if old["transcript_check"] != "transcript-absent":
+        raise UsageError(
+            f"--recheck {credit_id}: its transcript check is {old['transcript_check']}, and "
+            "only a credit recorded transcript-absent is rechecked"
+        )
+    record_id = old["record_id"]
+    quote = store.evidence_artifact(old["quote_id"])["text"]
+    result = _check(ctx, old["source_session"], quote, old["source_turn"], old["person"])
+    if result.outcome == transcript.TRANSCRIPT_ABSENT:
+        raise ContractViolation(
+            CONTRACT_CREDIT_TRANSCRIPT_STILL_ABSENT,
+            [
+                f"the transcript of session {old['source_session']} is still not on this "
+                f"machine, so {credit_id} stays as it is: nothing was written",
+                "put the transcript file where Claude Code keeps it (under "
+                f"$CLAUDE_CONFIG_DIR/projects/), then rerun `kyo credit --recheck {credit_id}`",
+            ],
+        )
+    fields = {
+        name: old[name]
+        for name in (
+            "recommended",
+            "recommended_by",
+            "outcome",
+            "refining_session",
+            "refining_turn",
+            "span_session",
+            "span_first_turn",
+            "span_last_turn",
+            "span_person_turns",
+            "span_agent_turns",
+            "span_active_seconds",
+            "span_started_at",
+            "span_ended_at",
+        )
+    }
+    subjects = [(r["subject_kind"], r["subject_id"]) for r in store.credit_subjects(credit_id)]
+    with store.transaction():
+        before = {record_id: export.record_document(store, record_id)}
+        new_id = store.add_credit(
+            record_id,
+            created_at=old["created_at"],
+            person=old["person"],
+            role=old["role"],
+            quote_id=old["quote_id"],
+            source_kind=old["source_kind"],
+            subjects=subjects,
+            author=ctx.actor,
+            source_session=old["source_session"],
+            source_note=old["source_note"],
+            basis_id=old["basis_id"],
+            alternatives=json.loads(old["alternatives_json"]) if old["alternatives_json"] else None,
+            **fields,
+            **result.store_fields(),
+        )
+        store.supersede_credit(credit_id, new_id)
+        _touch_record(store, record_id)
+        after, events = commands._commit_and_export(
+            store,
+            command=f"credit --recheck {credit_id}",
+            actor=ctx.actor,
+            record_ids=[record_id],
+            before=before,
+        )
+    commands._finish_mutation(store, [record_id], events)
+    label = person_label(store.config, old["person"])
+    out = [
+        f"rechecked {credit_id} on {record_id}, written by {ctx.actor}",
+        f"credit {new_id}: transcript {result.outcome} for {label}",
+        f"  {result.why}",
+        f"  supersedes {credit_id}",
+    ]
+    return Output(
+        out,
+        {
+            "ok": True,
+            "command": "credit",
+            "credit_id": new_id,
+            "record_id": record_id,
+            "superseded": credit_id,
+            "transcript_check": result.outcome,
+            "record": after[record_id],
+        },
+    )
+
+
+# ----------------------------------------------------------------------- --batch
+
+#: The columns of a ``--batch`` file, tab-separated, one credit per line. The last column
+#: takes the rest of the line, so the words may hold tabs.
+BATCH_COLUMNS = ("subjects", "role", "where", "turn", "outcome", "recommended", "quote")
+
+_BATCH_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\"}
+
+
+def _unescape(text: str) -> str:
+    r"""``\n`` and ``\t`` in a batch column are a newline and a tab; ``\\`` is a backslash."""
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text) and text[i + 1] in _BATCH_ESCAPES:
+            out.append(_BATCH_ESCAPES[text[i + 1]])
+            i += 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _batch_rows(text: str) -> list[tuple[int, dict[str, str]]]:
+    """``(line number, columns)`` of each credit line; blank and ``#`` lines are skipped."""
+    rows = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("\t", len(BATCH_COLUMNS) - 1)
+        parts += [""] * (len(BATCH_COLUMNS) - len(parts))
+        cells = [p.strip() for p in parts[:-1]] + [parts[-1]]
+        rows.append((number, dict(zip(BATCH_COLUMNS, cells, strict=True))))
+    return rows
+
+
+def _batch_line(ctx: Context, store, args: Namespace, row: dict[str, str]) -> dict:
+    """One line of a batch resolved and checked: the credit and where it goes. Raises the
+    refusal the same credit would get from `kyo credit`, which the caller attributes to
+    its line."""
+    subject_ids = list(dict.fromkeys(i.strip() for i in row["subjects"].split(",") if i.strip()))
+    if not subject_ids:
+        raise UsageError("the subjects column is empty")
+    resolved = [(sid, *_subject(store, sid)) for sid in subject_ids]
+    kinds = {kind for _sid, kind, _rec, _at in resolved}
+    records = {rec for _sid, _kind, rec, _at in resolved}
+    if len(records) > 1:
+        raise UsageError(f"these subjects are on {', '.join(sorted(records))}, not one record")
+    role = row["role"] or (ROLE_DECIDED if kinds == {"record"} else ROLE_OBSERVED)
+    if role not in CREDIT_ROLES:
+        raise UsageError(f"role {role!r}; known: {', '.join(CREDIT_ROLES)}")
+    if role in (ROLE_DECIDED, ROLE_AUTHORIZED) and kinds != {"record"}:
+        raise UsageError(f"a {role} credit names a record, and these subjects are {sorted(kinds)}")
+    if role == ROLE_OBSERVED and "record" in kinds:
+        raise UsageError("an observed credit names verifications or gates, not a record")
+    where = row["where"]
+    session, other = (None, where[len("other:") :].strip()) if where.startswith("other:") else (
+        where or None,
+        None,
+    )
+    if session is None and other is None:
+        raise UsageError(
+            "the where column is empty: a Claude Code session id, or other:<where it was said>"
+        )
+    line_args = Namespace(
+        person=args.person,
+        session=session,
+        source_other=other,
+        turn=row["turn"] or None,
+        decision_file=None,
+        span_first=None,
+        span_last=None,
+        span_session=None,
+    )
+    decision_text = None
+    if role == ROLE_DECIDED:
+        decision = {"outcome": row["outcome"] or None}
+        if row["recommended"]:
+            decision["recommended"] = row["recommended"]
+        decision_text = yaml.safe_dump(decision)
+    elif row["outcome"] or row["recommended"]:
+        raise UsageError(
+            f"the outcome and recommended columns belong to a decided credit, not {role}"
+        )
+    credit = resolve(
+        ctx,
+        store,
+        line_args,
+        role=role,
+        quote_text=_unescape(row["quote"]),
+        contract=CONTRACT_CREDIT_BATCH_INVALID,
+        act="a batch credit",
+        remedies=["fill the missing column of that line"],
+        decision_text=decision_text,
+    )
+    if role == ROLE_DECIDED and credit.decision.get("outcome") == CREDIT_OUTCOME_REFINED:
+        raise UsageError(
+            "a refined outcome cites its refining turn, which a batch line has no column for; "
+            "credit that one alone with `kyo credit`"
+        )
+    return {
+        "subjects": [(kind, sid) for sid, kind, _rec, _at in resolved],
+        "record_id": records.pop(),
+        "credit": credit,
+    }
+
+
+def batch(ctx: Context, args: Namespace) -> Output:
+    """``kyo credit --batch FILE --basis <credit-id> [--person KEY]`` (KYO-653, KYO-638
+    section 4.5): one reconstructed credit per line of FILE, written in one transaction.
+
+    Every line shares the one ``--basis``, the person's own decided credit approving the
+    batch. Every line is resolved and checked before anything is written; if any line is
+    refused, the whole batch is, naming each bad line with the reason. The file is
+    described in ``kyo reference credit``.
+    """
+    extra = [
+        flag
+        for flag, given in (
+            ("a SUBJECT_ID", args.subject_ids),
+            ("--role", args.role),
+            ("--supersede", args.supersede),
+            ("--quote-file", args.quote_file),
+            ("--session", args.session),
+            ("--turn", args.turn),
+            ("--source-other", args.source_other),
+            ("--decision-file", args.decision_file),
+            ("--span-first", args.span_first),
+            ("--span-last", args.span_last),
+            ("--span-session", args.span_session),
+        )
+        if given
+    ]
+    if extra:
+        raise UsageError(
+            f"--batch takes each line's subjects, words and place from the file; give it no "
+            f"{', '.join(extra)} (only --basis and --person are shared)"
+        )
+    if args.basis is None:
+        raise ContractViolation(
+            CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS,
+            [
+                "every credit of a batch is written after its subject (reconstructed), and "
+                "rests on the person's approval of the batch: nothing was written",
+                "file the batch on a record, have the person approve it, credit that "
+                "approval with role decided, and give its id as --basis",
+            ],
+        )
+    store = ctx.store()
+    person = _person(store, args.person)
+    if person is None:
+        declared = declared_people(store.config)
+        raise ContractViolation(
+            CONTRACT_CREDIT_BATCH_INVALID,
+            [
+                "a batch credits one person and none was named ("
+                + (
+                    f"{len(declared)} are declared, {', '.join(declared)}"
+                    if declared
+                    else "nobody is declared under `people:` in kyosei/config.yml"
+                )
+                + "): nothing was written",
+                "give --person KEY, a key under `people:` in kyosei/config.yml",
+            ],
+        )
+    args.person = person
+    check_basis(store, args.basis, person)
+    rows = _batch_rows(read_prose(args.batch, what="--batch"))
+    if not rows:
+        raise UsageError(f"--batch {args.batch} holds no credit lines")
+    prepared: list[dict] = []
+    problems: list[str] = []
+    seen: dict[str, int] = {}
+    for number, row in rows:
+        try:
+            line = _batch_line(ctx, store, args, row)
+            for _kind, sid in line["subjects"]:
+                if sid in seen:
+                    raise UsageError(f"{sid} is also credited on line {seen[sid]}")
+                current = store.current_credits_of(sid)
+                if current:
+                    raise UsageError(
+                        f"{sid} already has a current credit ({current[0]['id']}); credit "
+                        "it alone with `kyo credit` --supersede"
+                    )
+            for _kind, sid in line["subjects"]:
+                seen[sid] = number
+            prepared.append(line)
+        except (UsageError, ContractViolation, NotFound) as exc:
+            reason = " ".join(
+                (exc.unmet[0] if isinstance(exc, ContractViolation) else str(exc)).split()
+            )
+            problems.append(f"line {number}: {reason}")
+    if problems:
+        raise ContractViolation(
+            CONTRACT_CREDIT_BATCH_INVALID,
+            [
+                f"{len(problems)} of {len(rows)} line(s) of {args.batch} cannot be credited, "
+                "so none of the batch was written",
+                *problems,
+                "correct or remove those lines and rerun the same command",
+            ],
+        )
+    record_ids = list(dict.fromkeys(line["record_id"] for line in prepared))
+    credit_ids: list[str] = []
+    with store.transaction():
+        before = {rid: export.record_document(store, rid) for rid in record_ids}
+        for line in prepared:
+            quote_id, _digest = _add_evidence(
+                store, line["record_id"], line["credit"].quote_text, supports_id=None,
+                author=ctx.actor,
+            )  # fmt: skip
+            credit_ids.append(
+                write(
+                    store,
+                    line["record_id"],
+                    line["credit"],
+                    quote_id=quote_id,
+                    subjects=line["subjects"],
+                    author=ctx.actor,
+                    basis_id=args.basis,
+                )
+            )
+        for rid in record_ids:
+            _touch_record(store, rid)
+        after, events = commands._commit_and_export(
+            store,
+            command=f"credit --batch {args.batch}",
+            actor=ctx.actor,
+            record_ids=record_ids,
+            before=before,
+        )
+    commands._finish_mutation(store, record_ids, events)
+    label = person_label(store.config, person)
+    out = [
+        f"credited {len(credit_ids)} line(s) of {args.batch} to {label} on "
+        f"{len(record_ids)} record(s), written by {ctx.actor}",
+        f"  reconstructed; approved in {args.basis}",
+    ]
+    return Output(
+        out,
+        {
+            "ok": True,
+            "command": "credit",
+            "written": len(credit_ids),
+            "credit_ids": credit_ids,
+            "record_ids": record_ids,
+            "basis_id": args.basis,
         },
     )
 

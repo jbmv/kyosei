@@ -1416,8 +1416,9 @@ def build_parser() -> KyoseiParser:
     p_credit.add_argument(
         "subject_ids",
         metavar="SUBJECT_ID",
-        nargs="+",
-        help="verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record",
+        nargs="*",
+        help="verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; "
+        "none with --recheck or --batch",
     )
     p_credit.add_argument(
         "--role",
@@ -1434,6 +1435,26 @@ def build_parser() -> KyoseiParser:
         "--supersede",
         metavar="CREDIT_ID",
         help="replace this current credit of a subject; it stays readable as superseded",
+    )
+    p_credit.add_argument(
+        "--recheck",
+        metavar="CREDIT_ID",
+        help="redo the transcript check of a credit recorded transcript-absent, and supersede "
+        "it with the new outcome (what doctor's credit_transcripts_appeared notice names; "
+        "KYO-653)",
+    )
+    p_credit.add_argument(
+        "--batch",
+        metavar="FILE",
+        help="credit many rows at once, every line under the one --basis and --person, in one "
+        "transaction or none at all (a bad line refuses the whole batch and is named). FILE is "
+        "tab-separated, one credit per line, blank and #-lines skipped, with seven columns: "
+        "subjects (ids, comma-separated, on one record); role (empty: decided for a record, "
+        "observed otherwise); where (a Claude Code session id, or other:<where it was said>); "
+        "turn (a transcript record uuid, or empty); outcome and recommended (a decided credit's "
+        "accepted | overrode | unprompted and what was recommended, else empty; a refined "
+        "outcome is credited alone); quote (the person's words, the rest of the line, with \\n "
+        "for a newline, \\t for a tab and \\\\ for a backslash). Needs --basis (KYO-653)",
     )
     credits.add_credit_flags(p_credit, decision=True, span=True)
 
