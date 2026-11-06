@@ -108,9 +108,16 @@ class Entry:
     #: on an entry read from packaged data written before this field existed, which
     #: carries the date only; :func:`between` says when it had to fall back to it.
     completed_at: str | None = None
+    #: KYO-647: the persons who decided this record, as the project labels them (the
+    #: display name it declares, otherwise the key). Empty on every record without a
+    #: current ``decided`` credit, and absent from the data then, so a changelog written
+    #: before credits existed is byte-identical to one written now.
+    decided_by: tuple[str, ...] = ()
 
     def as_data(self) -> dict:
+        extra = {"decided_by": list(self.decided_by)} if self.decided_by else {}
         return {
+            **extra,
             "id": self.id,
             "kind": self.kind,
             "scope": self.scope,
@@ -130,6 +137,7 @@ class Entry:
             completed_on=str(raw.get("completed_on") or ""),
             dated_by=str(raw.get("dated_by") or DATED_BY_RECORD),
             completed_at=raw.get("completed_at") or None,
+            decided_by=tuple(str(p) for p in raw.get("decided_by") or ()),
         )
 
     @property
@@ -254,6 +262,20 @@ def _completion_dates(export_dir: Path, complete_status: str) -> dict[str, str]:
     return dates
 
 
+def _decided_by(document: dict, people: dict[str, str | None]) -> tuple[str, ...]:
+    """The distinct persons with a current ``decided`` credit on this record document,
+    in credit order, labelled as :func:`kyosei.config.person_label` labels them."""
+    names: list[str] = []
+    for credit in document.get("credits") or []:
+        if credit.get("role") != "decided" or credit.get("superseded_by"):
+            continue
+        person = str(credit.get("person") or "")
+        label = people.get(person) or person
+        if label and label not in names:
+            names.append(label)
+    return tuple(names)
+
+
 def entries_from_store(code_root: Path) -> list[Entry]:
     """Every completed record in the store ``code_root`` serves, newest first."""
     export_dir = store_export_dir(code_root)
@@ -269,6 +291,9 @@ def entries_from_store(code_root: Path) -> list[Entry]:
         else contracts.default_ladder()
     )
     completed = _completion_dates(export_dir, ladder.complete)
+
+    config = _this_checkouts_config(code_root)
+    people = config.people if config is not None else {}
 
     entries: list[Entry] = []
     for document in rebuild.read_record_documents(export_dir):
@@ -295,6 +320,7 @@ def entries_from_store(code_root: Path) -> list[Entry]:
                 # KYO-398.c2: both sources are tool-stamped UTC instants (law 16), so
                 # the date above is this value's date and the two cannot disagree.
                 completed_at=at or None,
+                decided_by=_decided_by(document, people),
             )
         )
     return sort_entries(entries)
@@ -666,6 +692,10 @@ def containment_sentence(changelog: Changelog) -> str:
     )
 
 
+def _decided_clause(entry: Entry) -> str:
+    return f" — decided by {', '.join(entry.decided_by)}" if entry.decided_by else ""
+
+
 def text_lines(changelog: Changelog, shown: list[Entry], since: str | None) -> list[str]:
     """``kyo changelog``'s human output."""
     from .buildinfo import version_line
@@ -683,6 +713,7 @@ def text_lines(changelog: Changelog, shown: list[Entry], since: str | None) -> l
         for entry in entries:
             out.append(
                 f"  {entry.completed_on}  {entry.id:<10} {entry.kind:<14} {entry.title}"
+                f"{_decided_clause(entry)}"
             )
     return out
 
@@ -732,6 +763,7 @@ def markdown(changelog: Changelog, shown: list[Entry], since: str | None) -> str
         for entry in entries:
             out.append(
                 f"- **{entry.completed_on}** — `{entry.id}` ({entry.kind}) — {entry.title}"
+                f"{_decided_clause(entry)}"
             )
         out.append("")
     return "\n".join(out)

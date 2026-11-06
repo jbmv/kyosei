@@ -18,9 +18,11 @@
         {
           "author": "orchestrator",
           "created_at": "2026-01-02T03:04:05.678Z",
+          "credit": null,
           "evidence_id": null,
           "id": "TST-2.v1",
           "method": "reasoned-about",
+          "overrides": null,
           "reason": null,
           "seq": 1,
           "verdict": "met"

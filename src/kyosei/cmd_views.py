@@ -79,6 +79,7 @@ from .render import (
     result_value,
     shift_note_text,
     show_text,
+    with_credit_fields,
 )
 from .store import Store
 
@@ -2084,7 +2085,8 @@ def _show(ctx: Context, args: Namespace) -> Output:
         # through to `no record ...` below: that id has the right shape and the wrong
         # value, which is a different answer and stays a different answer (law 6).
         raise _refuse_shape(args.id, child_kind)
-    doc = export.record_document(store, args.id)
+    # KYO-647: the derived credit fields ride on the shown document, never on the export.
+    doc = with_credit_fields(export.record_document(store, args.id), store.config.people)
     members = _plan_members(store, args.id)
     standings = _standings(store, [doc, *members])
     covered_by = _covered_by_dispatches(store, args.id)
@@ -2215,6 +2217,7 @@ def cmd_list(ctx: Context, args: Namespace) -> Output:
         ctx,
         query.Filters.from_args(args),
         unsettled=bool(getattr(args, "unsettled", False)),
+        overrode=bool(getattr(args, "overrode", False)),
     )
 
     # KYO-420.c4: `--limit N` prints the first N matching rows. The counts in the

@@ -2598,7 +2598,10 @@ def test_a_credit_stores_the_form_of_its_words_and_a_discussion_span(
     assert {k: credit[k] for k in _SPAN} == _SPAN
     (project / "kyosei" / "kyosei.db").unlink()
     assert kyo("rebuild").code == 0
-    assert kyo("show", record, "--json").json["credits"][0] == credit
+    # KYO-647: `kyo show --json` adds the derived `reconstructed` and `person_name`
+    # beside the stored fields; the export holds only the latter.
+    shown = kyo("show", record, "--json").json["credits"][0]
+    assert {k: v for k, v in shown.items() if k not in ("reconstructed", "person_name")} == credit
 
 
 @pytest.mark.parametrize("form", ["typed", "mid-turn", "choice", "accepted-suggestion"])
