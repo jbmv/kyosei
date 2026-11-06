@@ -17,7 +17,7 @@ import pytest
 from kyosei.contracts import CONTRACT_FILING_REQUIRES_EVIDENCE
 from kyosei.errors import EXIT_CONTRACT
 
-from .conftest import new_record
+from .conftest import decided, new_record
 
 WORDS = (
     "The maintainer, in the orchestrator session:\n"
@@ -51,12 +51,13 @@ def test_the_flag_clears_the_refusal_and_stores_the_words(kyo, write_file) -> No
     words = write_file("words.md", WORDS)
     spawned = kyo(
         "spawn", reminder, "--kind", "decision", "--title", "Keep it",
-        "--evidence-file", words, "--json",
+        "--evidence-file", words, *decided(kyo.project), "--json",
     )  # fmt: skip
     assert spawned.code == 0, spawned
     decision = spawned.json["record_id"]
     assert spawned.json["evidence_id"] == f"{decision}.e1"
-    (evidence,) = kyo("show", decision, "--json").json["evidence_artifacts"]
+    # KYO-644: e2 is the credit's quote, the person's words alone.
+    evidence = kyo("show", decision, "--json").json["evidence_artifacts"][0]
     stored = WORDS.rstrip("\n")
     assert evidence["text"] == stored
     assert evidence["sha256"] == hashlib.sha256(stored.encode("utf-8")).hexdigest()
@@ -78,12 +79,17 @@ def test_an_empty_evidence_file_is_refused(kyo, write_file) -> None:
 def test_a_decision_spawned_from_a_proposal_or_investigation_needs_no_evidence(
     kyo, source_kind, criteria
 ) -> None:
-    """c2: unchanged -- the source record and its produced-by link are the provenance."""
+    """c2: no --evidence-file -- the source record and its produced-by link are the
+    provenance. KYO-644: the decision still credits the person who decided it, and the
+    credit's words are the one artifact stored."""
     source = new_record(kyo, kind=source_kind, title="the source", criteria=criteria)
-    spawned = kyo("spawn", source, "--kind", "decision", "--title", "Decided", "--json")
+    spawned = kyo(
+        "spawn", source, "--kind", "decision", "--title", "Decided", *decided(kyo.project),
+        "--json",
+    )
     assert spawned.code == 0, spawned
-    assert spawned.json["evidence_id"] is None
-    assert kyo("show", spawned.json["record_id"], "--json").json["evidence_artifacts"] == []
+    (artifact,) = kyo("show", spawned.json["record_id"], "--json").json["evidence_artifacts"]
+    assert artifact["id"] == spawned.json["evidence_id"]
 
 
 def test_the_registry_page_says_which_spawn_routes_need_evidence() -> None:

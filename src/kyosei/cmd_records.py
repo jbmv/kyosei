@@ -22,7 +22,16 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from . import commands, docs_obligations, docs_parse, explanations, export, kinds, prior_art
+from . import (
+    commands,
+    credits,
+    docs_obligations,
+    docs_parse,
+    explanations,
+    export,
+    kinds,
+    prior_art,
+)
 from . import ideas as ideas_module
 from . import registry as registry_module
 from . import sweep as sweep_module
@@ -291,8 +300,12 @@ def _evidence_at_filing(
     Read before anything else in `kyo new` reads stdin, and refused when another prose
     flag also names stdin, since one stream cannot be read twice.
     """
+    # KYO-644: a kind that requires a credit takes the person's words in --quote-file, and
+    # given alone they are the evidence too, read once, so a direct filing stays one command.
     source = getattr(args, "evidence_file", None)
     kind_def = registry.require(kind)
+    if source is None and kind_def.requires_credit:
+        source = getattr(args, "quote_file", None)
     if source is None:
         if spawn_source is None:
             if kind_def.requires_evidence_links:
@@ -344,6 +357,37 @@ def _evidence_at_filing(
     if not text.strip():
         raise UsageError("--evidence-file must not be empty: it is stored as evidence")
     return text
+
+
+def _write_filing_credit(
+    ctx: Context,
+    store: Store,
+    record_id: str,
+    credit: credits.Credit | None,
+    evidence: tuple[str, str] | None,
+    args: Namespace,
+    stamp: str,
+) -> str | None:
+    """KYO-644: the decided credit naming the record just filed, in its transaction. The
+    quote is the filing's evidence when --quote-file stood in for --evidence-file, and its
+    own evidence artifact when both were given."""
+    if credit is None:
+        return None
+    if evidence is not None and not getattr(args, "evidence_file", None):
+        quote_id = evidence[0]
+    else:
+        quote_id, _digest = commands._add_evidence(
+            store, record_id, credit.quote_text, supports_id=None, author=ctx.actor
+        )
+    return credits.write(
+        store,
+        record_id,
+        credit,
+        quote_id=quote_id,
+        subjects=[("record", record_id)],
+        author=ctx.actor,
+        created_at=stamp,
+    )
 
 
 def _check_kind_accepts_idea(store: Store, registry: kinds.KindRegistry, kind: str) -> None:
@@ -747,6 +791,10 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         )
     _check_kind_accepts_intake(store, registry, kind)
     evidence_text = _evidence_at_filing(registry, kind, args)
+    credits.filing_credit_flag_problem(args, registry.require(kind))
+    credit = credits.filing_credit(
+        ctx, store, registry.require(kind), args, evidence_text, f"kyo new {kind}"
+    )
 
     # KYO-330: `--from FILE` is an alternative to the six flags below, not a second
     # write path -- it parses to exactly what they would have produced and falls
@@ -892,6 +940,8 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             if evidence_text is not None
             else None
         )
+        # KYO-644: the decided credit, in the record's own transaction and stamp.
+        credit_id = _write_filing_credit(ctx, store, record_id, credit, evidence, args, stamp)
         # KYO-554: inside the same transaction, so the export carries them.
         standing_summary = raise_standing_obligations(ctx, store, record_id, stamp=stamp)
         after, events = commands._commit_and_export(
@@ -941,6 +991,8 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
         lines.append(echo_value("sha256", evidence[1]))
+    if credit is not None and credit_id is not None:
+        lines += credits.lines(store, credit_id, credit)
     lines += standing_obligation_receipt(standing_summary)
     scope_lines, scope_data = _scope_suggestion(scopes, declared=scope, touches=touches)
     lines += scope_lines
@@ -958,6 +1010,7 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             "prior_art": prior_art_data,
             # KYO-538: the new record's id under the key every receipt shares.
             "id": record_id,
+            "credit_id": credit_id,  # KYO-644
             "record_id": record_id,
             # KYO-521: the evidence `--evidence-file` attached, or null.
             "evidence_id": evidence[0] if evidence is not None else None,
@@ -2190,6 +2243,12 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     evidence_text = _evidence_at_filing(
         registry, args.kind, args, spawn_source=source_id, spawn_source_kind=source_kind
     )
+    # KYO-644: approving a proposal into a decision is the person's decision, so a kind
+    # that requires a credit asks for it on every spawn, whatever the source.
+    credits.filing_credit_flag_problem(args, target)
+    credit = credits.filing_credit(
+        ctx, store, target, args, evidence_text, f"kyo spawn {source_id} --kind {args.kind}"
+    )
 
     # KYO-330: `--from FILE` stands in for --title/--description-file/--criteria-file/
     # --touches-file -- `kyo spawn` has no --plan, so a file's `plan:` is refused
@@ -2312,6 +2371,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             if evidence_text is not None
             else None
         )
+        # KYO-644: the decided credit, in the record's own transaction and stamp.
+        credit_id = _write_filing_credit(ctx, store, record_id, credit, evidence, args, stamp)
 
         # The same direction and the same edge type `kyo split` writes (successor
         # produced-by original), reused rather than reinvented: `kyo doctor`'s
@@ -2361,6 +2422,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
         lines.append(echo_value("sha256", evidence[1]))
+    if credit is not None and credit_id is not None:
+        lines += credits.lines(store, credit_id, credit)
     # KYO-50.c2, decision 2: said out loud, because "the source is now settled" is
     # the assumption a spawn invites and the one thing this command does not do.
     unchanged = (
@@ -2387,6 +2450,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             "command": "spawn",
             "prior_art": prior_art_data,
             "id": record_id,  # KYO-538
+            "credit_id": credit_id,  # KYO-644
             "record_id": record_id,
             "standing_obligations": standing_summary,  # KYO-554
             "link_id": link_id,
@@ -3209,7 +3273,13 @@ def _forced_gates_line(status: str, gates: list[GateView]) -> list[str]:
 
 
 def clear_gates_on_carried_settle(
-    store: Store, record_id: str, *, settled_by: str, reason: str
+    store: Store,
+    record_id: str,
+    *,
+    settled_by: str,
+    reason: str,
+    clearing: credits.GateClearing | None = None,
+    author: str = "",
 ) -> list[dict]:
     """KYO-497: settling a carried record clears its open gates first.
 
@@ -3221,18 +3291,34 @@ def clear_gates_on_carried_settle(
     `kyo ungate` (``cmd_links.cmd_ungate``) minus its stale-criteria flag, which a
     carried kind — no criteria (``requires_criteria: false``) — has nothing to raise.
     Returns the gates it cleared, for the command to say so.
+
+    KYO-644 (KYO-640 P5): a gate that waits on a person is cleared only with the person's
+    answer, credited (``clearing.credit``), or with ``--withdrawn``; otherwise the settle
+    is refused under ``person-gate-clear-requires-credit``. Every gate this clears carries
+    the clearing's ``cleared_as``, and a credit names them all.
     """
+    clearing = clearing or credits.GateClearing()
+    open_rows = [row for row in store.gates(record_id) if not row["cleared_at"]]
+    if clearing.cleared_as() is None:
+        credits.refuse_settle_over_person_gate(
+            [row for row in open_rows if row["gate_type"] in credits.HUMAN_GATE_TYPES],
+            settled_by,
+        )
     cleared_at = now()
     why = f"cleared by `{settled_by}` (KYO-497, a carried record settling): {reason}"
     cleared = []
-    for row in store.gates(record_id):
-        if row["cleared_at"]:
-            continue
+    for row in open_rows:
         store.conn.execute(
-            "UPDATE gates SET cleared_at = ?, cleared_why = ? WHERE id = ?",
-            (cleared_at, why, row["id"]),
+            "UPDATE gates SET cleared_at = ?, cleared_why = ?, cleared_as = ? WHERE id = ?",
+            (cleared_at, why, clearing.cleared_as(), row["id"]),
         )
         cleared.append({"gate_id": row["id"], "gate_type": row["gate_type"]})
+    credit_id = clearing.write(
+        store, [(g["gate_id"], record_id) for g in cleared], author, cleared_at
+    )
+    for item in cleared:
+        item["credit_id"] = credit_id
+        item["cleared_as"] = clearing.cleared_as()
     return cleared
 
 
@@ -3242,7 +3328,12 @@ def _cleared_gates_lines(cleared: list[dict]) -> list[str]:
         return []
     return [
         f"cleared {len(cleared)} open gate(s) on settling this carried record:",
-        *(f"  {g['gate_id']}  {g['gate_type']}" for g in cleared),
+        *(
+            f"  {g['gate_id']}  {g['gate_type']}"
+            + (f"  cleared as {g['cleared_as']}" if g.get("cleared_as") else "")
+            + (f", credit {g['credit_id']}" if g.get("credit_id") else "")
+            for g in cleared
+        ),
     ]
 
 
@@ -3258,6 +3349,7 @@ def _transition(
     force: bool = False,
     settled_by: str | None = None,
     standing_settled: list[str] | None = None,
+    clearing: credits.GateClearing | None = None,
 ):
     """One status write, contracts enforced inside the caller's transaction.
 
@@ -3326,6 +3418,8 @@ def _transition(
                 record_id,
                 settled_by=settled_by or f"kyo move {record_id} {status}",
                 reason=reason or "",
+                clearing=clearing,
+                author=ctx.actor,
             )
     # KYO-490: only a settling move can be refused over an open gate, so only that move
     # reads them; `--force` passes none to the contract and keeps them to report.
@@ -3454,6 +3548,9 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
         )
     plan_members: list[dict] | None = None
     unsettled: list[dict] = []
+    # KYO-644: a carried settle's credit is resolved (and its transcript read) before the
+    # transaction; whether it is needed is decided inside it.
+    clearing = credits.settle_clearing(ctx, store, args, reason)
     with store.transaction():
         # KYO-308.c1: `plan`'s completion is a status distribution over its members,
         # not criteria (kinds.yml: `requires_criteria: false`), so none of
@@ -3496,6 +3593,7 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
         old_status, doc, events, closed_flags, forced_gates, cleared_gates = _transition(
             ctx, store, args.id, args.status, reason,
             force=bool(getattr(args, "force", False)),
+            clearing=clearing,
         )
         forced_note_id: str | None = None
         if unsettled:
@@ -3579,6 +3677,7 @@ def cmd_wont_do(ctx: Context, args: Namespace) -> Output:
     # be one the registry can name — which is why exactly one status may carry the
     # `retired` role (contracts.SINGLETON_ROLES).
     retired = _load_status_ladder(store).retired
+    clearing = credits.settle_clearing(ctx, store, args, reason)
     with store.transaction():
         old_status, doc, events, closed_flags, forced_gates, cleared_gates = _transition(
             ctx,
@@ -3592,6 +3691,7 @@ def cmd_wont_do(ctx: Context, args: Namespace) -> Output:
             flow_remedy=knowledge_disposal_remedy(args.id),
             force=bool(getattr(args, "force", False)),
             settled_by=f"kyo wont-do {args.id}",
+            clearing=clearing,
         )
     commands._finish_mutation(store, [args.id], events)
     lines = [

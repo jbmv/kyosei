@@ -290,7 +290,7 @@ def test_settling_a_carried_record_clears_every_open_gate(kyo, verb) -> None:
         ["move", record, "done", "--why", reason]
         if verb == "move"
         else ["wont-do", record, "--why", reason]
-    )
+    ) + ["--withdrawn"]  # KYO-644: the human gate is cleared as withdrawn, no person named
     result = kyo(*args)
     assert result.code == 0, result
     # Said, by gate id.
@@ -311,8 +311,15 @@ def test_settling_a_carried_record_clears_every_open_gate(kyo, verb) -> None:
 def test_settle_json_names_the_cleared_gates(kyo) -> None:
     record = _carry(kyo, "an item")
     gate_id = _gate(kyo, record)
-    data = kyo("move", record, "done", "--why", "settled", "--json").json
-    assert data["cleared_gates"] == [{"gate_id": gate_id, "gate_type": "awaiting:human-review"}]
+    data = kyo("move", record, "done", "--why", "settled", "--withdrawn", "--json").json
+    assert data["cleared_gates"] == [
+        {
+            "gate_id": gate_id,
+            "gate_type": "awaiting:human-review",
+            "credit_id": None,
+            "cleared_as": "withdrawn",
+        }
+    ]
 
 
 def test_a_non_carried_record_is_still_refused_settling_past_an_open_gate(kyo) -> None:

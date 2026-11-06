@@ -44,7 +44,13 @@ from kyosei.cli import COMMAND_TABLE, MUTATING_COMMANDS, build_parser
 from kyosei.commands import PROJECT_NONE
 from kyosei.registry import DEFAULT_DOCUMENT_GLOBS
 
-from .conftest import checkout_build_lock, checkout_build_lock_path, invoke
+from .conftest import (
+    CREDIT_ELSEWHERE,
+    checkout_build_lock,
+    checkout_build_lock_path,
+    declare_person,
+    invoke,
+)
 from .this_store import store_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +66,12 @@ needs_this_store = pytest.mark.skipif(
     not THIS_STORE.is_dir(),
     reason="reads this repository's own store, which only the maintainer's checkout carries",
 )
+
+
+def _credited(kyo) -> list[str]:
+    """KYO-644: a confirmation names the person who observed."""
+    declare_person(kyo.project)
+    return list(CREDIT_ELSEWHERE)
 
 
 @pytest.fixture
@@ -653,7 +665,7 @@ def _walk_to_done(kyo, title: str) -> str:
     record = new_record(kyo, criteria=["a criterion to settle"], title=title)
     for status in ("working", "built"):
         assert kyo("move", record, status).code == 0
-    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     assert verified.code == 0, verified
     for status in ("verified", "done"):
         assert kyo("move", record, status).code == 0
@@ -1308,7 +1320,7 @@ def _awaiting_the_maintainer(kyo, title: str) -> str:
 
 
 def _confirm(kyo, record: str):
-    return kyo("confirm", record, "--quote", CONFIRM_WORDS, "--json")
+    return kyo("confirm", record, "--quote", CONFIRM_WORDS, "--json", *_credited(kyo))
 
 
 def _closing_sequence(project: Path, suite: str, *ids: str):
@@ -1413,7 +1425,7 @@ def test_kyo577_a_project_declaring_no_generate_steps_confirms_exactly_as_before
     assert _git(project, "rev-parse", "HEAD") == head
     assert (project / GENERATED).read_bytes() == copy
     second = _awaiting_the_maintainer(kyo, "Nor here")
-    printed = kyo("confirm", second, "--quote", CONFIRM_WORDS)
+    printed = kyo("confirm", second, "--quote", CONFIRM_WORDS, *_credited(kyo))
     assert printed.code == 0, printed
     assert "generate" not in printed.out and "INCOMPLETE" not in printed.out
     assert _git(project, "rev-parse", "HEAD") == head
@@ -1463,7 +1475,7 @@ def test_kyo577_the_skipped_refresh_is_printed_with_its_line(
     gated = _awaiting_the_maintainer(kyo, "Printed")
     _store_commit(project)
     (project / "wip.py").write_text("x = 1\n", encoding="utf-8")
-    out = kyo("confirm", gated, "--quote", CONFIRM_WORDS).out
+    out = kyo("confirm", gated, "--quote", CONFIRM_WORDS, *_credited(kyo)).out
     assert out.startswith(f"confirmed {gated}")
     assert "INCOMPLETE" in out and "not refreshed (skipped)" in out
     assert "generated documents NOT refreshed (skipped)" in out and "wip.py" in out

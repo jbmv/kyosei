@@ -1132,9 +1132,7 @@ def test_show_prints_a_criterion_with_its_verdict_history(kyo, project: Path) ->
     that showed only the state would hide the evidence this store actually keeps."""
     record = new_record(kyo, criteria=["the widget turns"])
     criterion_id = kyo("show", record, "--json").json["criteria"][0]["id"]
-    assert kyo(
-        "verify", criterion_id, "--verdict", "met", "--method", "human-observed"
-    ).code == 0
+    verify_criterion(kyo, criterion_id, "met", method="human-observed")
 
     shown = kyo("show", criterion_id)
     assert shown.code == 0, shown

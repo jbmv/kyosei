@@ -707,14 +707,22 @@ VERIFICATION_METHODS: tuple[str, ...] = (
 #: KYO-642 (KYO-638 section 3, as amended by KYO-640): the vocabularies of the ``credits``
 #: table, held here so the writer (:meth:`kyosei.store.Store.add_credit`) and its
 #: commands (KYO-644) name one list. ``observed``: the person looked at something;
-#: ``decided``: the person decided a decision record.
-CREDIT_ROLES: tuple[str, ...] = ("observed", "decided")
+#: ``decided``: the person decided a decision record. KYO-644.c8 adds ``authorized``: a
+#: go-ahead approving a plan already stated ("sounds good", "build it now"), credited as
+#: authorizing the work to proceed and never as deciding its content, so it carries no
+#: outcome, recommendation or alternatives, and a decision record still needs ``decided``.
+CREDIT_ROLES: tuple[str, ...] = ("observed", "decided", "authorized")
+CREDIT_ROLE_DECIDED = "decided"
 CREDIT_SOURCE_KINDS: tuple[str, ...] = ("claude-code", "other")
+#: KYO-644 adds ``unreadable``: a transcript file exists and the reader recognises no
+#: record in it. Recorded like ``transcript-absent`` and named separately, so a changed
+#: transcript format is seen rather than read as a missing file (KYO-638 section 5.1).
 CREDIT_TRANSCRIPT_CHECKS: tuple[str, ...] = (
     "matched",
     "matched-paste-unknown",
     "transcript-absent",
     "not-applicable",
+    "unreadable",
 )
 #: What the person did with the agent's recommendation. KYO-640 amends P9: ``refined``
 #: is a recommendation the person took and changed in a following turn, by a question or a
@@ -2093,6 +2101,15 @@ def check_transition(
                     f"{g.id} ({g.gate_type}) is open: "
                     f"{gate_payload_first_line(g.detail)} — `kyo ungate {g.id} --why "
                     "<reason>` clears it once what it waits on has happened"
+                    if not g.gate_type.startswith("awaiting:human-")
+                    # KYO-644: a gate waiting on a person clears with their credited
+                    # answer (kyo confirm, or kyo ungate with --person and --quote-file),
+                    # or as withdrawn when the wait no longer applies.
+                    else f"{g.id} ({g.gate_type}) is open: "
+                    f"{gate_payload_first_line(g.detail)} — the person's answer clears it, "
+                    "recorded with kyo confirm and their words; `kyo ungate "
+                    f"{g.id} --why <reason> --withdrawn` clears it if the wait no longer "
+                    "applies"
                     for g in open_gates
                 ),
                 f"a record settled with an open gate is not finished (KYO-490): clear "

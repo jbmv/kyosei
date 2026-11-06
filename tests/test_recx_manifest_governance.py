@@ -31,6 +31,7 @@ from kyosei import docs_check, docs_obligations, docs_parse, docs_recx, git_quer
 from kyosei import registry as registry_module
 from kyosei.docs_parse import PREAMBLE
 
+from .conftest import decided as credit_flags
 from .conftest import new_record, valid_report, verify_criterion
 from .test_kyo137_docs_obligations import _commit, _declare_touches, _git, _write
 
@@ -570,7 +571,7 @@ def test_c5_a_decision_naming_a_module_section_raises_a_standing_obligation(
     decided = kyo(
         "new", "decision", "--title", "The validator takes a new flag",
         "--evidence-file", write_file("words.md", "The maintainer, today:\n\"yes\"\n"),
-        "--json",
+        *credit_flags(project), "--json",
     )
     assert decided.code == 0, decided
     record = decided.json["record_id"]

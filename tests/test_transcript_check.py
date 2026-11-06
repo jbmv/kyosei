@@ -650,9 +650,15 @@ def test_store_fields_are_the_uuid_the_timestamp_and_the_outcome(config: Path) -
         "transcript_check": tr.MATCHED_PASTE_UNKNOWN,
         "source_turn": "u-1",
         "observed_at": "2026-10-10T10:00:00.000Z",
+        "words_form": "typed",
     }
     for result in results:
-        assert set(result.store_fields()) == {"transcript_check", "source_turn", "observed_at"}
+        assert set(result.store_fields()) == {
+            "transcript_check",
+            "source_turn",
+            "observed_at",
+            "words_form",
+        }
 
 
 def test_no_transcript_text_or_path_leaves_in_a_result(config: Path) -> None:
@@ -818,3 +824,30 @@ def test_kyo_sessions_lists_the_recorded_transcript(tmp_path: Path) -> None:
     ctx = Namespace(root=store)
     out = cmd_sessions.cmd_sessions(ctx, Namespace(hook=False))
     assert any("transcript: /elsewhere/t.jsonl" in line for line in out.lines)
+
+
+def test_an_accepted_suggestion_is_read_under_its_own_form(config: Path) -> None:
+    """KYO-644.c6 (KYO-640.n1): creditable as the person's choice, never as their writing."""
+    write_transcript(
+        config,
+        [typed("u-1", ANCHOR), typed("u-2", "run the suite now", source="suggestion_accepted")],
+    )
+    result = check(config, "run the suite now")
+    assert result.form == tr.FORM_ACCEPTED_SUGGESTION
+    assert result.store_fields()["words_form"] == "accepted-suggestion"
+    assert check(config, ANCHOR).store_fields()["words_form"] == "typed"
+
+
+def test_each_form_is_reported_in_the_stores_vocabulary(config: Path) -> None:
+    """KYO-644.c6: typed, mid-turn and an answer to a question (stored as choice)."""
+    write_transcript(
+        config,
+        [
+            typed("u-1", ANCHOR),
+            queued("q-1", "also the lamp meanwhile"),
+            ask("a-1", "tool-1", "Which colour?", [("amber", "warm"), ("teal", "cool")]),
+            answer("r-1", "tool-1", "Which colour?", "amber"),
+        ],
+    )
+    assert check(config, "the lamp").words_form == "mid-turn"
+    assert check(config, "amber").words_form == "choice"

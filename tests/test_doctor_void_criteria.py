@@ -79,7 +79,7 @@ def test_a_real_desync_between_verifiable_states_still_fails(kyo, db) -> None:
     *can* record, disagreement is still the law-3 failure the check exists for."""
     record = new_record(kyo, kind="task", title="Desynced", criteria=["the only one"])
     assert kyo(
-        "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed"
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed"
     ).code == 0
 
     conn = db()

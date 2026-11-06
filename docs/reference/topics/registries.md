@@ -21,7 +21,9 @@ is the disposal (KYO-44). Each kind declares:
 - `policy` — `requires_criteria`, `dispatchable`, `unattended_ok`, `write_scope`,
   `swept`, `counted` (+ optional `worker_model` and `carried`) for `work` kinds;
   `amendable`, `swept`, `counted` (+ optional `requires_evidence_links` and
-  `raises_docs_obligations`) for `knowledge` kinds. `raises_docs_obligations` (KYO-554, on
+  `raises_docs_obligations`) for `knowledge` kinds; `requires_credit` (optional, either
+  archetype, KYO-644) makes `kyo new` and `kyo spawn` refuse the kind
+  (`filing-requires-credit`) without a `decided` credit naming the person who decided it. `raises_docs_obligations` (KYO-554, on
   the packaged `decision`) makes filing or editing a record raise a standing docs
   obligation on each ssot section it names by id and each of its doc-refs
   ([docs governance](docs-governance.md)).
@@ -74,6 +76,15 @@ proposal route remains for a decision that needs design work first -- `kyo spawn
 <proposal-id> --kind decision` once the proposal is approved -- and a reminder that was
 waiting on the operator becomes one with `kyo spawn <reminder-id> --kind decision
 --evidence-file words.md`.
+
+**The person who decided (KYO-644).** The packaged `decision` also sets `requires_credit`,
+so every filing of one, by `kyo new` or by any `kyo spawn`, carries a `decided` credit: the
+person's words alone in `--quote-file` (which also serves as the evidence when
+`--evidence-file` is not given), what was recommended, the outcome and the alternatives in
+`--decision-file`, the person (`--person`, defaulting to the only one declared under
+`people:`), and where the words were said (`--session`, defaulting to
+`$CLAUDE_CODE_SESSION_ID`, whose transcript is checked, or `--source-other`). The command
+reference lists the decision file's keys.
 
 **Which spawn routes need evidence (KYO-522).** A reminder becomes a decision exactly when
 the operator answers in conversation, so `kyo spawn` from a source whose kind is `carried`

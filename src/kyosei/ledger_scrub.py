@@ -429,6 +429,12 @@ FIELD_REDACTABLE: dict[str, tuple[str, str]] = {
     "criterion": ("criteria", "text"),
 }
 
+#: KYO-644.c7: a credit (``RECORD.pN``) is a field target too. Its words are evidence and
+#: are redacted as evidence; what the credit itself holds as free text is these three
+#: columns, each copied into every snapshot of the record document's ``credits`` list.
+#: ``alternatives`` is a list, and only each entry's ``text`` is prose.
+CREDIT_FREE_TEXT: tuple[str, ...] = ("recommended", "source_note", "alternatives")
+
 #: The command a redaction event is written with, and the pattern that reads its target
 #: back — one spelling, used by the writer (`kyo redact`) and the reader
 #: (:func:`field_redactions`), so the two cannot drift apart.
@@ -443,6 +449,8 @@ def field_target(target_id: str) -> tuple[str, str] | None:
         return match.group(2), match.group(1)
     if ids.child_kind(target_id) == "criterion":
         return "criterion", ids.record_of_child(target_id) or ""
+    if ids.child_kind(target_id) == "credit":
+        return "credit", ids.record_of_child(target_id) or ""
     return None
 
 
@@ -502,6 +510,14 @@ def _field_values(event: dict, target_id: str, kind: str, record_id: str) -> lis
             for item in document.get("criteria", []) or []:
                 if isinstance(item, dict) and item.get("id") == target_id and "text" in item:
                     places.append((item, "text"))
+        elif kind == "credit":
+            for item in document.get("credits", []) or []:
+                if not isinstance(item, dict) or item.get("id") != target_id:
+                    continue
+                places += [(item, key) for key in ("recommended", "source_note") if key in item]
+                for alternative in item.get("alternatives") or []:
+                    if isinstance(alternative, dict) and "text" in alternative:
+                        places.append((alternative, "text"))
         elif kind in document:
             places.append((document, kind))
     return places

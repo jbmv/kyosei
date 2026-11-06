@@ -13,7 +13,7 @@ from pathlib import Path
 from kyosei import report_schema as rs
 from kyosei.report_schema import validate_report
 
-from .conftest import new_record, valid_report
+from .conftest import new_record, valid_report, verify_criterion
 
 
 def _doc(verdict_method: str, docs_method: str | None = None) -> dict:
@@ -97,7 +97,4 @@ def test_report_schema_text_says_workers_may_not_use_it(kyo) -> None:
 
 def test_orchestrator_verify_still_accepts_human_observed(kyo, git_project: Path) -> None:
     record = new_record(kyo, criteria=["it works"])
-    verified = kyo(
-        "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed"
-    )
-    assert verified.code == 0, verified
+    verify_criterion(kyo, f"{record}.c1", "met", method="human-observed")

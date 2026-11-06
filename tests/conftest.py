@@ -116,6 +116,9 @@ def store_home(tmp_path: Path):
     # run `claude plugin list`; under the developer's real ~/.claude a plugin enabled
     # there would leak into every test. A test that wants a configuration sets its own.
     patch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    # KYO-644: a credit's session defaults to $CLAUDE_CODE_SESSION_ID, which is set when the
+    # suite runs inside Claude Code; a test that wants a session names its own.
+    patch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     yield home
     patch.undo()
 
@@ -390,6 +393,55 @@ def requires_evidence(project: Path, kind: str) -> bool:
     return policy.get("requires_evidence_links") is True
 
 
+#: KYO-644: the person the suite's projects declare when a test needs a credit, and the
+#: flags that credit words said outside Claude Code (no transcript is read).
+TEST_PERSON = "tester"
+CREDIT_ELSEWHERE = ("--source-other", "the test suite")
+DECISION_FILE = "outcome: unprompted\n"
+
+
+def declare_person(project: Path, key: str = TEST_PERSON) -> None:
+    """Declare ``key`` under ``people:`` in the project's config.yml (KYO-642's key)."""
+    path = Path(project) / "kyosei" / "config.yml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    people = raw.get("people") or {}
+    people.setdefault(key, None)
+    raw["people"] = people
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def decided(project: Path, words: str = "the person's words deciding it") -> list[str]:
+    """The flags of a decided credit for a test filing a decision about something else
+    (KYO-644): the person declared, their words and an unprompted decision file written
+    beside the project, said outside Claude Code."""
+    declare_person(project)
+    root = Path(project).parent
+    quote = root / "kyo644-decision-quote.txt"
+    quote.write_text(words, encoding="utf-8")
+    decision = root / "kyo644-decision.yml"
+    decision.write_text(DECISION_FILE, encoding="utf-8")
+    return [
+        "--quote-file", str(quote), "--decision-file", str(decision), "--person", TEST_PERSON,
+        *CREDIT_ELSEWHERE,
+    ]  # fmt: skip
+
+
+def requires_credit(project: Path, kind: str) -> bool:
+    """Does this project's registry make `kyo new` refuse ``kind`` without a decided
+    credit? (KYO-644: ``policy.requires_credit``)"""
+    raw = yaml.safe_load(kinds_yml(project).read_text(encoding="utf-8"))
+    policy = (raw["kinds"].get(kind) or {}).get("policy") or {}
+    return policy.get("requires_credit") is True
+
+
+def decision_credit_args(project: Path) -> list[str]:
+    """The flags a decided credit takes, with the person declared and the files written."""
+    declare_person(project)
+    path = Path(project).parent / "kyo644-decision.yml"
+    path.write_text(DECISION_FILE, encoding="utf-8")
+    return ["--decision-file", str(path), "--person", TEST_PERSON, *CREDIT_ELSEWHERE]
+
+
 def new_record(
     kyo, *, kind: str = "bug", title: str = "A record", criteria: list[str] | None = None
 ):
@@ -418,6 +470,10 @@ def new_record(
             handle.write("The test suite, filing a record of this kind:\n\"evidence\"\n")
             handle.flush()
             args += ["--evidence-file", handle.name]
+            if requires_credit(project, kind):
+                args += ["--quote-file", handle.name]
+        if project is not None and requires_credit(project, kind):
+            args += decision_credit_args(project)
         result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result.json["record"]["id"]
@@ -465,9 +521,17 @@ def verify_criterion(
     stdin = None
     if why is not None:
         args += ["--why", why]
+    if method == "human-observed" and evidence is None:
+        evidence = "the person's words"
     if evidence is not None:
         args += ["--evidence-file", "-"]
         stdin = evidence
+    if method == "human-observed":
+        # KYO-644: a human-observed verdict names the person who observed it.
+        project = getattr(kyo, "project", None)
+        if project is not None:
+            declare_person(project)
+        args += ["--person", TEST_PERSON, *CREDIT_ELSEWHERE]
     result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result

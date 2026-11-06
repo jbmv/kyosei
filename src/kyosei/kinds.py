@@ -111,9 +111,23 @@ WORK_POLICY_KEYS: frozenset[str] = frozenset(
 #: record's open gates). A key rather than a test for a kind's name because projects
 #: rename kinds and the registry is where policy lives -- KYO-521 renamed the shipped
 #: kind itself (to ``reminder``) without touching a line that reads this key.
-WORK_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset({"worker_model", "carried"})
+#:
+#: KYO-644: ``policy.requires_credit`` (optional, either archetype) -- filing a record of
+#: this kind, by `kyo new` or `kyo spawn`, needs a ``decided`` credit naming the person who
+#: decided it (``credits.filing_credit``). Set on the shipped ``decision``.
+WORK_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset(
+    {"worker_model", "carried", "requires_credit"}
+)
 WORK_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
-    {"requires_criteria", "dispatchable", "unattended_ok", "swept", "counted", "carried"}
+    {
+        "requires_criteria",
+        "dispatchable",
+        "unattended_ok",
+        "swept",
+        "counted",
+        "carried",
+        "requires_credit",
+    }
 )
 
 #: A ``knowledge`` kind's policy carries these, plus optionally ``requires_evidence_links``,
@@ -124,10 +138,17 @@ KNOWLEDGE_POLICY_REQUIRED_KEYS: frozenset[str] = frozenset({"amendable", "swept"
 #: KYO-554 adds ``raises_docs_obligations``: a record of such a kind raises a standing docs
 #: obligation on each section it names (``cmd_records.raise_standing_obligations``).
 KNOWLEDGE_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset(
-    {"requires_evidence_links", "raises_docs_obligations"}
+    {"requires_evidence_links", "raises_docs_obligations", "requires_credit"}
 )
 KNOWLEDGE_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
-    {"amendable", "swept", "counted", "requires_evidence_links", "raises_docs_obligations"}
+    {
+        "amendable",
+        "swept",
+        "counted",
+        "requires_evidence_links",
+        "raises_docs_obligations",
+        "requires_credit",
+    }
 )
 
 #: ``accepts_from`` may name these in addition to another defined kind; ``produces`` may not
@@ -208,6 +229,12 @@ class Kind:
         file this kind without ``--evidence-file``); false when absent and on every work
         kind."""
         return self.policy.get("requires_evidence_links", False) is True
+
+    @property
+    def requires_credit(self) -> bool:
+        """``policy.requires_credit`` (KYO-644): `kyo new` and `kyo spawn` refuse to file
+        this kind without a ``decided`` credit; false when absent."""
+        return self.policy.get("requires_credit", False) is True
 
     @property
     def raises_docs_obligations(self) -> bool:

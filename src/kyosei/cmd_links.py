@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 
-from . import commands, explanations, export, links
+from . import commands, credits, explanations, export, links
 from . import registry as registry_module
 from .clock import now
 from .commands import (
@@ -766,10 +766,28 @@ def cmd_ungate(ctx: Context, args: Namespace) -> Output:
     store = ctx.store()
     reason = _reason(args)
     if tag is not None:
-        return _ungate_by_tag(ctx, store, tag, reason, apply)
+        return _ungate_by_tag(ctx, store, tag, reason, apply, args)
+    clearing = _clearing(ctx, store, args, gate_ids, reason, "kyo ungate " + " ".join(gate_ids))
     if len(gate_ids) == 1:
-        return _ungate_one(ctx, store, gate_ids[0], reason)
-    return _ungate_many(ctx, store, gate_ids, reason, command=f"ungate {' '.join(gate_ids)}")
+        return _ungate_one(ctx, store, gate_ids[0], reason, clearing)
+    return _ungate_many(
+        ctx, store, gate_ids, reason, command=f"ungate {' '.join(gate_ids)}", clearing=clearing
+    )
+
+
+def _clearing(
+    ctx: Context, store, args: Namespace, gate_ids: list[str], reason: str | None, command: str
+) -> credits.GateClearing:
+    """KYO-644: how these gates clear -- a person's answer, credited, or ``--withdrawn`` --
+    decided before anything is written. A gate id that does not exist is left to the
+    clearing's own refusal, which names it."""
+    rows = []
+    for gate_id in gate_ids:
+        try:
+            rows.append(store.gate(gate_id))
+        except NotFound:
+            continue
+    return credits.gate_clearing(ctx, store, args, rows, reason, command=command)
 
 
 def _already_cleared(gate_id: str, cleared_at: str) -> str:
@@ -778,7 +796,9 @@ def _already_cleared(gate_id: str, cleared_at: str) -> str:
     return f"{gate_id} was already cleared at {cleared_at}"
 
 
-def _clear_gate(store, gate_id: str, reason: str | None, cleared_at: str) -> dict:
+def _clear_gate(
+    store, gate_id: str, reason: str | None, cleared_at: str, cleared_as: str | None = None
+) -> dict:
     """Clear one gate inside the caller's transaction; the caller exports and commits.
 
     The one write path for a clearing, whether one gate was named or many (KYO-492):
@@ -787,9 +807,10 @@ def _clear_gate(store, gate_id: str, reason: str | None, cleared_at: str) -> dic
     if gate["cleared_at"]:
         raise KyoseiError(_already_cleared(gate_id, gate["cleared_at"]))
     record_id = gate["record_id"]
+    # KYO-644: `cleared_as` says how -- answered (a credit names the gate) or withdrawn.
     store.conn.execute(
-        "UPDATE gates SET cleared_at = ?, cleared_why = ? WHERE id = ?",
-        (cleared_at, reason, gate_id),
+        "UPDATE gates SET cleared_at = ?, cleared_why = ?, cleared_as = ? WHERE id = ?",
+        (cleared_at, reason, cleared_as, gate_id),
     )
     flagged: dict | None = None
     if gate["gate_type"] in GATE_TYPES_FLAGGING_STALE_CRITERIA:
@@ -814,11 +835,15 @@ def _clear_gate(store, gate_id: str, reason: str | None, cleared_at: str) -> dic
     }
 
 
-def _ungate_one(ctx: Context, store, gate_id: str, reason: str | None) -> Output:
+def _ungate_one(
+    ctx: Context, store, gate_id: str, reason: str | None, clearing: credits.GateClearing
+) -> Output:
     with store.transaction():
         record_id = store.gate(gate_id)["record_id"]
         before = {record_id: export.record_document(store, record_id)}
-        cleared = _clear_gate(store, gate_id, reason, now())
+        cleared_at = now()
+        cleared = _clear_gate(store, gate_id, reason, cleared_at, clearing.cleared_as())
+        credit_id = clearing.write(store, [(gate_id, record_id)], ctx.actor, cleared_at)
         after, events = commands._commit_and_export(
             store,
             command=f"ungate {gate_id}",
@@ -830,6 +855,7 @@ def _ungate_one(ctx: Context, store, gate_id: str, reason: str | None) -> Output
     flagged = cleared["flag"]
     gate_type = cleared["gate_type"]
     lines = [f"cleared {gate_id} on {record_id} ({gate_type})"]
+    lines += _clearing_lines(store, clearing, credit_id)
     if reason is not None:
         lines += echo_block("why", reason)
     if flagged is not None:
@@ -854,14 +880,37 @@ def _ungate_one(ctx: Context, store, gate_id: str, reason: str | None) -> Output
             "command": "ungate",
             "gate_id": gate_id,
             "record_id": record_id,
+            # KYO-644: how the gate cleared, and the credit naming who answered.
+            "cleared_as": clearing.cleared_as(),
+            "credit_id": credit_id,
             "flag": flagged,
             "record": after[record_id],
         },
     )
 
 
+def _clearing_lines(store, clearing: credits.GateClearing, credit_id: str | None) -> list[str]:
+    """What a clearing says about who answered (KYO-644)."""
+    if clearing.withdrawn:
+        return [echo_value("cleared as", "withdrawn: no person answered")]
+    if clearing.credit is not None and credit_id is not None:
+        return [
+            echo_value("cleared as", "answered"),
+            *credits.lines(store, credit_id, clearing.credit),
+        ]
+    if clearing.joined is not None:
+        return [echo_value("cleared as", f"answered, credit {clearing.joined}")]
+    return []
+
+
 def _ungate_many(
-    ctx: Context, store, gate_ids: list[str], reason: str | None, *, command: str
+    ctx: Context,
+    store,
+    gate_ids: list[str],
+    reason: str | None,
+    *,
+    command: str,
+    clearing: credits.GateClearing,
 ) -> Output:
     """Clear every gate in ``gate_ids`` in one transaction, or none of them.
 
@@ -887,7 +936,15 @@ def _ungate_many(
         record_ids = list(dict.fromkeys(store.gate(g)["record_id"] for g in gate_ids))
         before = {rid: export.record_document(store, rid) for rid in record_ids}
         cleared_at = now()
-        cleared = [_clear_gate(store, g, reason, cleared_at) for g in gate_ids]
+        cleared = [
+            _clear_gate(store, g, reason, cleared_at, clearing.cleared_as()) for g in gate_ids
+        ]
+        credit_id = clearing.write(
+            store,
+            [(item["gate_id"], item["record_id"]) for item in cleared],
+            ctx.actor,
+            cleared_at,
+        )
         after, events = commands._commit_and_export(
             store,
             command=command,
@@ -907,6 +964,7 @@ def _ungate_many(
         f"{len(cleared)} gate(s) cleared in one transaction; {flags} raised "
         f"{FLAG_TYPE_GATE_CLEARED_STALE_CRITERIA}"
     )
+    lines += _clearing_lines(store, clearing, credit_id)
     if reason is not None:
         lines += echo_block("why", reason)
     return Output(
@@ -917,13 +975,17 @@ def _ungate_many(
             "applied": True,
             "gate_ids": [item["gate_id"] for item in cleared],
             "cleared": cleared,
+            "cleared_as": clearing.cleared_as(),
+            "credit_id": credit_id,
             "why": reason,
             "records": [after[rid] for rid in record_ids],
         },
     )
 
 
-def _ungate_by_tag(ctx: Context, store, tag: str, reason: str | None, apply: bool) -> Output:
+def _ungate_by_tag(
+    ctx: Context, store, tag: str, reason: str | None, apply: bool, args: Namespace
+) -> Output:
     """``kyo ungate --tag T [--apply]`` (KYO-492.c2): every OPEN gate carrying ``T``.
 
     Dry run by default — law 11's habit, as `kyo flag collapse` has it: the selection is
@@ -946,12 +1008,10 @@ def _ungate_by_tag(ctx: Context, store, tag: str, reason: str | None, apply: boo
                 }
             )
     if apply and selected:
+        ids_ = [item["gate_id"] for item in selected]
+        clearing = _clearing(ctx, store, args, ids_, reason, f"kyo ungate --tag {tag} --apply")
         return _ungate_many(
-            ctx,
-            store,
-            [item["gate_id"] for item in selected],
-            reason,
-            command=f"ungate --tag {tag} --apply",
+            ctx, store, ids_, reason, command=f"ungate --tag {tag} --apply", clearing=clearing
         )
     lines = [
         f"{item['gate_id']} on {item['record_id']} ({item['gate_type']})"

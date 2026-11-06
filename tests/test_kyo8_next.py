@@ -54,7 +54,7 @@ def test_clearing_the_gate_makes_it_ready_again(kyo) -> None:
     record = new_record(kyo, criteria=["a"])
     gated = kyo("gate", record, "awaiting:human-review", "--json")
     gate_id = gated.json["gate_id"]
-    kyo("ungate", gate_id)
+    kyo("ungate", gate_id, "--withdrawn", "--why", "moot")
     ready = kyo("next", "--json").json["ready"]
     assert record in [r["id"] for r in ready]
 

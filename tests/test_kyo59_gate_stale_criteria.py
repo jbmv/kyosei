@@ -38,7 +38,7 @@ def test_clearing_a_holding_for_gate_flags_the_criteria_written_under_it(kyo) ->
     record = new_record(kyo, criteria=["the stamp is a single value", "the four stamped ideas"])
     gate = _gate(kyo, record, "holding-for", "the v2 promoted-table design decides the stamp")
 
-    result = kyo("ungate", gate, "--why", "the design decided it", "--json")
+    result = kyo("ungate", gate, "--withdrawn", "--why", "the design decided it", "--json")
     assert result.code == 0, result
     flag = result.json["flag"]
     assert flag is not None, "clearing the gate said nothing about the stale criteria"
@@ -92,7 +92,7 @@ def test_settled_criteria_do_not_raise_the_flag(kyo) -> None:
     void one directs nobody. Only a criterion still able to send a worker somewhere
     can send one to the wrong place — which is the harm this flag is about."""
     record = new_record(kyo, criteria=["already true", "still open"])
-    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     gate = _gate(kyo, record, "holding-for")
     flag = kyo("ungate", gate, "--json").json["flag"]
     assert flag["criteria"] == [f"{record}.c2"]
@@ -109,7 +109,8 @@ def test_the_flag_reaches_the_next_session_s_brief_and_clears_from_it(kyo) -> No
     gate = _gate(kyo, record, "holding-for", "the design decides the stamp")
     kyo("brief")  # the session in which the gate was cleared
 
-    flag_id = kyo("ungate", gate, "--why", "decided", "--json").json["flag"]["flag_id"]
+    cleared = kyo("ungate", gate, "--withdrawn", "--why", "decided", "--json")
+    flag_id = cleared.json["flag"]["flag_id"]
 
     next_session = kyo("brief", "--json")
     assert next_session.code == 0, next_session
@@ -142,7 +143,10 @@ def test_only_holding_for_raises_the_flag(kyo) -> None:
     for gate_type in quiet:
         record = new_record(kyo, criteria=["written before the gate cleared"])
         gate = _gate(kyo, record, gate_type, "run the migration")
-        result = kyo("ungate", gate)
+        # KYO-644: a gate waiting on a person clears with a credit or as withdrawn.
+        human = gate_type.startswith("awaiting:human")
+        withdrawn = ["--withdrawn", "--why", "moot"] if human else []
+        result = kyo("ungate", gate, *withdrawn)
         assert result.code == 0, result
         assert _unresolved(kyo, record) == [], gate_type
         assert "does not raise" in result.out, (

@@ -326,7 +326,8 @@ kinds:
     summary: Shapes architecture. Cites the evidence that supports it.
     accepts_from: [intake, proposal, investigation, reminder]   # intake, reminder: KYO-521
     produces: []
-    policy: { amendable: true, requires_evidence_links: true, swept: false, counted: false }
+    policy: { amendable: true, requires_evidence_links: true, requires_credit: true,   # KYO-644
+              swept: false, counted: false }
   evidence:
     archetype: knowledge
     summary: Captured observations with method and instrument. Can be marked wrong.
@@ -387,6 +388,8 @@ kinds:
   kind that sets it unless `--evidence-file` attaches the evidence in the same act
   (`filing-requires-evidence`), so a decision filed directly is never an unsupported assertion.
   `kyo spawn` asks for none; its `produced-by` link names the record the decision came from.
+  KYO-644 adds `requires_credit`, consumed by both: a decision is filed only with a `decided`
+  credit naming the declared person who decided it, their words, and what was recommended.
 
 ### Status and gates are orthogonal dimensions
 
@@ -428,7 +431,10 @@ says both at once while every brief goes on listing it (KYO-380 reached that sta
 `kyo wont-do`). So `settled-requires-no-open-gates` refuses `kyo move` into either role,
 `kyo wont-do`, `kyo void`, and `kyo accept --close`'s walk, naming each gate and the two
 ways out: clear it with `kyo ungate <gate-id> --why` once what it waits on has happened,
-or pass `--force` to settle with the gate left open, which the command reports.
+or pass `--force` to settle with the gate left open, which the command reports. A gate
+waiting on a person (`awaiting:human-run`, `awaiting:human-review`) clears only with that
+person's credited answer or with `--withdrawn`, which records that nobody answered
+(`person-gate-clear-requires-credit`, KYO-644); the clearing's `cleared_as` says which.
 
 ### Core schema (SQLite)
 
@@ -526,7 +532,8 @@ kyo edit <id> --notes-file f.md   # or stdin; echoes stored result; supersede-ma
 kyo promote <idea-file> --kind <k>   # validates flows + touches against repo; authors criteria
 kyo move <id> <status>            # enforces transition contracts AT the transition, names unmet items
 kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload the dashboard"
-kyo ungate <id> [--why]
+kyo ungate <id> [--why]          # a gate waiting on a person: their credit, or --withdrawn (KYO-644)
+kyo credit <id>... --basis <credit>   # a credit for rows that already exist (KYO-644)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --criteria c3,c7   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles

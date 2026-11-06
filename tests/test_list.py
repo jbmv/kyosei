@@ -139,7 +139,7 @@ def test_gates_open_count_is_shown(kyo) -> None:
     kyo("gate", record, "holding-for", "--do", "the measurement finishes")
     row = next(r for r in kyo("list", "--json").json["records"] if r["id"] == record)
     assert row["gates_open"] == 2
-    kyo("ungate", gate_id, "--why", "reviewed")
+    kyo("ungate", gate_id, "--withdrawn", "--why", "reviewed")
     row = next(r for r in kyo("list", "--json").json["records"] if r["id"] == record)
     assert row["gates_open"] == 1
 

@@ -62,7 +62,7 @@ def test_ungate_takes_the_gates_own_id(kyo) -> None:
     record = new_record(kyo)
     gate_id = kyo("gate", record, "awaiting:human-review", "--json").json["gate_id"]
     assert gate_id.startswith(f"{record}.g")
-    result = kyo("ungate", gate_id, "--why", "reviewed on the call")
+    result = kyo("ungate", gate_id, "--withdrawn", "--why", "reviewed on the call")
     assert result.code == 0
     gate = kyo("show", record, "--json").json["gates"][0]
     assert gate["cleared_at"] is not None
@@ -72,8 +72,8 @@ def test_ungate_takes_the_gates_own_id(kyo) -> None:
 def test_clearing_a_gate_twice_fails_loudly(kyo) -> None:
     record = new_record(kyo)
     gate_id = kyo("gate", record, "awaiting:human-review", "--json").json["gate_id"]
-    assert kyo("ungate", gate_id).code == 0
-    result = kyo("ungate", gate_id)
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", "moot").code == 0
+    result = kyo("ungate", gate_id, "--withdrawn", "--why", "moot")
     assert result.code == 1
     assert "already cleared" in result.err
 
@@ -96,7 +96,7 @@ def test_a_cleared_gate_is_kept_not_deleted(kyo) -> None:
     """Law 4: supersede, never delete — the history of the hold survives."""
     record = new_record(kyo)
     gate_id = kyo("gate", record, "holding-for", "--do", "the p95 lands", "--json").json["gate_id"]
-    kyo("ungate", gate_id, "--why", "measurement done")
+    kyo("ungate", gate_id, "--withdrawn", "--why", "measurement done")
     gates = kyo("show", record, "--json").json["gates"]
     assert [g["id"] for g in gates] == [gate_id]
     assert gates[0]["do"] == "the p95 lands"
@@ -214,7 +214,7 @@ def test_a_cleared_gate_carries_no_claims(kyo) -> None:
     record = new_record(kyo)
     gate_id = kyo("gate", record, "awaiting:human-review", "--json").json["gate_id"]
     claim_id = _claim(kyo, record, "an answer to something else entirely")
-    assert kyo("ungate", gate_id, "--why", "reviewed").code == 0
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", "reviewed").code == 0
 
     block = "\n".join(_gate_block(kyo("show", record).out, gate_id))
     assert claim_id not in block
@@ -402,7 +402,7 @@ def test_the_filter_reads_open_gates_only(kyo, project: Path) -> None:
     assert [r["id"] for r in kyo("list", "--gate-tag", "ui-review", "--json").json["records"]] == [
         record
     ]
-    kyo("ungate", gate_id, "--why", "reviewed on the call")
+    kyo("ungate", gate_id, "--withdrawn", "--why", "reviewed on the call")
     assert kyo("list", "--gate-tag", "ui-review", "--json").json["records"] == []
 
 
@@ -736,7 +736,8 @@ def test_a_cleared_awaiting_gate_stops_making_the_wait_findable(kyo) -> None:
     gate_id = kyo(
         "gate", record, "awaiting:human-run", "--do", "watch the app", "--json"
     ).json["gate_id"]
-    assert kyo("ungate", gate_id, "--why", "looked, and it was wrong again").code == 0
+    why = "looked, and it was wrong again"
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", why).code == 0
     result = kyo(
         "verify",
         f"{record}.c1",
@@ -792,7 +793,7 @@ def test_a_met_verdict_never_suggests_a_gate(kyo) -> None:
     """Nothing is waiting on anybody, so there is nothing to make findable."""
     record = new_record(kyo, criteria=["the panel refreshes"])
     result = kyo(
-        "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed"
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed"
     )
     assert "kyo gate" not in result.out, result.out
 

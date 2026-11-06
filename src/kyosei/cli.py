@@ -57,6 +57,7 @@ from . import (
     cmd_views,
     cmd_worktrees,
     commands,
+    credits,
     events_ledger,
     explanations,
     prior_art,
@@ -144,6 +145,8 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     "ungate": (cmd_links.cmd_ungate, PROJECT_REQUIRED),
     "claim": (cmd_evidence.cmd_claim, PROJECT_REQUIRED),
     "verify": (cmd_evidence.cmd_verify, PROJECT_REQUIRED),
+    # KYO-644: a credit for rows that already exist (late, or reconstructed with --basis).
+    "credit": (credits.cmd_credit, PROJECT_REQUIRED),
     "attach": (cmd_evidence.cmd_attach, PROJECT_REQUIRED),
     # KYO-585: prior-art search through recx, on demand, for any record.
     "prior-art": (prior_art.cmd_prior_art, PROJECT_REQUIRED),
@@ -336,6 +339,8 @@ MUTATING_COMMANDS = (
     "ungate",
     "claim",
     "verify",
+    # KYO-644: writes a credit and its quote's evidence, with an events row.
+    "credit",
     "attach",
     # KYO-585: writes a claim and an evidence artifact, with an events row.
     "prior-art",
@@ -767,6 +772,9 @@ def build_parser() -> KyoseiParser:
         "requires_evidence_links (the default `decision`: the operator's words -- who, "
         "when, where, then the words verbatim) and allowed beside --from (KYO-521)",
     )
+    # KYO-644: a kind with policy.requires_credit (the default `decision`) names the
+    # person who decided it; --quote-file alone also serves as the evidence.
+    credits.add_credit_flags(p_new, decision=True, span=True)
     p_new.add_argument(
         "--from",
         dest="from_file",
@@ -933,6 +941,7 @@ def build_parser() -> KyoseiParser:
         "when, where, then the words verbatim); not asked of a proposal or investigation "
         "source (KYO-522)",
     )
+    credits.add_credit_flags(p_spawn, decision=True, span=True)
     p_spawn.add_argument(
         "--check",
         action="store_true",
@@ -1118,6 +1127,9 @@ def build_parser() -> KyoseiParser:
         + " | ".join(default_ladder().names),
     )
     _add_reason_flags(p_move, "(required to enter wont-do)")
+    # KYO-644: a carried record's settle clears its open gates; one waiting on a person
+    # needs the person's credited answer, or --withdrawn.
+    credits.add_gate_clearing_flags(p_move, credit_join=False)
     # KYO-308.c1: `plan`'s completion is a status distribution over its members, and
     # this is the escape hatch beside the one the refusal itself names — settle the
     # members, or detach them with `kyo edit --no-plan`. Ignored by every move this
@@ -1139,6 +1151,7 @@ def build_parser() -> KyoseiParser:
     )
     p_wont.add_argument("id")
     _add_reason_flags(p_wont, "(required)")
+    credits.add_gate_clearing_flags(p_wont, credit_join=False)
     # KYO-490: the same meaning `kyo move --force` has for an open gate.
     p_wont.add_argument(
         "--force",
@@ -1281,6 +1294,8 @@ def build_parser() -> KyoseiParser:
         help="with --tag: clear every gate the selection lists, in one transaction",
     )
     _add_reason_flags(p_ungate, "for clearing it")
+    # KYO-644: a gate waiting on a person clears with their credited answer or --withdrawn.
+    credits.add_gate_clearing_flags(p_ungate)
 
     # KYO-585: the creating commands search recx for prior art when this
     # project's `recx.prior_art` names the kind and the command; this skips one search.
@@ -1382,6 +1397,45 @@ def build_parser() -> KyoseiParser:
         "already applied, or as a newer verdict kept, and skipped",
     )
     _add_reason_flags(p_verify, "(required for unmet-unobserved)")
+    # KYO-644: a human-observed verdict names the person; --evidence-file is their words.
+    credits.add_credit_flags(p_verify, quote=False)
+    p_verify.add_argument(
+        "--credit",
+        metavar="CREDIT_ID",
+        help="add this human-observed verdict to an existing credit of the same act and "
+        "words (kyo confirm uses it)",
+    )
+
+    p_credit = sub.add_parser(
+        "credit",
+        parents=[common],
+        help="credit a person for rows that already exist: a human-observed verdict, a "
+        "cleared human gate, or a record they decided or authorized; a reconstructed "
+        "credit needs --basis (KYO-644)",
+    )
+    p_credit.add_argument(
+        "subject_ids",
+        metavar="SUBJECT_ID",
+        nargs="+",
+        help="verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record",
+    )
+    p_credit.add_argument(
+        "--role",
+        metavar="ROLE",
+        help="observed | decided | authorized; defaults to decided for a record, observed "
+        "otherwise. authorized: a go-ahead approving a plan already stated",
+    )
+    p_credit.add_argument(
+        "--basis",
+        metavar="CREDIT_ID",
+        help="the person's own decided credit approving this batch of reconstructed credits",
+    )
+    p_credit.add_argument(
+        "--supersede",
+        metavar="CREDIT_ID",
+        help="replace this current credit of a subject; it stays readable as superseded",
+    )
+    credits.add_credit_flags(p_credit, decision=True, span=True)
 
     p_attach = sub.add_parser(
         "attach", parents=[common], help="attach an evidence artifact, stored verbatim (law 5, 9)"
@@ -2501,6 +2555,8 @@ def build_parser() -> KyoseiParser:
         help="the awaiting:human-* gate the words answer; needed only when more than one "
         "is open",
     )
+    # KYO-644: the person who observed; --quote/--quote-file are their words.
+    credits.add_credit_flags(p_confirm, quote=False)
     p_confirm.add_argument(
         "--no-close",
         action="store_true",

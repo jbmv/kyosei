@@ -33,7 +33,7 @@ def _met_record(kyo) -> str:
     """A bug whose one criterion is met, so `done` is otherwise permitted."""
     record = new_record(kyo, criteria=["the import finishes"])
     assert kyo("move", record, "working").code == 0
-    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     assert verified.code == 0, verified
     return record
 
@@ -107,7 +107,7 @@ def test_void_is_refused_over_an_open_gate(kyo) -> None:
 def test_every_open_gate_is_named_and_a_cleared_one_is_not(kyo) -> None:
     record = _met_record(kyo)
     cleared = _gate(kyo, record, "awaiting:human-review")
-    assert kyo("ungate", cleared, "--why", "reviewed").code == 0
+    assert kyo("ungate", cleared, "--withdrawn", "--why", "reviewed").code == 0
     first = _gate(kyo, record, "awaiting:event")
     second = _gate(kyo, record, "awaiting:human-review")
     refused = kyo("move", record, "done")
@@ -145,7 +145,8 @@ def test_ungating_then_repeating_the_move_succeeds(kyo) -> None:
     record = _met_record(kyo)
     gate_id = _gate(kyo, record)
     assert kyo("move", record, "done").code == 2
-    assert kyo("ungate", gate_id, "--why", "ran it; the summary is on the record").code == 0
+    why = "ran it; the summary is on the record"
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", why).code == 0
     moved = kyo("move", record, "done")
     assert moved.code == 0, moved
     assert _status(kyo, record) == "done"

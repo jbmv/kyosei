@@ -15,7 +15,7 @@ from kyosei import buildinfo
 from kyosei.export import write_export
 from kyosei.store import open_store
 
-from .conftest import invoke, new_record
+from .conftest import CREDIT_ELSEWHERE, invoke, new_record
 
 SESSION = "7212f0bb-a568-49c4-9b87-d3209a201b6b"
 TURN = "e4060c50-1111-2222-3333-444455556666"
@@ -198,8 +198,9 @@ def test_a_gate_cleared_by_an_answer_and_one_withdrawn_read_differently(
         first, second = [g["id"] for g in store.conn.execute("SELECT id FROM gates")]
     finally:
         store.close()
-    assert kyo("ungate", first, "--why", "the person said yes").code == 0
-    assert kyo("ungate", second, "--why", "no longer matters").code == 0
+    # KYO-644: cleared through the command, then given the shape each clearing reads as.
+    assert kyo("ungate", first, "--withdrawn", "--why", "the person said yes").code == 0
+    assert kyo("ungate", second, "--withdrawn", "--why", "no longer matters").code == 0
     store = open_store(project)
     try:
         with store.transaction():
@@ -220,18 +221,12 @@ def test_a_credited_verdict_that_reverses_an_agents_names_what_it_overrides(
     kyo, project: Path
 ) -> None:
     record, agent_v, _ = _verified(kyo, project)
+    # KYO-644: the human-observed verdict is credited by the command that records it.
     result = kyo(
         "verify", f"{record}.c1", "--verdict", "unmet-unbuilt", "--method", "human-observed",
-        "--evidence-file", "-", stdin="it is not there",
+        "--evidence-file", "-", "--person", "jbmv", *CREDIT_ELSEWHERE, stdin="it is not there",
     )  # fmt: skip
     assert result.code == 0, result
-    store = open_store(project)
-    try:
-        person_v = store.verifications_for_criterion(f"{record}.c1")[-1]["id"]
-        evidence = store.evidence_artifacts(record)[-1]["id"]
-    finally:
-        store.close()
-    _credit(project, record, evidence, [("verification", person_v)])
     text = kyo("show", record).out
     assert f"overrides {agent_v} (met, reasoned-about, orchestrator)" in text
     verifications = kyo("show", record, "--json").json["criteria"][0]["verifications"]
@@ -267,18 +262,17 @@ def test_list_filters_return_the_records_they_name(kyo, project: Path) -> None:
 
 def test_a_verdict_override_is_found_by_overrode(kyo, project: Path) -> None:
     record, _, _ = _verified(kyo, project)
+    # An agent's own reversal credits nobody, and is not a person overriding anything.
+    assert kyo(
+        "verify", f"{record}.c1", "--verdict", "unmet-unbuilt", "--method", "agent-observed",
+    ).code == 0  # fmt: skip
+    assert kyo("list", "--overrode", "--json").json["records"] == []
+    # KYO-644: a person's reversal is credited by the command that records it.
+    assert kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "reasoned-about").code == 0
     assert kyo(
         "verify", f"{record}.c1", "--verdict", "unmet-unbuilt", "--method", "human-observed",
-        "--evidence-file", "-", stdin="not there",
+        "--evidence-file", "-", "--person", "jbmv", *CREDIT_ELSEWHERE, stdin="not there",
     ).code == 0  # fmt: skip
-    store = open_store(project)
-    try:
-        person_v = store.verifications_for_criterion(f"{record}.c1")[-1]["id"]
-        evidence = store.evidence_artifacts(record)[-1]["id"]
-    finally:
-        store.close()
-    assert kyo("list", "--overrode", "--json").json["records"] == []
-    _credit(project, record, evidence, [("verification", person_v)])
     assert [r["id"] for r in kyo("list", "--overrode", "--json").json["records"]] == [record]
 
 
@@ -317,7 +311,10 @@ def test_the_changelog_names_who_decided_a_completed_record(
         record = new_record(kyo, criteria=["a"], title=title)
         for status in ("working", "built"):
             assert kyo("move", record, status).code == 0
-        verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+        verified = kyo(
+            "verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+            "--evidence-file", "-", "--person", "jbmv", *CREDIT_ELSEWHERE, stdin="it works",
+        )  # fmt: skip
         assert verified.code == 0, verified
         for status in ("verified", "done"):
             assert kyo("move", record, status).code == 0
@@ -356,23 +353,25 @@ def test_the_changelog_names_who_decided_a_completed_record(
 
 
 def test_an_authorized_credit_is_never_shown_or_found_as_decided(kyo, project: Path) -> None:
-    """KYO-647.c6. The ``authorized`` role is KYO-644's and may not be in the vocabulary
-    this branch was cut from, so the credit is stored as ``decided`` and its role column
-    rewritten, which is the stored shape the command will write."""
+    """KYO-647.c6. KYO-644 added ``authorized`` to the vocabulary: a go-ahead carries no
+    outcome, recommendation or alternatives."""
     decision = new_record(kyo, kind="decision", title="Go ahead", criteria=["a"])
+    # KYO-644: filing wrote the decision's own decided credit; this test is about a record
+    # whose only credit is a go-ahead, so that one is removed.
+    store = open_store(project)
+    try:
+        with store.transaction():
+            store.conn.execute("DELETE FROM credit_subjects")
+            store.conn.execute("DELETE FROM credits")
+    finally:
+        store.close()
     _, _, evidence = _verified(kyo, project, record=decision)
     credit = _credit(
-        project, decision, evidence, [("record", decision)], role="decided", outcome="accepted",
+        project, decision, evidence, [("record", decision)], role="authorized",
         span_session=SESSION, span_first_turn="t1", span_last_turn="t2",
         span_person_turns=1, span_agent_turns=3, span_active_seconds=45,
         span_started_at="2026-11-06T10:00:00Z", span_ended_at="2026-11-06T10:01:00Z",
     )  # fmt: skip
-    store = open_store(project)
-    try:
-        with store.transaction():
-            store.conn.execute("UPDATE credits SET role = 'authorized' WHERE id = ?", (credit,))
-    finally:
-        store.close()
     text = kyo("show", decision).out
     assert f"authorized by: jbmv (credit {credit}, transcript matched)" in text
     assert "decided by" not in text

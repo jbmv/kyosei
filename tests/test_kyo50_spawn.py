@@ -25,13 +25,15 @@ from kyosei.contracts import (
     CONTRACT_SPAWN_SOURCE_IS_RETIRED,
 )
 
-from .conftest import kinds_yml, new_record
+from .conftest import decided, kinds_yml, new_record
 
 TOUCHES = "kyosei/config.yml\n"
 
 
 def _spawn(kyo, source: str, kind: str, *, title: str, write_file, **flags):
     args = ["spawn", source, "--kind", kind, "--title", title, "--json"]
+    if kind == "decision":  # KYO-644: a decision credits the person who decided it
+        args += decided(kyo.project)
     for flag, content in flags.items():
         if content is None:  # a bare switch such as --force (KYO-538)
             args.append(f"--{flag.replace('_', '-')}")
@@ -189,7 +191,8 @@ def test_spawning_does_not_change_the_source_s_status(kyo, write_file) -> None:
     assert kyo("show", proposal, "--json").json["status"] == "working"
 
     human = kyo(
-        "spawn", proposal, "--kind", "decision", "--title", "And we keep the old one warm"
+        "spawn", proposal, "--kind", "decision", "--title", "And we keep the old one warm",
+        *decided(kyo.project),
     )
     assert human.code == 0, human
     assert f"{proposal} is unchanged at working: spawning is not a status change" in human.out

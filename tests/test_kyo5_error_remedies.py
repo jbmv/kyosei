@@ -97,7 +97,17 @@ from kyosei.errors import (
 from kyosei.kinds import KindRegistry, load_kind_registry
 from kyosei.schema import SCHEMA_VERSION
 
-from .conftest import Run, git_init, invoke, kinds_yml, new_record, requires_evidence
+from .conftest import (
+    Run,
+    decided,
+    declare_person,
+    git_init,
+    invoke,
+    kinds_yml,
+    new_record,
+    requires_credit,
+    requires_evidence,
+)
 
 
 def _config_path(project: Path) -> Path:
@@ -640,6 +650,17 @@ def _decision_without_intake(project: Path) -> None:
     raw["kinds"]["reminder"]["produces"] = [
         k for k in raw["kinds"]["reminder"]["produces"] if k != "decision"
     ]
+    # KYO-644: without `requires_credit` too, so the routes these tests read are the only
+    # thing a remedy has to get right; the credit refusal is tested on its own below.
+    raw["kinds"]["decision"]["policy"].pop("requires_credit", None)
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def _decision_without_credit(project: Path) -> None:
+    """The ``decision`` kind as it was before KYO-644 set ``requires_credit`` on it."""
+    path = kinds_yml(project)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["kinds"]["decision"]["policy"].pop("requires_credit", None)
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
@@ -783,6 +804,9 @@ def _corpus(kyo) -> list[tuple[str, str]]:
             if requires_evidence(kyo.project, kind)
             else []
         )
+        # KYO-644: and a kind requiring a credit names the person who decided it.
+        if requires_credit(kyo.project, kind):
+            extra += decided(kyo.project)
         result = kyo("new", kind, "--title", f"a {kind}", *extra, "--json")
         assert result.code == 0, result
         corpus.append((result.json["record"]["id"], kind))
@@ -2198,7 +2222,7 @@ def _redo_on_a_gate_that_already_cleared(at: Path) -> Provocation:
     kyo = _runner(root)
     gated = kyo("gate", record, "awaiting:human-review", "--do", "look at the banner", "--json")
     gate_id = gated.json["gate_id"]
-    assert kyo("ungate", gate_id, "--why", "looked at it").code == 0
+    assert kyo("ungate", gate_id, "--withdrawn", "--why", "looked at it").code == 0
     return Provocation(root, ("redo", gate_id, "--do", "look at something else"))
 
 
@@ -2238,8 +2262,11 @@ def _since_note_naming_a_later_note(at: Path) -> Provocation:
 
 def _decision_filed_without_evidence(at: Path) -> Provocation:
     """KYO-521: `kyo new decision` with no `--evidence-file`, in a store holding a
-    proposal, so the spawn route the refusal names has a real source to bind."""
+    proposal, so the spawn route the refusal names has a real source to bind. The kind
+    is put back as it was before KYO-644's `requires_credit`, which the spawn route would
+    otherwise also ask for; that refusal has its own provoker."""
     root = _new_project(at)
+    _decision_without_credit(root)
     run = _runner(root)
     new_record(run, kind="proposal", title="Pick a store", criteria=["a store is chosen"])
     return Provocation(root, ("new", "decision", "--title", "use SQLite"))
@@ -2591,7 +2618,7 @@ def _done_over_an_open_gate(at: Path) -> Provocation:
     root, record = _project_with_a_record(at)
     kyo = _runner(root)
     assert kyo("move", record, "working").code == 0
-    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed")
+    verified = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed")
     assert verified.code == 0, verified
     gated = kyo("gate", record, "awaiting:human-review")
     assert gated.code == 0, gated
@@ -4243,6 +4270,53 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-644: the credit refusals whose remedy is the refused command again with what the
+    # credit lacked -- the person's words in a file, a turn uuid, a declared person, a
+    # supersede id -- which only the caller can supply. Each is run, from the refused
+    # state, by a test in this file's KYO-644 section below.
+    "credits.py:resolve#0": (
+        "a re-invocation giving --session or --source-other, not both; proved by "
+        "test_kyo644_session_and_source_other_is_cleared_by_giving_one"
+    ),
+    "credits.py:_check_declared#0": (
+        "a hand edit declaring the person under `people:`, or a declared key; proved by "
+        "test_kyo644_an_undeclared_person_is_cleared_by_declaring_them"
+    ),
+    "credits.py:_check#1": (
+        "a re-invocation naming the turn with --turn; proved by "
+        "test_kyo644_an_ambiguous_quote_is_cleared_by_naming_the_turn"
+    ),
+    "credits.py:_require_person_turn#0": (
+        "a decision file naming one of the person's turns; proved by "
+        "tests/test_kyo644_credits.py::test_a_refined_decision_cites_the_refining_turn"
+    ),
+    "credits.py:_span#2": (
+        "a re-invocation giving --span-session; proved by "
+        "test_kyo644_a_span_with_no_session_is_cleared_by_naming_it"
+    ),
+    "credits.py:cmd_credit#6": (
+        "a re-invocation with --supersede and the id the message names; proved by "
+        "test_kyo644_an_already_credited_subject_is_cleared_by_superseding"
+    ),
+    "credits.py:gate_clearing#0": (
+        "a re-invocation with either --withdrawn or the credit flags; proved by "
+        "test_kyo644_withdrawn_beside_a_credit_is_cleared_by_giving_one"
+    ),
+    "credits.py:gate_clearing#2": (
+        "the refused `kyo ungate` again with the person's words, or --withdrawn with a "
+        "reason; the message composes the line from the command it refused, so the static "
+        "walk cannot see `kyo` in it. Proved by "
+        "test_kyo644_a_person_gate_is_cleared_by_a_credit_or_withdrawn"
+    ),
+    "cmd_evidence.py:_credit_for_verdict#0": (
+        "a re-invocation of `kyo verify --credit` without the other credit flags; proved by "
+        "test_kyo644_credit_beside_credit_flags_is_cleared_by_dropping_them"
+    ),
+    "store.py:Store.add_credit#5": (
+        "a call passing the span's measures whole, beside its ids; proved by "
+        "tests/test_kyo644_credits.py::test_an_absent_transcript_stores_the_span_ids_with_"
+        "empty_measures and test_a_span_is_measured_from_the_transcript"
+    ),
     # KYO-642: the `people:` refusals. Each remedy is a hand edit of kyosei/config.yml (the
     # message prints the shape to write, or says to delete the key), which no `kyo` command
     # performs. Proved by tests/test_schema_compat.py::
@@ -6614,3 +6688,254 @@ def test_kyo504_a_probe_outside_pytest_is_refused_too(tmp_path: Path) -> None:
     assert probe.returncode == 0, probe.stderr
     assert probe.stdout.strip().splitlines()[-1] == "refused", probe.stdout
     assert not registry.exists(), registry.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------- KYO-644
+#
+# The credit refusals (KYO-638 sections 4.2 to 4.5, as KYO-640 amends them). Each test
+# provokes one, runs what its message offers -- the backticked line, bound to this state,
+# or the re-invocation its message describes -- and shows the refusal gone. Most of these
+# messages compose their `kyo` line from the command they refused, so the static walk
+# above cannot see them; they are run here instead.
+
+_K644_SESSION = "3c4d5e6f-1111-4a2b-9c3d-0123456789ab"
+
+
+def _k644_project(at: Path) -> tuple[Path, str, Run]:
+    root, record = _project_with_a_record(at)
+    declare_person(root)
+    return root, record, _runner(root)
+
+
+def _k644_file(at: Path, name: str, text: str) -> str:
+    path = at / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def _k644_transcript(turns: list[tuple[str, str]]) -> None:
+    """The session's transcript, one typed turn of the person's per ``(uuid, text)``."""
+    config = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    path = config / "projects" / "-a-project" / f"{_K644_SESSION}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "type": "user", "uuid": uuid, "sessionId": _K644_SESSION,
+                    "timestamp": f"2026-11-06T10:0{n}:00.000Z", "isSidechain": False,
+                    "message": {"role": "user", "content": text},
+                    "origin": {"kind": "human"}, "promptSource": "typed",
+                }  # fmt: skip
+            )
+            + "\n"
+            for n, (uuid, text) in enumerate(turns)
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_kyo644_a_human_observed_verdict_without_a_credit_is_cleared_by_either_line(
+    tmp_path: Path,
+) -> None:
+    """`human-observed-requires-credit`: both lines the message offers clear it -- the
+    person's words with where they were said, or the agent's own observation."""
+    for index in range(2):
+        root, record, kyo = _k644_project(tmp_path / f"p{index}")
+        words = _k644_file(tmp_path, f"w{index}", "it works on the laptop")
+        refused = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+                      "--evidence-file", words)  # fmt: skip
+        assert refused.code == EXIT_CONTRACT and "human-observed-requires-credit" in refused.err
+        offered = named_remedies(refused.err)
+        assert len(offered) == 2, refused.err
+        argv, unbound = bind_remedy(
+            offered[index], {"FILE": words, "KEY": "tester", "<where>": "'on a call'"}
+        )
+        assert argv is not None, unbound
+        assert kyo(*argv[1:]).code == 0
+        assert kyo("show", f"{record}.c1", "--json").json["state"] == "met"
+
+
+def test_kyo644_an_undeclared_person_is_cleared_by_declaring_them(tmp_path: Path) -> None:
+    """`credit-person-undeclared`: declared under `people:`, the same line succeeds."""
+    root, record, kyo = _k644_project(tmp_path)
+    line = ("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+            "--evidence-file", _k644_file(tmp_path, "w", "fine"), "--person", "ada",
+            "--source-other", "a call")  # fmt: skip
+    refused = kyo(*line)
+    assert refused.code == EXIT_CONTRACT and "credit-person-undeclared" in refused.err
+    assert "declared: tester" in refused.err
+    declare_person(root, "ada")
+    assert kyo(*line).code == 0
+
+
+def test_kyo644_a_quote_the_transcript_lacks_is_cleared_by_the_exact_words(
+    tmp_path: Path,
+) -> None:
+    """`credit-quote-not-found`: corrected to the person's words, the check matches."""
+    root, record, kyo = _k644_project(tmp_path)
+    _k644_transcript([("t-1", "the banner looks right to me")])
+    base = ("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+            "--session", _K644_SESSION)  # fmt: skip
+    refused = kyo(*base, "--evidence-file", _k644_file(tmp_path, "a", "the banner is fine"))
+    assert refused.code == EXIT_CONTRACT and "credit-quote-not-found" in refused.err
+    exact = _k644_file(tmp_path, "b", "the banner looks right [...] me")
+    assert kyo(*base, "--evidence-file", exact).code == 0
+
+
+def test_kyo644_an_ambiguous_quote_is_cleared_by_naming_the_turn(tmp_path: Path) -> None:
+    """`credit-quote-ambiguous`: --turn with one of the uuids the message lists."""
+    root, record, kyo = _k644_project(tmp_path)
+    _k644_transcript([("t-1", "yes"), ("t-2", "yes")])
+    base = ("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+            "--session", _K644_SESSION,
+            "--evidence-file", _k644_file(tmp_path, "w", "yes"))  # fmt: skip
+    refused = kyo(*base)
+    assert refused.code == EXIT_CONTRACT and "credit-quote-ambiguous" in refused.err
+    assert "turn t-1" in refused.err and "turn t-2" in refused.err
+    assert kyo(*base, "--turn", "t-2").code == 0
+
+
+def test_kyo644_session_and_source_other_is_cleared_by_giving_one(tmp_path: Path) -> None:
+    root, record, kyo = _k644_project(tmp_path)
+    base = ("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+            "--evidence-file", _k644_file(tmp_path, "w", "fine"))  # fmt: skip
+    assert kyo(*base, "--session", _K644_SESSION, "--source-other", "a call").code == 64
+    assert kyo(*base, "--source-other", "a call").code == 0
+
+
+def test_kyo644_credit_beside_credit_flags_is_cleared_by_dropping_them(tmp_path: Path) -> None:
+    root, record, kyo = _k644_project(tmp_path)
+    words = _k644_file(tmp_path, "w", "fine")
+    first = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+                "--evidence-file", words, "--source-other", "a call", "--json")  # fmt: skip
+    credit = first.json["credit_id"]
+    again = ("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+             "--evidence-file", words, "--credit", credit)  # fmt: skip
+    assert kyo(*again, "--source-other", "a call").code == 64
+    assert kyo(*again).code == 0
+
+
+def test_kyo644_a_person_gate_is_cleared_by_a_credit_or_withdrawn(tmp_path: Path) -> None:
+    """`person-gate-clear-requires-credit`, at `kyo ungate` and at a carried settle: each
+    line the message offers clears it."""
+    for index in range(2):
+        root, record, kyo = _k644_project(tmp_path / f"u{index}")
+        gate = kyo("gate", record, "awaiting:human-run", "--do", "run it", "--json").json["gate_id"]
+        refused = kyo("ungate", gate)
+        assert refused.code == EXIT_CONTRACT and "person-gate-clear-requires-credit" in refused.err
+        offered = named_remedies(refused.err)
+        assert len(offered) == 2, refused.err
+        argv, _ = bind_remedy(offered[index], {
+            "FILE": _k644_file(tmp_path, f"w{index}", "ran it, fine"), "KEY": "tester",
+            "<where>": "'a call'", "<reason>": "'the run was dropped'",
+        })  # fmt: skip
+        assert argv is not None and kyo(*argv[1:]).code == 0
+        assert kyo("show", record, "--json").json["gates"][0]["cleared_at"]
+    for index, verb in enumerate(("move", "wont-do")):
+        root = _new_project(tmp_path / f"s{index}")
+        declare_person(root)
+        kyo = _runner(root)
+        reminder = kyo("new", "reminder", "--title", "ask", "--json").json["record_id"]
+        kyo("gate", reminder, "awaiting:human-review", "--do", "answer it")
+        line = ("move", reminder, "done") if verb == "move" else ("wont-do", reminder)
+        refused = kyo(*line, "--why", "settled")
+        assert refused.code == EXIT_CONTRACT and "person-gate-clear-requires-credit" in refused.err
+        offered = named_remedies(refused.err)
+        assert len(offered) == 2, refused.err
+        argv, _ = bind_remedy(offered[index], {
+            "FILE": _k644_file(tmp_path, f"settle-words-{index}", "settled, yes"),
+            "KEY": "tester", "<where>": "'a call'", "<reason>": "'settled'",
+        })  # fmt: skip
+        assert argv is not None and kyo(*argv[1:]).code == 0, offered[index]
+        assert kyo("show", reminder, "--json").json["gates"][0]["cleared_at"]
+
+
+def test_kyo644_withdrawn_beside_a_credit_is_cleared_by_giving_one(tmp_path: Path) -> None:
+    root, record, kyo = _k644_project(tmp_path)
+    gate = kyo("gate", record, "awaiting:human-run", "--do", "run it", "--json").json["gate_id"]
+    words = _k644_file(tmp_path, "w", "ran it")
+    both = ("ungate", gate, "--why", "x", "--withdrawn", "--quote-file", words)
+    assert kyo(*both, "--source-other", "a call").code == 64
+    assert kyo("ungate", gate, "--why", "x", "--withdrawn").code == 0
+
+
+def test_kyo644_a_decision_without_a_credit_is_cleared_by_the_credit(tmp_path: Path) -> None:
+    """`filing-requires-credit`, at `kyo new` and at `kyo spawn`: the same command with
+    the person's words, what was decided and where it was said."""
+    root, record, kyo = _k644_project(tmp_path)
+    words = _k644_file(tmp_path, "w", "use SQLite")
+    decision = _k644_file(tmp_path, "d.yml", "outcome: unprompted\n")
+    credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
+    refused = kyo("new", "decision", "--title", "Use SQLite", "--evidence-file", words)
+    assert refused.code == EXIT_CONTRACT and "filing-requires-credit" in refused.err
+    assert kyo("new", "decision", "--title", "Use SQLite", *credit).code == 0
+    proposal = new_record(kyo, kind="proposal", title="Pick", criteria=["picked"])
+    refused = kyo("spawn", proposal, "--kind", "decision", "--title", "Use it")
+    assert refused.code == EXIT_CONTRACT and "filing-requires-credit" in refused.err
+    assert kyo("spawn", proposal, "--kind", "decision", "--title", "Use it", *credit).code == 0
+
+
+def _k644_late(tmp_path: Path) -> tuple[Path, Run, str, str, tuple[str, ...]]:
+    """A human-observed verdict with no credit, the person's approval of crediting it,
+    and the `kyo credit` line without its basis."""
+    root, record, kyo = _k644_project(tmp_path)
+    vid = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed",
+              "--json").json["verification_id"]  # fmt: skip
+    conn = sqlite3.connect(root / "kyosei" / "kyosei.db")
+    conn.execute("UPDATE verifications SET method = 'human-observed' WHERE id = ?", (vid,))
+    conn.commit()
+    conn.close()
+    approval = kyo("new", "decision", "--title", "Credit the backfill",
+                   "--quote-file", _k644_file(tmp_path, "a", "approved"),
+                   "--decision-file", _k644_file(tmp_path, "d.yml", "outcome: unprompted\n"),
+                   "--source-other", "a call", "--json").json["credit_id"]  # fmt: skip
+    line = ("credit", vid, "--quote-file", _k644_file(tmp_path, "w", "it is fast"),
+            "--source-other", "a call")  # fmt: skip
+    return root, kyo, vid, approval, line
+
+
+def test_kyo644_a_reconstructed_credit_is_cleared_by_its_basis(tmp_path: Path) -> None:
+    """`reconstructed-credit-requires-basis`: --basis with the person's approval."""
+    _root, kyo, _vid, approval, line = _k644_late(tmp_path)
+    refused = kyo(*line)
+    assert refused.code == EXIT_CONTRACT and "reconstructed-credit-requires-basis" in refused.err
+    assert kyo(*line, "--basis", approval).code == 0
+
+
+def test_kyo644_a_basis_that_is_not_an_approval_is_cleared_by_the_approval(
+    tmp_path: Path,
+) -> None:
+    """`credit-basis-not-approval`: an observed credit is no basis; the person's decided
+    credit approving the batch is."""
+    root, kyo, vid, approval, line = _k644_late(tmp_path)
+    record = vid.split(".")[0]
+    kyo("edit", record, "--add-criteria-file", "-", stdin="another\n")
+    observed = kyo("verify", f"{record}.c2", "--verdict", "met", "--method", "human-observed",
+                   "--evidence-file", _k644_file(tmp_path, "o", "b too"),
+                   "--source-other", "a call", "--json").json["credit_id"]  # fmt: skip
+    refused = kyo(*line, "--basis", observed)
+    assert refused.code == EXIT_CONTRACT and "credit-basis-not-approval" in refused.err
+    assert kyo(*line, "--basis", approval).code == 0
+
+
+def test_kyo644_an_already_credited_subject_is_cleared_by_superseding(tmp_path: Path) -> None:
+    """`credit-subject-already-credited`: --supersede with the id the message names."""
+    _root, kyo, _vid, approval, line = _k644_late(tmp_path)
+    first = kyo(*line, "--basis", approval, "--json")
+    assert first.code == 0, first
+    refused = kyo(*line, "--basis", approval)
+    assert refused.code == EXIT_CONTRACT and "credit-subject-already-credited" in refused.err
+    named = re.search(r"--supersede (\S+)", refused.err).group(1)
+    assert named == first.json["credit_id"]
+    assert kyo(*line, "--basis", approval, "--supersede", named).code == 0
+
+
+def test_kyo644_a_span_with_no_session_is_cleared_by_naming_it(tmp_path: Path) -> None:
+    root, record, kyo = _k644_project(tmp_path)
+    base = ("new", "decision", "--title", "X",
+            "--quote-file", _k644_file(tmp_path, "w", "x"),
+            "--decision-file", _k644_file(tmp_path, "d.yml", "outcome: unprompted\n"),
+            "--source-other", "a call", "--span-first", "t-1", "--span-last", "t-2")  # fmt: skip
+    assert kyo(*base).code == 64
+    assert kyo(*base, "--span-session", _K644_SESSION).code == 0
