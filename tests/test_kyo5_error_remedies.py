@@ -7184,3 +7184,28 @@ def test_kyo666_kyo_credit_with_a_basis_may_omit_the_outcome_and_without_one_may
     refused = kyo(*line)
     assert refused.code != 0 and "outcome" in refused.err
     assert kyo(*line, "--basis", approval).code == 0
+
+
+# --------------------------------------------------------------------- KYO-667.c1
+
+
+def test_restating_a_human_verdict_as_agent_observed_clears_the_legacy_notice(
+    kyo, project: Path
+) -> None:
+    """The remedy ``credit_coverage_legacy`` names for a verdict that was an agent's own
+    observation, ``kyo verify --method agent-observed``, must stop the notice counting it."""
+    from .test_credit_coverage import LEGACY, _doctor, _human_verdict, _restamp
+
+    record, _verdict = _human_verdict(kyo)
+    _restamp(project, 27)
+    _result, checks = _doctor(kyo)
+    assert not checks[LEGACY]["ok"]
+    assert "1 human-observed verdicts" in str(checks[LEGACY])
+    restated = kyo(
+        "verify", f"{record}.c1", "--verdict", "met", "--method", "agent-observed",
+        "--evidence-file", "-", stdin="the agent saw it itself",
+    )
+    assert restated.code == 0, restated
+    _restamp(project, 27)
+    _result, checks = _doctor(kyo)
+    assert checks[LEGACY]["ok"], checks[LEGACY]
