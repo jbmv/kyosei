@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 
-from . import commands, events_ledger, export
+from . import commands, credits, events_ledger, export
 from .clock import now
 from .commands import (
     Context,
@@ -746,6 +746,14 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
             f"{', '.join(VERIFICATION_METHODS)}"
         )
     reason = _reason(args)
+    # Read once, before the transaction: for a human-observed verdict these are also the
+    # person's words, checked against the transcript before anything is written (KYO-644).
+    text: str | None = None
+    if args.evidence_file:
+        text = read_prose(args.evidence_file, what="--evidence-file")
+        if not text.strip():
+            raise UsageError("--evidence-file must not be empty")
+    credit, joined = _credit_for_verdict(ctx, store, args, text)
 
     with store.transaction():
         criterion = store.criterion(args.criterion_id)
@@ -754,13 +762,12 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
         before = {record_id: export.record_document(store, record_id)}
 
         evidence_id: str | None = None
-        if args.evidence_file:
-            text = read_prose(args.evidence_file, what="--evidence-file")
-            if not text.strip():
-                raise UsageError("--evidence-file must not be empty")
-            evidence_id, _digest = _add_evidence(
+        if text is not None:
+            evidence_id, digest = _add_evidence(
                 store, record_id, text, supports_id=args.criterion_id, author=ctx.actor
             )
+            if joined is not None:
+                credits.join(store, joined, record_id, quote_sha256=digest)
 
         verification_id, seq = store.new_child_id(record_id, "verification")
         stamp = now()
@@ -787,6 +794,23 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
             "UPDATE criteria SET state = ?, reason = ?, updated_at = ? WHERE id = ?",
             (args.verdict, reason, stamp, args.criterion_id),
         )
+        # KYO-644: the credit is written in the verdict's own transaction, so a
+        # human-observed verdict never exists without the person it names.
+        credit_id: str | None = None
+        if credit is not None:
+            assert evidence_id is not None
+            credit_id = credits.write(
+                store,
+                record_id,
+                credit,
+                quote_id=evidence_id,
+                subjects=[("verification", verification_id)],
+                author=ctx.actor,
+                created_at=stamp,
+            )
+        elif joined is not None:
+            store.add_credit_subject(joined, "verification", verification_id)
+            credit_id = joined
         _touch_record(store, record_id)
         after, events = commands._commit_and_export(
             store,
@@ -804,6 +828,10 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
     ]
     if evidence_id:
         lines.append(echo_value("evidence", evidence_id))
+    if credit is not None and credit_id is not None:
+        lines += credits.lines(store, credit_id, credit)
+    elif joined is not None:
+        lines.append(echo_value("credit", f"{joined} (this verdict added to it)"))
     if reason is not None:
         lines += echo_block("reason", reason)
 
@@ -846,6 +874,8 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
             "command": "verify",
             "verification_id": verification_id,
             "record_id": record_id,
+            # KYO-644: the credit naming the person, for a human-observed verdict.
+            "credit_id": credit_id,
             # KYO-267: the same finding a text reader gets, for a `--json` caller who
             # would otherwise be handed the verdict and none of its consequence.
             "ungated_unobserved": waiting,
@@ -854,6 +884,44 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
             "record": after[record_id],
         },
     )
+
+
+def _credit_for_verdict(
+    ctx: Context, store, args: Namespace, words: str | None
+) -> tuple[credits.Credit | None, str | None]:
+    """KYO-644 (KYO-640 P5): the credit a human-observed verdict needs, resolved and
+    checked before anything is written, or the existing credit it joins (``--credit``,
+    for `kyo confirm`'s further verdicts of one act). Other methods take no credit."""
+    joined = getattr(args, "credit", None)
+    if args.method != "human-observed":
+        credits.refuse_unused_flags(args, f"--method {args.method} records no person")
+        return None, None
+    if joined is not None:
+        if credits.requested(args):
+            raise UsageError("--credit adds this verdict to an existing credit; give no other credit flag")
+        if words is None:
+            raise UsageError("--credit holds the person's words, and this verdict gives none in --evidence-file")
+        return None, joined
+    cid = args.criterion_id
+    verdict = args.verdict
+    credit = credits.resolve(
+        ctx,
+        store,
+        args,
+        role=credits.ROLE_OBSERVED,
+        quote_text=words,
+        contract=credits.CONTRACT_HUMAN_OBSERVED_REQUIRES_CREDIT,
+        act="a human-observed verdict",
+        remedies=[
+            "the person's words go in --evidence-file, with where they said them: "
+            f"`kyo verify {cid} --verdict {verdict} --method human-observed --evidence-file "
+            "FILE --person KEY --source-other <where>` (or --session ID for a Claude Code "
+            "session, whose transcript is checked)",
+            "an observation of your own, an agent's, is recorded as such: "
+            f"`kyo verify {cid} --verdict {verdict} --method agent-observed`",
+        ],
+    )
+    return credit, None
 
 
 def cmd_attach(ctx: Context, args: Namespace) -> Output:

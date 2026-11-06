@@ -1,0 +1,1047 @@
+"""Credits: who a person's judgement in the store belongs to (KYO-644).
+
+KYO-642 built the tables and :meth:`kyosei.store.Store.add_credit`, the one writer. This
+module is what every command that writes a credit goes through, so the rules are stated
+once (law 3): which person, which words, where they were said, whether the transcript
+holds them, and, for a decision, what was recommended and what else was weighed. It is
+section 4 of the KYO-638 proposal as amended by decision KYO-640 (P3, P5, P8, P9) and by
+the maintainer's later words recorded as KYO-644.c8 and c9.
+
+THE ENFORCEMENT POINTS (KYO-640, P5). Each refuses, stores nothing, and names its remedy:
+
+* ``kyo verify --method human-observed`` (:func:`kyosei.cmd_evidence._verify_one`):
+  ``human-observed-requires-credit``. The verdict's ``--evidence-file`` is the person's
+  words; an agent's own observation is ``--method agent-observed``.
+* ``kyo confirm`` writes ONE credit whose subjects are every verification it records
+  and the gate it clears (:mod:`kyosei.cmd_confirm`).
+* ``kyo ungate`` of a gate in :data:`HUMAN_GATE_TYPES`, and a carried settle that would
+  clear one: ``person-gate-clear-requires-credit``, cleared by a credit (the gate's
+  ``cleared_as`` becomes ``answered``) or by ``--withdrawn`` with a reason (``withdrawn``:
+  no person answered, the wait stopped mattering).
+* ``kyo new`` and ``kyo spawn`` of a kind whose policy sets ``requires_credit`` (the
+  shipped ``decision``): ``filing-requires-credit``, cleared by a ``decided`` credit.
+* ``kyo credit`` (:func:`cmd_credit`), for a credit written after its subject:
+  ``reconstructed-credit-requires-basis``, ``credit-basis-not-approval`` and
+  ``credit-subject-already-credited``.
+
+Shared by all of them: ``credit-person-undeclared``, ``credit-quote-not-found`` (the
+transcript is present and none of the person's turns holds the words; KYO-640 P6 allows
+no override) and ``credit-quote-ambiguous``. Passing both ``--session`` and
+``--source-other`` is a usage error.
+
+THE PERSON (P3). ``--person`` defaults to the only person ``people:`` declares, and every
+write echoes who was credited. With none or several declared and no ``--person``, the
+credit is incomplete and refused.
+
+WHERE THE WORDS WERE SAID. ``--session`` defaults to ``$CLAUDE_CODE_SESSION_ID``, which
+Claude Code sets in its shell; the quote is then checked against that session's
+transcript by :mod:`kyosei.harness.claude_code_transcript`, and only
+``CheckResult.store_fields()`` is stored. ``--source-other`` is one line saying where
+words said outside Claude Code were said, recorded ``not-applicable``.
+
+ROLES. ``observed``: the person looked at something (a verdict, a gate). ``decided``: the
+person decided a decision record, with ``--decision-file`` saying what was recommended,
+by whom, the outcome (accepted, refined, overrode, unprompted) and the alternatives; a
+``refined`` outcome cites the refining turn beside the accepting one. ``authorized``
+(KYO-644.c8): a go-ahead approving a plan already stated ("sounds good", "build it now"),
+credited as authorizing the work to proceed and never as deciding its content, so it
+takes no decision file; a decision record still needs ``decided``.
+
+A DISCUSSION SPAN (KYO-640.n1). A credit may cite the discussion that led to it:
+``--span-first`` and ``--span-last`` (record uuids) in ``--span-session`` (by default the
+credit's session). kyo measures it when the credit is written
+(:func:`kyosei.harness.claude_code_transcript.measure_span`) and stores counts and times,
+never text: the person's turns; the agent's REPLIES to the person, one per agent turn
+(the run of the agent's records between two of the person's turns) that ends in text
+before the person's next turn, so a reply split across records between tool calls counts
+once (KYO-644.c9); active seconds, leaving out every gap longer than
+``SPAN_BREAK_SECONDS`` (fifteen minutes); and the span's first and last timestamps. With
+no transcript the span's ids are stored and its measures left empty.
+"""
+
+from __future__ import annotations
+
+import json
+import shlex
+from argparse import ArgumentParser, Namespace
+from dataclasses import dataclass, field
+
+import yaml
+
+from . import commands, export, ids
+from .cmd_sessions import recorded_transcript_path
+from .commands import Context, Output, _add_evidence, _touch_record
+from .config import declared_people, person_label
+from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
+from .errors import ContractViolation, KyoseiError, NotFound, UsageError
+from .harness import claude_code_transcript as transcript
+from .prose import read_prose, single_line
+
+#: The gates that wait on a person to look. Clearing one needs a credit or ``--withdrawn``.
+HUMAN_GATE_TYPES: frozenset[str] = frozenset({"awaiting:human-review", "awaiting:human-run"})
+
+#: The variable Claude Code sets in its shell to the session's id.
+ENV_SESSION = "CLAUDE_CODE_SESSION_ID"
+
+ROLE_OBSERVED = "observed"
+ROLE_DECIDED = "decided"
+ROLE_AUTHORIZED = "authorized"
+
+SOURCE_CLAUDE_CODE = "claude-code"
+SOURCE_OTHER = "other"
+CHECK_NOT_APPLICABLE = "not-applicable"
+
+#: ``gates.cleared_as`` values (``contracts.GATE_CLEARED_AS``).
+CLEARED_ANSWERED = "answered"
+CLEARED_WITHDRAWN = "withdrawn"
+
+CONTRACT_HUMAN_OBSERVED_REQUIRES_CREDIT = "human-observed-requires-credit"
+CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT = "person-gate-clear-requires-credit"
+CONTRACT_FILING_REQUIRES_CREDIT = "filing-requires-credit"
+CONTRACT_CREDIT_PERSON_UNDECLARED = "credit-person-undeclared"
+CONTRACT_CREDIT_QUOTE_NOT_FOUND = "credit-quote-not-found"
+CONTRACT_CREDIT_QUOTE_AMBIGUOUS = "credit-quote-ambiguous"
+CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS = "reconstructed-credit-requires-basis"
+CONTRACT_CREDIT_BASIS_NOT_APPROVAL = "credit-basis-not-approval"
+CONTRACT_CREDIT_SUBJECT_ALREADY_CREDITED = "credit-subject-already-credited"
+
+#: The keys a ``--decision-file`` may carry.
+DECISION_FILE_KEYS = frozenset(
+    {"recommended", "recommended_by", "outcome", "alternatives", "refining_turn", "refining_session"}
+)
+
+
+# ------------------------------------------------------------------------ the flags
+
+
+def add_credit_flags(
+    parser: ArgumentParser, *, quote: bool = True, decision: bool = False, span: bool = False
+) -> None:
+    """The flags a credit is given by, on every command that writes one."""
+    parser.add_argument(
+        "--person",
+        metavar="KEY",
+        help="the person whose judgement this is, a key under `people:` in "
+        "kyosei/config.yml; defaults to the only one declared (KYO-644)",
+    )
+    if quote:
+        parser.add_argument(
+            "--quote-file",
+            metavar="FILE",
+            help="the person's words, verbatim, from a file or '-' for stdin",
+        )
+    parser.add_argument(
+        "--session",
+        metavar="ID",
+        help=f"the Claude Code session the words were said in; defaults to ${ENV_SESSION}. "
+        "The words are checked against that session's transcript",
+    )
+    parser.add_argument(
+        "--turn",
+        metavar="UUID",
+        help="the transcript record holding the words, when they occur in several turns",
+    )
+    parser.add_argument(
+        "--source-other",
+        metavar="TEXT",
+        help="one line saying where the words were said, when not in a Claude Code session",
+    )
+    if decision:
+        parser.add_argument(
+            "--decision-file",
+            metavar="FILE",
+            help="YAML: recommended, recommended_by, outcome (accepted | refined | overrode "
+            "| unprompted), alternatives [{text, chosen}], and refining_turn for a "
+            "refined outcome",
+        )
+    if span:
+        parser.add_argument(
+            "--span-first",
+            metavar="UUID",
+            help="the first transcript record of the discussion the credit cites",
+        )
+        parser.add_argument(
+            "--span-last",
+            metavar="UUID",
+            help="the last transcript record of the discussion the credit cites",
+        )
+        parser.add_argument(
+            "--span-session",
+            metavar="ID",
+            help="the session the discussion was in; defaults to the credit's session",
+        )
+
+
+def requested(args: Namespace) -> bool:
+    """Whether this invocation gave any flag that only a credit reads."""
+    return any(
+        getattr(args, name, None)
+        for name in ("person", "quote_file", "session", "turn", "source_other", "decision_file")
+    )
+
+
+# ------------------------------------------------------------------- the resolution
+
+
+@dataclass
+class Credit:
+    """A credit resolved and checked, not yet written."""
+
+    person: str
+    role: str
+    quote_text: str
+    source_kind: str
+    source_session: str | None
+    source_note: str | None
+    check: dict = field(default_factory=dict)
+    check_why: str = ""
+    decision: dict = field(default_factory=dict)
+    span: dict = field(default_factory=dict)
+    span_why: str = ""
+
+    @property
+    def transcript_check(self) -> str:
+        return self.check["transcript_check"]
+
+    def summary(self, label: str) -> str:
+        """``observed by jbmv (transcript matched, turn …)``."""
+        verb = {ROLE_OBSERVED: "observed", ROLE_DECIDED: "decided", ROLE_AUTHORIZED: "authorized"}
+        where = f"transcript {self.transcript_check}"
+        if self.check.get("source_turn"):
+            where += f", turn {self.check['source_turn']}"
+        if self.check.get("words_form"):
+            where += f", {self.check['words_form']}"
+        if self.source_kind == SOURCE_OTHER:
+            where = f"said elsewhere: {self.source_note}; not checked"
+        return f"{verb[self.role]} by {label} ({where})"
+
+    def flags(self) -> list[str]:
+        """The flags that give this same credit to another command (``kyo confirm``)."""
+        out = ["--person", self.person]
+        if self.source_kind == SOURCE_OTHER:
+            out += ["--source-other", self.source_note or ""]
+        else:
+            out += ["--session", self.source_session or ""]
+            if self.check.get("source_turn"):
+                out += ["--turn", self.check["source_turn"]]
+        return out
+
+
+def _person(store, given: str | None) -> str | None:
+    """``--person``, or the only declared person; None when it cannot be decided."""
+    declared = declared_people(store.config)
+    if given is None:
+        return next(iter(declared)) if len(declared) == 1 else None
+    _check_declared(given, declared)
+    return given
+
+
+def _check_declared(given: str, declared: dict) -> None:
+    if given in declared:
+        return
+    raise ContractViolation(
+        CONTRACT_CREDIT_PERSON_UNDECLARED,
+        [
+            f"{given!r} is not declared under `people:` in kyosei/config.yml (declared: "
+            + (", ".join(declared) or "nobody")
+            + "): nothing was written",
+            "a credit names a declared person; declare them there, or give --person one "
+            "of the declared keys",
+        ],
+    )
+
+
+def resolve(
+    ctx: Context,
+    store,
+    args: Namespace,
+    *,
+    role: str,
+    quote_text: str | None,
+    contract: str,
+    act: str,
+    remedies: list[str],
+) -> Credit:
+    """Resolve and check one credit from the invocation's flags. Writes nothing.
+
+    ``contract`` and ``act`` name the enforcement point the refusal is raised under when
+    a part of the credit is missing, and ``remedies`` are its ready lines.
+    """
+    session = getattr(args, "session", None)
+    other = getattr(args, "source_other", None)
+    if session and other:
+        raise UsageError(
+            "--session and --source-other both say where the words were said; give one"
+        )
+    if other is not None and getattr(args, "turn", None):
+        raise UsageError("--turn names a transcript record, and --source-other has none")
+    person = _person(store, getattr(args, "person", None))
+    if session is None and other is None:
+        session = ctx.environ.get(ENV_SESSION) or None
+    missing = []
+    if person is None:
+        declared = declared_people(store.config)
+        missing.append(
+            "the person (--person KEY: "
+            + (
+                f"{len(declared)} are declared, {', '.join(declared)}"
+                if declared
+                else "nobody is declared under `people:` in kyosei/config.yml"
+            )
+            + ")"
+        )
+    if not (quote_text or "").strip():
+        missing.append("the person's words")
+    if session is None and other is None:
+        missing.append(
+            f"where they were said (--session ID, or ${ENV_SESSION} in a Claude Code "
+            "shell, or --source-other for anywhere else)"
+        )
+    decision_path = getattr(args, "decision_file", None)
+    if role == ROLE_DECIDED and decision_path is None:
+        missing.append("what was decided (--decision-file)")
+    if missing:
+        raise ContractViolation(
+            contract,
+            [
+                f"{act} names the person whose judgement it records, and this invocation "
+                f"gives no {'; no '.join(missing)}: nothing was written",
+                *remedies,
+            ],
+        )
+    assert person is not None and quote_text is not None
+    if other is not None:
+        credit = Credit(
+            person,
+            role,
+            quote_text,
+            SOURCE_OTHER,
+            None,
+            single_line(other, what="--source-other"),
+            check={
+                "transcript_check": CHECK_NOT_APPLICABLE,
+                "source_turn": None,
+                "observed_at": None,
+                "words_form": None,
+            },
+            check_why="said outside Claude Code, so no transcript was read",
+        )
+    else:
+        assert session is not None
+        result = _check(ctx, session, quote_text, getattr(args, "turn", None), person)
+        credit = Credit(
+            person,
+            role,
+            quote_text,
+            SOURCE_CLAUDE_CODE,
+            session,
+            None,
+            check=result.store_fields(),
+            check_why=result.why,
+        )
+    if role == ROLE_DECIDED:
+        credit.decision = _decision(ctx, read_prose(decision_path, what="--decision-file"), credit)
+    elif decision_path is not None:
+        raise UsageError(
+            f"--decision-file belongs to a decided credit; this one is {role}, which records "
+            "no recommendation, outcome or alternatives"
+        )
+    credit.span, credit.span_why = _span(ctx, args, credit)
+    return credit
+
+
+def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str):
+    try:
+        result = transcript.check_quote(
+            session,
+            quote,
+            turn=turn,
+            recorded=recorded_transcript_path(ctx.root, session),
+            environ=ctx.environ,
+        )
+    except ValueError as exc:
+        raise UsageError(f"{exc}; --session takes the session's UUID") from exc
+    if result.outcome == transcript.NOT_FOUND:
+        raise ContractViolation(
+            CONTRACT_CREDIT_QUOTE_NOT_FOUND,
+            [
+                f"the words are not {person}'s in session {session}: {result.why}; nothing "
+                "was written (KYO-640: a present transcript decides, with no override)",
+                "correct the quote to their exact words, marking an omission with [...]; "
+                "or give --session for the session they said it in, or --source-other if "
+                "they said it outside Claude Code",
+            ],
+        )
+    if result.outcome == transcript.AMBIGUOUS:
+        raise ContractViolation(
+            CONTRACT_CREDIT_QUOTE_AMBIGUOUS,
+            [
+                f"the words occur in {len(result.candidates)} of {person}'s turns in session "
+                f"{session}, so they do not say which one is credited: nothing was written",
+                *(f"  turn {turn_id}  {stamp}" for turn_id, stamp in result.candidates),
+                "pass --turn with the uuid of the turn the words answer",
+            ],
+        )
+    return result
+
+
+def _decision(ctx: Context, text: str, credit: Credit) -> dict:
+    """The ``--decision-file``: what was recommended, the outcome, the alternatives."""
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise UsageError(f"--decision-file is not YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise UsageError("--decision-file holds a mapping of recommended, outcome, alternatives")
+    extra = sorted(set(map(str, raw)) - DECISION_FILE_KEYS)
+    if extra:
+        raise UsageError(
+            f"--decision-file carries {', '.join(extra)}; it reads "
+            f"{', '.join(sorted(DECISION_FILE_KEYS))}"
+        )
+    outcome = raw.get("outcome")
+    if outcome not in CREDIT_OUTCOMES:
+        raise UsageError(
+            f"--decision-file outcome is {outcome!r}; it is one of {', '.join(CREDIT_OUTCOMES)}"
+        )
+    recommended = raw.get("recommended")
+    if recommended is not None:
+        recommended = single_line(str(recommended), what="--decision-file recommended")
+    if outcome == "unprompted" and recommended:
+        raise UsageError(
+            "--decision-file says the person decided unprompted and also names a "
+            "recommendation; an unprompted decision had none"
+        )
+    if outcome != "unprompted" and not recommended:
+        raise UsageError(
+            f"--decision-file outcome {outcome!r} is an answer to a recommendation, and "
+            "names none in `recommended`"
+        )
+    alternatives = raw.get("alternatives") or []
+    if not isinstance(alternatives, list) or not all(
+        isinstance(a, dict) and isinstance(a.get("text"), str) and a["text"].strip()
+        for a in alternatives
+    ):
+        raise UsageError("--decision-file alternatives is a list of {text, chosen} entries")
+    alternatives = [
+        {"text": single_line(a["text"], what="an alternative"), "chosen": a.get("chosen") is True}
+        for a in alternatives
+    ]
+    if alternatives and not any(a["chosen"] for a in alternatives):
+        raise UsageError("--decision-file lists alternatives and marks none `chosen: true`")
+    refining_turn = raw.get("refining_turn")
+    refining_session = raw.get("refining_session") or (
+        credit.source_session if refining_turn else None
+    )
+    if outcome == CREDIT_OUTCOME_REFINED:
+        if not refining_turn or not refining_session:
+            raise UsageError(
+                "--decision-file outcome 'refined' cites the turn that refined the "
+                "recommendation as refining_turn (and refining_session when it is not "
+                "the credit's session)"
+            )
+        _require_person_turn(ctx, str(refining_session), str(refining_turn))
+    elif refining_turn:
+        raise UsageError(
+            f"--decision-file refining_turn belongs to outcome 'refined', not {outcome!r}"
+        )
+    return {
+        "recommended": recommended,
+        "recommended_by": (
+            single_line(str(raw["recommended_by"]), what="recommended_by")
+            if raw.get("recommended_by")
+            else (ctx.actor if recommended else None)
+        ),
+        "outcome": outcome,
+        "alternatives": alternatives or None,
+        "refining_session": str(refining_session) if refining_session else None,
+        "refining_turn": str(refining_turn) if refining_turn else None,
+    }
+
+
+def _require_person_turn(ctx: Context, session: str, turn: str) -> None:
+    """A refining turn must be one of the person's when the transcript can say so."""
+    try:
+        read = transcript.find_person_turns(
+            session, recorded=recorded_transcript_path(ctx.root, session), environ=ctx.environ
+        )
+    except (ValueError, OSError):
+        return
+    if read.readable and turn not in {t.id for t in read.turns}:
+        raise UsageError(
+            f"refining_turn {turn} is not one of the person's turns in session {session} "
+            f"({len(read.turns)} read)"
+        )
+
+
+def _span(ctx: Context, args: Namespace, credit: Credit) -> tuple[dict, str]:
+    first = getattr(args, "span_first", None)
+    last = getattr(args, "span_last", None)
+    if not first and not last:
+        if getattr(args, "span_session", None):
+            raise UsageError("--span-session goes with --span-first and --span-last")
+        return {}, ""
+    if not (first and last):
+        raise UsageError("a discussion span is cited by both --span-first and --span-last")
+    session = getattr(args, "span_session", None) or credit.source_session
+    if not session:
+        raise UsageError(
+            "--span-first and --span-last name records of a Claude Code session, and this "
+            "credit names none: give --span-session"
+        )
+    try:
+        measure = transcript.measure_span(
+            session,
+            first,
+            last,
+            recorded=recorded_transcript_path(ctx.root, session),
+            environ=ctx.environ,
+        )
+    except ValueError as exc:
+        raise UsageError(f"{exc}; --span-session takes the session's UUID") from exc
+    if measure.outcome in (transcript.SPAN_TURN_NOT_FOUND, transcript.SPAN_REVERSED):
+        raise UsageError(f"the discussion span cannot be measured: {measure.why}")
+    fields = {"span_session": session, "span_first_turn": first, "span_last_turn": last}
+    fields.update(measure.store_fields())
+    return fields, measure.why
+
+
+# ------------------------------------------------------------------------- writing
+
+
+def write(
+    store,
+    record_id: str,
+    credit: Credit,
+    *,
+    quote_id: str,
+    subjects: list[tuple[str, str]],
+    author: str,
+    basis_id: str | None = None,
+    created_at: str | None = None,
+) -> str:
+    """Store ``credit`` through :meth:`Store.add_credit`; return its id.
+
+    ``created_at`` is the subject's own write time when the credit is written in the
+    subject's transaction (KYO-644, for KYO-647's exact "reconstructed" derivation)."""
+    return store.add_credit(
+        record_id,
+        created_at=created_at,
+        person=credit.person,
+        role=credit.role,
+        quote_id=quote_id,
+        source_kind=credit.source_kind,
+        subjects=subjects,
+        author=author,
+        source_session=credit.source_session,
+        source_note=credit.source_note,
+        basis_id=basis_id,
+        **credit.check,
+        **credit.decision,
+        **credit.span,
+    )
+
+
+def lines(store, credit_id: str, credit: Credit) -> list[str]:
+    """What a credit-writing command echoes: who was credited, always (P3)."""
+    label = person_label(store.config, credit.person)
+    out = [f"credit {credit_id}: {credit.summary(label)}"]
+    if credit.check_why and credit.source_kind == SOURCE_CLAUDE_CODE:
+        out.append(f"  {credit.check_why}")
+    if credit.decision:
+        d = credit.decision
+        out.append(
+            f"  outcome: {d['outcome']}"
+            + (f"; recommended by {d['recommended_by']}: {d['recommended']}" if d["recommended"] else "")
+        )
+    if credit.span:
+        s = credit.span
+        if s.get("span_active_seconds") is not None:
+            out.append(
+                f"  discussion: {s['span_person_turns']} turn(s) of the person's, "
+                f"{s['span_agent_turns']} reply(ies) of the agent's, "
+                f"{s['span_active_seconds']}s active, {s['span_started_at']} to "
+                f"{s['span_ended_at']}"
+            )
+        else:
+            out.append(f"  discussion cited by id, not measured: {credit.span_why}")
+    return out
+
+
+def join(store, credit_id: str, record_id: str, *, quote_sha256: str | None = None):
+    """An existing credit another row of the same act is added to (``--credit``).
+
+    It must be current, on the same record, and, when the joining command stores words
+    too, hold the same words: ``--credit`` adds a row to one act, it does not lend an old
+    credit to a new one.
+    """
+    try:
+        row = store.credit(credit_id)
+    except NotFound as exc:
+        raise UsageError(f"--credit {credit_id}: no such credit") from exc
+    if row["superseded_by"]:
+        raise UsageError(f"--credit {credit_id} was superseded by {row['superseded_by']}")
+    if row["record_id"] != record_id:
+        raise UsageError(f"--credit {credit_id} is {row['record_id']}'s, not {record_id}'s")
+    if quote_sha256 is not None:
+        held = store.evidence_artifact(row["quote_id"])["sha256"]
+        if held != quote_sha256:
+            raise UsageError(
+                f"--credit {credit_id} holds other words than this verdict's evidence; one "
+                "credit is one act of the person's"
+            )
+    return row
+
+
+# ------------------------------------------------------------------------ kyo credit
+
+
+def _subject(store, subject_id: str) -> tuple[str, str, str]:
+    """``(kind, record id, write time)`` of one subject, or a refusal naming why not."""
+    kind = ids.child_kind(subject_id)
+    if kind == "verification":
+        row = store.conn.execute(
+            "SELECT record_id, method, created_at FROM verifications WHERE id = ?", (subject_id,)
+        ).fetchone()
+        if row is None:
+            raise UsageError(f"no verification {subject_id!r}")
+        if row["method"] != "human-observed":
+            raise UsageError(
+                f"{subject_id} is {row['method']}, and a credit names the person behind a "
+                "human-observed verdict"
+            )
+        return "verification", row["record_id"], row["created_at"]
+    if kind == "gate":
+        row = store.gate(subject_id)
+        if row["gate_type"] not in HUMAN_GATE_TYPES or not row["cleared_at"]:
+            raise UsageError(
+                f"{subject_id} is {'an open' if not row['cleared_at'] else 'a cleared'} "
+                f"{row['gate_type']} gate; a credit names the person who answered a "
+                f"cleared {' or '.join(sorted(HUMAN_GATE_TYPES))} gate"
+            )
+        return "gate", row["record_id"], row["cleared_at"]
+    if ids.is_record_id(subject_id):
+        row = store.record(subject_id)
+        return "record", subject_id, row["created_at"]
+    raise UsageError(
+        f"{subject_id!r} is not a verification (RECORD.vN), a gate (RECORD.gN) or a record id"
+    )
+
+
+def cmd_credit(ctx: Context, args: Namespace) -> Output:
+    """``kyo credit <subject-id>... --person … --quote-file … (--session … |
+    --source-other …) [--turn …] [--role …] [--decision-file …] [--span-first … --span-last
+    …] --basis <credit-id> [--supersede <credit-id>]`` (KYO-644, KYO-638 section 4.5).
+
+    Credits rows that already exist: a human-observed verification, a cleared human gate,
+    or a record (``decided`` or ``authorized``). Such a credit is written after its subject
+    and so is reconstructed, and every reconstructed credit needs ``--basis``: the
+    person's own current ``decided`` credit approving the batch (P8). One exception, for
+    the role KYO-644.c8 adds: an ``authorized`` go-ahead whose words the transcript dates
+    after the record was filed is the go-ahead itself, credited when it was given, and
+    needs no basis.
+    """
+    store = ctx.store()
+    subject_ids = list(dict.fromkeys(args.subject_ids))
+    resolved = [(sid, *_subject(store, sid)) for sid in subject_ids]
+    kinds = {kind for _sid, kind, _rec, _at in resolved}
+    records = {rec for _sid, _kind, rec, _at in resolved}
+    if len(records) > 1:
+        raise UsageError(
+            f"one credit is filed on one record, and these subjects are on "
+            f"{', '.join(sorted(records))}"
+        )
+    record_id = records.pop()
+    role = args.role or (ROLE_DECIDED if kinds == {"record"} else ROLE_OBSERVED)
+    if role not in CREDIT_ROLES:
+        raise UsageError(f"--role {role!r}; known: {', '.join(CREDIT_ROLES)}")
+    if role in (ROLE_DECIDED, ROLE_AUTHORIZED) and kinds != {"record"}:
+        raise UsageError(f"a {role} credit names a record, and these subjects are {sorted(kinds)}")
+    if role == ROLE_OBSERVED and "record" in kinds:
+        raise UsageError("an observed credit names verifications or gates, not a record")
+    quote_text = read_prose(args.quote_file, what="--quote-file") if args.quote_file else None
+    rerun = "kyo " + shlex.join(["credit", *subject_ids])
+    credit = resolve(
+        ctx,
+        store,
+        args,
+        role=role,
+        quote_text=quote_text,
+        contract=CONTRACT_HUMAN_OBSERVED_REQUIRES_CREDIT
+        if role == ROLE_OBSERVED
+        else CONTRACT_FILING_REQUIRES_CREDIT,
+        act="a credit",
+        remedies=[
+            f"give the missing parts to the same command: {rerun} with --person, "
+            "--quote-file and --session or --source-other"
+        ],
+    )
+
+    already = {
+        sid: store.current_credits_of(sid) for sid, *_ in resolved if store.current_credits_of(sid)
+    }
+    superseded = args.supersede
+    if superseded is not None:
+        old = store.credit(superseded)
+        if old["superseded_by"]:
+            raise UsageError(f"--supersede {superseded} was already superseded by {old['superseded_by']}")
+        named = {s["subject_id"] for s in store.credit_subjects(superseded)}
+        if not named & set(subject_ids):
+            raise UsageError(
+                f"--supersede {superseded} names {', '.join(sorted(named))}, none of these subjects"
+            )
+    blocking = {
+        sid: rows for sid, rows in already.items() if any(r["id"] != superseded for r in rows)
+    }
+    if blocking:
+        raise ContractViolation(
+            CONTRACT_CREDIT_SUBJECT_ALREADY_CREDITED,
+            [
+                *(
+                    f"{sid} already has a current credit: "
+                    + ", ".join(
+                        f"{r['id']} ({r['role']} by {r['person']})" for r in rows if r["id"] != superseded
+                    )
+                    for sid, rows in blocking.items()
+                ),
+                "nothing was written. A second current credit would leave two answers to "
+                "who the row belongs to; rerun this command with --supersede "
+                + next(r["id"] for rows in blocking.values() for r in rows if r["id"] != superseded)
+                + " to replace that credit, keeping it readable",
+            ],
+        )
+
+    latest_subject = max(at for *_rest, at in resolved)
+    live_go_ahead = (
+        role == ROLE_AUTHORIZED
+        and credit.check.get("observed_at")
+        and credit.check["observed_at"] > latest_subject
+    )
+    basis_id = args.basis
+    if basis_id is None and not live_go_ahead:
+        raise ContractViolation(
+            CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS,
+            [
+                f"{', '.join(subject_ids)} already exist, so this credit is written after "
+                "the fact (reconstructed), and a reconstructed credit rests on the person's "
+                "approval of it: nothing was written",
+                "file the batch on a record, have the person approve it, credit that "
+                "approval with role decided, and give its id as --basis",
+            ],
+        )
+    if basis_id is not None:
+        try:
+            basis = store.credit(basis_id)
+        except NotFound:
+            basis = None
+        if (
+            basis is None
+            or basis["role"] != ROLE_DECIDED
+            or basis["person"] != credit.person
+            or basis["superseded_by"]
+        ):
+            what = (
+                "no credit"
+                if basis is None
+                else f"a {'superseded ' if basis['superseded_by'] else ''}{basis['role']} "
+                f"credit by {basis['person']}"
+            )
+            raise ContractViolation(
+                CONTRACT_CREDIT_BASIS_NOT_APPROVAL,
+                [
+                    f"--basis {basis_id} is {what}, and the basis of a credit to "
+                    f"{credit.person} is {credit.person}'s own current decided credit "
+                    "approving it: nothing was written",
+                    f"give as --basis the id of {credit.person}'s decided credit on the "
+                    "record that approved this batch",
+                ],
+            )
+
+    with store.transaction():
+        before = {record_id: export.record_document(store, record_id)}
+        quote_id, _digest = _add_evidence(
+            store, record_id, credit.quote_text, supports_id=None, author=ctx.actor
+        )
+        credit_id = write(
+            store,
+            record_id,
+            credit,
+            quote_id=quote_id,
+            subjects=[(kind, sid) for sid, kind, _rec, _at in resolved],
+            author=ctx.actor,
+            basis_id=basis_id,
+        )
+        if superseded is not None:
+            store.supersede_credit(superseded, credit_id)
+        _touch_record(store, record_id)
+        after, events = commands._commit_and_export(
+            store,
+            command=f"credit {' '.join(subject_ids)}",
+            actor=ctx.actor,
+            record_ids=[record_id],
+            before=before,
+        )
+    commands._finish_mutation(store, [record_id], events)
+    out = [f"credited {', '.join(subject_ids)} on {record_id}, written by {ctx.actor}"]
+    out += lines(store, credit_id, credit)
+    out.append(f"  words stored as {quote_id}")
+    if basis_id:
+        out.append(f"  reconstructed; approved in {basis_id}")
+    elif live_go_ahead:
+        out.append("  a go-ahead given after the record was filed; no basis needed")
+    if superseded:
+        out.append(f"  supersedes {superseded}")
+    return Output(
+        out,
+        {
+            "ok": True,
+            "command": "credit",
+            "credit_id": credit_id,
+            "record_id": record_id,
+            "quote_id": quote_id,
+            "basis_id": basis_id,
+            "superseded": superseded,
+            "record": after[record_id],
+        },
+    )
+
+
+def credit_json(store, credit_id: str) -> dict:
+    """One credit as the export writes it, for a command's ``--json``."""
+    return export._credit(store, store.credit(credit_id))
+
+
+def refuse_unused_flags(args: Namespace, why: str) -> None:
+    """A credit flag given where no credit is written is refused, not dropped."""
+    given = [
+        flag
+        for name, flag in (
+            ("person", "--person"),
+            ("session", "--session"),
+            ("turn", "--turn"),
+            ("source_other", "--source-other"),
+            ("credit", "--credit"),
+        )
+        if getattr(args, name, None)
+    ]
+    if given:
+        raise UsageError(f"{', '.join(given)} belong to a credit, and {why}")
+
+
+# ------------------------------------------------------------- clearing a person's gate
+
+
+@dataclass
+class GateClearing:
+    """How one `kyo ungate` (or carried settle) clears its gates (KYO-640 P5).
+
+    ``credit``: the person answered, in words resolved and checked here. ``joined``: the
+    answer is an existing credit of the same act (`kyo confirm`). ``withdrawn``: no person
+    answered and the wait stopped mattering. None of the three: no gate waits on a person.
+    """
+
+    credit: Credit | None = None
+    joined: str | None = None
+    withdrawn: bool = False
+
+    def cleared_as(self) -> str | None:
+        if self.withdrawn:
+            return CLEARED_WITHDRAWN
+        if self.credit is not None or self.joined is not None:
+            return CLEARED_ANSWERED
+        return None
+
+    def write(
+        self, store, gates: list[tuple[str, str]], author: str, cleared_at: str | None = None
+    ) -> str | None:
+        """Write the credit naming the cleared gates ``(gate id, record id)``, inside the
+        caller's transaction; return its id, or None when there is none."""
+        if not gates or (self.credit is None and self.joined is None):
+            return None
+        record_ids = {record for _gate, record in gates}
+        if len(record_ids) > 1:
+            raise UsageError(
+                "one credit is filed on one record, and these gates are on "
+                f"{', '.join(sorted(record_ids))}; clear each record's gates on their own"
+            )
+        record_id = record_ids.pop()
+        if self.joined is not None:
+            join(store, self.joined, record_id)
+            for gate_id, _record in gates:
+                store.add_credit_subject(self.joined, "gate", gate_id)
+            return self.joined
+        assert self.credit is not None
+        quote_id, _digest = _add_evidence(
+            store, record_id, self.credit.quote_text, supports_id=record_id, author=author
+        )
+        return write(
+            store,
+            record_id,
+            self.credit,
+            quote_id=quote_id,
+            subjects=[("gate", gate_id) for gate_id, _record in gates],
+            author=author,
+            created_at=cleared_at,
+        )
+
+
+def gate_clearing(
+    ctx: Context,
+    store,
+    args: Namespace,
+    gates: list,
+    reason: str | None,
+    *,
+    command: str,
+) -> GateClearing:
+    """Decide how ``gates`` are cleared, refusing a person's gate cleared with neither a
+    credit nor ``--withdrawn``. ``command`` is the refused line as typed, for the remedies.
+    Writes nothing."""
+    withdrawn = bool(getattr(args, "withdrawn", False))
+    joined = getattr(args, "credit", None)
+    if withdrawn:
+        if requested(args) or joined:
+            raise UsageError(
+                "--withdrawn says no person answered, and the credit flags say one did; give one"
+            )
+        if not (reason or "").strip():
+            raise UsageError(
+                "--withdrawn records that the wait stopped mattering, and the reason it did "
+                "goes in --why or --why-file"
+            )
+        return GateClearing(withdrawn=True)
+    if joined is not None:
+        if requested(args):
+            raise UsageError("--credit names an existing credit; give no other credit flag")
+        return GateClearing(joined=joined)
+    human = [g for g in gates if g["gate_type"] in HUMAN_GATE_TYPES and not g["cleared_at"]]
+    remedies = [
+        "the person's answer, with their words and where they said them: "
+        f"`{command} --quote-file FILE --person KEY --source-other <where>` (or --session "
+        "ID for a Claude Code session, whose transcript is checked)",
+        f"or, when the wait no longer applies: `{command} --withdrawn --why <reason>`",
+    ]
+    if not requested(args):
+        if human:
+            raise ContractViolation(
+                CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT,
+                [
+                    *(f"{g['id']} ({g['gate_type']}) waits on a person" for g in human),
+                    "clearing it says the person answered, so it names who and in what "
+                    "words, or says plainly that nobody did: nothing was cleared",
+                    *remedies,
+                ],
+            )
+        return GateClearing()
+    quote_file = getattr(args, "quote_file", None)
+    quote_text = read_prose(quote_file, what="--quote-file") if quote_file else None
+    credit = resolve(
+        ctx,
+        store,
+        args,
+        role=ROLE_OBSERVED,
+        quote_text=quote_text,
+        contract=CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT,
+        act="clearing a gate that waits on a person",
+        remedies=remedies,
+    )
+    return GateClearing(credit=credit)
+
+
+def add_gate_clearing_flags(parser: ArgumentParser, *, credit_join: bool = True) -> None:
+    """The credit flags plus ``--withdrawn`` (and ``--credit``) on a command that clears
+    gates."""
+    add_credit_flags(parser)
+    parser.add_argument(
+        "--withdrawn",
+        action="store_true",
+        help="no person answered: the wait stopped mattering. Needs --why; the gate is "
+        "recorded cleared_as withdrawn (KYO-644)",
+    )
+    if credit_join:
+        parser.add_argument(
+            "--credit",
+            metavar="CREDIT_ID",
+            help="add this clearing to an existing credit of the same act (kyo confirm "
+            "uses it); the credit must be current and on the same record",
+        )
+
+
+def refuse_settle_over_person_gate(gates: list, command: str) -> None:
+    """KYO-644 (KYO-640 P5): a carried settle that would clear a gate waiting on a person
+    needs the person's answer, or ``--withdrawn``, as `kyo ungate` does."""
+    if not gates:
+        return
+    raise ContractViolation(
+        CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT,
+        [
+            *(f"{g['id']} ({g['gate_type']}) waits on a person" for g in gates),
+            "settling this carried record clears its open gates, and clearing one that "
+            "waits on a person says the person answered, so it names who and in what "
+            "words, or says plainly that nobody did: nothing was written",
+            "the person's answer, with their words and where they said them: "
+            f"`{command} --why <reason> --quote-file FILE --person KEY --source-other "
+            "<where>`",
+            f"or, when the wait no longer applies: `{command} --why <reason> --withdrawn`",
+        ],
+    )
+
+
+def settle_clearing(ctx: Context, store, args: Namespace, reason: str | None) -> GateClearing:
+    """The clearing a carried settle (`kyo move`, `kyo wont-do`) was given, resolved before
+    its transaction. With no credit flag and no ``--withdrawn`` it is empty, and
+    :func:`refuse_settle_over_person_gate` decides inside the settle whether that is
+    allowed."""
+    if not (requested(args) or getattr(args, "withdrawn", False)):
+        return GateClearing()
+    return gate_clearing(ctx, store, args, [], reason, command="kyo move")
+
+
+# ---------------------------------------------------------------- filing a decision
+
+
+def filing_credit(
+    ctx: Context, store, kind_def, args: Namespace, evidence_text: str | None, command: str
+) -> Credit | None:
+    """KYO-644 (KYO-640 P5, P9): the ``decided`` credit `kyo new` / `kyo spawn` of a kind
+    with ``policy.requires_credit`` needs, resolved before anything is written; None for
+    any other kind. ``--quote-file`` holds the person's words deciding it; given without
+    ``--evidence-file`` it is also the filing's evidence, read once
+    (``cmd_records._evidence_at_filing``), so a direct filing stays one command."""
+    if not kind_def.requires_credit:
+        return None
+    quote_file = getattr(args, "quote_file", None)
+    if quote_file and not getattr(args, "evidence_file", None):
+        quote_text = evidence_text
+    else:
+        quote_text = read_prose(quote_file, what="--quote-file") if quote_file else None
+    return resolve(
+        ctx,
+        store,
+        args,
+        role=ROLE_DECIDED,
+        quote_text=quote_text,
+        contract=CONTRACT_FILING_REQUIRES_CREDIT,
+        act=f"kind {kind_def.name!r} sets policy.requires_credit, so `{command}`",
+        remedies=[
+            "give the same command the person's words deciding it in --quote-file, what "
+            "was recommended and the alternatives in --decision-file, the person in "
+            "--person, and --session ID for a Claude Code session or --source-other "
+            "<where> for anywhere else",
+        ],
+    )
+
+
+def filing_credit_flag_problem(args: Namespace, kind_def) -> None:
+    """A credit flag on a filing of a kind that takes no credit is refused, not dropped."""
+    if kind_def.requires_credit:
+        return
+    refuse_unused_flags(
+        args, f"kind {kind_def.name!r} does not set policy.requires_credit"
+    )
+    for name, flag in (("quote_file", "--quote-file"), ("decision_file", "--decision-file")):
+        if getattr(args, name, None):
+            raise UsageError(
+                f"{flag} belongs to a credit, and kind {kind_def.name!r} does not set "
+                "policy.requires_credit"
+            )

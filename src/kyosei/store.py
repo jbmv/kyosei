@@ -325,8 +325,13 @@ class Store:
         span_active_seconds: int | None = None,
         span_started_at: str | None = None,
         span_ended_at: str | None = None,
+        created_at: str | None = None,
     ) -> str:
         """Store one credit and its subjects; return the credit's id.
+
+        ``created_at`` (KYO-644): a command writing the credit in its subject's own
+        transaction passes the subject's write time, so "reconstructed" (a credit written
+        later than its subject) is derived exactly; omitted, it is now.
 
         KYO-642: the one writer of the ``credits`` tables, validating the closed
         vocabularies in :mod:`kyosei.contracts`. It does not check that ``person`` is
@@ -368,15 +373,18 @@ class Store:
             )
         if words_form is not None:
             _one_of("words_form", words_form, CREDIT_WORDS_FORMS)
-        span = (
-            span_session, span_first_turn, span_last_turn, span_person_turns,
-            span_agent_turns, span_active_seconds, span_started_at, span_ended_at,
+        # KYO-644.c5: a span is cited by its three ids whole or not at all, and its five
+        # measures are all given or all empty -- empty when the transcript was absent at
+        # write time, so the ids are kept and nothing is guessed.
+        span_ids = (span_session, span_first_turn, span_last_turn)
+        measures = (
+            span_person_turns, span_agent_turns, span_active_seconds, span_started_at,
+            span_ended_at,
         )  # fmt: skip
-        if any(v is not None for v in span) and any(v is None for v in span):
+        if any(v is not None for v in span_ids) and any(v is None for v in span_ids):
             raise KyoseiError(
-                "a discussion span is cited whole or not at all: pass every span_* argument "
-                "(session, first and last turn, the person's and the agent's turn counts, "
-                "active seconds, start and end), or none"
+                "a discussion span is cited whole or not at all: pass span_session, "
+                "span_first_turn and span_last_turn together, or none"
             )
         if not subjects:
             raise KyoseiError(
@@ -384,6 +392,23 @@ class Store:
             )
         for kind, _ in subjects:
             _one_of("subject kind", kind, CREDIT_SUBJECT_KINDS)
+        # KYO-644: after the refusals above, so their ordinals in the remedy table hold.
+        if any(v is not None for v in measures) and (
+            any(v is None for v in measures) or span_session is None
+        ):
+            raise KyoseiError(
+                "a discussion span's measures are stored together and only beside its ids: "
+                "pass every measure (the person's and the agent's turn counts, active "
+                "seconds, start and end) with the span's ids, or none"
+            )
+        # KYO-644.c8: what was recommended and what else was considered belong to a
+        # decision. An `authorized` go-ahead approves a plan already stated and carries
+        # neither; an `observed` credit is a look at something, not a choice.
+        if role != "decided" and (recommended or recommended_by or alternatives):
+            raise KyoseiError(
+                f"recommended, recommended_by and alternatives belong to role 'decided', "
+                f"not {role!r}: drop them, or credit the person as 'decided'"
+            )
         credit_id, seq = self.new_child_id(record_id, "credit")
         self.conn.execute(
             "INSERT INTO credits (id, record_id, seq, person, role, quote_id, source_kind,"
@@ -423,16 +448,45 @@ class Store:
                 span_ended_at,
                 basis_id,
                 author,
-                now(),
+                created_at or now(),
             ),
         )
         for kind, subject_id in subjects:
-            self.conn.execute(
-                "INSERT INTO credit_subjects (credit_id, subject_kind, subject_id)"
-                " VALUES (?, ?, ?)",
-                (credit_id, kind, subject_id),
-            )
+            self.add_credit_subject(credit_id, kind, subject_id)
         return credit_id
+
+    def add_credit_subject(self, credit_id: str, kind: str, subject_id: str) -> None:
+        """KYO-644: one more row a credit answers, for `kyo confirm`'s one act that settles
+        several rows through several composed steps (each step names the credit)."""
+        _one_of("subject kind", kind, CREDIT_SUBJECT_KINDS)
+        self.conn.execute(
+            "INSERT INTO credit_subjects (credit_id, subject_kind, subject_id) VALUES (?, ?, ?)",
+            (credit_id, kind, subject_id),
+        )
+
+    def credit(self, credit_id: str) -> sqlite3.Row:
+        """One credit by id."""
+        row = self.conn.execute("SELECT * FROM credits WHERE id = ?", (credit_id,)).fetchone()
+        if row is None:
+            raise NotFound(f"no credit {credit_id!r}")
+        return row
+
+    def current_credits_of(self, subject_id: str) -> list[sqlite3.Row]:
+        """The current (not superseded) credits naming ``subject_id`` as a subject."""
+        return list(
+            self.conn.execute(
+                "SELECT c.* FROM credits c JOIN credit_subjects s ON s.credit_id = c.id"
+                " WHERE s.subject_id = ? AND c.superseded_by IS NULL ORDER BY c.created_at",
+                (subject_id,),
+            )
+        )
+
+    def supersede_credit(self, credit_id: str, by: str) -> None:
+        """KYO-644 (`kyo credit --supersede`): mark a credit replaced, keeping it readable."""
+        self.conn.execute(
+            "UPDATE credits SET superseded_by = ?, superseded_at = ? WHERE id = ?",
+            (by, now(), credit_id),
+        )
 
     # ------------------------------------------------------- docs governance (KYO-137)
 

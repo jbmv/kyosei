@@ -59,10 +59,11 @@ import tempfile
 from argparse import Namespace
 from pathlib import Path
 
-from . import cmd_close_wave, cmd_evidence, cmd_links
+from . import cmd_close_wave, cmd_evidence, cmd_links, credits
 from .cmd_accept import _close, _incomplete_line, _incompleteness, _run, _Step
 from .commands import Context, Output, _load_status_ladder
 from .contracts import ROLE_RETIRED, SETTLED_CRITERION_STATES, VOID_CRITERION_STATES
+from .config import person_label
 from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .prose import STDIN, check_not_shell_mangled, read_prose, single_line
 
@@ -70,7 +71,7 @@ from .prose import STDIN, check_not_shell_mangled, read_prose, single_line
 #: happen and ``holding-for`` for a premise to resolve; neither waits for a person to
 #: look, and clearing ``holding-for`` raises ``gate-cleared-stale-criteria`` (KYO-59),
 #: which needs a deliberate ``kyo ungate``, not the side effect of an approval.
-HUMAN_GATE_TYPES: frozenset[str] = frozenset({"awaiting:human-review", "awaiting:human-run"})
+HUMAN_GATE_TYPES: frozenset[str] = credits.HUMAN_GATE_TYPES
 
 #: The one verdict and the one method a confirmation records.
 CONFIRM_VERDICT = "met"
@@ -193,7 +194,9 @@ def _refuse_retired(store, record_id: str, status: str, ladder) -> None:
             f"{record_id} is {status} (retired): confirming it would record approval of "
             "work that was retired, so nothing was written",
             *(
-                f"clear its open gate on its own: `kyo ungate {gate['id']} --why-file FILE`"
+                f"clear its open gate on its own: `kyo ungate {gate['id']} --why-file FILE"
+                + (" --withdrawn" if gate["gate_type"] in HUMAN_GATE_TYPES else "")
+                + "`"
                 for gate in gates
             ),
         ],
@@ -505,6 +508,29 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         else:
             targets.append({"criterion_id": cid, "prior_state": criterion["state"]})
 
+    # KYO-644 (KYO-640 P5): one credit for the whole act, resolved and checked against the
+    # transcript before anything is written. The first verdict writes it; every further
+    # verdict and the gate are added to it with --credit, so it names every row settled.
+    existing = _existing_credit(store, record_id, quote, resolved, skipped)
+    credit = None
+    if (targets or gate is not None) and existing is None:
+        credit = credits.resolve(
+            ctx,
+            store,
+            args,
+            role=credits.ROLE_OBSERVED,
+            quote_text=quote.text,
+            contract=credits.CONTRACT_HUMAN_OBSERVED_REQUIRES_CREDIT,
+            act="a confirmation",
+            remedies=[
+                "name the person and where they said the words: "
+                f"`{_rerun_line(record_id, quote, args)} --person KEY --source-other "
+                "<where>` (or --session ID for a Claude Code session, whose transcript "
+                "is checked)"
+            ],
+        )
+    credit_id: str | None = existing
+
     steps: list[_Step] = []
     verified: list[str] = []
     attached: str | None = None
@@ -515,15 +541,17 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         for target in targets:
             cid = target["criterion_id"]
             tail = ["--verdict", CONFIRM_VERDICT, "--method", CONFIRM_METHOD, "--evidence-file"]
+            who = ["--credit", credit_id] if credit_id else credit.flags()
             step = _composed(
                 ctx,
-                ["verify", cid, *tail, str(words)],
-                ["verify", cid, *tail, label],
+                ["verify", cid, *tail, str(words), *who],
+                ["verify", cid, *tail, label, *who],
                 cmd_evidence.cmd_verify,
             )
             steps.append(step)
             if step.refused is None:
                 verified.append(cid)
+                credit_id = credit_id or (step.data or {}).get("credit_id")
         if not resolved["targets"] and gate is not None:
             held = [
                 e
@@ -533,17 +561,6 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             if held:
                 attached = held[0]
                 skipped.append({"evidence_id": attached, "reason": "already attached"})
-            else:
-                tail = ["--supports", record_id]
-                step = _composed(
-                    ctx,
-                    ["attach", record_id, "--file", str(words), *tail],
-                    ["attach", record_id, "--file", label, *tail],
-                    cmd_evidence.cmd_attach,
-                )
-                steps.append(step)
-                if step.refused is None:
-                    attached = (step.data or {}).get("evidence_id")
 
         gates_cleared: list[dict] = []
         gates_left: list[dict] = []
@@ -571,14 +588,24 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
                     encoding="utf-8",
                     newline="",
                 )
+                # With no verdict to carry it, the ungate writes the credit and stores the
+                # words as its quote, supporting the record, as `kyo attach` did before.
+                if credit_id:
+                    who, shown = ["--credit", credit_id], ["--credit", credit_id]
+                else:
+                    who = ["--quote-file", str(words), *credit.flags()]
+                    shown = ["--quote-file", label, *credit.flags()]
                 step = _composed(
                     ctx,
-                    ["ungate", gate["id"], "--why-file", str(pointer)],
-                    ["ungate", gate["id"], "--why-file", "<pointer>"],
+                    ["ungate", gate["id"], "--why-file", str(pointer), *who],
+                    ["ungate", gate["id"], "--why-file", "<pointer>", *shown],
                     cmd_links.cmd_ungate,
                 )
                 steps.append(step)
                 if step.refused is None:
+                    credit_id = credit_id or (step.data or {}).get("credit_id")
+                    if attached is None and credit_id and not verified:
+                        attached = store.credit(credit_id)["quote_id"]
                     gates_cleared.append({"gate_id": gate["id"], "gate_type": gate["gate_type"]})
                 else:
                     gates_left.append(
@@ -606,9 +633,18 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     refused_steps, still_open = _incompleteness(store, steps, left, close=close)
     complete = not refused_steps and not still_open and not gates_left and not refresh_failed
 
+    credit_row = store.credit(credit_id) if credit_id else None
+    observed = (
+        f"observed by {person_label(store.config, credit_row['person'])} (credit "
+        f"{credit_id}, transcript {credit_row['transcript_check']}"
+        + (f", turn {credit_row['source_turn']}" if credit_row["source_turn"] else "")
+        + ")"
+        if credit_row is not None
+        else "no credit written"
+    )
     lines = [
-        f"confirmed {record_id} as {ctx.actor}, with the words in {quote.source} "
-        f"({quote.chars} chars, sha256:{quote.sha256})"
+        f"confirmed {record_id}: {observed}, written by {ctx.actor}, with the words in "
+        f"{quote.source} ({quote.chars} chars, sha256:{quote.sha256})"
     ]
     if not complete:
         lines.append(
@@ -671,6 +707,8 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             "complete": complete,
             "record_id": record_id,
             "quote": {"chars": quote.chars, "sha256": quote.sha256},
+            # KYO-644: the one credit naming every verification and gate this act settled.
+            "credit_id": credit_id,
             "rule": resolved["rule"],
             "ignored": resolved["ignored"],
             "targets": targets,
@@ -697,6 +735,27 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             ),
         },
     )
+
+
+def _existing_credit(store, record_id: str, quote: _Quote, resolved: dict, skipped: list) -> str | None:
+    """A rerun's credit: the current credit on a skipped target's latest verdict that holds
+    these words, so the gate a first run left open joins the same act (KYO-644)."""
+    for item in skipped:
+        cid = item.get("criterion_id")
+        if not cid:
+            continue
+        latest = store.latest_verification(cid)
+        if latest is None:
+            continue
+        for row in store.current_credits_of(latest["id"]):
+            if store.evidence_artifact(row["quote_id"])["sha256"] == quote.sha256:
+                return row["id"]
+    for evidence_id in _holds_quote(store, record_id, quote):
+        for row in store.conn.execute(
+            "SELECT id FROM credits WHERE quote_id = ? AND superseded_by IS NULL", (evidence_id,)
+        ):
+            return row["id"]
+    return None
 
 
 def _resolution_line(record_id: str, resolved: dict, gate) -> str:

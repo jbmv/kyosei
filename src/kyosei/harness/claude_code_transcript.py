@@ -2,8 +2,8 @@
 
 Given a session id and a quote, this module finds the session's transcript and says
 whether the quote is the person's own words in it. It is section 5 of the KYO-638
-proposal as amended by decision KYO-640 (P6, P7). Nothing in the CLI calls it yet;
-KYO-644 does.
+proposal as amended by decision KYO-640 (P6, P7). Its caller is :mod:`kyosei.credits`
+(KYO-644), which every credit-writing command goes through.
 
 WHERE THE FILES ARE, FROM CLAUDE CODE'S OWN DOCUMENTATION (KYO-643.c5). Read on
 2026-11-06 from three pages:
@@ -57,6 +57,12 @@ WHICH RECORDS ARE THE PERSON'S WORDS. Three forms, per KYO-640:
   answers are read, never the question text or the option descriptions beside them, so
   the agent's own words in the question cannot match.
 
+A prompt the person sent from Claude Code's suggestions (``promptSource ==
+"suggestion_accepted"`` on a typed record) is read as the person's turn but under its own
+form, ``accepted-suggestion`` (KYO-640.n1): it is creditable as their choice and is never
+shown as their writing. :attr:`CheckResult.words_form` names the form in the store's
+vocabulary (``typed``, ``mid-turn``, ``choice``, ``accepted-suggestion``).
+
 Everything else is excluded: the agent's text, other tool results (where the agent's
 own commands echo a quote back), hook output and other attachments, injected skill
 text, peer messages, task notifications, and records without ``origin``. A transcript
@@ -82,8 +88,15 @@ present and readable it alone decides (KYO-640: a mismatch against a present tra
 is refused), and the history serves only to find paste boundaries.
 
 WHAT LEAVES THIS MODULE FOR THE STORE (KYO-643.c4). :meth:`CheckResult.store_fields` is
-the matched record's id, its own timestamp and the outcome, and nothing else: not the
-turn's text, not its neighbours, not the transcript path, not a hash.
+the matched record's id, its own timestamp, the outcome and the form of the matched words
+(KYO-644), and nothing else: not the turn's text, not its neighbours, not the transcript
+path, not a hash.
+
+A DISCUSSION SPAN (KYO-640.n1, KYO-644). A decided credit may cite the discussion that led
+to it by its first and last record. :func:`measure_span` reads the records between them and
+returns counts and times only: the person's turns, the agent's turns, the active seconds
+(gaps longer than :data:`SPAN_BREAK_SECONDS` are left out, because a long gap is time away)
+and the first and last timestamps. No text from the span leaves the module.
 """
 
 from __future__ import annotations
@@ -130,6 +143,27 @@ SOURCE_HISTORY = "history"
 FORM_TYPED = "typed"
 FORM_MID_TURN = "mid-turn"
 FORM_ANSWER = "answer"
+#: KYO-640.n1: a prompt the person sent from Claude Code's suggestions. Read as their
+#: turn, under its own form, so it is credited as their choice and never as their writing.
+FORM_ACCEPTED_SUGGESTION = "accepted-suggestion"
+
+#: The ``promptSource`` value Claude Code writes on a prompt sent from its suggestions.
+SUGGESTION_PROMPT_SOURCE = "suggestion_accepted"
+
+#: Each form as the store names it (``contracts.CREDIT_WORDS_FORMS``). An answer to a
+#: multiple-choice question is stored as ``choice``.
+WORDS_FORMS: dict[str, str] = {
+    FORM_TYPED: "typed",
+    FORM_MID_TURN: "mid-turn",
+    FORM_ANSWER: "choice",
+    FORM_ACCEPTED_SUGGESTION: "accepted-suggestion",
+}
+
+#: A gap between two records of a span longer than this is a break and is not counted
+#: as active time (KYO-640.n1: "that time could have been spent eating"). Fifteen
+#: minutes: longer than an agent's ordinary tool run or a person's reading of a reply,
+#: shorter than a meal.
+SPAN_BREAK_SECONDS = 15 * 60
 
 #: The prefix of a history turn's id. A history line carries no uuid, so its id is its
 #: own timestamp in milliseconds, which is all the store keeps of it in any case.
@@ -347,9 +381,12 @@ def read_transcripts(paths: list[Path]) -> TranscriptRead:
             text = _text_of(content)
             words = _typed_words(text) if text is not None else None
             if words is not None:
-                turns[uuid] = Turn(
-                    uuid, stamp, FORM_TYPED, SOURCE_TRANSCRIPT, (words,), False, words
+                form = (
+                    FORM_ACCEPTED_SUGGESTION
+                    if record.get("promptSource") == SUGGESTION_PROMPT_SOURCE
+                    else FORM_TYPED
                 )
+                turns[uuid] = Turn(uuid, stamp, form, SOURCE_TRANSCRIPT, (words,), False, words)
     ordered = sorted(turns.values(), key=lambda t: t.timestamp)
     if not has_origin:
         return TranscriptRead(
@@ -573,7 +610,7 @@ class CheckResult:
     turn: str | None = None
     #: The matched record's own timestamp.
     observed_at: str | None = None
-    #: The matched turn's form (typed, mid-turn, answer). Shown, not stored.
+    #: The matched turn's form (typed, mid-turn, answer, accepted-suggestion).
     form: str | None = None
     #: For ``ambiguous``: each matching turn's (id, timestamp), to name one with ``turn``.
     candidates: tuple[tuple[str, str], ...] = ()
@@ -583,12 +620,19 @@ class CheckResult:
         """Whether a credit may be written: refused outcomes are not-found and ambiguous."""
         return self.outcome not in (NOT_FOUND, AMBIGUOUS)
 
+    @property
+    def words_form(self) -> str | None:
+        """The matched turn's form in the store's vocabulary, or None if nothing matched."""
+        return WORDS_FORMS.get(self.form) if self.form is not None else None
+
     def store_fields(self) -> dict[str, str | None]:
-        """Everything the store keeps from the transcript (KYO-643.c4, KYO-638 5.5)."""
+        """Everything the store keeps from the transcript (KYO-643.c4, KYO-638 5.5), and
+        the form of the matched words (KYO-640.n1, KYO-644)."""
         return {
             "transcript_check": self.outcome,
             "source_turn": self.turn,
             "observed_at": self.observed_at,
+            "words_form": self.words_form,
         }
 
 
@@ -736,3 +780,174 @@ def find_person_turns(
     read = read_transcripts(paths)
     history = read_history(history_path(base), session_id)
     return TranscriptRead(pair_with_history(read.turns, history), read.readable, read.why)
+
+
+# ---------------------------------------------------------------- discussion spans
+
+
+#: :attr:`SpanMeasure.outcome` values.
+SPAN_MEASURED = "measured"
+#: No transcript for the session: the span's ids are stored and its measures are empty.
+SPAN_TRANSCRIPT_ABSENT = TRANSCRIPT_ABSENT
+#: The transcript is present and readable, and one of the cited records is not in it.
+SPAN_TURN_NOT_FOUND = "turn-not-found"
+#: The cited first record comes after the cited last one.
+SPAN_REVERSED = "reversed"
+
+
+@dataclass(frozen=True)
+class SpanMeasure:
+    """What :func:`measure_span` found. Counts and timestamps only, never text."""
+
+    outcome: str
+    why: str
+    person_turns: int | None = None
+    agent_turns: int | None = None
+    active_seconds: int | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+
+    @property
+    def measured(self) -> bool:
+        return self.outcome == SPAN_MEASURED
+
+    def store_fields(self) -> dict[str, int | str | None]:
+        """The ``span_*`` measures a credit stores; all None when nothing was measured."""
+        return {
+            "span_person_turns": self.person_turns,
+            "span_agent_turns": self.agent_turns,
+            "span_active_seconds": self.active_seconds,
+            "span_started_at": self.started_at,
+            "span_ended_at": self.ended_at,
+        }
+
+
+def _moment(stamp: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _has_text(record: dict) -> bool:
+    """Whether an assistant record carries text addressed to the person (not only tool
+    calls or thinking)."""
+    content = (record.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+        and block["text"].strip()
+        for block in content
+    )
+
+
+def _main_chain(paths: list[Path]) -> list[dict]:
+    """The session's top-level records in file order, each uuid once, sidechains out."""
+    seen: set[str] = set()
+    records: list[dict] = []
+    for path in paths:
+        for record in _parse_lines(path):
+            uuid = record.get("uuid")
+            if record.get("isSidechain") or not isinstance(uuid, str) or uuid in seen:
+                continue
+            if not isinstance(record.get("timestamp"), str):
+                continue
+            seen.add(uuid)
+            records.append(record)
+    return records
+
+
+def measure_span(
+    session_id: str,
+    first: str,
+    last: str,
+    *,
+    recorded: Path | None = None,
+    config: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    break_seconds: int = SPAN_BREAK_SECONDS,
+) -> SpanMeasure:
+    """Measure the discussion from record ``first`` to record ``last`` of a session.
+
+    The person's turns are counted by the rule :func:`read_transcripts` applies. The
+    agent's count is its REPLIES to the person (KYO-644.c9): one per agent turn -- the run
+    of ``assistant`` records between two of the person's turns, or between the last one
+    and the end of the span -- whose last assistant record carries text. Counting every
+    assistant record with text would count one reply several times, because Claude Code
+    writes a reply as several records split between tool calls; that inflated an early
+    sheet to about nineteen agent messages per four of the person's. Active time is the sum of the
+    gaps between consecutive records of the span, leaving out every gap longer than
+    ``break_seconds``. ``first`` and ``last`` are record uuids and may be any records of
+    the top-level transcript.
+
+    Raises :class:`ValueError` for a session id that is not a UUID.
+    """
+    base = config if config is not None else config_dir(environ)
+    paths = candidate_transcripts(session_id, config=base, recorded=recorded)
+    if not paths:
+        return SpanMeasure(
+            SPAN_TRANSCRIPT_ABSENT,
+            f"no transcript for session {session_id}; the span is cited by id and not measured",
+        )
+    try:
+        read = read_transcripts(paths)
+        records = _main_chain(paths)
+    except OSError as exc:
+        return SpanMeasure(
+            UNREADABLE,
+            f"the transcript could not be read ({exc.strerror or exc}); the span is cited "
+            "by id and not measured",
+        )
+    if not read.readable:
+        return SpanMeasure(UNREADABLE, f"{read.why}; the span is cited by id and not measured")
+    index = {record["uuid"]: n for n, record in enumerate(records)}
+    missing = [turn for turn in (first, last) if turn not in index]
+    if missing:
+        return SpanMeasure(
+            SPAN_TURN_NOT_FOUND,
+            f"the transcript of session {session_id} has no record {', '.join(missing)} "
+            f"({len(records)} top-level records read)",
+        )
+    start, end = index[first], index[last]
+    if start > end:
+        return SpanMeasure(
+            SPAN_REVERSED,
+            f"record {first} comes after record {last} in session {session_id}",
+        )
+    person_ids = {turn.id for turn in read.turns}
+    span = records[start : end + 1]
+    person = 0
+    agent = 0
+    # The agent's last assistant record since the person's last turn: a reply counts once,
+    # when that run ends in text (KYO-644.c9).
+    last_said: bool | None = None
+    for record in span:
+        if record["uuid"] in person_ids:
+            person += 1
+            agent += 1 if last_said else 0
+            last_said = None
+        elif record.get("type") == "assistant":
+            last_said = _has_text(record)
+    agent += 1 if last_said else 0
+    moments = [m for m in (_moment(record["timestamp"]) for record in span) if m is not None]
+    moments.sort()
+    active = 0.0
+    for before, after in zip(moments, moments[1:], strict=False):
+        gap = (after - before).total_seconds()
+        if gap <= break_seconds:
+            active += gap
+    return SpanMeasure(
+        SPAN_MEASURED,
+        f"{len(span)} records of session {session_id} measured; gaps over "
+        f"{break_seconds} seconds left out of the active time",
+        person_turns=person,
+        agent_turns=agent,
+        active_seconds=int(round(active)),
+        started_at=span[0]["timestamp"],
+        ended_at=span[-1]["timestamp"],
+    )

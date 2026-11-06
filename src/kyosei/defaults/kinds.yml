@@ -26,6 +26,9 @@
 #       # archetype: knowledge uses instead:
 #       amendable: bool
 #       requires_evidence_links: bool   # optional; true = filing directly needs --evidence-file
+#       requires_credit: bool   # optional, either archetype; true = `kyo new`/`kyo spawn` of
+#                               # this kind needs a decided credit: --person, --quote-file,
+#                               # --decision-file, --session or --source-other (KYO-644)
 #       raises_docs_obligations: bool   # optional, default false; true = filing or editing a
 #                                       # record raises a standing docs obligation on each ssot
 #                                       # section it names by id, and on each doc-ref (KYO-554)
@@ -256,6 +259,8 @@ kinds:
     policy:
       amendable: true
       requires_evidence_links: true   # consumed by `kyo new`: filing directly needs --evidence-file
+      requires_credit: true           # KYO-644: `kyo new`/`kyo spawn` need the person's decided
+                                      # credit; --quote-file can serve as the evidence
       raises_docs_obligations: true   # KYO-554: a decision naming a section obliges someone to
                                       # bring that section into line, or say it needs no change
       swept: false

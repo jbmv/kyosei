@@ -9,6 +9,7 @@ file.
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 
 from . import events_ledger, export, ids, ledger_repair, ledger_scrub, ledgers
@@ -106,6 +107,8 @@ def cmd_redact(ctx: Context, args: Namespace) -> Output:
         )
     target_id = args.evidence_id
     field = ledger_scrub.field_target(target_id)
+    if field is not None and field[0] == "credit":
+        return _redact_credit(ctx, store, target_id, field[1], reason)
     if field is not None:
         return _redact_field(ctx, store, target_id, *field, reason)
     kind = _redaction_target(target_id)
@@ -372,6 +375,131 @@ def _redact_field(
     )
 
 
+def _credit_texts(row) -> list[str]:
+    """The free text a credit row holds now (KYO-644.c7)."""
+    texts = [row["recommended"], row["source_note"]]
+    if row["alternatives_json"]:
+        texts += [a.get("text") for a in json.loads(row["alternatives_json"])]
+    return [t for t in texts if isinstance(t, str) and t and t != REDACTION_MARKER]
+
+
+def _redact_credit(
+    ctx: Context, store: Store, target_id: str, record_id: str, reason: str
+) -> Output:
+    """``kyo redact RECORD.pN`` (KYO-644.c7): a credit's free text, as evidence is redacted.
+
+    ``recommended``, ``source_note`` and each alternative's ``text`` become
+    :data:`REDACTION_MARKER` in the row and in every snapshot up to the redaction, in the
+    database's ``events`` table and in the ledger, by the field rule
+    (:func:`ledger_scrub._field_values`), and each original is matched as whole-blob text
+    wherever it was copied, under the same length guard. The credit keeps its id, person,
+    role, outcome, ids and measures; the person's words are its quote, an evidence
+    artifact, redacted with ``kyo redact`` on that evidence id. Like a field redaction it
+    has no ``redacted_at`` column: its event records it, and a rerun under the same reason
+    is a retry.
+    """
+    with store.transaction():
+        row = store.conn.execute("SELECT * FROM credits WHERE id = ?", (target_id,)).fetchone()
+        if row is None:
+            raise NotFound(f"no credit {target_id!r} in this store to redact")
+        previous = next(
+            (item for item in ledger_scrub.field_redactions(store) if item.target_id == target_id),
+            None,
+        )
+        current = _credit_texts(row)
+        retry = not current and previous is not None and previous.why.strip() == reason.strip()
+        upto = previous.seq if retry and previous is not None else None
+        residue = ledger_scrub.field_redaction_residue(
+            store, target_id, "credit", record_id, upto, REDACTION_MARKER
+        )
+        originals = set(residue.texts) | set(current)
+        if not originals and not retry:
+            raise UsageError(
+                f"credit {target_id} holds no free text to redact (recommended, source_note "
+                "and alternatives are empty or already redacted); its quote is evidence "
+                f"{row['quote_id']}"
+            )
+        alternatives = (
+            json.dumps(
+                [
+                    {**a, "text": REDACTION_MARKER}
+                    for a in json.loads(row["alternatives_json"])
+                ]
+            )
+            if row["alternatives_json"]
+            else None
+        )
+        store.conn.execute(
+            "UPDATE credits SET recommended = ?, source_note = ?, alternatives_json = ?"
+            " WHERE id = ?",
+            (
+                REDACTION_MARKER if row["recommended"] else row["recommended"],
+                REDACTION_MARKER if row["source_note"] else row["source_note"],
+                alternatives,
+                target_id,
+            ),
+        )
+        embedded = 0
+        global_pass_ran = False
+        for original in sorted(originals):
+            count, ran = ledger_scrub.scrub_embedded_copies(store, original, REDACTION_MARKER)
+            embedded += count
+            global_pass_ran = global_pass_ran or ran
+        event = None
+        if retry and previous is not None:
+            stamp = str(
+                store.conn.execute(
+                    "SELECT at FROM events WHERE seq = ?", (previous.seq,)
+                ).fetchone()["at"]
+            )
+            upto_seq = previous.seq
+        else:
+            _touch_record(store, record_id)
+            event = store.record_event(
+                actor=ctx.actor,
+                command=ledger_scrub.REDACTION_COMMAND.format(target=target_id, reason=reason),
+                record_id=record_id,
+                before=None,
+                after=export.record_document(store, record_id),
+            )
+            stamp = event["at"]
+            upto_seq = event["seq"]
+        event_rows = ledger_scrub.scrub_field_from_events_table(
+            store, target_id, "credit", record_id, upto_seq, REDACTION_MARKER,
+            tuple(sorted(originals)),
+        )
+        after = export.record_document(store, record_id)
+        surviving = surviving_occurrences(store, sorted(originals))
+
+    if event is not None:
+        events_ledger.append_events(store, [event])
+    else:
+        ledger_repair.repair_ledgers(store)
+    export.write_exports(store, [record_id])
+    ledgers.write_allocations(store)
+    scrubbed = ledger_scrub.scrub_field_from_ledgers(
+        store, target_id, "credit", record_id, upto_seq, REDACTION_MARKER
+    )
+    for original in sorted(originals):
+        if len(original) >= ledger_scrub.MIN_GLOBAL_SCRUB_LENGTH:
+            scrubbed += ledger_scrub.scrub_text_from_ledgers(store, original, REDACTION_MARKER)
+    return _redaction_output(
+        kind="credit",
+        target_id=target_id,
+        record_id=record_id,
+        retry=retry,
+        stamp=stamp,
+        reason=reason,
+        surviving=surviving,
+        scrubbed=scrubbed,
+        event_rows=event_rows,
+        embedded=embedded,
+        originals=originals,
+        global_pass_ran=global_pass_ran,
+        after=after,
+    )
+
+
 def _redaction_output(
     *,
     kind: str,
@@ -490,6 +618,10 @@ RESIDUE_COLUMNS: tuple[tuple[str, str, str | None], ...] = (
     ("gates", "detail", "record_id"),
     ("gates", "cleared_why", "record_id"),
     ("verifications", "reason", "record_id"),
+    # KYO-644.c7: a credit's free text (its quote is evidence, above).
+    ("credits", "recommended", "record_id"),
+    ("credits", "source_note", "record_id"),
+    ("credits", "alternatives_json", "record_id"),
     ("flags", "detail", "record_id"),
     ("flags", "resolved_why", "record_id"),
     ("dispatches", "brief", "record_id"),
