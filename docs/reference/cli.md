@@ -821,7 +821,7 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--kind KIND] [--scope SCOPE] [--gate-tag TAG] [--status STATUS] [--plan ID] [--unsettled] [--limit N]`
+Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--kind KIND] [--scope SCOPE] [--gate-tag TAG] [--status STATUS] [--plan ID] [--unsettled] [--person KEY] [--decided-by KEY] [--overrode] [--limit N]`
 
 ### Options
 
@@ -831,6 +831,9 @@ Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 - `--status STATUS` — optional. a status declared in kyosei/statuses.yml (default ladder: open | working | built | verified | done | wont-do), or current | void for knowledge-archetype records. Repeat it to ask for any of several (`--status open --status working`)
 - `--plan ID` — optional. only records belonging to this plan — membership is stored on the member, so this is the only way to walk the relation the other way
 - `--unsettled` — optional. only records not yet settled: leave out every record whose stored status has the `complete` or `retired` role in kyosei/statuses.yml. Combines with --status (both must hold)
+- `--person KEY` — optional. only records with a current credit by this person, a key under `people:` in kyosei/config.yml; refused if the project does not declare it (KYO-647)
+- `--decided-by KEY` — optional. only decision records this person decided: those with a current `decided` credit by them; refused if the project does not declare the key (KYO-647)
+- `--overrode` — optional. only records where a person overrode an agent: a `decided` credit whose outcome is `overrode`, or a credited verdict that reverses an uncredited earlier one on the same criterion (KYO-647)
 - `--limit N` — optional. print at most N rows, in the listing's usual order; the summary line says how many matched and that the listing was limited
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

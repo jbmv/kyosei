@@ -15,7 +15,8 @@
       "title",
       "counted",
       "created_at",
-      "updated_at"
+      "updated_at",
+      "people"
     ],
     "filters": {
       "status": "open"
@@ -40,7 +41,8 @@
       "title",
       "counted",
       "created_at",
-      "updated_at"
+      "updated_at",
+      "people"
     ],
     "filters": {
       "status": "open"
@@ -83,6 +85,7 @@
           "type": "blocks"
         }
       ],
+      "people": [],
       "scope": null,
       "seq": 1,
       "standing": "open",
@@ -99,6 +102,7 @@
       "id": "TST-3",
       "kind": "task",
       "links": [],
+      "people": [],
       "scope": null,
       "seq": 3,
       "standing": "open",

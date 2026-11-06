@@ -1466,6 +1466,25 @@ def build_parser() -> KyoseiParser:
         "--status (both must hold)",
     )
     p_list.add_argument(
+        "--person",
+        metavar="KEY",
+        help="only records with a current credit by this person, a key under `people:` in "
+        "kyosei/config.yml; refused if the project does not declare it (KYO-647)",
+    )
+    p_list.add_argument(
+        "--decided-by",
+        metavar="KEY",
+        help="only decision records this person decided: those with a current `decided` "
+        "credit by them; refused if the project does not declare the key (KYO-647)",
+    )
+    p_list.add_argument(
+        query.OVERRODE_FLAG,
+        action="store_true",
+        help="only records where a person overrode an agent: a `decided` credit whose "
+        "outcome is `overrode`, or a credited verdict that reverses an uncredited earlier "
+        "one on the same criterion (KYO-647)",
+    )
+    p_list.add_argument(
         "--limit",
         metavar="N",
         type=_positive_int,

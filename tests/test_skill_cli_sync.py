@@ -1105,6 +1105,11 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
 #: same escape hatch. Keyed by ``(command, flag)`` so that a flag left out on one command
 #: and explained on another cannot be confused for one decision.
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-647: filters on who is credited; an orchestrator's workflow does not reach them
+    # until credits are in use, and the command reference lists them.
+    ("list", "--person"): "a filter on credited persons, read from the command reference",
+    ("list", "--decided-by"): "a filter on credited persons, read from the command reference",
+    ("list", "--overrode"): "a filter on credited persons, read from the command reference",
     # KYO-595: the copies mode is chosen once, at setup, and a project already on the
     # copies runs both commands without the flag; the skill names them for that case.
     ("install-hooks", "--copies"): (

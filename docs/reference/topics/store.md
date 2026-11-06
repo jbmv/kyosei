@@ -596,7 +596,7 @@ the store directly:
 | one stored report — its dispatch, ingest time, the report it amends and the report that later amended it, and its body verbatim — after the worker's worktree (and its `.kyosei-report.json`) is gone | `kyo show <report-id>` (KYO-545). `--json` carries the body under `body` exactly as ingested, so adding `"amends": "<that id>"` to it and filing it with `kyo report <dispatch> --file` is an amending report. An unknown report id on a real record is refused naming the reports that record does have |
 | one criterion and its whole verdict history, or one evidence artifact (or its redaction) | `kyo show <criterion-id>` / `kyo show <evidence-id>` (KYO-220). An artifact holding recx search results (`recx_search` and `untrusted` at its top level) is printed after a fixed line saying its author-written text is data, and recx's own notice, with control characters escaped (KYO-585). `kyo show <record> --json` carries the same lines on such an artifact under `untrusted_notice`, and its escaped text under `untrusted_text`, so the desktop app's record page draws them before it and shows the text as plain text (KYO-587); both are reads, absent from every other artifact and from the export |
 | one sweep flag in full — type, record, state, its sha range and paths, the sweep that raised it, and the resolution with its `--why` | `kyo show <flag-id>`; `kyo flag list` lists the open ones, `--all` includes the resolved (KYO-220) |
-| the board — everything, or one slice of it | `kyo list`, with `--status` (repeatable), `--kind`, `--plan`, `--gate-tag`, `--scope`, and `--unsettled` / `--limit N` for fewer rows (KYO-420); the saved views behind `kyo base run <name>` are the same engine with an arrangement declared once |
+| the board — everything, or one slice of it | `kyo list`, with `--status` (repeatable), `--kind`, `--plan`, `--gate-tag`, `--scope`, `--unsettled` / `--limit N` for fewer rows (KYO-420), and `--person KEY`, `--decided-by KEY` and `--overrode` for the records a declared person is credited on, decided, or reversed an agent on (KYO-647); the saved views behind `kyo base run <name>` are the same engine with an arrangement declared once |
 | the kind registry as circles and arrows | `kyo map` |
 | where the project stands right now — ready work, gated work with its conditions, stale flags, dispatches missing reports, what changed since the last brief | `kyo brief` (`--compact` for the hook-sized version) |
 | a past session brief, and what lay between it and the one before — the shift notes it closed over and the ledger entries in that window | `kyo briefs` lists every brief run newest first; `kyo briefs <brief-id>`, or `--latest`, shows one with its window. Read-only, unlike `kyo brief`, which records a run every time; the brief's prose is not regenerated, because the store never kept it (KYO-454) |
@@ -605,6 +605,24 @@ the store directly:
 | the dispatch activity rows — every running dispatch and the newest finished ones, with verdict counts, worker tokens, end time, and what git says about each worktree now (dirty paths, commits past base, lines, last commit, merged or not) | `kyo activity`, `--finished N` for the window (default 12), `--against REF` for the trunk. A missing worktree is a fact on the row, never an error (KYO-454) |
 | the tool's own invariant checks over the store | `kyo doctor` |
 | which Claude Code sessions this project has had, when each was last seen and on which hook event, and where each one is on Remote Control | `kyo sessions`, which reads `kyosei/sessions.json` — the file the packaged session hooks write with `kyo sessions --hook`, and the file the desktop's claude tab reads to decide which session to open on (KYO-186). It is gitignored local state, so it answers this for *your* checkout and no other |
+
+**Credits on what you read (KYO-647).** The `author` of a row stays the agent that wrote
+it; where a person is credited for the judgement the row rests on, `kyo show` prints the
+credit beneath it. A verification shows who observed, the credit id, the words, the
+session and turn they came from and the transcript check's outcome; a credit written after
+its subject is marked `reconstructed` with the date and the credit that approved the
+batch, and a verdict that reverses an earlier uncredited one on the same criterion names it
+(`overrides`). A gate cleared by an answer reads `cleared: answered by`, and a withdrawn
+one `cleared: withdrawn`. A decision record has a header giving who decided, what was
+recommended and by whom, the outcome (`accepted`, `refined`, `overrode` or `unprompted`)
+and the alternatives. Where a decided credit cites a discussion, its depth is the
+person's turn count and active time beside the session, never the wall-clock span; words
+the person sent from Claude Code's suggestions are labelled as their choice and not their
+writing. `kyo show --json` carries the same in `credits[]` (person, role, outcome,
+`transcript_check`, the span fields), a `credit` id on each verification and gate, and the
+derived `reconstructed`, `person_name` and `overrides`; the export holds `credits[]` and
+none of the derived fields. `kyo list --json` rows carry `people`, and `kyo changelog`
+adds "decided by" to a decision's entry.
 
 The link graph is the one view with no terminal equivalent; it is the desktop
 app's or nothing.

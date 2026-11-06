@@ -398,6 +398,314 @@ def obligation_lines(obligations: list[dict], *, expand: bool = False) -> list[s
     return out
 
 
+# --------------------------------------------------------------- KYO-647: credits
+#
+# KYO-638 section 6, as KYO-640 amends it. `author` keeps meaning the agent that wrote the
+# row; every surface adds the person's credit beside it. Everything below reads a record
+# DOCUMENT (the export's shape: `credits[]` with their subjects inline), so `kyo show`,
+# `kyo list --overrode` and the tests derive from the same function (law 3).
+
+#: A credit written within this many seconds of its subject counts as written with it. The
+#: proposal says a credit written in the same transaction carries the same stamp; two
+#: `now()` calls in one transaction may still differ by milliseconds, and an hour late is
+#: what the marker is for.
+RECONSTRUCTED_WINDOW_SECONDS = 2
+
+_TRANSCRIPT_WORDS = {
+    "matched": "transcript matched",
+    "matched-paste-unknown": "transcript matched, paste unknown",
+    "transcript-absent": "transcript absent",
+    "not-applicable": "no transcript applies",
+}
+
+#: ``authorized`` (KYO-644): a go-ahead that approves a plan already stated. It is never
+#: shown as "decided by" and is not what ``--decided-by`` finds.
+_ROLE_VERB = {
+    "observed": "observed by",
+    "decided": "decided by",
+    "authorized": "authorized by",
+}
+
+
+def current_credits(doc: dict) -> list[dict]:
+    """The credits of ``doc`` that nothing has superseded."""
+    return [c for c in doc.get("credits") or [] if not c.get("superseded_by")]
+
+
+def credits_for(doc: dict, kind: str, subject_id: str) -> list[dict]:
+    """The current credits that name one verification, gate or record as a subject."""
+    return [
+        c
+        for c in current_credits(doc)
+        if any(s["kind"] == kind and s["id"] == subject_id for s in c["subjects"])
+    ]
+
+
+def _instant(value: str) -> float | None:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _subject_written_at(doc: dict, kind: str, subject_id: str) -> str | None:
+    if kind == "record":
+        return doc["created_at"]
+    if kind == "gate":
+        return next((g["cleared_at"] for g in doc["gates"] if g["id"] == subject_id), None)
+    for criterion in doc["criteria"]:
+        for verification in criterion["verifications"]:
+            if verification["id"] == subject_id:
+                return verification["created_at"]
+    return None
+
+
+def credit_reconstructed(doc: dict, credit: dict) -> bool:
+    """Was this credit written after the fact? Derived, never stored (KYO-638 P8): its
+    ``created_at`` is later than the write time of a subject -- ``verifications.created_at``,
+    ``gates.cleared_at`` or ``records.created_at``."""
+    made = _instant(credit["created_at"])
+    for subject in credit["subjects"]:
+        written = _subject_written_at(doc, subject["kind"], subject["id"])
+        written_at = _instant(written) if written else None
+        if (
+            made is not None
+            and written_at is not None
+            and made - written_at > RECONSTRUCTED_WINDOW_SECONDS
+        ):
+            return True
+    return False
+
+
+def verification_overrides(doc: dict) -> dict[str, dict]:
+    """``{verification id: the verdict it overrides}``, derived from each criterion's history.
+
+    A credited verdict overrides the verdict just before it on the same criterion when that
+    one differs and carries no credit of its own: an agent's claim that the person then
+    reversed (KYO-638 section 3.2: the override is in the history, not a field).
+    """
+    out: dict[str, dict] = {}
+    for criterion in doc["criteria"]:
+        previous = None
+        for verification in criterion["verifications"]:
+            if (
+                previous is not None
+                and credits_for(doc, "verification", verification["id"])
+                and not credits_for(doc, "verification", previous["id"])
+                and previous["verdict"] != verification["verdict"]
+            ):
+                out[verification["id"]] = {
+                    "id": previous["id"],
+                    "verdict": previous["verdict"],
+                    "method": previous["method"],
+                    "author": previous["author"],
+                }
+            previous = verification
+    return out
+
+
+def record_overrode(doc: dict) -> bool:
+    """``kyo list --overrode``: a decided credit whose outcome is ``overrode``, or a
+    credited verdict that overrides an agent's."""
+    return any(
+        c["role"] == "decided" and c["outcome"] == "overrode" for c in current_credits(doc)
+    ) or bool(verification_overrides(doc))
+
+
+def with_credit_fields(doc: dict, people: dict[str, str | None]) -> dict:
+    """``doc`` with the derived credit fields ``kyo show --json`` adds and the export never
+    carries: ``credit`` on each verification and gate (the current credit's id or null),
+    ``overrides`` on each verification, and ``reconstructed`` and ``person_name`` (the
+    display name the project declares, or null) on each credit."""
+    overrides = verification_overrides(doc)
+
+    def credit_id(kind: str, subject_id: str) -> str | None:
+        found = credits_for(doc, kind, subject_id)
+        return found[-1]["id"] if found else None
+
+    return {
+        **doc,
+        "criteria": [
+            {
+                **criterion,
+                "verifications": [
+                    {
+                        **v,
+                        "credit": credit_id("verification", v["id"]),
+                        "overrides": overrides.get(v["id"]),
+                    }
+                    for v in criterion["verifications"]
+                ],
+            }
+            for criterion in doc["criteria"]
+        ],
+        "gates": [{**g, "credit": credit_id("gate", g["id"])} for g in doc["gates"]],
+        "credits": [
+            {
+                **c,
+                "reconstructed": credit_reconstructed(doc, c),
+                "person_name": people.get(c["person"]),
+            }
+            for c in doc.get("credits") or []
+        ],
+    }
+
+
+def _duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m" if rest == 0 else f"{minutes}m {rest:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+def _plural(n: int, word: str) -> str:
+    if n == 1:
+        return f"{n} {word}"
+    return f"{n} {word[:-1] + 'ies' if word.endswith('y') else word + 's'}"
+
+
+def span_text(credit: dict) -> str | None:
+    """A credit's discussion as the depth KYO-640.n1 asks for: the person's message count
+    and the agent's reply count, with active time, beside the session. Turn ids stay in
+    ``--json``; wall-clock span is never shown as effort."""
+    if credit.get("span_session") is None:
+        return None
+    return (
+        f"{credit['span_person_turns']} of your messages, "
+        f"{_plural(credit['span_agent_turns'], 'reply')}, "
+        f"{_duration(credit['span_active_seconds'])} active, "
+        f"session {credit['span_session'][:8]}"
+    )
+
+
+def _quote_clause(credit: dict, evidence: dict[str, str]) -> str:
+    quote = evidence.get(credit["quote_id"])
+    if quote is None:
+        return ""
+    first, more = elided_first_line(quote, more_at=f"in {credit['quote_id']}")
+    shown = f'"{first}"{more}'
+    form = credit.get("words_form")
+    if form == "accepted-suggestion":
+        # KYO-640.n1: sent from Claude Code's suggestions, so the person's choice and
+        # never their writing.
+        return f": accepted a suggestion (their choice, not their writing): {shown}"
+    if form == "choice":
+        return f": chose {shown}"
+    suffix = "   (sent mid-turn)" if form == "mid-turn" else ""
+    return f": {shown}{suffix}"
+
+
+def credit_lines(
+    doc: dict, credit: dict, *, verb: str, indent: str, evidence: dict[str, str]
+) -> list[str]:
+    """The lines a credited row shows under itself (KYO-638 section 6)."""
+    marks = [f"credit {credit['id']}"]
+    if credit_reconstructed(doc, credit):
+        marks.append(f"reconstructed {credit['created_at'][:10]}")
+        if credit.get("basis_id"):
+            marks.append(f"approved in {credit['basis_id']}")
+    out = [
+        f"{indent}{verb} {credit['person']} ({', '.join(marks)})"
+        f"{_quote_clause(credit, evidence)}"
+    ]
+    where = []
+    if credit.get("source_session"):
+        where.append(f"session {credit['source_session'][:8]}")
+    if credit.get("source_turn"):
+        where.append(f"turn {credit['source_turn'][:8]}")
+    if credit.get("observed_at"):
+        where.append(credit["observed_at"])
+    if credit.get("source_note"):
+        where.append(credit["source_note"])
+    where.append(_TRANSCRIPT_WORDS.get(credit["transcript_check"], credit["transcript_check"]))
+    out.append(f"{indent}{', '.join(where)}")
+    discussion = span_text(credit)
+    if discussion:
+        out.append(f"{indent}discussion: {discussion}")
+    return out
+
+
+def _alternative_text(item: object) -> str:
+    if isinstance(item, dict):
+        chosen = bool(item.get("chosen"))
+        text = next(
+            (str(item[k]) for k in ("text", "title", "name", "option", "label") if item.get(k)),
+            next((str(v) for v in item.values() if isinstance(v, str)), ""),
+        )
+        return f"{text} [chosen]" if chosen else text
+    return str(item)
+
+
+def decision_header_lines(doc: dict, evidence: dict[str, str]) -> list[str]:
+    """The header block of a decision record: who decided, what was recommended and what
+    became of it (KYO-638 P9 as KYO-640 amends it)."""
+    out: list[str] = []
+    for credit in credits_for(doc, "record", doc["id"]):
+        if credit["role"] not in ("decided", "authorized"):
+            continue
+        label = "authorized by:" if credit["role"] == "authorized" else "decided by:  "
+        marks = [f"credit {credit['id']}"]
+        if credit_reconstructed(doc, credit):
+            marks.append(f"reconstructed {credit['created_at'][:10]}")
+            if credit.get("basis_id"):
+                marks.append(f"approved in {credit['basis_id']}")
+        marks.append(
+            _TRANSCRIPT_WORDS.get(credit["transcript_check"], credit["transcript_check"])
+        )
+        out.append(f"  {label} {credit['person']} ({', '.join(marks)})")
+        if credit.get("recommended"):
+            by = f"  ({credit['recommended_by']})" if credit.get("recommended_by") else ""
+            outcome = credit.get("outcome")
+            if outcome == "refined":
+                outcome = (
+                    f"refined (turn {credit['refining_turn'][:8]}, "
+                    f"session {credit['refining_session'][:8]})"
+                )
+            ending = f" — {outcome}" if outcome else ""
+            out.append(f"  recommended:  {credit['recommended']}{by}{ending}")
+        elif credit.get("outcome"):
+            out.append(f"  outcome:      {credit['outcome']}")
+        if credit.get("alternatives"):
+            out.append(
+                "  alternatives: "
+                + "; ".join(_alternative_text(a) for a in credit["alternatives"])
+            )
+        form = credit.get("words_form")
+        if form == "accepted-suggestion":
+            out.append("  words:        accepted a suggestion (their choice, not their writing)")
+        elif form == "choice":
+            out.append("  words:        a choice among offered options")
+        discussion = span_text(credit)
+        if discussion:
+            out.append(f"  discussion:   {discussion}")
+    return out
+
+
+def _verification_credit_lines(
+    doc: dict, verification: dict, quotes: dict[str, str], overrides: dict[str, dict]
+) -> list[str]:
+    out: list[str] = []
+    indent = " " * 18
+    for credit in credits_for(doc, "verification", verification["id"]):
+        out.extend(
+            credit_lines(
+                doc, credit, verb=_ROLE_VERB[credit["role"]], indent=indent, evidence=quotes
+            )
+        )
+    prior = overrides.get(verification["id"])
+    if prior:
+        out.append(
+            f"{indent}overrides {prior['id']} "
+            f"({prior['verdict']}, {prior['method']}, {prior['author']})"
+        )
+    return out
+
+
 def show_text(
     doc: dict,
     *,
@@ -436,6 +744,8 @@ def show_text(
     """
     out: list[str] = []
     pending = set(pending_touches or ())
+    quotes = {e["id"]: e["text"] for e in doc["evidence_artifacts"] if not e["redacted_at"]}
+    overrides = verification_overrides(doc)
     out.append(f"{doc['id']}  [{doc['kind']}]  {_standing_of(doc, standings)}")
     out.append(f"  title:   {doc['title']}")
     if carried is not None:
@@ -451,6 +761,7 @@ def show_text(
     out.append(f"  scope:   {doc['scope'] or '(none declared)'}")
     out.append(f"  created: {doc['created_at']}")
     out.append(f"  updated: {doc['updated_at']}")
+    out.extend(decision_header_lines(doc, quotes))
     if doc["wont_do_reason"]:
         # The column is one column; the label is the archetype's own word for what
         # happened to the record (KYO-44).
@@ -491,6 +802,7 @@ def show_text(
                 f"{verification['method']}  {verification['author']}  "
                 f"{verification['created_at']}{evidence}"
             )
+            out.extend(_verification_credit_lines(doc, verification, quotes, overrides))
 
     out.append("")
     out.append(f"touches ({len(doc['touches'])}):")
@@ -558,8 +870,16 @@ def show_text(
         # is what is true of this one alone.
         tags = f"  tags: {', '.join(gate['tags'])}" if gate["tags"] else ""
         out.append(f"  {gate['id']}  {gate['type']}  [{state}]{tags}{detail}")
-        if gate["cleared_why"]:
+        answered = credits_for(doc, "gate", gate["id"]) if gate.get("cleared_as") else []
+        if gate.get("cleared_as") == "withdrawn":
+            out.append(f"      cleared: withdrawn — {gate['cleared_why'] or '(no reason)'}")
+        elif gate["cleared_why"]:
             out.append(f"      cleared because: {gate['cleared_why']}")
+        for credit in answered:
+            lines = credit_lines(
+                doc, credit, verb="cleared: answered by", indent="      ", evidence=quotes
+            )
+            out.extend(lines)
         # KYO-88: the claims go under the OPEN gates only. A cleared gate is no
         # longer a question, so putting the record's answers beside it would be
         # noise in the one rendering this record exists to keep readable.

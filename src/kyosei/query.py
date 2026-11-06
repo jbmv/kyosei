@@ -89,6 +89,10 @@ class Filters:
     status: str | tuple[str, ...] | None = None
     plan: str | None = None
     gate_tag: str | None = None
+    #: KYO-647: records with a current credit by this person (a key under ``people:``).
+    person: str | None = None
+    #: KYO-647: decision records this person decided (a current ``decided`` credit).
+    decided_by: str | None = None
 
     @classmethod
     def from_args(cls, args: Namespace) -> Filters:
@@ -148,6 +152,10 @@ FILTER_NAMES: tuple[str, ...] = tuple(f.name for f in fields(Filters))
 #: name would read as "role active only".
 UNSETTLED_FLAG = "--unsettled"
 
+#: KYO-647: ``kyo list --overrode``, a boolean like ``--unsettled`` and kept off the Base
+#: surface for the same reason (a Base's ``filters:`` values are strings).
+OVERRODE_FLAG = "--overrode"
+
 #: The ``kyo list`` flags that narrow the listing and are NOT :class:`Filters` fields,
 #: so a Base cannot declare them. Named here because the parity test between the two
 #: surfaces (``tests/test_bases.py``) must exclude exactly these and nothing else.
@@ -160,7 +168,7 @@ UNSETTLED_FLAG = "--unsettled"
 #: output KYO-420 was ruled not to move. For the same reason a Base's ``status:``
 #: still takes one string, not the list a repeated ``--status`` builds. Widening the
 #: Base surface to both is left to a record of its own.
-LIST_ONLY_FLAGS: tuple[str, ...] = (UNSETTLED_FLAG, "--limit")
+LIST_ONLY_FLAGS: tuple[str, ...] = (UNSETTLED_FLAG, OVERRODE_FLAG, "--limit")
 
 
 def filter_key(name: str) -> str:
@@ -197,6 +205,9 @@ ROW_FIELDS: tuple[str, ...] = (
     # selected, which is `kyo list --json` -- the renderings' need, stated (law 2).
     "created_at",
     "updated_at",
+    # KYO-647: the sorted distinct persons with a current credit on the record, shown
+    # for the reason ``scope`` is (law 2): a reader can filter by person and see why.
+    "people",
 )
 
 #: The subset a ``sort:`` or ``group-by:`` may name. ``gate_tags`` and ``gate_types``
@@ -205,7 +216,7 @@ ROW_FIELDS: tuple[str, ...] = (
 #: by. Refused loudly rather than silently stringified, which would group
 #: ``[ui, human]`` apart from ``[human, ui]``.
 SCALAR_ROW_FIELDS: tuple[str, ...] = tuple(
-    f for f in ROW_FIELDS if f not in ("gate_tags", "gate_types")
+    f for f in ROW_FIELDS if f not in ("gate_tags", "gate_types", "people")
 )
 
 #: The order rows come back in when a Base declares no ``sort:`` — record sequence,
@@ -339,6 +350,16 @@ def validate(store: Store, filters: Filters) -> None:
     gate_tags = registry_module.load_gate_tag_registry(store.config.kyosei_dir)
     if filters.gate_tag is not None:
         gate_tags.require(filters.gate_tag)
+    # KYO-647: a person filter names a key the project declares, refused like any other
+    # undeclared value (law 6) rather than answered with an empty listing.
+    declared = store.config.people
+    for flag, value in (("--person", filters.person), ("--decided-by", filters.decided_by)):
+        if value is not None and value not in declared:
+            known = ", ".join(declared) if declared else "none"
+            raise UsageError(
+                f"{flag} names {value!r}, which this project does not declare under "
+                f"people: in kyosei/config.yml (declared: {known})"
+            )
 
 
 def _open_gates(
@@ -405,7 +426,34 @@ def links_by_record(store: Store, record_ids: list[str]) -> dict[str, list[dict]
     return out
 
 
-def run(store: Store, filters: Filters, *, unsettled: bool = False) -> Result:
+def credit_index(store: Store) -> dict[str, dict]:
+    """``{record: {"people": [...], "decided_by": [...], "overrode": bool}}`` for every
+    record carrying a current credit (KYO-647). Overriding is derived by
+    :func:`kyosei.render.record_overrode` from the record's own document, once per
+    credited record, so ``--overrode`` and ``kyo show`` cannot disagree."""
+    from . import export
+    from .render import record_overrode
+
+    index: dict[str, dict] = {}
+    for row in store.conn.execute(
+        "SELECT record_id, person, role FROM credits WHERE superseded_by IS NULL ORDER BY seq"
+    ):
+        entry = index.setdefault(
+            row["record_id"], {"people": set(), "decided_by": set(), "overrode": False}
+        )
+        entry["people"].add(row["person"])
+        if row["role"] == "decided":
+            entry["decided_by"].add(row["person"])
+    for record_id, entry in index.items():
+        entry["people"] = sorted(entry["people"])
+        entry["decided_by"] = sorted(entry["decided_by"])
+        entry["overrode"] = record_overrode(export.record_document(store, record_id))
+    return index
+
+
+def run(
+    store: Store, filters: Filters, *, unsettled: bool = False, overrode: bool = False
+) -> Result:
     """The records matching ``filters``, in record-sequence order.
 
     ``unsettled`` (KYO-420.c4, ``kyo list --unsettled``) additionally drops every
@@ -421,6 +469,7 @@ def run(store: Store, filters: Filters, *, unsettled: bool = False) -> Result:
     registry = _load_registry(store)
     ladder = _load_status_ladder(store)
     gate_tags, gate_counts, gate_types = _open_gates(store)
+    credited = credit_index(store)
 
     query = "SELECT * FROM records"
     conditions: list[str] = []
@@ -463,6 +512,15 @@ def run(store: Store, filters: Filters, *, unsettled: bool = False) -> Result:
         carried_tags = gate_tags.get(row["id"], [])
         if filters.gate_tag is not None and filters.gate_tag not in carried_tags:
             continue
+        credit = credited.get(row["id"], {})
+        if filters.person is not None and filters.person not in credit.get("people", ()):
+            continue
+        if filters.decided_by is not None and (
+            filters.decided_by not in credit.get("decided_by", ())
+        ):
+            continue
+        if overrode and not credit.get("overrode"):
+            continue
         counted = kind_def.counted if kind_def is not None else False
         if counted:
             counted_total += 1
@@ -503,6 +561,7 @@ def run(store: Store, filters: Filters, *, unsettled: bool = False) -> Result:
                 # sorts had nothing to sort by without a Base.
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
+                "people": credit.get("people", []),
             }
         )
 
@@ -514,11 +573,13 @@ def run(store: Store, filters: Filters, *, unsettled: bool = False) -> Result:
     )
 
 
-def validated_run(ctx: Context, filters: Filters, *, unsettled: bool = False) -> Result:
+def validated_run(
+    ctx: Context, filters: Filters, *, unsettled: bool = False, overrode: bool = False
+) -> Result:
     """``validate`` then ``run`` against the context's store — the whole engine, once."""
     store = ctx.store()
     validate(store, filters)
-    return run(store, filters, unsettled=unsettled)
+    return run(store, filters, unsettled=unsettled, overrode=overrode)
 
 
 # ------------------------------------------------------- KYO-109: the three sources
