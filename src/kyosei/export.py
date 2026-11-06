@@ -402,6 +402,9 @@ def _credit(store: Store, row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
         "superseded_by": row["superseded_by"],
         "superseded_at": row["superseded_at"],
+        "withdrawn_at": row["withdrawn_at"],
+        "withdrawn_by": row["withdrawn_by"],
+        "withdrawn_why": row["withdrawn_why"],
         "subjects": [
             {"kind": s["subject_kind"], "id": s["subject_id"]}
             for s in store.credit_subjects(row["id"])

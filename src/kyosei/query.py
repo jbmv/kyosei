@@ -436,7 +436,8 @@ def credit_index(store: Store) -> dict[str, dict]:
 
     index: dict[str, dict] = {}
     for row in store.conn.execute(
-        "SELECT record_id, person, role FROM credits WHERE superseded_by IS NULL ORDER BY seq"
+        "SELECT record_id, person, role FROM credits WHERE superseded_by IS NULL"
+        " AND withdrawn_at IS NULL ORDER BY seq"
     ):
         entry = index.setdefault(
             row["record_id"], {"people": set(), "decided_by": set(), "overrode": False}

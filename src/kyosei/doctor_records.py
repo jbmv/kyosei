@@ -514,9 +514,13 @@ def uncredited_rows(store: Store) -> list[dict]:
     line is not in the ledger, counts as written before credits, because the ledger-gap
     check is what names that and exit 3 here would name the wrong thing.
     """
+    # KYO-670: only a CURRENT credit covers a row. A withdrawn credit covers nothing, and a
+    # superseded one is covered by whatever superseded it or by nothing, so a row whose
+    # credit was withdrawn (or superseded by one later withdrawn) counts again.
     credited = (
-        "NOT EXISTS (SELECT 1 FROM credit_subjects cs WHERE cs.subject_kind = ? "
-        "AND cs.subject_id = {}.id)"
+        "NOT EXISTS (SELECT 1 FROM credit_subjects cs JOIN credits c ON c.id = cs.credit_id "
+        "WHERE cs.subject_kind = ? AND cs.subject_id = {}.id "
+        "AND c.superseded_by IS NULL AND c.withdrawn_at IS NULL)"
     )
     found: list[tuple[str, str, str, str]] = []  # (type, record, id, written_at)
     for row in store.conn.execute(
@@ -564,10 +568,29 @@ def uncredited_rows(store: Store) -> list[dict]:
                 return 0
         return 0
 
+    withdrawn = {
+        row["subject_id"]
+        for row in store.conn.execute(
+            "SELECT cs.subject_id FROM credit_subjects cs JOIN credits c ON c.id = cs.credit_id"
+            " WHERE c.withdrawn_at IS NOT NULL"
+        )
+    }
     return [
-        {"record": record, "type": kind, "id": row_id, "schema": schema_of(record, written_at)}
+        {
+            "record": record,
+            "type": kind,
+            "id": row_id,
+            "schema": schema_of(record, written_at),
+            "withdrawn": row_id in withdrawn,
+        }
         for kind, record, row_id, written_at in found
     ]
+
+
+def _legacy(row: dict) -> bool:
+    """Whether an uncredited row is the legacy notice's: written before credits existed,
+    or uncredited by `kyo credit --withdraw` (KYO-670), a command and so no bypass."""
+    return row["schema"] < CREDITS_SINCE_SCHEMA or row["withdrawn"]
 
 
 def _open_first(store: Store, records: set[str]) -> list[str]:
@@ -601,7 +624,7 @@ def check_credit_coverage_legacy(store: Store) -> list[str]:
     history no command can change at once would paint every stop red until the last batch.
     The same kind of row written at schema 28 or later is :func:`check_credit_coverage`'s.
     """
-    rows = [r for r in uncredited_rows(store) if r["schema"] < CREDITS_SINCE_SCHEMA]
+    rows = [r for r in uncredited_rows(store) if _legacy(r)]
     if not rows:
         return []
     count = {
@@ -629,6 +652,15 @@ def check_credit_coverage_legacy(store: Store) -> list[str]:
         "reconstructed credit, and a verdict that was an agent's own observation is restated "
         "with `kyo verify --method agent-observed` (KYO-646)",
         "by record, open records first: " + some_of(listing, limit=6),
+        *(
+            [
+                f"{len(withdrawn)} of them had their credit withdrawn with `kyo credit "
+                f"--withdraw` ({some_of(withdrawn)}) and are counted again as uncredited "
+                "(KYO-670)"
+            ]
+            if (withdrawn := [r["id"] for r in rows if r["withdrawn"]])
+            else []
+        ),
     ]
 
 
@@ -639,7 +671,7 @@ def check_credit_coverage(store: Store) -> list[str]:
     a kind that requires a credit) refuses to write such a row, so one in the store means
     the enforcement was bypassed, for example by a ledger merged from an older ``kyo``.
     """
-    rows = [r for r in uncredited_rows(store) if r["schema"] >= CREDITS_SINCE_SCHEMA]
+    rows = [r for r in uncredited_rows(store) if not _legacy(r)]
     if not rows:
         return []
     from .currency import some_of
@@ -670,7 +702,7 @@ def check_credit_transcripts_appeared(store: Store) -> list[str]:
     appeared: list[str] = []
     for row in store.conn.execute(
         "SELECT id, source_session FROM credits WHERE transcript_check = 'transcript-absent' "
-        "AND superseded_by IS NULL AND source_kind = 'claude-code' "
+        "AND superseded_by IS NULL AND withdrawn_at IS NULL AND source_kind = 'claude-code' "
         "AND source_session IS NOT NULL ORDER BY record_id, seq"
     ):
         try:

@@ -24,6 +24,12 @@ THE ENFORCEMENT POINTS (KYO-640, P5). Each refuses, stores nothing, and names it
   ``reconstructed-credit-requires-basis``, ``credit-basis-not-approval`` and
   ``credit-subject-already-credited``.
 
+WITHDRAWAL (KYO-670). ``kyo credit --withdraw <credit-id> --why <reason>`` retracts a
+current credit that should not exist, for example one quoting a process correction as an
+override. Nothing replaces it: the row and its words stay readable, ``withdrawn_at``,
+``withdrawn_by`` and ``withdrawn_why`` say when, by whom and why, and it counts nowhere a
+current credit counts, so the rows it named are uncredited again.
+
 Shared by all of them: ``credit-person-undeclared``, ``credit-quote-not-found`` (the
 transcript is present and none of the person's turns holds the words; KYO-640 P6 allows
 no override) and ``credit-quote-ambiguous``. Passing both ``--session`` and
@@ -637,6 +643,8 @@ def join(store, credit_id: str, record_id: str, *, quote_sha256: str | None = No
         raise UsageError(f"--credit {credit_id}: no such credit") from exc
     if row["superseded_by"]:
         raise UsageError(f"--credit {credit_id} was superseded by {row['superseded_by']}")
+    if row["withdrawn_at"]:
+        raise UsageError(f"--credit {credit_id} was withdrawn: {row['withdrawn_why']}")
     if row["record_id"] != record_id:
         raise UsageError(f"--credit {credit_id} is {row['record_id']}'s, not {record_id}'s")
     if quote_sha256 is not None:
@@ -695,12 +703,19 @@ def check_basis(store, basis_id: str, person: str) -> None:
         or basis["role"] != ROLE_DECIDED
         or basis["person"] != person
         or basis["superseded_by"]
+        or basis["withdrawn_at"]
     ):
+        state = (
+            "superseded "
+            if basis is not None and basis["superseded_by"]
+            else "withdrawn "
+            if basis is not None and basis["withdrawn_at"]
+            else ""
+        )
         what = (
             "no credit"
             if basis is None
-            else f"a {'superseded ' if basis['superseded_by'] else ''}{basis['role']} "
-            f"credit by {basis['person']}"
+            else f"a {state}{basis['role']} credit by {basis['person']}"
         )
         raise ContractViolation(
             CONTRACT_CREDIT_BASIS_NOT_APPROVAL,
@@ -731,6 +746,13 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     ``--recheck <credit-id>`` and ``--batch FILE`` are the two other forms: they are
     :func:`recheck` and :func:`batch`.
     """
+    if getattr(args, "withdraw", None):
+        return withdraw(ctx, args)
+    if getattr(args, "why", None) is not None or getattr(args, "why_file", None) is not None:
+        raise UsageError(
+            "--why and --why-file give the reason for --withdraw, and this is no "
+            "withdrawal: drop them, or add --withdraw CREDIT_ID"
+        )
     if args.recheck:
         return recheck(ctx, args)
     if args.batch:
@@ -783,6 +805,11 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         if old["superseded_by"]:
             raise UsageError(
                 f"--supersede {superseded} was already superseded by {old['superseded_by']}"
+            )
+        if old["withdrawn_at"]:
+            raise UsageError(
+                f"--supersede {superseded} was withdrawn, so it is no longer a current "
+                "credit and nothing needs replacing: rerun this command without --supersede"
             )
         named = {s["subject_id"] for s in store.credit_subjects(superseded)}
         if not named & set(subject_ids):
@@ -894,6 +921,113 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     )
 
 
+# -------------------------------------------------------------------- --withdraw
+
+
+def withdraw(ctx: Context, args: Namespace) -> Output:
+    """``kyo credit --withdraw <credit-id> --why <reason>`` (KYO-670): retract a current
+    credit that should not exist, with no replacement.
+
+    The model is ``--supersede``: the credit leaves the current set and stays readable.
+    Unlike a supersession nothing takes its place, so the rows it named are uncredited
+    again, and doctor's credit-coverage notice counts them. The withdrawal records who
+    withdrew it (the acting author), when, and the reason, which is required.
+    """
+    credit_id = args.withdraw
+    extra = [
+        flag
+        for flag, given in (
+            ("a SUBJECT_ID", args.subject_ids),
+            ("--recheck", args.recheck),
+            ("--batch", args.batch),
+            ("--role", args.role),
+            ("--basis", args.basis),
+            ("--supersede", args.supersede),
+            ("--decision-file", args.decision_file),
+            ("--span-first", args.span_first),
+            ("--span-last", args.span_last),
+            ("--span-session", args.span_session),
+        )
+        if given
+    ]
+    if requested(args):
+        extra.append("a credit flag")
+    if extra:
+        raise UsageError(
+            f"--withdraw retracts {credit_id} as it stands and writes no new credit; give it "
+            f"no {', '.join(extra)}"
+        )
+    why = commands._reason(args)
+    if not why:
+        raise UsageError(
+            f"--withdraw {credit_id} needs a reason, stored with the withdrawal: rerun "
+            f"`kyo credit --withdraw {credit_id} --why <reason>`"
+        )
+    store = ctx.store()
+    try:
+        old = store.credit(credit_id)
+    except NotFound as exc:
+        raise UsageError(f"--withdraw {credit_id}: no such credit") from exc
+    if old["withdrawn_at"]:
+        raise UsageError(
+            f"--withdraw {credit_id}: it was already withdrawn at {old['withdrawn_at']} by "
+            f"{old['withdrawn_by']} ({old['withdrawn_why']}); nothing was written"
+        )
+    if old["superseded_by"]:
+        raise UsageError(
+            f"--withdraw {credit_id}: it was superseded by {old['superseded_by']}, which is "
+            "the current credit: withdraw that one with "
+            f"`kyo credit --withdraw {old['superseded_by']} --why <reason>`"
+        )
+    record_id = old["record_id"]
+    subjects = [r["subject_id"] for r in store.credit_subjects(credit_id)]
+    resting = [
+        row["id"]
+        for row in store.conn.execute(
+            "SELECT id FROM credits WHERE basis_id = ? AND superseded_by IS NULL"
+            " AND withdrawn_at IS NULL ORDER BY record_id, seq",
+            (credit_id,),
+        )
+    ]
+    with store.transaction():
+        before = {record_id: export.record_document(store, record_id)}
+        store.withdraw_credit(credit_id, ctx.actor, why)
+        _touch_record(store, record_id)
+        after, events = commands._commit_and_export(
+            store,
+            command=f"credit --withdraw {credit_id}",
+            actor=ctx.actor,
+            record_ids=[record_id],
+            before=before,
+        )
+    commands._finish_mutation(store, [record_id], events)
+    label = person_label(store.config, old["person"])
+    out = [
+        f"withdrew {credit_id} on {record_id}, written by {ctx.actor}",
+        f"  it was {old['role']} by {label}; its words stay readable as {old['quote_id']}",
+        f"  why: {why}",
+        f"  uncredited again: {', '.join(subjects)}",
+    ]
+    if resting:
+        out.append(
+            f"  {len(resting)} current credit(s) cite it as their basis and are unchanged: "
+            + ", ".join(resting)
+        )
+    return Output(
+        out,
+        {
+            "ok": True,
+            "command": "credit",
+            "withdrawn": credit_id,
+            "record_id": record_id,
+            "why": why,
+            "subjects": subjects,
+            "basis_of": resting,
+            "record": after[record_id],
+        },
+    )
+
+
 # --------------------------------------------------------------------- --recheck
 
 
@@ -937,6 +1071,11 @@ def recheck(ctx: Context, args: Namespace) -> Output:
     if old["superseded_by"]:
         raise UsageError(
             f"--recheck {credit_id}: it was superseded by {old['superseded_by']}; recheck that one"
+        )
+    if old["withdrawn_at"]:
+        raise UsageError(
+            f"--recheck {credit_id}: it was withdrawn ({old['withdrawn_why']}), and only a "
+            "current credit is rechecked"
         )
     if old["transcript_check"] != "transcript-absent":
         raise UsageError(

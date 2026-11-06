@@ -1418,7 +1418,7 @@ def build_parser() -> KyoseiParser:
         metavar="SUBJECT_ID",
         nargs="*",
         help="verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; "
-        "none with --recheck or --batch",
+        "none with --recheck, --batch or --withdraw",
     )
     p_credit.add_argument(
         "--role",
@@ -1456,6 +1456,14 @@ def build_parser() -> KyoseiParser:
         "outcome is credited alone); quote (the person's words, the rest of the line, with \\n "
         "for a newline, \\t for a tab and \\\\ for a backslash). Needs --basis (KYO-653)",
     )
+    p_credit.add_argument(
+        "--withdraw",
+        metavar="CREDIT_ID",
+        help="retract this current credit, which should not exist, with no replacement; it "
+        "stays readable as withdrawn, with --why, and its subjects are uncredited again "
+        "(KYO-670)",
+    )
+    _add_reason_flags(p_credit, "for --withdraw: why the credit should not exist")
     credits.add_credit_flags(p_credit, decision=True, span=True)
 
     p_attach = sub.add_parser(

@@ -302,7 +302,17 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: :data:`GATE_FIELD_DEFAULTS` [28]); the empty list and NULL are what was true of it, and
 #: nothing is derived from a gate's ``cleared_why`` prose. A real DDL change, so a real new
 #: hash.
-SCHEMA_VERSION = 28
+#: Bumped to 29 for KYO-670: ``credits.withdrawn_at``, ``withdrawn_by`` and
+#: ``withdrawn_why``. ``kyo credit --withdraw`` retracts a credit that should not exist (it
+#: quotes words that were never the judgement it claims), keeping the row and its words
+#: readable and recording who withdrew it, when and why. Three new columns rather than a
+#: reuse of ``superseded_at``: that column says when a replacement arrived, and giving it a
+#: second meaning would make ``superseded_at`` set with ``superseded_by`` NULL the only sign
+#: of a withdrawal. A credit is current when both ``superseded_by`` and ``withdrawn_at`` are
+#: NULL. A record document written at 28 carries no withdrawal keys on its credits
+#: (:data:`CREDIT_FIELD_DEFAULTS` [29]); NULL is what was true of it, since no credit could
+#: be withdrawn. A real DDL change, so a real new hash.
+SCHEMA_VERSION = 29
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -806,6 +816,10 @@ CREATE TABLE doc_refs (
 -- and what kyo measured when the credit was written -- the person's turn count, the
 -- agent's turn count, active seconds (gaps long enough to be breaks excluded) and the
 -- span's start and end timestamps. All NULL when no span is cited.
+--
+-- KYO-670: `withdrawn_at`, `withdrawn_by` and `withdrawn_why` record a credit retracted
+-- with no replacement (`kyo credit --withdraw`): when, by whom and why. The row and its
+-- quote stay; a credit is current only while `superseded_by` and `withdrawn_at` are NULL.
 CREATE TABLE credits (
     id                TEXT PRIMARY KEY,
     record_id         TEXT NOT NULL REFERENCES records(id),
@@ -839,6 +853,9 @@ CREATE TABLE credits (
     created_at        TEXT NOT NULL,
     superseded_by     TEXT REFERENCES credits(id),
     superseded_at     TEXT,
+    withdrawn_at      TEXT,
+    withdrawn_by      TEXT,
+    withdrawn_why     TEXT,
     UNIQUE (record_id, seq)
 );
 
@@ -1213,6 +1230,10 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "created_at": ("export.record_document",),
         "superseded_by": ("export.record_document",),
         "superseded_at": ("export.record_document",),
+        # KYO-670: what makes a credit no longer current, and what `kyo show` says of it.
+        "withdrawn_at": ("export.record_document", "render.current_credits", "render.show_text"),
+        "withdrawn_by": ("export.record_document", "render.show_text"),
+        "withdrawn_why": ("export.record_document", "render.show_text"),
     },
     "credit_subjects": {
         "credit_id": ("export.record_document", "store.Store.credit_subjects"),
@@ -2053,6 +2074,12 @@ GATE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     28: {"cleared_as": None},
 }
 
+#: KYO-670: a field *within* each credit, the per-child shape again. A credit exported
+#: before withdrawal existed could not have been withdrawn, and NULL says exactly that.
+CREDIT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
+    29: {"withdrawn_at": None, "withdrawn_by": None, "withdrawn_why": None},
+}
+
 #: KYO-63: the same per-version defaults idea applied to a **ledger** file rather than a
 #: record document — ``kyosei/export/_sweeps.jsonl``. One difference decides its shape:
 #: absence of the KEY is the version signal, so the table is applied by ``setdefault``
@@ -2251,4 +2278,9 @@ def apply_export_defaults(doc: dict) -> dict:
             if doc_version < version:
                 for field, default in GATE_FIELD_DEFAULTS[version].items():
                     gate.setdefault(field, default)
+    for credit in doc.get("credits", []):
+        for version in sorted(CREDIT_FIELD_DEFAULTS):
+            if doc_version < version:
+                for field, default in CREDIT_FIELD_DEFAULTS[version].items():
+                    credit.setdefault(field, default)
     return doc

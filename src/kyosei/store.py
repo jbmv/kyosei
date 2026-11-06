@@ -472,11 +472,12 @@ class Store:
         return row
 
     def current_credits_of(self, subject_id: str) -> list[sqlite3.Row]:
-        """The current (not superseded) credits naming ``subject_id`` as a subject."""
+        """The current (neither superseded nor withdrawn) credits naming ``subject_id``."""
         return list(
             self.conn.execute(
                 "SELECT c.* FROM credits c JOIN credit_subjects s ON s.credit_id = c.id"
-                " WHERE s.subject_id = ? AND c.superseded_by IS NULL ORDER BY c.created_at",
+                " WHERE s.subject_id = ? AND c.superseded_by IS NULL"
+                " AND c.withdrawn_at IS NULL ORDER BY c.created_at",
                 (subject_id,),
             )
         )
@@ -486,6 +487,15 @@ class Store:
         self.conn.execute(
             "UPDATE credits SET superseded_by = ?, superseded_at = ? WHERE id = ?",
             (by, now(), credit_id),
+        )
+
+    def withdraw_credit(self, credit_id: str, by: str, why: str) -> None:
+        """KYO-670 (`kyo credit --withdraw`): mark a credit retracted with no replacement,
+        keeping the row and its words readable."""
+        self.conn.execute(
+            "UPDATE credits SET withdrawn_at = ?, withdrawn_by = ?, withdrawn_why = ?"
+            " WHERE id = ?",
+            (now(), by, why, credit_id),
         )
 
     # ------------------------------------------------------- docs governance (KYO-137)

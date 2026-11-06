@@ -723,6 +723,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # verification, a gate clearing or a decision rests on, and the words and session
         # it cites. A real DDL change, so a real new hash.
         28: "968520f4377dc54d0dbf2a17dd51c87119f3e0f9d62eb4727533c6508d279d25",
+        # KYO-670: credits gains withdrawn_at, withdrawn_by and withdrawn_why -- a credit
+        # retracted with no replacement, kept readable. A real DDL change, so a real new
+        # hash.
+        29: "fed4bf489447031a8eeb333da551c7af3a54988a4b319be2459f9d29c4baa52e",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2443,6 +2447,36 @@ def test_a_credit_round_trips_through_export_and_rebuild(kyo, project: Path) -> 
     assert after["credits"][0]["person"] == "jbmv"
 
 
+def test_rebuild_accepts_a_schema_28_export_whose_credits_have_no_withdrawal(
+    kyo, project: Path
+) -> None:
+    """`withdrawn_at`, `withdrawn_by` and `withdrawn_why` arrived at schema_version 29
+    (KYO-670). A credit exported under 28 has none of the keys, and that absence rebuilds
+    as NULL: no credit could be withdrawn then, so the credit is still current."""
+    record, credit_id = _credited_record(kyo, project)
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    assert "withdrawn_at" in doc["credits"][0], "this build writes the keys"
+    doc["schema_version"] = 28
+    for key in ("withdrawn_at", "withdrawn_by", "withdrawn_why"):
+        del doc["credits"][0][key]
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        assert conn.execute(
+            "SELECT withdrawn_at, withdrawn_by, withdrawn_why FROM credits WHERE id = ?",
+            (credit_id,),
+        ).fetchall() == [(None, None, None)]
+    finally:
+        conn.close()
+    rebuilt = kyo("show", record, "--json").json
+    assert rebuilt["criteria"][0]["verifications"][0]["credit"] == credit_id
+
+
 # --------------------------------------------------------------------- KYO-642.c4
 
 
@@ -2540,7 +2574,7 @@ def test_every_new_column_has_a_consumer_and_the_doctor_check_passes(kyo, projec
     from kyosei.schema import COLUMN_CONSUMERS, CONFIG_CONSUMERS
     from kyosei.store import open_store
 
-    assert len(COLUMN_CONSUMERS["credits"]) == 32
+    assert len(COLUMN_CONSUMERS["credits"]) == 35  # KYO-670 adds the three withdrawn_*
     assert len(COLUMN_CONSUMERS["credit_subjects"]) == 3
     assert COLUMN_CONSUMERS["gates"]["cleared_as"]
     assert CONFIG_CONSUMERS["people"]

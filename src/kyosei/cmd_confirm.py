@@ -758,7 +758,9 @@ def _existing_credit(
                 return row["id"]
     for evidence_id in _holds_quote(store, record_id, quote):
         for row in store.conn.execute(
-            "SELECT id FROM credits WHERE quote_id = ? AND superseded_by IS NULL", (evidence_id,)
+            "SELECT id FROM credits WHERE quote_id = ? AND superseded_by IS NULL"
+            " AND withdrawn_at IS NULL",
+            (evidence_id,),
         ):
             return row["id"]
     return None

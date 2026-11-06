@@ -98,6 +98,7 @@ from kyosei.kinds import KindRegistry, load_kind_registry
 from kyosei.schema import SCHEMA_VERSION
 
 from .conftest import (
+    TEST_PERSON,
     Run,
     decided,
     declare_person,
@@ -3787,7 +3788,7 @@ PROVOKED: dict[str, Expectation] = {
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
     # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
-    "credits.py:recheck#4": (
+    "credits.py:recheck#5": (
         "the transcript placed where Claude Code keeps it, then the same `kyo credit "
         "--recheck <id>`; proved by test_kyo653_a_transcript_still_absent_is_cleared_by_placing_it"
     ),
@@ -3795,6 +3796,15 @@ UNREACHED: dict[str, str] = {
         "`kyo credit <id> --supersede <credit>` for the one subject, as for any credit; "
         "proved by test_kyo644_an_already_credited_subject_is_cleared_by_superseding and "
         "test_kyo653_a_batch_over_a_credited_subject_names_the_line"
+    ),
+    # KYO-670: `kyo credit --withdraw`, each named line run by the test the reason names.
+    "credits.py:withdraw#1": (
+        "the named `kyo credit --withdraw <id> --why <reason>` with a reason supplied; proved "
+        "by test_kyo670_a_withdrawal_without_a_reason_is_cleared_by_the_named_line"
+    ),
+    "credits.py:withdraw#4": (
+        "the named `kyo credit --withdraw <successor> --why <reason>`; proved by "
+        "test_kyo670_withdrawing_a_superseded_credit_is_cleared_by_withdrawing_its_successor"
     ),
     "credits.py:_batch_line#5": (
         "`kyo credit` with --decision-file for the one refined credit, as for any; proved by "
@@ -4309,18 +4319,31 @@ RECORDED: dict[str, str] = {
         "a re-invocation giving --span-session; proved by "
         "test_kyo644_a_span_with_no_session_is_cleared_by_naming_it"
     ),
-    "credits.py:cmd_credit#5": (
+    "credits.py:cmd_credit#7": (
         "a re-invocation with --supersede and the id the message names; proved by "
         "test_kyo644_an_already_credited_subject_is_cleared_by_superseding"
     ),
     # KYO-653: `kyo credit --recheck` and `--batch`, each remedy run by a test below.
-    "credits.py:cmd_credit#0": (
+    "credits.py:cmd_credit#1": (
         "a re-invocation naming a subject, --recheck or --batch; proved by "
         "test_kyo653_a_credit_naming_nothing_is_cleared_by_naming_something"
     ),
-    "credits.py:cmd_credit#6": (
+    "credits.py:cmd_credit#8": (
         "the same command run from the session that holds the go-ahead; proved by "
         "tests/test_kyo644_credits.py::test_an_authorized_go_ahead_takes_no_decision_file"
+    ),
+    # KYO-670: the refusals around `kyo credit --withdraw`, each run by a test below.
+    "credits.py:cmd_credit#0": (
+        "a re-invocation dropping --why, or adding --withdraw; proved by "
+        "test_kyo670_a_reason_without_withdraw_is_cleared_by_adding_withdraw"
+    ),
+    "credits.py:cmd_credit#5": (
+        "the same command without --supersede; proved by "
+        "test_kyo670_superseding_a_withdrawn_credit_is_cleared_by_dropping_supersede"
+    ),
+    "credits.py:withdraw#0": (
+        "a re-invocation dropping the flags the message names; proved by "
+        "test_kyo670_a_withdrawal_beside_credit_flags_is_cleared_by_dropping_them"
     ),
     "credits.py:recheck#0": (
         "a re-invocation dropping the flags the message names; proved by "
@@ -7209,3 +7232,113 @@ def test_restating_a_human_verdict_as_agent_observed_clears_the_legacy_notice(
     _restamp(project, 27)
     _result, checks = _doctor(kyo)
     assert checks[LEGACY]["ok"], checks[LEGACY]
+
+
+# --------------------------------------------------------------------- KYO-670
+#
+# `kyo credit --withdraw`: each refusal is provoked, the remedy its message names is run
+# from that state, and the refusal is gone.
+
+_K670_WHY = "quotes a process correction, not an override"
+
+
+def _k670_store(root: Path):
+    from kyosei.store import open_store
+
+    return open_store(root)
+
+
+def _k670_credited(tmp_path: Path) -> tuple[Path, Run, str, str]:
+    """A human-observed verdict credited by `kyo verify`; returns its record and credit."""
+    root, record, kyo = _k644_project(tmp_path)
+    made = kyo("verify", f"{record}.c1", "--verdict", "met", "--method", "human-observed",
+               "--evidence-file", _k644_file(tmp_path, "e", "it works"),
+               "--source-other", "a call", "--json")  # fmt: skip
+    assert made.code == 0, made
+    return root, kyo, record, made.json["credit_id"]
+
+
+def _k670_named_line(err: str) -> list[str]:
+    """The backticked `kyo credit --withdraw ...` line a refusal names, bound and split."""
+    found = re.search(r"`(kyo credit --withdraw [^`]+)`", err)
+    assert found, err
+    argv, unbound = bind_remedy(found.group(1), {"<reason>": shlex.quote(_K670_WHY)})
+    assert argv is not None, unbound
+    return argv[1:]
+
+
+def test_kyo670_a_withdrawal_without_a_reason_is_cleared_by_the_named_line(
+    tmp_path: Path,
+) -> None:
+    _root, kyo, record, credit = _k670_credited(tmp_path)
+    refused = kyo("credit", "--withdraw", credit)
+    assert refused.code == 64 and "needs a reason" in refused.err
+    assert kyo("show", record, "--json").json["credits"][0]["withdrawn_at"] is None
+    done = kyo(*_k670_named_line(refused.err), "--json")
+    assert done.code == 0, done
+    assert done.json["withdrawn"] == credit and done.json["why"] == _K670_WHY
+
+
+def test_kyo670_withdrawing_a_superseded_credit_is_cleared_by_withdrawing_its_successor(
+    tmp_path: Path,
+) -> None:
+    """The message names the current credit and the line that withdraws it."""
+    from kyosei.export import write_export
+
+    root, kyo, record, first = _k670_credited(tmp_path)
+    store = _k670_store(root)
+    try:
+        with store.transaction():
+            row = store.credit(first)
+            second = store.add_credit(
+                record, person=row["person"], role=row["role"], quote_id=row["quote_id"],
+                source_kind=row["source_kind"], source_note=row["source_note"],
+                transcript_check=row["transcript_check"],
+                subjects=[
+                    (s["subject_kind"], s["subject_id"]) for s in store.credit_subjects(first)
+                ],
+                author="orchestrator",
+            )  # fmt: skip
+            store.supersede_credit(first, second)
+        write_export(store, record)
+    finally:
+        store.close()
+    refused = kyo("credit", "--withdraw", first, "--why", _K670_WHY)
+    assert refused.code == 64 and f"superseded by {second}" in refused.err
+    line = _k670_named_line(refused.err)
+    assert line[2] == second
+    assert kyo(*line).code == 0
+    withdrawn = {c["id"]: c["withdrawn_at"] for c in kyo("show", record, "--json").json["credits"]}
+    assert withdrawn[second] and withdrawn[first] is None
+
+
+def test_kyo670_a_withdrawal_beside_credit_flags_is_cleared_by_dropping_them(
+    tmp_path: Path,
+) -> None:
+    _root, kyo, _record, credit = _k670_credited(tmp_path)
+    refused = kyo("credit", "--withdraw", credit, "--why", _K670_WHY, "--basis", credit,
+                  "--person", TEST_PERSON)  # fmt: skip
+    assert refused.code == 64 and "give it no --basis, a credit flag" in refused.err
+    assert kyo("credit", "--withdraw", credit, "--why", _K670_WHY).code == 0
+
+
+def test_kyo670_a_reason_without_withdraw_is_cleared_by_adding_withdraw(tmp_path: Path) -> None:
+    _root, kyo, _record, credit = _k670_credited(tmp_path)
+    refused = kyo("credit", "--recheck", credit, "--why", _K670_WHY)
+    assert refused.code == 64 and "add --withdraw CREDIT_ID" in refused.err
+    assert kyo("credit", "--withdraw", credit, "--why", _K670_WHY).code == 0
+
+
+def test_kyo670_superseding_a_withdrawn_credit_is_cleared_by_dropping_supersede(
+    tmp_path: Path,
+) -> None:
+    """A withdrawn credit no longer blocks its subject, so --supersede has nothing to
+    replace: the same line without it is written."""
+    _root, kyo, _vid, approval, line = _k644_late(tmp_path)
+    first = kyo(*line, "--basis", approval, "--json")
+    assert first.code == 0, first
+    credit = first.json["credit_id"]
+    assert kyo("credit", "--withdraw", credit, "--why", _K670_WHY).code == 0
+    refused = kyo(*line, "--basis", approval, "--supersede", credit)
+    assert refused.code == 64 and "rerun this command without --supersede" in refused.err
+    assert kyo(*line, "--basis", approval).code == 0
