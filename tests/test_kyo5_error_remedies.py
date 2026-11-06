@@ -7137,3 +7137,50 @@ def test_kyo644_a_span_with_no_session_is_cleared_by_naming_it(tmp_path: Path) -
             "--source-other", "a call", "--span-first", "t-1", "--span-last", "t-2")  # fmt: skip
     assert kyo(*base).code == 64
     assert kyo(*base, "--span-session", _K644_SESSION).code == 0
+
+
+def test_kyo666_a_reconstructed_decided_credit_may_leave_its_outcome_unrecorded(
+    tmp_path: Path,
+) -> None:
+    """A batch line with no outcome and no recommendation is written with both empty and
+    `kyo show` says so; a recommendation without an outcome is still refused."""
+    kyo, record, _first, _second, approval = _k653_two_verdicts(tmp_path)
+    line = f"{record}\tdecided\tother:a call\t\t\t\tdo it\n"
+    path = _k644_file(tmp_path, "u.tsv", line)
+    done = kyo("credit", "--batch", path, "--basis", approval)
+    assert done.code == 0, done
+    written = [c for c in _k653_credits(kyo, record) if c["basis_id"]]
+    assert len(written) == 1
+    assert written[0]["outcome"] is None and written[0]["recommended"] is None
+    assert "outcome:      not recorded" in kyo("show", record).out
+    half = _k644_file(tmp_path, "h.tsv", f"{record}\tdecided\tother:a call\t\t\ta plan\tdo it\n")
+    refused = kyo("credit", "--batch", half, "--basis", approval)
+    assert refused.code == EXIT_CONTRACT and "outcome" in refused.err
+
+
+def test_kyo666_a_live_decided_credit_without_an_outcome_is_cleared_by_stating_it(
+    tmp_path: Path,
+) -> None:
+    """A decision filed with no outcome, and no basis to make it reconstructed, is
+    refused; the message names the outcomes, and stating one writes it."""
+    _root, _record, kyo = _k644_project(tmp_path)
+    base = ("new", "decision", "--title", "X",
+            "--quote-file", _k644_file(tmp_path, "w", "x"),
+            "--source-other", "a call")  # fmt: skip
+    refused = kyo(*base, "--decision-file", _k644_file(tmp_path, "n.yml", "alternatives: []\n"))
+    assert refused.code == 64 and "unprompted" in refused.err and "outcome" in refused.err
+    assert kyo(*base, "--decision-file", _k644_file(tmp_path, "d.yml", "outcome: unprompted\n")
+               ).code == 0  # fmt: skip
+
+
+def test_kyo666_kyo_credit_with_a_basis_may_omit_the_outcome_and_without_one_may_not(
+    tmp_path: Path,
+) -> None:
+    kyo, record, _first, _second, approval = _k653_two_verdicts(tmp_path)
+    none = _k644_file(tmp_path, "n.yml", "alternatives: []\n")
+    line = ("credit", record, "--role", "decided", "--quote-file",
+            _k644_file(tmp_path, "w", "do it"), "--source-other", "a call",
+            "--decision-file", none)  # fmt: skip
+    refused = kyo(*line)
+    assert refused.code != 0 and "outcome" in refused.err
+    assert kyo(*line, "--basis", approval).code == 0
