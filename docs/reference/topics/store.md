@@ -622,7 +622,8 @@ writing. `kyo show --json` carries the same in `credits[]` (person, role, outcom
 `transcript_check`, the span fields), a `credit` id on each verification and gate, and the
 derived `reconstructed`, `person_name` and `overrides`; the export holds `credits[]` and
 none of the derived fields. `kyo list --json` rows carry `people`, and `kyo changelog`
-adds "decided by" to a decision's entry.
+adds "decided by" to the entry of a completed record carrying a decided credit (a decision
+record itself has no completion, so the changelog never lists it).
 
 The link graph is the one view with no terminal equivalent; it is the desktop
 app's or nothing.
