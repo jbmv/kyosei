@@ -1349,6 +1349,12 @@ CONTRACT_VERIFY_FROM_REPORT_NEEDS_A_REPORT = "verify-from-report-needs-a-report"
 #: naming the subset they have checked — so an unrecognised one is refused with the
 #: offender named, never silently applied-as-nothing.
 CONTRACT_VERIFY_ONLY_NAMES_AN_ABSENT_CRITERION = "verify-only-names-an-absent-criterion"
+#: KYO-645 (decision KYO-640, P11): a stored report carries a verdict whose method is
+#: ``human-observed``. KYO-537 refuses that at ingest, but a report stored before the
+#: rule, or by any path that skipped it, would otherwise be applied as a person's
+#: observation. ``kyo verify --from-report`` and ``kyo accept`` re-check at apply time;
+#: the remedy is a corrected report that supersedes the stored one (``amends``).
+CONTRACT_VERIFY_FROM_REPORT_WORKER_HUMAN_OBSERVED = "verify-from-report-worker-human-observed"
 #: KYO-32: a report's commits must be reachable from the branch its dispatch
 #: declared. A consumer's worker created its own branch instead of the harness's;
 #: the controller's merge targeted the (empty) declared branch, git said "Already
