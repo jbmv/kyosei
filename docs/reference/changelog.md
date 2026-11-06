@@ -401,6 +401,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-06** — `KYO-639` (investigation) — Backfill candidates: the verdicts, gate clearings and decisions that rest on the maintainer's own words
 - **2026-10-10** — `KYO-504` (bug) — A test run registered tests/test_kyo5_error_remedies.py's provoked fixture project in the real ~/kyosei/projects.json
 - **2026-10-09** — `KYO-570` (bug) — kyo next, the brief and kyo dispatch ignore blocks links
 - **2026-10-05** — `KYO-546` (bug) — `kyo move <id> verified` succeeds when no criterion has a recorded verdict
