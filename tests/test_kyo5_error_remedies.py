@@ -3796,7 +3796,7 @@ UNREACHED: dict[str, str] = {
         "proved by test_kyo644_an_already_credited_subject_is_cleared_by_superseding and "
         "test_kyo653_a_batch_over_a_credited_subject_names_the_line"
     ),
-    "credits.py:_batch_line#7": (
+    "credits.py:_batch_line#5": (
         "`kyo credit` with --decision-file for the one refined credit, as for any; proved by "
         "tests/test_kyo644_credits.py::test_a_refined_decision_cites_the_refining_turn and "
         "test_kyo653_a_batch_line_with_a_refined_outcome_is_named"
@@ -4309,7 +4309,7 @@ RECORDED: dict[str, str] = {
         "a re-invocation giving --span-session; proved by "
         "test_kyo644_a_span_with_no_session_is_cleared_by_naming_it"
     ),
-    "credits.py:cmd_credit#7": (
+    "credits.py:cmd_credit#5": (
         "a re-invocation with --supersede and the id the message names; proved by "
         "test_kyo644_an_already_credited_subject_is_cleared_by_superseding"
     ),
@@ -4318,7 +4318,7 @@ RECORDED: dict[str, str] = {
         "a re-invocation naming a subject, --recheck or --batch; proved by "
         "test_kyo653_a_credit_naming_nothing_is_cleared_by_naming_something"
     ),
-    "credits.py:cmd_credit#8": (
+    "credits.py:cmd_credit#6": (
         "the same command run from the session that holds the go-ahead; proved by "
         "tests/test_kyo644_credits.py::test_an_authorized_go_ahead_takes_no_decision_file"
     ),

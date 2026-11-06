@@ -403,6 +403,22 @@ def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str
     return result
 
 
+
+def _check_role_subjects(role: str, kinds: set[str]) -> None:
+    """Which subjects a role may name (KYO-668). A decided credit names a record; an observed
+    one names verifications or gates; an authorized go-ahead names either a record or the
+    verifications and gates it approved, never a mix, because the maintainer's rule is that a
+    one-word acceptance only authorizes, wherever the agent happened to record it."""
+    if role == ROLE_DECIDED and kinds != {"record"}:
+        raise UsageError(f"a decided credit names a record, and these subjects are {sorted(kinds)}")
+    if role == ROLE_OBSERVED and "record" in kinds:
+        raise UsageError("an observed credit names verifications or gates, not a record")
+    if role == ROLE_AUTHORIZED and "record" in kinds and kinds != {"record"}:
+        raise UsageError(
+            "an authorized credit names a record, or verifications and gates, not both: "
+            f"these subjects are {sorted(kinds)}"
+        )
+
 def _decision(
     ctx: Context, text: str, credit: Credit, *, reconstructed: bool = False
 ) -> dict:
@@ -738,10 +754,7 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     role = args.role or (ROLE_DECIDED if kinds == {"record"} else ROLE_OBSERVED)
     if role not in CREDIT_ROLES:
         raise UsageError(f"--role {role!r}; known: {', '.join(CREDIT_ROLES)}")
-    if role in (ROLE_DECIDED, ROLE_AUTHORIZED) and kinds != {"record"}:
-        raise UsageError(f"a {role} credit names a record, and these subjects are {sorted(kinds)}")
-    if role == ROLE_OBSERVED and "record" in kinds:
-        raise UsageError("an observed credit names verifications or gates, not a record")
+    _check_role_subjects(role, kinds)
     quote_text = read_prose(args.quote_file, what="--quote-file") if args.quote_file else None
     rerun = "kyo " + shlex.join(["credit", *subject_ids])
     credit = resolve(
@@ -1061,10 +1074,7 @@ def _batch_line(ctx: Context, store, args: Namespace, row: dict[str, str]) -> di
     role = row["role"] or (ROLE_DECIDED if kinds == {"record"} else ROLE_OBSERVED)
     if role not in CREDIT_ROLES:
         raise UsageError(f"role {role!r}; known: {', '.join(CREDIT_ROLES)}")
-    if role in (ROLE_DECIDED, ROLE_AUTHORIZED) and kinds != {"record"}:
-        raise UsageError(f"a {role} credit names a record, and these subjects are {sorted(kinds)}")
-    if role == ROLE_OBSERVED and "record" in kinds:
-        raise UsageError("an observed credit names verifications or gates, not a record")
+    _check_role_subjects(role, kinds)
     where = row["where"]
     session, other = (None, where[len("other:") :].strip()) if where.startswith("other:") else (
         where or None,
