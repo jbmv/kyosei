@@ -402,7 +402,10 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## engine
 
 - **2026-11-06** — `KYO-648` (investigation) — Refresh the backfill candidates against the transcripts recovered from Time Machine
+- **2026-11-06** — `KYO-647` (task) — Credits in kyo show, kyo list, the export and the changelog
+- **2026-11-06** — `KYO-646` (task) — kyo doctor credit_coverage
 - **2026-11-06** — `KYO-645` (task) — kyo verify --from-report re-applies the worker ban on human-observed
+- **2026-11-06** — `KYO-644` (task) — Credit enforcement and kyo credit
 - **2026-11-06** — `KYO-643` (task) — The Claude Code transcript reader for credit checks
 - **2026-11-06** — `KYO-642` (task) — Schema 28: credits, credit_subjects, gates.cleared_as, the people key and agent-observed
 - **2026-11-06** — `KYO-639` (investigation) — Backfill candidates: the verdicts, gate clearings and decisions that rest on the maintainer's own words
