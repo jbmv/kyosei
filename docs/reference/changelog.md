@@ -401,6 +401,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-06** — `KYO-648` (investigation) — Refresh the backfill candidates against the transcripts recovered from Time Machine
 - **2026-11-06** — `KYO-639` (investigation) — Backfill candidates: the verdicts, gate clearings and decisions that rest on the maintainer's own words
 - **2026-11-06** — `KYO-638` (proposal) — Provenance credits: the fields, their enforcement, the transcript check and signing
 - **2026-10-10** — `KYO-504` (bug) — A test run registered tests/test_kyo5_error_remedies.py's provoked fixture project in the real ~/kyosei/projects.json
