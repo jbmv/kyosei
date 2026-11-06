@@ -42,6 +42,14 @@ store rather than the project is what makes one path correct under both layouts,
 and it keeps the cross-host case intact — whatever arrangement lets the app read
 this project's records lets it read this file.
 
+THE TRANSCRIPT PATH (KYO-643). Each entry also keeps the ``transcript_path`` the hook
+payload named, written home-relative (``~/...``) so the file does not spell out the
+home directory. Its consumer is the credit check's transcript reader
+(:mod:`kyosei.harness.claude_code_transcript`), which reads the path recorded here for a
+cited session before it falls back to a search by file name. Recording the path the
+harness itself handed over keeps this module the only one that learns where a session's
+transcript is, which is the stance the paragraph above takes against a scan.
+
 WHY ``sessions.json`` AND NOT ``active-sessions.json``. The file holds ended
 sessions too; that is *how* it says a session stopped being active (KYO-186.c7).
 A name asserting liveness would be falsified by the file's own contents the moment
@@ -164,6 +172,48 @@ TRANSCRIPT_TAIL_BYTES = 256 * 1024
 def sessions_path(store_root: Path | str) -> Path:
     """Where this project keeps the file, beside ``kyosei.db``."""
     return Path(store_root) / KYOSEI_DIR / SESSIONS_FILE
+
+
+def home_relative(path: str | None, home: Path | None = None) -> str | None:
+    """``path`` with the home directory written as ``~``, or None for no path.
+
+    A path outside the home directory is kept as given. The reverse is
+    :func:`expand_home`; the two are the only spellings this file uses.
+    """
+    if not isinstance(path, str) or not path:
+        return None
+    base = str(home if home is not None else Path.home())
+    if path == base:
+        return "~"
+    if base and path.startswith(base.rstrip("/") + "/"):
+        return "~/" + path[len(base.rstrip("/")) + 1 :]
+    return path
+
+
+def expand_home(path: str | None, home: Path | None = None) -> Path | None:
+    """The absolute path a :func:`home_relative` spelling stands for."""
+    if not isinstance(path, str) or not path:
+        return None
+    if path == "~" or path.startswith("~/"):
+        return (home if home is not None else Path.home()) / path[2:]
+    return Path(path)
+
+
+def recorded_transcript_path(
+    store_root: Path | str, session_id: str, home: Path | None = None
+) -> Path | None:
+    """The transcript path the hooks recorded for ``session_id``, or None.
+
+    None covers every case in which nothing usable is recorded: no file, an unreadable
+    file, no entry for the session, or an entry written before KYO-643 added the field.
+    The caller then searches by file name, so None here is never an answer about the
+    transcript itself.
+    """
+    file = read_sessions(sessions_path(store_root))
+    for entry in file.entries:
+        if entry.get("session_id") == session_id:
+            return expand_home(entry.get("transcript_path"), home)
+    return None
 
 
 def remote_url(bridge_session_id: str) -> str:
@@ -540,6 +590,7 @@ def apply_event(
     lookup: BridgeLookup,
     stamp: str,
     process: SessionProcess | None = None,
+    transcript_path: str | None = None,
 ) -> tuple[list[dict], dict]:
     """Fold one hook event into the entry list, returning the list and the entry.
 
@@ -575,6 +626,9 @@ def apply_event(
         "pid": process.pid if process is not None else previous.get("pid"),
         "process": process.name if process is not None else previous.get("process"),
         "host": process.host if process is not None else previous.get("host"),
+        # KYO-643: where the harness said this session's transcript is, home-relative.
+        # Kept from an earlier event when this one names none, as the process is.
+        "transcript_path": home_relative(transcript_path) or previous.get("transcript_path"),
     }
     if not lookup.found:
         # A later event that cannot see the record must not erase one an earlier
@@ -617,6 +671,7 @@ def record_event(
         lookup=lookup,
         stamp=stamp,
         process=process,
+        transcript_path=transcript_path,
     )
     problem = write_sessions(path, entries)
     return {
@@ -732,6 +787,7 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
                     else "not recorded"
                 )
             )
+            lines.append(f"      transcript: {entry.get('transcript_path') or 'not recorded'}")
             lines.append(
                 f"      remote control: {entry.get('url') or '—'} "
                 f"[{entry.get('remote_control_outcome')}]"
