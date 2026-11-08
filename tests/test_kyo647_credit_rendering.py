@@ -60,11 +60,14 @@ def _credit(project: Path, record: str, quote: str, subjects, *, late: bool = Fa
     try:
         with store.transaction():
             credit_id = store.add_credit(record, quote_id=quote, subjects=subjects, **defaults)
-            if late:
-                store.conn.execute(
-                    "UPDATE credits SET created_at = '2099-01-01T00:00:00.000Z' WHERE id = ?",
-                    (credit_id,),
-                )
+            # A real writer stamps a live credit with its subject's own time (KYO-644). This
+            # fixture writes the credit after the subject, so it is stamped explicitly: early
+            # for a live credit, late for a reconstructed one. Without the early stamp the
+            # credit reads as live only while today is before the fixed `observed_at` above.
+            stamp = "2099-01-01T00:00:00.000Z" if late else "2000-01-01T00:00:00.000Z"
+            store.conn.execute(
+                "UPDATE credits SET created_at = ? WHERE id = ?", (stamp, credit_id)
+            )
         write_export(store, record)
     finally:
         store.close()

@@ -510,9 +510,10 @@ def uncredited_rows(store: Store) -> list[dict]:
     "schema": int}``. A gate cleared as ``withdrawn`` says plainly that nobody answered and
     is not counted, and neither is a verdict a later agent-observed verdict on the same
     criterion restates: that is the remedy the legacy notice names (KYO-667). The writing
-    event is the record's first event at or after the row's own timestamp (an event is stamped just after its row); a row with no such event, or whose
-    line is not in the ledger, counts as written before credits, because the ledger-gap
-    check is what names that and exit 3 here would name the wrong thing.
+    event is the record's first event at or after the row's own timestamp (an event is
+    stamped just after its row); a row with no such event, or whose line is not in the
+    ledger, counts as written before credits, because the ledger-gap check is what names
+    that and exit 3 here would name the wrong thing.
     """
     # KYO-670: only a CURRENT credit covers a row. A withdrawn credit covers nothing, and a
     # superseded one is covered by whatever superseded it or by nothing, so a row whose
