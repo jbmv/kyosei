@@ -43,7 +43,7 @@ dependencies = ["pyyaml>=6.0"]
 recx = ["recx-cli>=0.1,<0.2"]
 # The dev extra carries recx so the integration tests in tests/test_prior_art.py run in
 # Kyosei's own suite against the real search().
-dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6", "recx-cli>=0.1,<0.2"]
+dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff==0.17.4", "recx-cli>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/jbmv/kyosei"
