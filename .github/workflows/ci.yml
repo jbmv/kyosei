@@ -32,4 +32,6 @@ jobs:
       - name: Lint
         run: make lint
       - name: Test
+        # A lint failure should not hide the suite's result.
+        if: success() || failure()
         run: make test

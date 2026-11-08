@@ -58,9 +58,10 @@ def _reference_description_edited_at(store, record_id: str) -> str:
             after = json.loads(event["after_json"])
             if before.get("description") != after.get("description"):
                 return str(event["at"])
-        elif event["changed_json"] is not None:
-            if "description" in json.loads(event["changed_json"]):
-                return str(event["at"])
+        elif event["changed_json"] is not None and "description" in json.loads(
+            event["changed_json"]
+        ):
+            return str(event["at"])
     return str(row["created_at"])
 
 
