@@ -118,8 +118,8 @@ dispatch or criterion. The whole workflow, step by step, is in
 
 ## Working on Kyosei itself
 
-[AGENTS.md](AGENTS.md) is the guide for a person or an agent building, testing or
-contributing to Kyosei.
+[CONTRIBUTING.md](CONTRIBUTING.md) describes how to propose a change, and
+[AGENTS.md](AGENTS.md) is the guide for a person or an agent building and testing Kyosei.
 
 ```sh
 make venv    # provision .venv (Python 3.12 via uv) and run nothing else

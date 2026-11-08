@@ -22,6 +22,7 @@ AGENTS.md first.
 
 ## Work on Kyosei
 
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change
 - [AGENTS.md](AGENTS.md): building, testing and contributing; the venv rules and the store rules for dispatched workers
 - [Design charter](docs/design/charter.md): the laws, the architecture and the reasoning behind them
 - [Desktop app](apps/desktop/README.md): the Electron viewer that reads projects through `kyo serve`, built from source with its own checks
