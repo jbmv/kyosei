@@ -21,6 +21,9 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # A tmux client refuses to start without a usable TERM, and the runner sets none.
+      TERM: xterm-256color
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,6 +32,12 @@ jobs:
       # Without tmux, the orchestrator-session tests skip themselves.
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # The tests commit in temporary repositories and expect a person's usual git settings.
+      - name: Configure git
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
       - name: Lint
         run: make lint
       - name: Test

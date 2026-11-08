@@ -16,6 +16,7 @@ from weak evidence.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import subprocess
 from pathlib import Path
@@ -379,7 +380,13 @@ def test_an_inherited_git_dir_does_not_redirect_the_scaffold(
 
 
 def test_a_git_call_that_hangs_is_stopped(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(scaffold, "GIT_TIMEOUT_SECONDS", 0.001)
+    # A git that really hangs: the real one can finish inside any timeout short enough to test.
+    fake = tmp_path / "bin" / "git"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(scaffold, "GIT_TIMEOUT_SECONDS", 0.2)
     result = scaffold._git(tmp_path, "--version")
     assert result is not None and result.returncode == 124
     assert "did not finish" in result.stderr
