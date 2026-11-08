@@ -96,11 +96,11 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-09-08** — `KYO-189` (bug) — A dev build and the packaged build share one userData directory, so whichever launched last owns the other's kyo shim
 - **2026-09-08** — `KYO-185` (bug) — The no-tmux message tells a Finder-launched app's reader to set a shell variable, which they have no shell to set
 - **2026-09-08** — `KYO-183` (bug) — The desktop suite is green in every dispatch worktree and red in the maintainer's own checkout
-- **2026-09-05** — `KYO-203` (task) — A gate filter beside the kind/status/scope chips, fed by the rows the pane already has — decided by jbmv
+- **2026-09-05** — `KYO-203` (task) — A gate filter beside the kind/status/scope chips, fed by the rows the pane already has
 - **2026-09-01** — `KYO-192` (task) — The claude pane belongs in the bottom dock, tabbed with Terminal
 - **2026-09-01** — `KYO-191` (bug) — The claude pane has no reload, so a bad load is unrecoverable without restarting the app
 - **2026-09-01** — `KYO-190` (bug) — Redocking the claude pane shows the pre-login view, not the session the popped-out window logged into
-- **2026-09-01** — `KYO-186` (task) — A claude.ai pane beside Terminal, deep-linked to this project's Remote Control session — decided by jbmv
+- **2026-09-01** — `KYO-186` (task) — A claude.ai pane beside Terminal, deep-linked to this project's Remote Control session
 - **2026-09-01** — `KYO-176` (bug) — The app has never been packaged, and its own code already states the contract for doing it — decided by jbmv
 - **2026-09-01** — `KYO-175` (bug) — The app can only ever look at one project, and it is this one — decided by jbmv
 - **2026-08-31** — `KYO-161` (bug) — Opening one idea file still rewrites the one being left
@@ -295,7 +295,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-09-18** — `KYO-303` (task) — kyo docs suggest: draft document declarations from what the repository looks like (numbered documents, generated files), suggested and never enforced
 - **2026-09-18** — `KYO-300` (task) — Symbol-aware sweep and drift, and an additive touch claim, so a much-claimed file stops colliding and re-flagging as a whole
 - **2026-09-18** — `KYO-299` (task) — Doc fragments: workers add numbered sections as per-dispatch fragment files, and the controller assembles them with the next number — decided by jbmv
-- **2026-09-18** — `KYO-298` (task) — The worker-suite policy as a mechanism: declared controller-only commands, a PreToolUse refusal inside a running dispatch's worktree, a doctor notice, and re-writes counted per dispatch — decided by jbmv
+- **2026-09-18** — `KYO-298` (task) — The worker-suite policy as a mechanism: declared controller-only commands, a PreToolUse refusal inside a running dispatch's worktree, a doctor notice, and re-writes counted per dispatch
 - **2026-09-18** — `KYO-295` (bug) — kyo dispatch hands out a record whose every criterion is settled, while kyo next withholds it
 - **2026-09-18** — `KYO-294` (bug) — A worktree cut after the controller commits the dispatch inherits a store diff, and check-branch blocks the worker's stop for it while the brief calls that state normal
 - **2026-09-18** — `KYO-291` (task) — A record covered by another record's dispatch names that dispatch and its report, in kyo show and on the desktop record page
@@ -401,6 +401,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-08** — `KYO-673` (investigation) — Measure the residual error of the reviewed credits on a sample checked against the conversations
 - **2026-11-06** — `KYO-671` (investigation) — Independent review of the reconstructed credits, before any is shown to a reader
 - **2026-11-06** — `KYO-670` (task) — kyo credit --withdraw: retract a credit that should not exist, keeping it readable
 - **2026-11-06** — `KYO-668` (task) — An authorized credit may name verifications and gates, not only records
@@ -565,7 +566,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-08-26** — `KYO-80` (bug) — kyo brief refuses where the write guard permits, and states a consequence that would not occur
 - **2026-08-26** — `KYO-76` (bug) — A dispatch brief states only the primary record's touches, so --also-covers work falls outside the worker's stated boundary
 - **2026-08-26** — `KYO-71` (bug) — A declared touch list is never checked against the files a dispatch actually edited
-- **2026-08-26** — `KYO-70` (bug) — Dispatch worktrees appear beside the user's other projects and are never cleaned up
+- **2026-08-26** — `KYO-70` (bug) — Dispatch worktrees appear beside the user's other projects and are never cleaned up — decided by jbmv
 - **2026-08-26** — `KYO-69` (bug) — touch-changed re-files the same finding every sweep, so the flag list becomes unreadable
 - **2026-08-26** — `KYO-65` (bug) — A dispatch's --also-covers records are invisible to the disjointness check
 - **2026-08-26** — `KYO-63` (bug) — Sweep's bookkeeping describes a history its own repository may not have
