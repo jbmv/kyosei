@@ -401,6 +401,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-08** — `KYO-675` (bug) — KYO-647's rendering tests depend on today's date, and one docstring line fails lint
 - **2026-11-08** — `KYO-673` (investigation) — Measure the residual error of the reviewed credits on a sample checked against the conversations
 - **2026-11-06** — `KYO-671` (investigation) — Independent review of the reconstructed credits, before any is shown to a reader
 - **2026-11-06** — `KYO-670` (task) — kyo credit --withdraw: retract a credit that should not exist, keeping it readable
