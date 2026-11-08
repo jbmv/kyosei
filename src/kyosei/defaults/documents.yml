@@ -54,7 +54,7 @@
 # -- including every project initialised before this release, which has no documents.yml
 # at all -- is scanned for:
 #
-#     *.md            root-level markdown: README.md, CONTRIBUTING.md, an operating doc
+#     *.md            root-level markdown: README.md, a contributing guide, an operating doc
 #     docs/**/*.md    the docs tree, which is what discovery used to be
 #
 # That default lives in the code (registry.DEFAULT_DOCUMENT_GLOBS), not in this file, and
