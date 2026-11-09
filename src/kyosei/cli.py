@@ -64,6 +64,7 @@ from . import (
     prior_art,
     query,
     report_ingest,
+    serve_tokens,
     touch_drift,
 )
 from . import serve as serve_module
@@ -311,6 +312,10 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # by path. Not in MUTATING_COMMANDS: it writes $KYOSEI_HOME/projects.json and no
     # store; not served (serve.NOT_SERVED), because kyo serve never registers projects.
     "projects": (cmd_projects.cmd_projects, PROJECT_NONE),
+    # KYO-699: the tokens a device presents to kyo serve. PROJECT_NONE and not in
+    # MUTATING_COMMANDS for `projects`'s reason: it writes $KYOSEI_HOME/device-tokens.json
+    # and no store.
+    "devices": (serve_tokens.cmd_devices, PROJECT_NONE),
     # KYO-514: the build's own agent setup prompt, and `--check`, the same checklist read
     # back against existing projects. PROJECT_NONE: the prompt needs no project, and
     # `--check` resolves the project here (or every registered one) itself, reporting an
@@ -2225,6 +2230,34 @@ def build_parser() -> KyoseiParser:
         nargs="?",
         metavar="PATH|NAME",
         help="for add: the project's directory; for remove: its registered name or root",
+    )
+
+    p_devices = sub.add_parser(
+        "devices",
+        parents=[common],
+        help="issue, list and revoke the per-device tokens kyo serve's routes check, on this "
+        "machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699)",
+    )
+    p_devices.add_argument(
+        "action",
+        choices=("list", "issue", "revoke"),
+        help="list every device, issue a token to a new device and print it once, or revoke "
+        "a device's token, which stops working on the next request",
+    )
+    p_devices.add_argument(
+        "target",
+        nargs="?",
+        metavar="NAME|ID",
+        help="for issue: the new device's name; for revoke: a live device's name, or an id "
+        "from `kyo devices list`",
+    )
+    p_devices.add_argument(
+        "--permission",
+        action="append",
+        default=[],
+        choices=serve_tokens.PERMISSIONS,
+        help="with issue: a permission the token carries (repeatable). `send` lets it use the "
+        "send routes; a token issued without it is refused there",
     )
 
     p_onboard = sub.add_parser(

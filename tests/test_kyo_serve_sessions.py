@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-import kyosei
 from kyosei import cmd_sessions, serve, serve_sessions, session_layer
 
 from .conftest import git_init, new_record, opt_in_transcripts
@@ -1227,8 +1226,8 @@ def test_the_screen_route_for_a_session_with_no_pane(bed: Bed) -> None:
 
 #: What would let a ``kyosei.serve*`` module send input to a session.
 FORBIDDEN_NAMES = {
-    "send_message", "send_slash_command", "clear_input", "_send_typed", "_send_paste",
-    "Tmux", "resolve_tmux", "tmux",
+    "send_message", "send_slash_command", "send_interrupt", "clear_input", "_send_typed",
+    "_send_paste", "Tmux", "resolve_tmux", "tmux",
 }  # fmt: skip
 FORBIDDEN_STRINGS = ("send-keys", "paste-buffer", "load-buffer")
 FORBIDDEN_MODULES = ("claude_code_pane", "claude_code_transcript", "harness")
@@ -1265,23 +1264,6 @@ def reaches_send(source: str, name: str) -> list[str]:
     return found
 
 
-def test_no_serve_module_can_reach_the_send_function() -> None:
-    package = Path(kyosei.__file__).parent
-    modules = sorted(package.glob("serve*.py"))
-    assert {"serve.py", "serve_events.py", "serve_files.py", "serve_sessions.py"} <= {
-        p.name for p in modules
-    }
-    offenders = {
-        path.name: found
-        for path in modules
-        if (found := reaches_send(path.read_text(encoding="utf-8"), path.name))
-    }
-    assert offenders == {}, (
-        "no kyosei.serve* module may reach the session layer's sending half until the send "
-        f"routes of chunk E4 exist, and those routes change this test on purpose: {offenders}"
-    )
-
-
 @pytest.mark.parametrize(
     "planted",
     [
@@ -1300,7 +1282,7 @@ def test_the_session_layer_itself_offers_no_send_function() -> None:
     from kyosei import session_layer
 
     public = {name for name in dir(session_layer) if not name.startswith("_")}
-    assert "send_message" not in public and "send_slash_command" not in public
+    assert not {"send_message", "send_slash_command", "send_interrupt"} & public
 
 
 # ------------------------------------------------------------------- c5: the opt-in

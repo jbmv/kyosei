@@ -37,6 +37,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo close-wave`](#kyo-close-wave) | yes | yes | close a merged wave: move each record to completion, run the declared generators, commit store and generated files together, then print (or, with --run-after, run) the declared after-steps — refused before any write unless every record can finish and the declared suite passed at this code (KYO-536) |
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
 | [`kyo credit`](#kyo-credit) | yes | yes | credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644) |
+| [`kyo devices`](#kyo-devices) | no | no | issue, list and revoke the per-device tokens kyo serve's routes check, on this machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699) |
 | [`kyo dispatch`](#kyo-dispatch) | yes | yes | dispatch a record with a frozen brief, or `dispatch close` a dispatch (M5) |
 | [`kyo docs`](#kyo-docs) | yes | yes | Layer 3 docs-SOT skeleton validator (M8) |
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
@@ -455,6 +456,27 @@ Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo devices`
+
+issue, list and revoke the per-device tokens kyo serve's routes check, on this machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699)
+
+Needs a Kyosei project: **no** — it never searches for one.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send}] {list,issue,revoke} [NAME|ID]`
+
+### Positional arguments
+
+- `{list,issue,revoke}` — **required**. list every device, issue a token to a new device and print it once, or revoke a device's token, which stops working on the next request
+- `[NAME|ID]` — optional. for issue: the new device's name; for revoke: a live device's name, or an id from `kyo devices list`
+
+### Options
+
+- `--permission {send}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes; a token issued without it is refused there
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

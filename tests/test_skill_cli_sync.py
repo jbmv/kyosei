@@ -1076,6 +1076,10 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
         "wire and for the commands people have typed (KYO-519, KYO-513); the skill "
         "names the command by its canonical name"
     ),
+    "devices": (
+        "issued and revoked by the machine's owner in a terminal, when a device is set up to "
+        "send through kyo serve; the orchestrator's workflow never needs a device token"
+    ),
     "projects": (
         "manages the machine's project registry, which `kyo init` already fills; a "
         "controller's loop never adds or removes a served project (KYO-455)"
