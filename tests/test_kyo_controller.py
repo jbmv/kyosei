@@ -321,7 +321,12 @@ def launchctl(monkeypatch):
     yield fake
     for process in fake.processes:
         process.terminate()
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # A loaded machine can leave a foreground tmux server slow to act on SIGTERM.
+            process.kill()
+            process.wait()
 
 
 def test_over_ssh_with_no_server_start_refuses_naming_install_and_install_clears_it(
