@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-669` (task) — kyo check-push scans the messages and authors of the commits being pushed for private terms
 - **2026-10-14** — `KYO-635` (bug) — kyo init --adopt links a store recording a different code repository but never re-records the identity
 - **2026-10-14** — `KYO-634` (bug) — kyo init writes the setup-incomplete CLAUDE.md section in a project whose plugin is already enabled
 - **2026-10-14** — `KYO-633` (task) — First push to the public repository jbmv/kyosei
@@ -401,6 +402,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-09** — `KYO-677` (bug) — Two output pins need a global init.defaultBranch, and CI's lint uses an unpinned ruff
 - **2026-11-08** — `KYO-676` (chore) — A contributor guide and continuous integration for the public repository
 - **2026-11-08** — `KYO-675` (bug) — KYO-647's rendering tests depend on today's date, and one docstring line fails lint
 - **2026-11-08** — `KYO-673` (investigation) — Measure the residual error of the reviewed credits on a sample checked against the conversations
