@@ -748,7 +748,7 @@ Needs a Kyosei project: **no** — it never searches for one.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo init [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--prefix PREFIX] [--defaults] [--explain] [--in-repo] [--store DIR] [--adopt] [--no-git-init] [directory]`
+Usage: `kyo init [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--prefix PREFIX] [--defaults] [--explain] [--in-repo] [--store DIR] [--adopt] [--read-transcripts {yes,no}] [--no-git-init] [directory]`
 
 ### Positional arguments
 
@@ -762,6 +762,7 @@ Usage: `kyo init [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 - `--in-repo` — optional. put the store INSIDE the code repository (kyosei/ and ideas/ committed alongside the code) instead of the default, which is a store of its own at ~/kyosei/<project>/ in its own git repository. The right choice when records are not sensitive and you want them reviewed in the same pull request as the code; it also means ideas/, record descriptions, shift notes, evidence stored verbatim and frozen briefs all become committed prose in this repository
 - `--store DIR` — optional. put the split store at this path instead of ~/kyosei/<project>/ ($KYOSEI_HOME overrides the ~/kyosei part)
 - `--adopt` — optional. link the existing store at the chosen path even when kyo init cannot confirm it belongs to this code repository: its recorded code repository (root commit) differs, or cannot be compared. Without it, such a store is refused, so a repository never silently adopts another project's store that merely shares its directory name
+- `--read-transcripts {yes,no}` — optional. required to create a store, and has no default: whether Kyosei may read this project's Claude Code transcripts and prompt history, on this machine, to check that words credited to a person are theirs, and keep a local archive of them. Written as read_transcripts: in kyosei/config.yml; setup decision D14 in `kyo onboard` gives the full disclosure (KYO-686)
 - `--no-git-init` — optional. in a directory that is in no git repository, do NOT run `git init` and commit the files kyo init wrote there; the store then records no code-repository identity until you make the repository and commit, after which the next `kyo doctor` or session-start brief records it
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

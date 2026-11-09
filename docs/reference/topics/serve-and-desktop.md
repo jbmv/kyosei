@@ -250,13 +250,13 @@ in a login shell ("Starting an orchestrator from another machine", above). A new
 without the app:
 
 ```sh
-ssh <devbox> "zsh -lc 'mkdir -p ~/code/<name> && cd ~/code/<name> && kyo init --defaults'"
+ssh <devbox> "zsh -lc 'mkdir -p ~/code/<name> && cd ~/code/<name> && kyo init --defaults --read-transcripts <yes|no>'"
 ssh <devbox> "zsh -lc 'kyo orchestrator start <name>'"
 ssh <devbox> "zsh -lc 'kyo orchestrator list'"
 ```
 
 `kyo init --defaults` makes a split store (`--in-repo` puts it inside the code repository
-instead; KYO-573) and registers the project, so the next `/v1/projects` lists it. A bare
+instead; KYO-573), records the required answer to setup decision D14, and registers the project, so the next `/v1/projects` lists it. A bare
 `kyo init` in a folder with no store writes nothing and names these routes (KYO-558).
 `kyo orchestrator start` needs `kyo orchestrator --install --apply` to have been run once
 on `<devbox>` itself (above).
@@ -365,7 +365,9 @@ same store this CLI writes to:
   registers the project) and, if asked, `kyo controller start` there. It asks where the
   store lives (setup decision B1; KYO-573): a store of its own in the home folder,
   `kyo init --defaults`, selected unless you pick the other, or the store inside the code
-  repository, `kyo init --in-repo`, which publishes its prose with the code. Without the app it
+  repository, `kyo init --in-repo`, which publishes its prose with the code. It also asks
+setup decision D14, with no answer preselected, and New Project cannot go on without one;
+the answer is passed as `--read-transcripts`. Without the app it
   is the same four commands in a terminal: `ssh`, `mkdir`, `kyo init --defaults` (or
   `--in-repo`), `kyo orchestrator start`. macOS needs Remote Login enabled on the machine the commands go to.
 - **To open a record a message names, click it in the claude tab** (KYO-263). What is

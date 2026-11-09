@@ -3382,6 +3382,20 @@ ipcMain.handle(
         problem,
       };
     }
+    // KYO-686: the dialog sends an answer or nothing; `kyo init` has no default for it.
+    if (typeof input.readTranscripts !== "boolean") {
+      return {
+        ok: false,
+        root,
+        machine: host.machine,
+        name: null,
+        prefix: null,
+        registered: false,
+        controller: null,
+        failedStep: "init",
+        problem: "the question about reading transcripts has no answer",
+      };
+    }
     const outcome = await createProject(
       host,
       root,
@@ -3389,6 +3403,7 @@ ipcMain.handle(
         startController: input.startController === true,
         // Anything but the in-repo choice is the split store, the default (KYO-573).
         storeLocation: input.storeLocation === "in-repo" ? "in-repo" : "split",
+        readTranscripts: input.readTranscripts,
       },
       runProcess,
     );

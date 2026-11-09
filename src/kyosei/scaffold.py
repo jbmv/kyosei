@@ -419,15 +419,40 @@ def existing_store_refusal(root: Path, *, asked_for_split: bool) -> str:
     return f"{head}; this is already a Kyosei project"
 
 
+def _require_transcript_answer(code_root: Path, read_transcripts: bool | None) -> None:
+    """KYO-686.c1: refuse to create a store with no answer to setup decision D14. A
+    project's first sessions often hold its most important planning, so the question is
+    put before the store exists rather than defaulted (KYO-685)."""
+    if read_transcripts is not None:
+        return
+    raise UsageError(
+        f"`kyo init` needs an answer before it creates a store for {code_root}, so it wrote "
+        "nothing. Run it again with `--read-transcripts yes` or `--read-transcripts no`. "
+        "The answer decides whether Kyosei may read this project's Claude Code transcripts "
+        "and prompt history, on this machine, to check that words credited to a person are "
+        "theirs and to count the turns of a discussion a credit cites, and whether it keeps "
+        "a local archive of each session's transcript. It is written as "
+        "`read_transcripts:` in kyosei/config.yml and can be changed there later, but "
+        "sessions held before a yes may no longer be there to read. `kyo onboard` gives "
+        "the full disclosure, as setup decision D14"
+    )
+
+
 def init_project(
-    root: Path, *, prefix: str | None = None, layout: str | None = None
+    root: Path,
+    *,
+    prefix: str | None = None,
+    layout: str | None = None,
+    read_transcripts: bool | None = None,
 ) -> tuple[list[Path], str]:
     """Create the project skeleton. Returns the paths written and the chosen prefix.
 
     ``layout`` is recorded in ``config.yml`` as ``layout_at_init`` (KYO-60): a
     historical fact about which layout this project was created under, which is
     the only thing that separates a project that *chose* the in-repo layout from
-    one that predates the choice existing at all.
+    one that predates the choice existing at all. ``read_transcripts`` is setup decision
+    D14's answer, recorded the same way (KYO-686.c2); :func:`init_layout` refuses to get
+    here without one.
     """
     root = root.resolve()
     if config_path_for(root).exists():
@@ -450,7 +475,14 @@ def init_project(
             path.write_text(content, encoding="utf-8")
             written.append(path)
 
-    written.append(write_config(root, project_prefix=chosen, layout_at_init=layout))
+    written.append(
+        write_config(
+            root,
+            project_prefix=chosen,
+            layout_at_init=layout,
+            read_transcripts=read_transcripts,
+        )
+    )
     from .config import load_config
 
     create_database(load_config(root))
@@ -759,6 +791,7 @@ def init_layout(
     git_init: bool = True,
     environ: dict[str, str] | None = None,
     claude_md: bool = False,
+    read_transcripts: bool | None = None,
 ) -> InitResult:
     """Scaffold a project under whichever of the two layouts was chosen.
 
@@ -772,6 +805,10 @@ def init_layout(
     CLAUDE.md the setup-incomplete Kyosei section when it has none -- written before
     the first commit when this call makes the repository, so that commit still holds
     every file `kyo init` wrote there.
+
+    ``read_transcripts`` is the answer to setup decision D14, and ``None`` is no answer:
+    refused at each point that would create a store and nowhere else, so linking a store
+    that exists and re-running over one are unaffected (KYO-686.c1).
     """
     code_root = code_root.resolve()
     if in_repo:
@@ -785,7 +822,11 @@ def init_layout(
                 "--in-repo and --adopt contradict each other: --adopt links an existing "
                 "split store, --in-repo scaffolds a new store inside the code repository"
             )
-        written, chosen = init_project(code_root, prefix=prefix, layout=LAYOUT_IN_REPO)
+        if not config_path_for(code_root).exists():
+            _require_transcript_answer(code_root, read_transcripts)
+        written, chosen = init_project(
+            code_root, prefix=prefix, layout=LAYOUT_IN_REPO, read_transcripts=read_transcripts
+        )
         # KYO-206.c1: the code repository ignores the worker report path from the
         # moment the project exists, under both layouts and by the same call.
         ignore_changes, _ = install_report_gitignore(code_root)
@@ -879,6 +920,7 @@ def init_layout(
         if not (store_root / ".git").exists():
             git_notes.extend(init_store_repository(store_root))
     else:
+        _require_transcript_answer(code_root, read_transcripts)
         check_store_location(store_root)
         # KYO-569.c1: `kyo init --defaults DIR` creates DIR, as `git init DIR` does --
         # after every refusal above, so a refused init still writes nothing.
@@ -896,6 +938,7 @@ def init_layout(
             store_root,
             prefix=prefix or ids.normalise_prefix(code_root.name),
             layout=LAYOUT_SPLIT,
+            read_transcripts=read_transcripts,
         )
         # KYO-416.c4: recorded before the first commit, so the store's own history
         # carries which code repository it was made for from its first line.

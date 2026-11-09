@@ -146,7 +146,11 @@ def test_defaults_does_what_bare_init_used_to(
     twin = tmp_path / "twin" / "my-app"
     twin.mkdir(parents=True)
     direct = scaffold.init_layout(
-        twin, prefix=prefix, store_dir=tmp_path / "twin-store", environ=dict(os.environ)
+        twin,
+        prefix=prefix,
+        store_dir=tmp_path / "twin-store",
+        environ=dict(os.environ),
+        read_transcripts=False,
     )
     assert sorted(data["written"]) == sorted(
         str(p.relative_to(direct.store_root)) for p in direct.written
@@ -165,8 +169,8 @@ def test_the_refusal_names_three_routes_with_the_derived_path_and_prefix(
     result = invoke(["init", str(fresh)])
     err = result.err
     onboard = err.index("kyo onboard`")
-    defaults = err.index(f"`kyo init --defaults {fresh}`")
-    in_repo = err.index(f"`kyo init --in-repo {fresh}`")
+    defaults = err.index(f"`kyo init --defaults --read-transcripts <yes|no> {fresh}`")
+    in_repo = err.index(f"`kyo init --in-repo --read-transcripts <yes|no> {fresh}`")
     assert onboard < defaults < in_repo
     assert "recommended" in err[onboard:defaults]
     assert str(store_home / "my-app") in err[defaults:in_repo]
@@ -181,7 +185,7 @@ def test_the_routes_run_as_printed_from_where_they_were_printed(
     monkeypatch.chdir(fresh)
     err = invoke(["init", "--prefix", "APP"]).err
     assert "  `kyo onboard`" in err
-    assert "  `kyo init --defaults --prefix APP`" in err
+    assert "  `kyo init --defaults --read-transcripts <yes|no> --prefix APP`" in err
     assert "APP-1" in err
     assert invoke(["init", "--defaults", "--prefix", "APP"]).code == 0
 
@@ -547,9 +551,9 @@ def test_the_onboarding_prompt_passes_a_layout_flag_according_to_b1() -> None:
     prompt = cmd_onboard.render_prompt()
     step = prompt[prompt.index("## Step 4") : prompt.index("## Step 5")]
     init_line = next(line for line in step.splitlines() if line.startswith("2. `kyo init"))
-    assert "`kyo init --defaults --prefix <PREFIX>`" in init_line
-    assert "**[B1]**" in init_line
-    assert "`kyo init --in-repo --prefix <PREFIX>`" in step
+    assert "`kyo init --defaults --prefix <PREFIX> --read-transcripts <yes|no>`" in init_line
+    assert "**[B1]**" in " ".join(step.split())
+    assert "--in-repo --prefix <PREFIX> --read-transcripts <yes|no>`" in " ".join(step.split())
     for command in re.findall(r"`(kyo init[^`]*)`", prompt):
         flags = command.split()[2:]
         assert not flags or {"--defaults", "--in-repo", "--adopt", "--no-git-init"} & set(

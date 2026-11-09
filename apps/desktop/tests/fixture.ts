@@ -625,7 +625,11 @@ export async function makeFixture(options: FixtureOptions | number = {}): Promis
   // explicitly rather than relying on having inherited it.
   const home = join(base, "kyosei home");
   process.env.KYOSEI_HOME = home;
-  await kyo(resolution, ["init", "--in-repo", "--prefix", "FIX", root], base);
+  await kyo(
+    resolution,
+    ["init", "--in-repo", "--prefix", "FIX", "--read-transcripts", "no", root],
+    base,
+  );
   if (git) {
     const run = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
     run("init", "-b", "main");

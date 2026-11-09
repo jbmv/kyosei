@@ -13,7 +13,12 @@ import yaml
 
 import kyosei
 from kyosei import cmd_onboard
-from kyosei.config import READ_TRANSCRIPTS_KEY, load_config, transcripts_opted_in
+from kyosei.config import (
+    READ_TRANSCRIPTS_KEY,
+    load_config,
+    render_config,
+    transcripts_opted_in,
+)
 from kyosei.errors import KyoseiError
 from kyosei.harness import claude_code_transcript as transcript
 from kyosei.schema import CONFIG_CONSUMERS, OPTIONAL_CONFIG_KEYS
@@ -428,9 +433,15 @@ def test_the_setup_decisions_list_carries_the_question_and_the_people_key() -> N
 
 
 def test_the_config_kyo_init_writes_offers_the_key(project: Path) -> None:
+    """KYO-686: the fixture's `kyo init` answered, so the key is set; the commented offer
+    is what `render_config` writes for a project with no answer, as one from before."""
     text = _config_path(project).read_text(encoding="utf-8")
-    assert f"# {READ_TRANSCRIPTS_KEY}: true" in text
-    assert READ_TRANSCRIPTS_KEY not in yaml.safe_load(text)
+    assert yaml.safe_load(text)[READ_TRANSCRIPTS_KEY] is False
+    raw = yaml.safe_load(text)
+    del raw[READ_TRANSCRIPTS_KEY]
+    rendered = render_config(raw)
+    assert f"# {READ_TRANSCRIPTS_KEY}: true" in rendered
+    assert READ_TRANSCRIPTS_KEY not in yaml.safe_load(rendered)
 
 
 def test_onboard_check_reads_the_answer_back(project: Path) -> None:
@@ -439,6 +450,9 @@ def test_onboard_check_reads_the_answer_back(project: Path) -> None:
         items = {i["label"]: i for i in ran.json["projects"][0]["items"]}
         return items[READ_TRANSCRIPTS_KEY]
 
+    raw = yaml.safe_load(_config_path(project).read_text(encoding="utf-8"))
+    del raw[READ_TRANSCRIPTS_KEY]
+    _config_path(project).write_text(yaml.safe_dump(raw), encoding="utf-8")
     missing = item()
     assert missing["status"] == "missing" and "D14" in missing["fix"]
     _write_key(project, False)

@@ -1288,6 +1288,10 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "same as --in-repo: it explains the init-time layout choice and writes nothing "
         "(KYO-558); `kyo where` is what an orchestrator reads its own layout back with"
     ),
+    ("init", "--read-transcripts"): (
+        "kyo onboard's prompt carries it, and the refusal names it; an orchestrator is "
+        "working in a store that already has its answer"
+    ),
     ("init", "--no-git-init"): (
         "same as --in-repo: an init-time choice (KYO-507) made before any controller "
         "session exists; docs/reference/topics/store.md, 'What `kyo init` creates', names it"

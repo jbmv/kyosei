@@ -19,6 +19,10 @@
 // default -- `kyo init --defaults` -- and the store inside the code repository --
 // `kyo init --in-repo` -- the other. Costly to undo (KYO-557), so it is asked, not taken.
 //
+// READING TRANSCRIPTS (KYO-686, setup decision D14): `kyo init` refuses to create a store
+// without this answer, so it is asked here with nothing preselected and Choose stays
+// disabled until it is given. The disclosure is on the dialog, so the choice is informed.
+//
 // CHOOSE picks the selected folder, or the folder being shown when none is selected,
 // as a Mac's own "Choose" does. The project is made there and the dialog then says
 // what was done, in sentences built from `kyo`'s JSON, and offers to open it.
@@ -47,6 +51,19 @@ export interface NewProjectDialogOptions {
   /** Open the new project, in a new window. Returns a refusal sentence, or null. */
   onOpen(root: string, server: RemoteFacts | null): Promise<string | null>;
 }
+
+/** Setup decision D14's disclosure, shown with the question. Exported for the checks. */
+export const READ_TRANSCRIPTS_DISCLOSURE =
+  "It is used to check that words credited to you are yours, and to count the turns of a " +
+  "discussion a credit cites. If yes, Kyosei reads the Claude Code transcripts and prompt " +
+  "history for this project on the machine it runs on, when a credit is written or " +
+  "rechecked and when a session stops. The store keeps the check's outcome, the matched " +
+  "record's id and time, and counts and times for a cited discussion, and no transcript " +
+  "text. Transcripts are copied to a local archive outside every git repository, and " +
+  "neither they nor the prompt history leave the machine. If no, none of this is read, " +
+  "and a credit records its check as not-applicable. You can change the answer later in " +
+  "kyosei/config.yml, but sessions from before a yes may no longer be there to read. " +
+  "Setup decision D14 in docs/guide/setup-decisions.md has the full disclosure.";
 
 /** `name` inside `parent`, as the main process builds it too. */
 function childOf(parent: string, name: string): string {
@@ -145,6 +162,37 @@ export function openNewProjectDialog(host: HTMLElement, options: NewProjectDialo
   function storeLocation(): StoreLocation {
     return storeChoices.find(({ radio }) => radio.checked)?.location ?? DEFAULT_STORE_LOCATION;
   }
+  const transcriptChoices = (["yes", "no"] as const).map((answer) => {
+    const radio = el("input", {
+      data: { region: "new-project-transcripts-choice", answer },
+      attrs: { type: "radio", name: "new-project-transcripts", value: answer },
+    });
+    radio.addEventListener("change", () => reflectChoice());
+    return { answer, radio };
+  });
+  const transcriptField = el(
+    "fieldset",
+    { class: "picker-store", data: { region: "new-project-transcripts" } },
+    [
+      el("legend", { text: "May Kyosei read this project's Claude Code transcripts?" }),
+      el("div", {
+        class: "remote-hint",
+        data: { region: "new-project-transcripts-disclosure" },
+        text: READ_TRANSCRIPTS_DISCLOSURE,
+      }),
+      ...transcriptChoices.map(({ answer, radio }) =>
+        el("label", { class: "picker-check", data: { answer } }, [
+          radio,
+          el("span", { text: answer === "yes" ? "Yes" : "No" }),
+        ]),
+      ),
+    ],
+  );
+  /** The answer given, or null while none is. */
+  function readTranscripts(): boolean | null {
+    const chosen = transcriptChoices.find(({ radio }) => radio.checked);
+    return chosen === undefined ? null : chosen.answer === "yes";
+  }
   const startBox = el("input", {
     data: { region: "new-project-start" },
     attrs: { type: "checkbox" },
@@ -187,6 +235,7 @@ export function openNewProjectDialog(host: HTMLElement, options: NewProjectDialo
     folderRow,
     chosenLine,
     storeField,
+    transcriptField,
     startLabel,
     problem,
     el("div", { class: "prompt-actions" }, [
@@ -273,7 +322,7 @@ export function openNewProjectDialog(host: HTMLElement, options: NewProjectDialo
   function reflectChoice(): void {
     const path = chosenPath();
     chosenLine.textContent = path === null ? "" : `Project folder: ${path}`;
-    chooseButton.toggleAttribute("disabled", path === null || busy);
+    chooseButton.toggleAttribute("disabled", path === null || busy || readTranscripts() === null);
     newFolderButton.toggleAttribute("disabled", current === null || busy);
   }
 
@@ -449,7 +498,8 @@ export function openNewProjectDialog(host: HTMLElement, options: NewProjectDialo
   async function choose(): Promise<void> {
     const entry = server();
     const root = chosenPath();
-    if (busy || entry === null || root === null) return;
+    const transcripts = readTranscripts();
+    if (busy || entry === null || root === null || transcripts === null) return;
     busy = true;
     reflectChoice();
     say(
@@ -463,6 +513,7 @@ export function openNewProjectDialog(host: HTMLElement, options: NewProjectDialo
         server: entry.server,
         root,
         storeLocation: storeLocation(),
+        readTranscripts: transcripts,
         startController: startBox.checked,
       });
     } catch (error) {

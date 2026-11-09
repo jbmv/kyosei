@@ -410,7 +410,7 @@ test("what ssh prints on stderr is the problem, verbatim, at every step that run
     const made = await createProject(
       host,
       "/x/y",
-      { startController: true, storeLocation: "split" },
+      { startController: true, storeLocation: "split", readTranscripts: false },
       runProcess,
     );
     expect(made).toMatchObject({ ok: false, failedStep: "mkdir", problem: said });
@@ -455,15 +455,17 @@ test("New project runs mkdir -p, kyo init and kyo controller start there, in tha
   const made = await createProject(
     host,
     root,
-    { startController: true, storeLocation: "split" },
+    { startController: true, storeLocation: "split", readTranscripts: false },
     run,
   );
   expect(argvs).toEqual([
     commandArgv(host, ["mkdir", "-p", "--", root]),
-    commandArgv(host, ["kyo", "init", "--defaults", "--json", root]),
+    commandArgv(host, ["kyo", "init", "--defaults", "--read-transcripts", "no", "--json", root]),
     commandArgv(host, ["kyo", "controller", "start", "--json", root]),
   ]);
-  expect(argvs[1]?.at(-1)).toBe("'kyo init --defaults --json '\\''/Users/me/new thing'\\'''");
+  expect(argvs[1]?.at(-1)).toBe(
+    "'kyo init --defaults --read-transcripts no --json '\\''/Users/me/new thing'\\'''",
+  );
   expect(made).toEqual({
     ok: true,
     root,
@@ -492,7 +494,7 @@ test("New project runs mkdir -p, kyo init and kyo controller start there, in tha
   const plain = await createProject(
     host,
     root,
-    { startController: false, storeLocation: "split" },
+    { startController: false, storeLocation: "split", readTranscripts: false },
     quiet.run,
   );
   expect(quiet.argvs).toHaveLength(2);
@@ -507,7 +509,7 @@ test("New project runs mkdir -p, kyo init and kyo controller start there, in tha
   const noKyo = await createProject(
     host,
     root,
-    { startController: true, storeLocation: "split" },
+    { startController: true, storeLocation: "split", readTranscripts: false },
     refused.run,
   );
   expect(refused.argvs).toHaveLength(2);
@@ -526,7 +528,7 @@ test("New project runs mkdir -p, kyo init and kyo controller start there, in tha
   const noServer = await createProject(
     host,
     root,
-    { startController: true, storeLocation: "split" },
+    { startController: true, storeLocation: "split", readTranscripts: false },
     late.run,
   );
   expect(noServer).toMatchObject({
@@ -544,7 +546,7 @@ test("New project runs mkdir -p, kyo init and kyo controller start there, in tha
       await createProject(
         host,
         "relative",
-        { startController: false, storeLocation: "split" },
+        { startController: false, storeLocation: "split", readTranscripts: false },
         none.run,
       )
     ).ok,
@@ -556,8 +558,8 @@ test("New project's store-location choice is the kyo init layout flag -- --defau
   const root = "/Users/me/new thing";
   const init = JSON.stringify({ ok: true, code_root: root, project_prefix: "NEW", registry: null });
   const expected: Record<StoreLocation, string[]> = {
-    split: ["init", "--defaults", "--json", root],
-    "in-repo": ["init", "--in-repo", "--json", root],
+    split: ["init", "--defaults", "--read-transcripts", "no", "--json", root],
+    "in-repo": ["init", "--in-repo", "--read-transcripts", "no", "--json", root],
   };
   // The labels exactly as KYO-573.c1 fixes them: the split one's closing parenthesis
   // has no opening one, and stays that way.
@@ -579,7 +581,7 @@ test("New project's store-location choice is the kyo init layout flag -- --defau
     const made = await createProject(
       ssh,
       root,
-      { startController: false, storeLocation: location },
+      { startController: false, storeLocation: location, readTranscripts: false },
       run,
     );
     expect(made.ok).toBe(true);
@@ -611,7 +613,7 @@ test("New project's store-location choice is the kyo init layout flag -- --defau
       const made = await createProject(
         local,
         root,
-        { startController: false, storeLocation: location },
+        { startController: false, storeLocation: location, readTranscripts: false },
         run,
       );
       expect(made).toMatchObject({ ok: true, prefix: "NEW", failedStep: null });
@@ -745,7 +747,7 @@ test("through ssh, kyo init makes and registers the project, kyo controller star
       const made = await createProject(
         host,
         root,
-        { startController: true, storeLocation: "split" },
+        { startController: true, storeLocation: "split", readTranscripts: false },
         runProcess,
       );
       expect(made.problem, made.problem ?? "").toBeNull();
@@ -1063,6 +1065,23 @@ test("New Project… is a directory picker over ssh -- breadcrumbs, folders, dou
     await expect(storeChoice("split")).toBeChecked();
     await expect(storeChoice("in-repo")).not.toBeChecked();
 
+    // Setup decision D14 (KYO-686.c4): the question and its disclosure, neither answer
+    // preselected, and Choose disabled until one is given.
+    const transcripts = page.locator('[data-region="new-project-transcripts"]');
+    await expect(transcripts.locator("legend")).toContainText("transcripts");
+    await expect(page.locator('[data-region="new-project-transcripts-disclosure"]')).toContainText(
+      "no transcript text",
+    );
+    const transcriptChoice = (answer: "yes" | "no") =>
+      transcripts.locator(
+        `[data-region="new-project-transcripts-choice"][data-answer="${answer}"]`,
+      );
+    await expect(transcriptChoice("yes")).not.toBeChecked();
+    await expect(transcriptChoice("no")).not.toBeChecked();
+    await expect(page.locator('[data-region="new-project-choose"]')).toBeDisabled();
+    await transcriptChoice("yes").check();
+    await expect(page.locator('[data-region="new-project-choose"]')).toBeEnabled();
+
     // Choose: mkdir -p, kyo init and kyo controller start, over ssh.
     await expect(page.locator('[data-region="new-project-start"]')).toBeChecked();
     await page.locator('[data-region="new-project-choose"]').click();
@@ -1087,7 +1106,7 @@ test("New Project… is a directory picker over ssh -- breadcrumbs, folders, dou
     }
     expect(calls.map((call) => call.at(-1) ?? "").filter((arg) => arg.startsWith("'kyo "))).toEqual(
       [
-        shellQuote(`kyo init --defaults --json ${shellQuote(root)}`),
+        shellQuote(`kyo init --defaults --read-transcripts yes --json ${shellQuote(root)}`),
         shellQuote(`kyo controller start --json ${shellQuote(root)}`),
       ],
     );
@@ -1146,6 +1165,7 @@ test("New Project… with the in-repo store chosen runs kyo init --in-repo there
     await page.locator('[data-region="new-project-start"]').uncheck();
     mkdirSync(SCREENS, { recursive: true });
     await page.screenshot({ path: join(SCREENS, "new-project-in-repo.png") });
+    await page.locator('[data-region="new-project-transcripts-choice"][data-answer="no"]').check();
     await page.locator('[data-region="new-project-choose"]').click();
     const said = page.locator('[data-region="new-project-said"]');
     await expect(said.first()).toContainText(`in ${root} on devbox.`, { timeout: 60_000 });
@@ -1158,7 +1178,7 @@ test("New Project… with the in-repo store chosen runs kyo init --in-repo there
         .calls()
         .map((call) => call.at(-1) ?? "")
         .filter((arg) => arg.startsWith("'kyo ")),
-    ).toEqual([shellQuote(`kyo init --in-repo --json ${shellQuote(root)}`)]);
+    ).toEqual([shellQuote(`kyo init --in-repo --read-transcripts no --json ${shellQuote(root)}`)]);
   } finally {
     if (app !== null) await closeReadyApp(app);
     removeFixture(project);

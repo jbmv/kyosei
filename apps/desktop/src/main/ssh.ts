@@ -410,7 +410,7 @@ export async function startControllerSession(
 export async function createProject(
   host: CommandHost,
   root: string,
-  options: { startController: boolean; storeLocation: StoreLocation },
+  options: { startController: boolean; storeLocation: StoreLocation; readTranscripts: boolean },
   run: Runner,
 ): Promise<NewProjectOutcome> {
   const outcome: NewProjectOutcome = {
@@ -435,7 +435,14 @@ export async function createProject(
   // routes, so the dialog's store-location choice (KYO-573) names one: the split store's
   // defaults, or the store inside the code repository.
   const layout = options.storeLocation === "in-repo" ? "--in-repo" : "--defaults";
-  const initialised = await runKyoOn(host, ["init", layout, "--json", root], run, 120_000);
+  // KYO-686: `kyo init` refuses to create a store without this answer.
+  const answer = options.readTranscripts ? "yes" : "no";
+  const initialised = await runKyoOn(
+    host,
+    ["init", layout, "--read-transcripts", answer, "--json", root],
+    run,
+    120_000,
+  );
   if (initialised.code !== 0) {
     return { ...outcome, failedStep: "init", problem: failureText(initialised, host) };
   }

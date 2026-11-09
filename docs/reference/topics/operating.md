@@ -738,9 +738,10 @@ governs: src/kyosei/cli.py
 kyo onboard                                # guided setup: prints the steps for an agent
                                             # (bare `kyo init` in a new project writes
                                             # nothing and names these routes, KYO-558)
-kyo init --defaults                        # scaffold the store at ~/kyosei/<project>/,
+kyo init --defaults --read-transcripts no  # scaffold the store at ~/kyosei/<project>/,
                                             # its own git repo; writes .kyosei here
-kyo init --in-repo                         # ...or scaffold ideas/ and kyosei/ in this
+                                            # (creating a store needs yes or no, KYO-686)
+kyo init --in-repo --read-transcripts no   # ...or scaffold ideas/ and kyosei/ in this
                                             # repository, committed alongside the code
 kyo init --store ~/kyosei/other            # ...or somewhere you name (adopts an
                                             # existing store at that path)

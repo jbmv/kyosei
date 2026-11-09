@@ -661,6 +661,8 @@ export interface NewProjectInput {
   server: RemoteFacts | null;
   root: string;
   storeLocation: StoreLocation;
+  /** Setup decision D14's answer, given in the dialog: `kyo init --read-transcripts` (KYO-686). */
+  readTranscripts: boolean;
   startController: boolean;
 }
 

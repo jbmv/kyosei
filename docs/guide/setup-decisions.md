@@ -85,7 +85,8 @@ decides, and how a setup agent can find the answer before asking.
   `kyo init --in-repo`. It prints the same text with and without a terminal, because an
   agent runs `kyo` without one. The setup prompt passes `--defaults` or `--in-repo`
   according to this decision, and scripts pass `--defaults`. `kyo init --explain` prints
-  what each layout keeps in or out of the code repository, and writes nothing.
+  what each layout keeps in or out of the code repository, and writes nothing. Creating a
+  store also needs `--read-transcripts yes` or `no` (D14).
 
 ### B2. Should the store repository have a remote?
 
@@ -458,8 +459,13 @@ decides, and how a setup agent can find the answer before asking.
 
 ### D14. May Kyosei read this project's transcripts?
 
-- **Default:** no. A project with no answer counts as not opted in, and no person's words are
-  read. Two mechanical reads happen either way: the Remote Control session id in a session's
+- **Default:** none, and it cannot be recorded as declined or deferred under `onboarding:`.
+  `kyo init` refuses to create a store without `--read-transcripts yes` or
+  `--read-transcripts no` and writes nothing, on every route that creates one, including
+  `--defaults`, because a project's first sessions often hold its most important planning.
+  A project created before this requirement is unaffected: with no answer it counts as not
+  opted in, no person's words are read, and `kyo doctor`'s notice names the question. Two
+  mechanical reads happen whatever the answer: the Remote Control session id in a session's
   transcript, and the token totals of dispatched workers.
 - **What is read:** the Claude Code transcript of a session a credit names, and the prompt
   history (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under
@@ -480,12 +486,14 @@ decides, and how a setup agent can find the answer before asking.
   Kyosei sends none of them anywhere and copies none of them into the store; a store remote
   carries only what is listed as stored.
 - **Where it lives:** `read_transcripts: true` or `read_transcripts: false` in
-  `kyosei/config.yml`. Every later feature that reads a transcript consults the same key.
+  `kyosei/config.yml`, written by `kyo init` from the flag. Every later feature that reads a
+  transcript consults the same key.
 - **Without it:** a credit is still written, and records its transcript check as
   `not-applicable`.
 - **Change later:** set the key. A credit already written keeps the check it recorded.
 - **Decides:** the operator, after reading the disclosure above.
-- **Detect:** `kyo onboard --check` reads the key back.
+- **Detect:** `kyo onboard --check` reads the key back, and reports it as missing until it
+  is set, whatever `onboarding:` says.
 
 ---
 
@@ -603,7 +611,8 @@ The setup prompt ends with a fixed block the operator can check. It lists:
 The next step it names is: write your first idea as its own file in `ideas/`, or ask the
 orchestrator to file your first record.
 
-**Declined and deferred decisions are recorded** (KYO-560). A decision answered yes leaves
+**Declined and deferred decisions are recorded** (KYO-560), except D14, which has only a yes
+or a no. A decision answered yes leaves
 its own trace: a remote, a `worktree_setup` list, a hooks file. One answered no or later
 leaves nothing, and a readback that cannot tell "never decided" from "decided no" sends the
 next agent back to the operator with a question already answered. So the setup agent writes

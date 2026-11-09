@@ -42,7 +42,7 @@ modules:
       type: cli
       entrypoints:
         - "kyo onboard"
-        - "kyo init [--prefix PREFIX] [--in-repo] [--store DIR] [--adopt] [directory]"
+        - "kyo init [--prefix PREFIX] [--in-repo] [--store DIR] [--adopt] [--read-transcripts {yes,no}] [directory]"
         - "kyo new KIND [--title TEXT] [--criteria-file FILE] [--touches-file FILE] [--from FILE] [--check]"
         - "kyo dispatch RECORD_ID [--branch NAME] [--base REF] [--model NAME] [--task-file FILE]"
         - "kyo report DISPATCH_ID --file FILE [--check]"

@@ -61,7 +61,9 @@ asks you the decisions that are yours: where the store lives, the record-id pref
 wire Kyosei into Claude Code, which models workers use. `kyo onboard --check` later reads a
 project back against the same checklist and changes nothing. Bare `kyo init` in a folder
 with no store writes nothing and names the ways to start: `kyo onboard`,
-`kyo init --defaults` for scripts and CI, and `kyo init --in-repo`.
+`kyo init --defaults` for scripts and CI, and `kyo init --in-repo`. A route that creates a
+store also needs `--read-transcripts yes` or `no`, which records whether Kyosei may read the
+project's Claude Code transcripts on this machine to check words credited to a person.
 
 The hooks and the skill reach Claude Code as a plugin inside the installed package, which
 setup registers and enables with your consent; an upgrade of `kyo` then reaches them with

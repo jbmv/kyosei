@@ -2878,6 +2878,13 @@ def _init_in_a_new_project_with_no_layout_chosen(at: Path) -> Provocation:
     return Provocation(root, ("init",))
 
 
+def _init_with_no_answer_to_the_transcript_question(at: Path) -> Provocation:
+    """KYO-686: `--root` keeps the fixture helper from answering for this run."""
+    root = at / "fresh"
+    root.mkdir(parents=True)
+    return Provocation(root, ("init", str(root), "--in-repo"))
+
+
 def _init_split_over_an_existing_in_repo_store(at: Path) -> Provocation:
     root, _ = _project_with_a_record(at)
     return Provocation(root, ("init", str(root)))
@@ -3757,6 +3764,9 @@ PROVOKED: dict[str, Expectation] = {
     # afterwards no longer reaches this refusal (it meets the existing store instead).
     "commands.py:cmd_init#0": Expectation(
         _init_in_a_new_project_with_no_layout_chosen,
+        # KYO-686: the question has no default, so the command shows the choice; either
+        # answer clears this refusal, and the check runs it with one.
+        bindings={"<yes|no>": "no"},
         descriptive={
             "kyo init": "names the command being refused, and the step the guided "
             "setup runs",
@@ -3764,6 +3774,16 @@ PROVOKED: dict[str, Expectation] = {
             "nothing itself, so running it alone cannot clear a refusal about a choice "
             "not yet made",
             "kyo init --explain": "describes the layouts and writes nothing by design",
+        },
+    ),
+    # KYO-686.c1: `tests/test_kyo686_required_transcript_answer.py` runs the remedy, the
+    # same command with the flag, on every route.
+    "scaffold.py:_require_transcript_answer#0": Expectation(
+        _init_with_no_answer_to_the_transcript_question,
+        clears_by_rerun=False,
+        descriptive={
+            "kyo init": "names the command being refused",
+            "kyo onboard": "where the disclosure is printed; it writes nothing",
         },
     ),
     # KYO-416 put the `--in-repo`/`--adopt` contradiction ahead of it, so this site
