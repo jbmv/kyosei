@@ -165,8 +165,6 @@ from .doctor_install import (
     check_harness_hook,
     check_hook_config,
     check_hook_config_superseded,
-    check_transcript_archive_location,
-    check_transcript_retention,
     check_ideas_scratchpad,
     check_installed_build_lag,
     check_orchestrator_only_setup,
@@ -178,6 +176,8 @@ from .doctor_install import (
     check_schema_version,
     check_skill,
     check_skill_superseded,
+    check_transcript_archive_location,
+    check_transcript_retention,
 )
 from .doctor_records import (
     check_completed_with_unmet_criteria,

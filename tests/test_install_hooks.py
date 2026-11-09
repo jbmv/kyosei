@@ -290,9 +290,8 @@ def test_install_hooks_rewrites_the_doctor_first_stop_hook(kyo, project: Path) -
         # replacement -- not that the event runs one command, which stopped being
         # true and was never this test's subject.
         assert commands.count(guarded(STOP_RECIPE)) == 1, f"{event}: {commands}"
-        assert commands == [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], (
-            f"{event}: {commands}"
-        )
+        expected = [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)]
+        assert commands == expected, f"{event}: {commands}"
 
 
 def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html(
@@ -329,9 +328,8 @@ def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
         assert retired not in commands, f"{event}: {commands}"
         assert commands.count(guarded(STOP_RECIPE)) == 1, f"{event}: {commands}"
-        assert commands == [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], (
-            f"{event}: {commands}"
-        )
+        expected = [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)]
+        assert commands == expected, f"{event}: {commands}"
 
 
 # --------------------------------------------------------- KYO-269: SessionEnd timeout

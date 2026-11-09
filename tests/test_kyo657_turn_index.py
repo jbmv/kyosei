@@ -477,7 +477,7 @@ def test_an_original_still_present_is_preferred_to_the_archive(tmp_path: Path) -
 
 
 def test_the_archive_is_outside_every_git_repository_of_a_split_store(tmp_path: Path) -> None:
-    """A split store is itself a repository at $KYOSEI_HOME/<project>; the archive is its sibling."""
+    """A split store is a repository at $KYOSEI_HOME/<project>; the archive is a sibling."""
     home = Path(os.environ["KYOSEI_HOME"])
     store = home / "proj"
     (store / ".git").mkdir(parents=True)
