@@ -50,6 +50,11 @@ put it there. The working database, `kyosei/kyosei.db`, is not committed: it is 
 the exported files with `kyo rebuild`, so git always holds the authoritative copy, and every
 change to it is a diff you can review.
 
+Where a project declares its people ([D13](setup-decisions.md#d13-people-credited)), a verdict,
+gate or decision that rests on a person's judgement carries a credit: their words, checked
+against the session's transcript if the project allows Kyosei to read transcripts
+([D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts)).
+
 ## Standing rules
 
 `kyosei/procedures.md` is the project's rule book, grouped by audience: workers, the

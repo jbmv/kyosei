@@ -242,9 +242,11 @@ Ask these together, in one message. Propose an answer for each from what you rea
   is stored; the words being credited are stored either way, because the credit holds
   them. **What never leaves this machine:** the transcripts and the prompt history. Kyosei
   sends neither anywhere and copies neither into the store; a store remote carries only
-  what is listed as stored. (Default: no.)" Write the answer as `read_transcripts: true` or
-  `read_transcripts: false` in `kyosei/config.yml`. Without it no transcript is read and
-  a credit records its check as `not-applicable`.
+  what is listed as stored. **Read either way:** the Remote Control session id in a session's
+  transcript, and the token totals of dispatched workers; neither reads your words. (Default:
+  no.)" Write the answer as `read_transcripts: true` or `read_transcripts: false` in
+  `kyosei/config.yml`. Without it none of the reading above happens, and a credit records its
+  check as `not-applicable`.
 - **[E1] Machine layout.** Ask: "CLI only on this machine (default), this machine with the
   desktop app, or a dev box you reach from a laptop?"
 - **[E3] `kyo serve`.** Ask only if **[E1]** is not CLI only: "May I run

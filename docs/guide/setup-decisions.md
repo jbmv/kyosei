@@ -456,7 +456,9 @@ decides, and how a setup agent can find the answer before asking.
 
 ### D14. May Kyosei read this project's transcripts?
 
-- **Default:** no. A project with no answer counts as not opted in, and reads nothing.
+- **Default:** no. A project with no answer counts as not opted in, and no person's words are
+  read. Two mechanical reads happen either way: the Remote Control session id in a session's
+  transcript, and the token totals of dispatched workers.
 - **What is read:** the Claude Code transcript of a session a credit names, and the prompt
   history (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under
   `CLAUDE_CONFIG_DIR`), on this machine, when a credit is written or rechecked.
