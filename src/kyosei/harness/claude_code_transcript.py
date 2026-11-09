@@ -81,18 +81,34 @@ PASTED CONTENT IS NEVER THE PERSON'S WORDS (KYO-640, P7). The transcript stores 
 expanded inside the same string as the typed text. ``history.jsonl`` holds the same
 prompt with each paste as a placeholder (``[Pasted text #2 +37 lines]``). A turn is
 paired with a history line of the same session whose text outside the placeholders
-matches the turn's text around them, and then only the typed segments count. A turn
-with no pairable history line (for example one typed through claude.ai, which the
-prompt history does not record) can still match, as ``matched-paste-unknown``. One
-case is not covered and cannot be from these files: whether Claude Code inserts a short
-paste as plain text with no placeholder. If it does, such a paste is indistinguishable
-from typing.
+matches the turn's text around them, and then only the typed segments count. A bracketed
+paste also reaches the transcript wrapped in a ``<pasted_content id=...>`` element (measured
+in this project's transcripts, including a prompt that arrived through tmux); where that is
+present its contents are excluded directly and no history line is needed. A turn neither
+route resolves is settled by the turn index when the project keeps one (KYO-657): the
+index line, confirmed from this transcript at Stop, records that the prompt carried no
+paste, and a Remote Control turn, which the prompt history does not hold, can then match as
+``matched``. A turn with no pairable history line and no index line can still match, as
+``matched-paste-unknown``. One case is not covered and cannot be from these files: a paste
+Claude Code inserts as plain text with neither a placeholder nor the element. It is
+indistinguishable from typing.
 
 THE SECOND SOURCE. When the transcript is absent or unreadable, the prompt history is
 searched for the session's typed prompts (``display`` with placeholders removed), and a
 match there is ``matched`` with the history named as its source. When the transcript is
 present and readable it alone decides (KYO-640: a mismatch against a present transcript
 is refused), and the history serves only to find paste boundaries.
+
+THE ARCHIVE (KYO-683). Claude Code deletes transcripts after ``cleanupPeriodDays``. When no
+original remains, :func:`candidate_transcripts` falls back to the project's copy under
+``$KYOSEI_HOME/transcript-archive/`` (:mod:`kyosei.transcript_archive`), which holds the
+same records, so every reader below answers from the archive with the outcomes it gives
+for the original.
+
+THE TURN INDEX (KYO-657). :func:`read_turn_facts` reads new records from a byte offset and
+returns, without any text, each prompt's id, its record's uuid and time, the kind of its
+``origin``, and whether a paste element is present. ``kyosei.cmd_turns`` confirms the
+index's lines from them at Stop.
 
 WHAT LEAVES THIS MODULE FOR THE STORE (KYO-643.c4). :meth:`CheckResult.store_fields` is
 the matched record's id, its own timestamp, the outcome and the form of the matched words
@@ -113,7 +129,7 @@ import os
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -186,6 +202,13 @@ PASTE_PLACEHOLDER = re.compile(r"\[Pasted text #\d+(?: \+\d+ lines?)?\]")
 #: in this project's transcripts; they are removed so that one cannot match if it is.
 _INJECTED = re.compile(r"<(system-reminder|pasted-content)\b[^>]*>.*?</\1>", re.S)
 
+#: A paste as the transcript carries it (KYO-657.c4). The closing tag repeats the opening
+#: tag's id (measured: ``</pasted_content id="8cf2">``), which the backreference requires, so
+#: text inside a paste that spells a bare closing tag does not end the element early.
+PASTED_ELEMENT = re.compile(
+    r"<pasted_content\b(?P<attrs>[^>]*)>.*?</pasted_content\b(?P=attrs)>", re.S
+)
+
 #: How a typed record's content begins when it is ``!`` shell input or its output.
 _SHELL_PREFIXES = ("<bash-input>", "<bash-stdout>", "<bash-stderr>")
 
@@ -213,10 +236,26 @@ def history_path(config: Path) -> Path:
     return config / "history.jsonl"
 
 
+def archived_transcripts(session_id: str, archive: Path) -> list[Path]:
+    """The archived copies of ``session_id``'s transcript in ``archive``.
+
+    The copy itself, and any copy kept aside when the original was rewritten
+    (:mod:`kyosei.transcript_archive`). :func:`read_transcripts` merges them by record id.
+    """
+    if not archive.is_dir():
+        return []
+    found = [archive / f"{session_id}.jsonl"]
+    found += sorted(archive.glob(f"{session_id}.rewritten-*.jsonl"))
+    return [p for p in found if p.is_file()]
+
+
 def candidate_transcripts(
-    session_id: str, *, config: Path, recorded: Path | None = None
+    session_id: str, *, config: Path, recorded: Path | None = None, archive: Path | None = None
 ) -> list[Path]:
     """The transcript files for ``session_id``, the recorded one first.
+
+    ``archive`` is the project's transcript archive (KYO-683), consulted only when no
+    original remains.
 
     ``recorded`` is the path the session's own hook wrote into ``sessions.json``. The
     search after it matches ``<session id>.jsonl`` under every project directory and
@@ -235,6 +274,8 @@ def candidate_transcripts(
             path = project / f"{session_id}.jsonl"
             if path.is_file() and all(not path.samefile(p) for p in found):
                 found.append(path)
+    if not found and archive is not None:
+        found = archived_transcripts(session_id, archive)
     return found
 
 
@@ -258,6 +299,9 @@ class Turn:
     segments: tuple[str, ...]
     paste_known: bool
     full_text: str = field(default="", repr=False, compare=False)
+    #: The record's ``promptId``, which the turn index is keyed on; absent on a mid-turn
+    #: message and on a history line.
+    prompt_id: str | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -305,6 +349,18 @@ def _typed_words(text: str) -> str | None:
         args = _COMMAND_ARGS.search(text)
         return args.group(1) if args and args.group(1).strip() else None
     return _clean(text)
+
+
+def _segments_of(words: str) -> tuple[tuple[str, ...], bool]:
+    """The person's segments of ``words`` and whether paste boundaries are known.
+
+    A turn holding a ``<pasted_content>`` element is split around it, the paste left out;
+    the boundaries are then known from the transcript alone.
+    """
+    if PASTED_ELEMENT.search(words) is None:
+        return (words,), False
+    parts = tuple(part for part in PASTED_ELEMENT.split(words)[0::2] if part.strip())
+    return parts, True
 
 
 def _is_human(origin: object) -> bool:
@@ -367,8 +423,9 @@ def read_transcripts(paths: list[Path]) -> TranscriptRead:
                 text = _text_of(attachment.get("prompt"))
                 words = _typed_words(text) if text is not None else None
                 if words is not None:
+                    segments, known = _segments_of(words)
                     turns[uuid] = Turn(
-                        uuid, stamp, FORM_MID_TURN, SOURCE_TRANSCRIPT, (words,), False, words
+                        uuid, stamp, FORM_MID_TURN, SOURCE_TRANSCRIPT, segments, known, words
                     )
                 continue
             if kind != "user":
@@ -393,7 +450,18 @@ def read_transcripts(paths: list[Path]) -> TranscriptRead:
                     if record.get("promptSource") == SUGGESTION_PROMPT_SOURCE
                     else FORM_TYPED
                 )
-                turns[uuid] = Turn(uuid, stamp, form, SOURCE_TRANSCRIPT, (words,), False, words)
+                segments, known = _segments_of(words)
+                prompt_id = record.get("promptId")
+                turns[uuid] = Turn(
+                    uuid,
+                    stamp,
+                    form,
+                    SOURCE_TRANSCRIPT,
+                    segments,
+                    known,
+                    words,
+                    prompt_id if isinstance(prompt_id, str) else None,
+                )
     ordered = sorted(turns.values(), key=lambda t: t.timestamp)
     if not has_origin:
         return TranscriptRead(
@@ -523,8 +591,26 @@ def pair_with_history(turns: list[Turn], history: list[HistoryLine]) -> list[Tur
                 tuple(s for s in line.segments if s.strip()),
                 True,
                 turn.full_text,
+                turn.prompt_id,
             )
         )
+    return out
+
+
+def apply_paste_index(turns: list[Turn], flags: Mapping[str, bool]) -> list[Turn]:
+    """Each turn, marked ``paste_known`` when the turn index records no paste in it (KYO-657).
+
+    ``flags`` maps a ``promptId`` or a record's ``uuid`` to whether that prompt carried
+    pasted content (:func:`kyosei.cmd_turns.confirmed_paste_flags`); only a person's lines
+    confirmed from this transcript are in it. A turn already resolved, or one the index
+    does not mention or marks as pasted, is left unchanged.
+    """
+    out: list[Turn] = []
+    for turn in turns:
+        key = turn.prompt_id if turn.prompt_id in flags else turn.id
+        if not turn.paste_known and flags.get(key) is False:
+            turn = replace(turn, paste_known=True)
+        out.append(turn)
     return out
 
 
@@ -692,13 +778,17 @@ def check_quote(
     recorded: Path | None = None,
     config: Path | None = None,
     environ: Mapping[str, str] | None = None,
+    archive: Path | None = None,
+    paste_flags: Mapping[str, bool] | None = None,
 ) -> CheckResult:
     """Whether ``quote`` is the person's own words in session ``session_id``.
 
     ``turn`` names one of the person's turns (a record ``uuid`` or a ``history:<ms>``
     id) when the quote occurs in more than one. ``recorded`` is the transcript path the
     hooks recorded (:func:`kyosei.cmd_sessions.recorded_transcript_path`). ``config``
-    overrides :func:`config_dir`.
+    overrides :func:`config_dir`. ``archive`` is the project's transcript archive, read when
+    no original remains (KYO-683). ``paste_flags`` is the turn index's confirmed answer
+    about pastes (:func:`apply_paste_index`, KYO-657.c4).
 
     Raises :class:`ValueError` for a session id that is not a UUID or a quote with no
     words; every other condition is a named outcome.
@@ -707,7 +797,7 @@ def check_quote(
     if not pieces:
         raise ValueError("the quote has no words to look for")
     base = config if config is not None else config_dir(environ)
-    paths = candidate_transcripts(session_id, config=base, recorded=recorded)
+    paths = candidate_transcripts(session_id, config=base, recorded=recorded, archive=archive)
     history = read_history(history_path(base), session_id)
 
     if paths:
@@ -719,7 +809,9 @@ def check_quote(
             )
         else:
             if read.readable:
-                turns = pair_with_history(read.turns, history)
+                turns = apply_paste_index(
+                    pair_with_history(read.turns, history), paste_flags or {}
+                )
                 decided = _decide(turns, pieces, turn, SOURCE_TRANSCRIPT)
                 if decided is not None:
                     return decided
@@ -774,6 +866,7 @@ def find_person_turns(
     recorded: Path | None = None,
     config: Path | None = None,
     environ: Mapping[str, str] | None = None,
+    archive: Path | None = None,
 ) -> TranscriptRead:
     """The person's turns in a session's transcript, with paste boundaries applied.
 
@@ -781,7 +874,7 @@ def find_person_turns(
     An absent transcript gives no turns and ``readable`` False.
     """
     base = config if config is not None else config_dir(environ)
-    paths = candidate_transcripts(session_id, config=base, recorded=recorded)
+    paths = candidate_transcripts(session_id, config=base, recorded=recorded, archive=archive)
     if not paths:
         return TranscriptRead([], False, f"no transcript for session {session_id}")
     read = read_transcripts(paths)
@@ -878,6 +971,7 @@ def measure_span(
     config: Path | None = None,
     environ: Mapping[str, str] | None = None,
     break_seconds: int = SPAN_BREAK_SECONDS,
+    archive: Path | None = None,
 ) -> SpanMeasure:
     """Measure the discussion from record ``first`` to record ``last`` of a session.
 
@@ -895,7 +989,7 @@ def measure_span(
     Raises :class:`ValueError` for a session id that is not a UUID.
     """
     base = config if config is not None else config_dir(environ)
-    paths = candidate_transcripts(session_id, config=base, recorded=recorded)
+    paths = candidate_transcripts(session_id, config=base, recorded=recorded, archive=archive)
     if not paths:
         return SpanMeasure(
             SPAN_TRANSCRIPT_ABSENT,
@@ -958,3 +1052,88 @@ def measure_span(
         started_at=span[0]["timestamp"],
         ended_at=span[-1]["timestamp"],
     )
+
+
+# ---------------------------------------------------------------- the turn index
+
+
+@dataclass(frozen=True)
+class TurnFact:
+    """One prompt as the transcript records it, with no text (KYO-657).
+
+    ``prompt_id`` is None for a message sent while the agent is mid-turn, which Claude Code
+    records as a ``queued_command`` attachment without one; ``turn`` is the record's uuid.
+    ``origin`` is the transcript's ``origin.kind``, or None when the record has no origin.
+    """
+
+    prompt_id: str | None
+    turn: str
+    at: str
+    origin: str | None
+    pasted: bool | None
+
+
+def _origin_kind(origin: object) -> str | None:
+    if isinstance(origin, dict) and isinstance(origin.get("kind"), str):
+        return origin["kind"]
+    return None
+
+
+def _pasted(text: object) -> bool | None:
+    """Whether a prompt's content holds a paste element; None when it has no text."""
+    words = _text_of(text)
+    return None if words is None else PASTED_ELEMENT.search(words) is not None
+
+
+def read_turn_facts(path: Path, offset: int) -> tuple[list[TurnFact], int]:
+    """The prompts in ``path`` past byte ``offset``, and the offset to read from next.
+
+    Reads only whole lines, so a line still being written is left for the next call, and
+    the returned offset never passes it. Each ``promptId`` yields one fact: the record
+    that opened the prompt, never the tool results and injected records sharing its id. A
+    ``queued_command`` is included only when it is the person's. Raises :class:`OSError`.
+    """
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        data = handle.read()
+    end = data.rfind(b"\n") + 1
+    if end == 0:
+        return [], offset
+    facts: list[TurnFact] = []
+    seen: set[str] = set()
+    for raw in data[:end].split(b"\n"):
+        if not raw.strip():
+            continue
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        uuid, stamp = record.get("uuid"), record.get("timestamp")
+        if not isinstance(uuid, str) or not isinstance(stamp, str):
+            continue
+        kind = record.get("type")
+        if kind == "attachment":
+            attachment = record.get("attachment")
+            if (
+                isinstance(attachment, dict)
+                and attachment.get("type") == "queued_command"
+                and attachment.get("commandMode") == "prompt"
+                and _is_human(attachment.get("origin"))
+                and not attachment.get("isMeta")
+            ):
+                prompt = attachment.get("prompt")
+                facts.append(TurnFact(None, uuid, stamp, "human", _pasted(prompt)))
+            continue
+        if kind != "user" or record.get("toolUseResult") is not None or record.get("isMeta"):
+            continue
+        prompt_id = record.get("promptId")
+        if not isinstance(prompt_id, str) or prompt_id in seen:
+            continue
+        seen.add(prompt_id)
+        content = (record.get("message") or {}).get("content")
+        facts.append(
+            TurnFact(prompt_id, uuid, stamp, _origin_kind(record.get("origin")), _pasted(content))
+        )
+    return facts, offset + end

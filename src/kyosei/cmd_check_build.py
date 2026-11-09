@@ -96,6 +96,7 @@ HOOK_INVOCATIONS: tuple[HookInvocation, ...] = (
     HookInvocation("check-clean", "subagent_stop", "the worker-worktree cleanliness guard"),
     HookInvocation("check-branch", "subagent_stop", "the worker-branch store guard"),
     HookInvocation("check-build", "hook", "the per-prompt build-change check"),
+    HookInvocation("turns", "hook", "the turn index and the transcript archive"),
 )
 
 
@@ -140,6 +141,7 @@ QUIET_OUTSIDE_PROJECT: dict[str, str] = {
     "check-clean": "subagent_stop",
     "check-branch": "subagent_stop",
     "check-build": "hook",
+    "turns": "hook",
 }
 
 

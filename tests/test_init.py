@@ -73,9 +73,12 @@ def test_the_sidecar_patterns_are_derived_from_the_database_name() -> None:
         "records.sqlite3-wal",
         "s.json",
         "r.txt",
+        "turns.jsonl",
+        "turns-cursor.json",
         # KYO-407.c8: the sessions temporary follows the sessions name it is written
         # beside; the atomic-write temporary follows no name, only its suffix.
         "s.json.*.tmp",
+        "turns.jsonl.*.tmp",
         "*.kyosei-tmp",
     ]
     assert not any(pattern.startswith("kyosei.db") for pattern in renamed)
@@ -140,7 +143,8 @@ def test_a_project_whose_anchored_patterns_already_cover_it_is_left_alone(
     gitignore = project / "kyosei" / ".gitignore"
     gitignore.write_text(
         "/kyosei.db\n/kyosei.db-shm\n/kyosei.db-wal\n/sessions.json\n/doctor-report.txt\n"
-        "/sessions.json.*.tmp\n/*.kyosei-tmp\n",
+        "/turns.jsonl\n/turns-cursor.json\n"
+        "/sessions.json.*.tmp\n/turns.jsonl.*.tmp\n/*.kyosei-tmp\n",
         encoding="utf-8",
     )
     assert install_gitignore.missing_store_gitignore_lines(project) == []

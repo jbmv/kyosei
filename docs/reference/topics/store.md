@@ -421,6 +421,11 @@ directory. The contents are identical either way:
     sessions.json           # which Claude Code sessions this project has and where each
                              # one is on claude.ai; written by the session hooks, gitignored
                              # (account-linked local state, never git-canonical) -- KYO-186
+    turns.jsonl             # the turn index: one line per prompt, with session, prompt id,
+                             # time, origin and whether it carried a paste, and no text;
+                             # only in a project that opted in (D14), gitignored -- KYO-657
+    turns-cursor.json       # how far each session's transcript has been read for that
+                             # index, and the lock its writers share; gitignored
     doctor-report.txt       # the full report behind `kyo doctor --hook`'s one line;
                              # written by a failing run, deleted by the next clean one,
                              # gitignored (KYO-362)
@@ -429,11 +434,22 @@ directory. The contents are identical either way:
                              # hook re-checks only what changed; carries its own
                              # `*` .gitignore, safe to delete (KYO-408)
     .gitignore               # excludes kyosei.db, the -shm/-wal sidecars SQLite keeps
-                             # beside it in WAL mode, sessions.json and doctor-report.txt,
-                             # and the temporaries an interrupted atomic write can leave
-                             # (sessions.json.*.tmp, *.kyosei-tmp); the export directory
-                             # is git-canonical (KYO-322, KYO-362, KYO-407)
+                             # beside it in WAL mode, sessions.json, doctor-report.txt,
+                             # turns.jsonl and turns-cursor.json, and the temporaries an
+                             # interrupted atomic write can leave (sessions.json.*.tmp,
+                             # turns.jsonl.*.tmp, *.kyosei-tmp); the export directory is
+                             # git-canonical (KYO-322, KYO-362, KYO-407, KYO-657)
 ```
+
+**The transcript archive (KYO-683).** A project that opted in to reading transcripts (setup
+decision D14) keeps a copy of each session's transcript and subagent transcripts under
+`$KYOSEI_HOME/transcript-archive/<project>/`, with Claude Code's own layout: `<session
+id>.jsonl` and `<session id>/subagents/`. It lies outside every git repository, which `kyo
+doctor` checks, and a split store's directory is not a place for it, since the store is
+itself a repository. The Stop and SessionEnd hook copies only what is new, and the credit
+reader falls back to the copy once the original has been deleted. A `/clear` starts a new
+transcript file with a new session id, so the archive holds one file per transcript file,
+which is not one per run of a session.
 
 **The code directory's git state decides whether the store records an identity.** The
 split store's `code_repo_id` is the code repository's root commit, so `kyo init` treats
@@ -648,6 +664,7 @@ the store directly:
 | every open gate across every record, with the record it is on | `kyo gates`, `--type` (repeatable) to narrow; `--json` also carries each record's open-gate count (KYO-454) |
 | the dispatch activity rows — every running dispatch and the newest finished ones, with verdict counts, worker tokens, end time, and what git says about each worktree now (dirty paths, commits past base, lines, last commit, merged or not) | `kyo activity`, `--finished N` for the window (default 12), `--against REF` for the trunk. A missing worktree is a fact on the row, never an error (KYO-454) |
 | the tool's own invariant checks over the store | `kyo doctor` |
+| the turn index of a project that opted in to reading transcripts: one line per prompt, whose it was and whether it carried a paste | `kyo turns`, `--session` to narrow; `--json` gives the lines. The lines hold no text (KYO-657) |
 | which Claude Code sessions this project has had, when each was last seen and on which hook event, and where each one is on Remote Control | `kyo sessions`, which reads `kyosei/sessions.json` — the file the packaged session hooks write with `kyo sessions --hook`, and the file the desktop's claude tab reads to decide which session to open on (KYO-186). It is gitignored local state, so it answers this for *your* checkout and no other |
 
 **Credits on what you read (KYO-647).** The `author` of a row stays the agent that wrote

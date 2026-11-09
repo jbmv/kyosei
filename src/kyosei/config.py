@@ -74,6 +74,15 @@ DB_NAME = "kyosei.db"
 #: for them to drift apart on (law 3).
 SESSIONS_NAME = "sessions.json"
 
+#: KYO-657: the turn index, one line per prompt, beside :data:`SESSIONS_NAME` and gitignored
+#: like it, and the sidecar holding how far each session's transcript has been read.
+TURNS_NAME = "turns.jsonl"
+TURNS_CURSOR_NAME = "turns-cursor.json"
+
+#: KYO-683: the directory directly under ``$KYOSEI_HOME`` holding per-project transcript
+#: archives. A sibling of the stores because a split store is itself a git repository.
+TRANSCRIPT_ARCHIVE_DIRNAME = "transcript-archive"
+
 #: KYO-362: where `kyo doctor --hook` leaves the report its one stderr line points at.
 #: Beside :data:`DB_NAME` and :data:`SESSIONS_NAME`, and on the same side of the line
 #: they draw: local state, gitignored, rewritten by the next failing run and deleted by

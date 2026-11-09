@@ -22,9 +22,11 @@ from . import (
     scaffold,
 )
 from . import config as config_module
-from .config import CONFIG_NAME
+from .config import CONFIG_NAME, transcripts_opted_in
+from .harness.claude_code_transcript import config_dir
 from .schema import SCHEMA_VERSION
 from .store import Store
+from .transcript_archive import archive_dir, archive_location_problem
 
 
 def check_schema_version(store: Store) -> list[str]:
@@ -1051,3 +1053,63 @@ def check_code_repo_identity_mismatch(store: Store) -> list[str]:
         f"repository's, run `{remedy}` in {code_root} to record the new identity; if it "
         "is not, link this repository to its own store"
     ]
+
+
+# -------------------------------------------- KYO-657.c5, KYO-683.c4: transcript retention
+
+#: The Claude Code settings key that says how many days a transcript is kept.
+CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
+
+#: Under this many days, a credit cannot be checked or rechecked a year on (DC10).
+MINIMUM_CLEANUP_DAYS = 365
+
+
+def _cleanup_period_days(store: Store) -> int | None:
+    """The effective ``cleanupPeriodDays``: the highest-precedence settings file naming it.
+
+    Project-local beats project beats user, Claude Code's own order. A file absent or
+    unreadable, or a value that is not a number, reads as unset.
+    """
+    project = store.config.repo_root / ".claude"
+    for path in (
+        project / "settings.local.json",
+        project / "settings.json",
+        config_dir() / "settings.json",
+    ):
+        try:
+            settings = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(settings, dict) and CLEANUP_PERIOD_KEY in settings:
+            value = settings[CLEANUP_PERIOD_KEY]
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return None
+
+
+def check_transcript_retention(store: Store) -> list[str]:
+    """KYO-657.c5: a project reading transcripts is told when they are deleted within a year.
+
+    A NOTICE: the setting belongs to the person and their machine, and a shorter period
+    may be intended. Silent where the project has not opted in, whose credits read no
+    transcript. Setting the key clears it.
+    """
+    if not transcripts_opted_in(store.config):
+        return []
+    days = _cleanup_period_days(store)
+    if days is not None and days >= MINIMUM_CLEANUP_DAYS:
+        return []
+    state = "unset (Claude Code's default is 30 days)" if days is None else f"{days} days"
+    return [
+        f"Claude Code's `{CLEANUP_PERIOD_KEY}` is {state}, so a credit cannot be checked "
+        "against a transcript older than that unless the archive holds a copy; set "
+        f"`{CLEANUP_PERIOD_KEY}` to {MINIMUM_CLEANUP_DAYS} or more in Claude Code's "
+        "settings.json (`~/.claude/`, or under `CLAUDE_CONFIG_DIR`)"
+    ]
+
+
+def check_transcript_archive_location(store: Store) -> list[str]:
+    """KYO-683.c4: the transcript archive must lie outside every git repository."""
+    if not transcripts_opted_in(store.config):
+        return []
+    problem = archive_location_problem(archive_dir(store.config))
+    return [problem] if problem is not None else []

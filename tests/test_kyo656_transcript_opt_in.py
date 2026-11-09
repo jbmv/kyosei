@@ -135,7 +135,12 @@ def test_every_module_that_imports_the_reader_asks_the_one_question() -> None:
                 names = [a.name for a in node.names]
             if any("claude_code_transcript" in name for name in names):
                 readers.append(path)
-    assert {p.name for p in readers} == {"credits.py", "doctor_records.py"}
+    assert {p.name for p in readers} == {
+        "cmd_turns.py",
+        "credits.py",
+        "doctor_install.py",
+        "doctor_records.py",
+    }
     for path in readers:
         assert "transcripts_opted_in(" in path.read_text(encoding="utf-8"), path
 

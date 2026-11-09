@@ -8,6 +8,15 @@
           "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo check-build --hook"
         }
       ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "comment": "KYO-657: appends one line for this prompt to the gitignored kyosei/turns.jsonl, with session, prompt id, time and whether it carried pasted content, and no text, in a project that opted in to reading transcripts. It prints nothing, because this hook's stdout is added to the session's context. The Stop hook confirms each line's origin from the transcript.",
+          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo turns --hook"
+        }
+      ]
     }
   ]
 }

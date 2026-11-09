@@ -15,7 +15,7 @@ fails if a packaged fragment is missing from that list.
 
 Every command the hooks below name — `kyo brief`, `kyo doctor`, `kyo sweep`, (KYO-13.c5)
 `kyo check-branch`, (KYO-17) `kyo check-clean`, (KYO-60) `kyo check-push`, (KYO-298)
-`kyo check-command`, (KYO-186) `kyo sessions` and (KYO-398) `kyo check-build` — is a
+`kyo check-command`, (KYO-186) `kyo sessions`, (KYO-398) `kyo check-build` and (KYO-657) `kyo turns` — is a
 command of the installed CLI.
 
 ## Keeping them current
@@ -479,6 +479,15 @@ orchestrator's ad-hoc script.
 itself a declared orchestrator-only command: the contradiction above, caught where it can be
 fixed.
 
+### `UserPromptSubmit`, `Stop` and `SessionEnd` → `kyo turns --hook`
+
+In a project that opted in to reading transcripts (setup decision D14, KYO-656), the prompt
+hook appends one line per prompt to the gitignored `kyosei/turns.jsonl`, with no text. The
+Stop and SessionEnd hook confirms each line's origin from the transcript, adds any prompt the
+prompt hook did not index, and copies the session's transcript and subagent transcripts, new
+bytes only, to `$KYOSEI_HOME/transcript-archive/<project>/` (KYO-657, KYO-683). It prints
+nothing and always exits 0, since UserPromptSubmit's stdout is added to the session's context.
+
 ### `UserPromptSubmit` → `kyo check-build --hook`
 
 KYO-398. Every project on a machine runs its one installed `kyo` (KYO-335; the uv tool since
@@ -523,11 +532,11 @@ warning.
 All in `src/kyosei/defaults/hooks/`:
 
 - `session-start.json` — `SessionStart` → `kyo brief --compact --session-start`
-- `stop.json` — `Stop` and `SessionEnd` → `kyo sweep --hook`, then `kyo doctor --hook`
+- `stop.json` — `Stop` and `SessionEnd` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group
 - `subagent-stop.json` — `SubagentStop` → `kyo check-clean --subagent-stop`, then `kyo check-branch --subagent-stop --against main`
 - `sessions.json` — `SessionStart`, `Stop` and `SessionEnd` → `kyo sessions --hook`
 - `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`
-- `prompt-submit.json` — `UserPromptSubmit` → `kyo check-build --hook`
+- `prompt-submit.json` — `UserPromptSubmit` → `kyo check-build --hook`, `kyo turns --hook`
 
 Each file is a standalone JSON fragment shaped like one event's value under `.claude/
 settings.json`'s `"hooks"` key. Its `comment` fields are for a reader of the fragment and are

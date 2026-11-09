@@ -406,7 +406,10 @@ def test_the_prompt_hook_is_packaged_and_installed(kyo, project) -> None:
     assert kyo("install-hooks", "--copies").code == 0
     settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
     commands = [h["command"] for g in settings["hooks"]["UserPromptSubmit"] for h in g["hooks"]]
-    assert [install_hooks.hook_action(c) for c in commands] == ["kyo check-build --hook"]
+    assert [install_hooks.hook_action(c) for c in commands] == [
+        "kyo check-build --hook",
+        "kyo turns --hook",
+    ]
     assert "check-build" in {shape.command for shape in cmd_check_build.HOOK_INVOCATIONS}
 
 

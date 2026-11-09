@@ -83,6 +83,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo split`](#kyo-split) | yes | yes | split unmet criteria to a new successor record, back-linked both ways (M5) |
 | [`kyo sweep`](#kyo-sweep) | yes | yes | flag stale touches and near-duplicate criteria; never edits (M6) |
 | [`kyo touch-drift`](#kyo-touch-drift) | yes | no | compare a dispatch's declared touches against what its branch actually changed (KYO-71) — reports, never refuses |
+| [`kyo turns`](#kyo-turns) | optional | no | the turn index: one line per prompt, with no text, in a project that opted in to reading transcripts (KYO-657) |
 | [`kyo ungate`](#kyo-ungate) | yes | yes | clear a gate by its own id; several ids, or every open gate with a tag, in one transaction (KYO-492) |
 | [`kyo unlink`](#kyo-unlink) | yes | yes | retract a typed edge by its own id; the edge and the reason stay in the events ledger |
 | [`kyo verify`](#kyo-verify) | yes | yes | record a criterion verification (laws 3, 9, 10) |
@@ -1533,6 +1534,23 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 Text output prints the quoted short form in place of the full text after it, which is what it printed there before KYO-489. When it printed any, its last line is: explained in `kyo reference touch-drift`. `<name>` stands for a value of that run.
 
 - "reported, not refused" — This is REPORTED, not refused — a touches table is a prediction and is routinely, defensibly wrong. What it costs is a later dispatch colliding with a file nothing knew was claimed. (KYO-71)
+
+## `kyo turns`
+
+the turn index: one line per prompt, with no text, in a project that opted in to reading transcripts (KYO-657)
+
+Needs a Kyosei project: **optional** — it runs, and says so, where there is no project.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo turns [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--session SESSION] [--hook]`
+
+### Options
+
+- `--session SESSION` — optional. only this session's lines
+- `--hook` — optional. read Claude Code's UserPromptSubmit, Stop or SessionEnd payload on stdin: add this prompt to the index, or confirm the index from the transcript and copy the transcript to the archive; how the packaged hooks invoke this. Prints nothing and always exits 0
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
 ## `kyo ungate`
 

@@ -291,6 +291,8 @@ SUPERSEDED_HOOK_COMMANDS: dict[str, str] = {
     # the invariant `tests/test_install_hooks.py` holds for EVERY packaged command: a
     # hand-merged copy of the bare line picks the guard up by re-running install-hooks.
     "kyo check-build --hook": guarded("kyo check-build --hook"),
+    # KYO-657: the same: no build shipped it bare; the pairing is the invariant.
+    "kyo turns --hook": guarded("kyo turns --hook"),
     # KYO-362: containment cannot carry the new `--hook` flag, so without this every
     # post-KYO-316 install would gain a second doctor group; this supersedes the guarded
     # pre-`--hook` chain they carry (docs/design/scaffold.md#kyo-362).

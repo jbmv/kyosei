@@ -24,6 +24,11 @@ The checks, and the law each one keeps honest:
 
 ============================  =====================================================
 ``check_schema_version``      the db and this build agree
+``check_transcript_retention``  KYO-657 — Claude Code's ``cleanupPeriodDays`` is unset or
+                              under a year in a project reading transcripts. A NOTICE
+                              naming the setting
+``check_transcript_archive_location``  KYO-683 — the transcript archive lies outside
+                              every git repository
 ``check_code_repo_identity_mismatch``  KYO-635 — a split store's recorded
                               ``code_repo_id`` shares no root commit with the linked
                               code repository; `kyo init --store <store> --adopt` is
@@ -160,6 +165,8 @@ from .doctor_install import (
     check_harness_hook,
     check_hook_config,
     check_hook_config_superseded,
+    check_transcript_archive_location,
+    check_transcript_retention,
     check_ideas_scratchpad,
     check_installed_build_lag,
     check_orchestrator_only_setup,
@@ -228,6 +235,10 @@ CHECK_ORDER = (
     "hook_config",
     # KYO-604: the superseded half of `hook_config`'s comparison, a notice.
     "hook_config_superseded",
+    # KYO-657.c5, KYO-683.c4: beside the installation checks, the retention of what this
+    # project's credits are checked against, then where its archive lives.
+    "transcript_retention",
+    "transcript_archive_location",
     "procedures",
     # KYO-212: beside the audience check and after it, on `scope_registry`'s
     # reasoning — a ledger whose audience tokens are broken has a bigger problem
@@ -353,6 +364,8 @@ CHECKS = {
     "harness": check_harness,
     "hook_config": check_hook_config,
     "hook_config_superseded": check_hook_config_superseded,
+    "transcript_retention": check_transcript_retention,
+    "transcript_archive_location": check_transcript_archive_location,
     "procedures": check_procedures,
     "procedures_rules_missing": check_procedures_rules_missing,
     "procedures_rules_differ": check_procedures_rules_differ,
@@ -498,6 +511,7 @@ NOTICE_CHECKS = frozenset(
         "credit_coverage_legacy",
         "credit_transcripts_appeared",
         "credit_people_undeclared",
+        "transcript_retention",
     }
 )
 

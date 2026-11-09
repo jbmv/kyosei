@@ -131,10 +131,12 @@ decides, and how a setup agent can find the answer before asking.
   |---|---|---|
   | Session start | `kyo brief` | Anchors the session: deltas, ready work, gates, the last shift note. |
   | Every prompt | `kyo check-build --hook` | One line when the installed `kyo` changed mid-session. |
+  | Every prompt | `kyo turns --hook` | Silent; indexes the prompt where D14 is yes. |
   | Before a `git push` | `kyo check-push` | Refuses a push that would publish an in-repo store until acknowledged. |
   | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see E3). |
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
+  | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index and copies the transcript to the local archive. |
 
 - **Without them:** the commands still work, but every rule above becomes something the agent
   has to remember.
@@ -461,14 +463,22 @@ decides, and how a setup agent can find the answer before asking.
   transcript, and the token totals of dispatched workers.
 - **What is read:** the Claude Code transcript of a session a credit names, and the prompt
   history (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under
-  `CLAUDE_CONFIG_DIR`), on this machine, when a credit is written or rechecked.
+  `CLAUDE_CONFIG_DIR`), on this machine, when a credit is written or rechecked. Each time a
+  session stops, the hooks read that session's transcript and subagent transcripts to keep
+  the turn index and the archive below, and each prompt the session receives is read for
+  the marker of pasted content.
 - **What is stored:** the check's outcome, the matched record's id and timestamp, the form
   of the words, and for a cited discussion the counts of turns, the active seconds and the
   first and last timestamps. No text, path or hash of a transcript. The words being credited
-  are stored whatever the answer, because the credit holds them.
-- **What never leaves the machine:** the transcripts and the prompt history. Kyosei sends
-  neither anywhere and copies neither into the store; a store remote carries only what is
-  listed as stored.
+  are stored whatever the answer, because the credit holds them. Beside the store and
+  gitignored, `kyosei/turns.jsonl` holds one line per prompt: session, prompt id, time,
+  whose it was and whether it carried pasted content, and no text.
+- **What is copied locally:** the session's transcript and subagent transcripts, to
+  `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
+  git repository, and which a credit is checked against once the original has been deleted.
+- **What never leaves the machine:** the transcripts, the archive and the prompt history.
+  Kyosei sends none of them anywhere and copies none of them into the store; a store remote
+  carries only what is listed as stored.
 - **Where it lives:** `read_transcripts: true` or `read_transcripts: false` in
   `kyosei/config.yml`. Every later feature that reads a transcript consults the same key.
 - **Without it:** a credit is still written, and records its transcript check as

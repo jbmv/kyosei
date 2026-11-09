@@ -53,7 +53,7 @@ from kyosei.install_hooks import (
     packaged_elements,
 )
 
-from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE
+from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
 
 
 def _settings(project: Path) -> Path:
@@ -203,7 +203,11 @@ def test_install_hooks_does_not_duplicate_an_extended_command(kyo, project: Path
     # subject.
     assert stop.count(f"{guarded(STOP_RECIPE)} && make docs") == 1, stop
     assert not any(command == guarded(STOP_RECIPE) for command in stop), stop
-    assert stop == [f"{guarded(STOP_RECIPE)} && make docs", guarded(SESSIONS_RECIPE)], stop
+    assert stop == [
+        f"{guarded(STOP_RECIPE)} && make docs",
+        guarded(TURNS_RECIPE),
+        guarded(SESSIONS_RECIPE),
+    ], stop
 
 
 # ------------------------------------- KYO-31: what the containment check cannot see

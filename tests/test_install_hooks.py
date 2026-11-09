@@ -26,7 +26,7 @@ from kyosei.scaffold import (
     defaults_dir,
 )
 
-from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE
+from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
 
 
 def _settings_path(project: Path) -> Path:
@@ -290,7 +290,9 @@ def test_install_hooks_rewrites_the_doctor_first_stop_hook(kyo, project: Path) -
         # replacement -- not that the event runs one command, which stopped being
         # true and was never this test's subject.
         assert commands.count(guarded(STOP_RECIPE)) == 1, f"{event}: {commands}"
-        assert commands == [guarded(STOP_RECIPE), guarded(SESSIONS_RECIPE)], f"{event}: {commands}"
+        assert commands == [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], (
+            f"{event}: {commands}"
+        )
 
 
 def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html(
@@ -327,7 +329,9 @@ def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
         assert retired not in commands, f"{event}: {commands}"
         assert commands.count(guarded(STOP_RECIPE)) == 1, f"{event}: {commands}"
-        assert commands == [guarded(STOP_RECIPE), guarded(SESSIONS_RECIPE)], f"{event}: {commands}"
+        assert commands == [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], (
+            f"{event}: {commands}"
+        )
 
 
 # --------------------------------------------------------- KYO-269: SessionEnd timeout
@@ -359,7 +363,11 @@ def test_every_packaged_sessionend_hook_carries_a_timeout() -> None:
     session end in every consumer. A packaged `SessionEnd` command with no
     `timeout` is exactly that defect, shipped again."""
     timeouts = _packaged_sessionend_timeouts()
-    assert timeouts == {guarded(STOP_RECIPE): 20, guarded(SESSIONS_RECIPE): 5}
+    assert timeouts == {
+        guarded(STOP_RECIPE): 20,
+        guarded(TURNS_RECIPE): 20,
+        guarded(SESSIONS_RECIPE): 5,
+    }
     for command, timeout in timeouts.items():
         assert isinstance(timeout, int) and 0 < timeout <= 60, (command, timeout)
 
@@ -475,6 +483,7 @@ def test_install_hooks_leaves_a_hand_set_sessionend_timeout_at_or_above_packaged
     hooks = [h for g in settings["hooks"]["SessionEnd"] for h in g["hooks"]]
     assert {h["command"]: h["timeout"] for h in hooks} == {
         guarded(STOP_RECIPE): 30,
+        guarded(TURNS_RECIPE): 30,
         guarded(SESSIONS_RECIPE): 30,
     }
 
