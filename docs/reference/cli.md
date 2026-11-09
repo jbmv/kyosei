@@ -468,7 +468,7 @@ Needs a Kyosei project: **no** — it never searches for one.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send}] {list,issue,revoke} [NAME|ID]`
+Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes}] {list,issue,revoke} [NAME|ID]`
 
 ### Positional arguments
 
@@ -477,7 +477,7 @@ Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 ### Options
 
-- `--permission {send}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes; a token issued without it is refused there
+- `--permission {send,notes}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes and `notes` the note routes; a token issued without the one a route asks for is refused there
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

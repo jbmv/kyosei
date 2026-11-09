@@ -19,6 +19,10 @@ session every :data:`HELD_POLL_SECONDS`, and ends when nothing that can be deliv
 nothing reads a pane while nothing is held. One look costs what a sampler's tick does for the
 pane: the pane lookup and one ``capture-pane``.
 
+A SET OF NOTES (KYO-706) is held like any other message, with the ids of its notes in ``notes``.
+They are tagged as sent when it is delivered (:func:`kyosei.serve_notes.file_as_sent`), and not
+when it is held, refused or retracted, because only then has the agent received them.
+
 DELIVERY goes through :func:`kyosei.serve_send.deliver_held`, because that module is the only one
 that can reach the sending half. A message that cannot go yet stays held with a reason: a screen
 showing a prompt or a dialog, an input box with text in it, no pane, sending switched off, a
@@ -41,7 +45,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import clock, serve_files, serve_send
+from . import clock, serve_files, serve_notes, serve_send
 from .serve import Refusal
 from .serve_events import frame
 from .serve_sessions import ProjectSessions
@@ -81,6 +85,7 @@ def _public(message: dict, *, text: bool) -> dict:
         "reason": message["reason"],
         "detail": message["detail"],
         "retrying": message["retrying"],
+        "notes": message.get("notes", []),
     }
 
 
@@ -137,8 +142,13 @@ class HeldMessages:
         session_id: str,
         authorization: str | None,
         read_body: Callable[[], bytes],
+        *,
+        notes: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Keep a message for ``session_id``, past every check a send makes."""
+        """Keep a message for ``session_id``, past every check a send makes.
+
+        ``notes`` names the notes the message was made from, if it was.
+        """
 
         def store(device: dict, automatic: bool, segments: list[dict]) -> dict:
             with self._lock_of(session_id):
@@ -164,6 +174,7 @@ class HeldMessages:
                     "detail": None,
                     "retrying": True,
                     "delivering": False,
+                    "notes": notes or [],
                 }
                 self._save(path, message)
             self._announce(session_id, "held", message)
@@ -242,6 +253,7 @@ class HeldMessages:
             "id": message["id"],
             "automatic": message["automatic"],
             "segments": _public(message, text=True)["segments"],
+            "notes": message.get("notes", []),
         }
 
     # ------------------------------------------------------------------- what a stream says
@@ -399,6 +411,7 @@ class HeldMessages:
                     )
                     self._save(path, message)
         if result.outcome == "delivered":
+            serve_notes.file_as_sent(self.server, message)
             self._announce(session_id, "delivered", None, message_id=message["id"])
         elif changed:
             self._announce(session_id, "held", message)

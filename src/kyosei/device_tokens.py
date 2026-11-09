@@ -46,8 +46,13 @@ TOKENS_FILE = "device-tokens.json"
 #: The permission that lets a token drive a session.
 PERMISSION_SEND = "send"
 
+#: The permission that lets a token file, read and tag notes (KYO-706). A name of its own,
+#: so that a device that only writes notes cannot type into a session, and a token issued
+#: before the note routes existed does not gain a store write it was never issued for.
+PERMISSION_NOTES = "notes"
+
 #: Every permission this build can grant.
-PERMISSIONS: tuple[str, ...] = (PERMISSION_SEND,)
+PERMISSIONS: tuple[str, ...] = (PERMISSION_SEND, PERMISSION_NOTES)
 
 #: Marks a string as a Kyosei token, for a person reading it and for secret scanners.
 TOKEN_PREFIX = "kyo_"
