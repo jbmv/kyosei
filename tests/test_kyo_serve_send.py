@@ -658,7 +658,8 @@ def test_an_unusable_log_stops_the_send_before_any_key(
 
 def test_only_the_send_module_can_reach_the_sending_functions() -> None:
     package = Path(kyosei.__file__).parent
-    modules = sorted(package.glob("serve*.py"))
+    # device_tokens.py is read by the server and is outside the serve* names.
+    modules = [*sorted(package.glob("serve*.py")), package / "device_tokens.py"]
     assert {
         "serve.py",
         "serve_events.py",
