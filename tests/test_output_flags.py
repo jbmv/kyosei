@@ -182,6 +182,9 @@ def _scenario(
     run("show missing", "show", "TST-99")
 
     _commit_anything(project, "the store, before the guards")
+    # The pinned check-branch output names where the trunk came from. Set it in this
+    # repository so the pin does not depend on the host's global init.defaultBranch (KYO-677).
+    _git(project, "config", "init.defaultBranch", "main")
     run("check-branch", "check-branch", "kyo-137", "--against", "main")
     run("check-clean", "check-clean")
 
