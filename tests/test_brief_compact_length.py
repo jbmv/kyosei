@@ -62,7 +62,7 @@ def build_fixture_payload(tmp: Path) -> dict:
     dispatchable record, one gated record and a handoff note; returns the payload of
     a session-start `kyo brief --compact --json` on it."""
     root = tmp / "proj"
-    _run(tmp, "init", str(root), "--in-repo", "--prefix", "TST")
+    _run(tmp, "init", str(root), "--in-repo", "--prefix", "TST", "--read-transcripts", "no")
     kinds = root / "kyosei" / "kinds.yml"
     import yaml
 

@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from .conftest import git_init, invoke
 
 from kyosei import cmd_onboard, scaffold
+
+from .conftest import git_init, invoke
 
 ROUTES = {
     "defaults": ["--defaults"],
@@ -26,6 +27,11 @@ def _argv(route: str, code: Path, tmp_path: Path) -> list[str]:
 
 def _config(store_root: Path) -> dict:
     return yaml.safe_load((store_root / "kyosei" / "config.yml").read_text(encoding="utf-8"))
+
+
+def _item(result) -> dict:
+    items = result.json["projects"][0]["items"]
+    return next(i for i in items if i["label"] == "read_transcripts")
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -144,7 +150,7 @@ def test_d14_recorded_as_declined_or_deferred_stays_missing(project: Path) -> No
         raw["onboarding"] = {"D14": status}
         path.write_text(yaml.safe_dump(raw), encoding="utf-8")
         result = invoke(["--root", str(project), "onboard", "--check", "--json"])
-        item = next(i for i in result.json["projects"][0]["items"] if i["label"] == "read_transcripts")
+        item = _item(result)
         assert item["status"] == "missing", item
         assert "cannot be declined or deferred" in item["fix"]
     raw = _config(project)
@@ -152,7 +158,7 @@ def test_d14_recorded_as_declined_or_deferred_stays_missing(project: Path) -> No
     del raw["onboarding"]
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     result = invoke(["--root", str(project), "onboard", "--check", "--json"])
-    item = next(i for i in result.json["projects"][0]["items"] if i["label"] == "read_transcripts")
+    item = _item(result)
     assert item["status"] == "present"
 
 

@@ -2878,6 +2878,13 @@ def _init_in_a_new_project_with_no_layout_chosen(at: Path) -> Provocation:
     return Provocation(root, ("init",))
 
 
+def _init_with_no_answer_to_the_transcript_question(at: Path) -> Provocation:
+    """KYO-686: `--root` keeps the fixture helper from answering for this run."""
+    root = at / "fresh"
+    root.mkdir(parents=True)
+    return Provocation(root, ("init", str(root), "--in-repo"))
+
+
 def _init_split_over_an_existing_in_repo_store(at: Path) -> Provocation:
     root, _ = _project_with_a_record(at)
     return Provocation(root, ("init", str(root)))
@@ -3767,6 +3774,16 @@ PROVOKED: dict[str, Expectation] = {
             "nothing itself, so running it alone cannot clear a refusal about a choice "
             "not yet made",
             "kyo init --explain": "describes the layouts and writes nothing by design",
+        },
+    ),
+    # KYO-686.c1: `tests/test_kyo686_required_transcript_answer.py` runs the remedy, the
+    # same command with the flag, on every route.
+    "scaffold.py:_require_transcript_answer#0": Expectation(
+        _init_with_no_answer_to_the_transcript_question,
+        clears_by_rerun=False,
+        descriptive={
+            "kyo init": "names the command being refused",
+            "kyo onboard": "where the disclosure is printed; it writes nothing",
         },
     ),
     # KYO-416 put the `--in-repo`/`--adopt` contradiction ahead of it, so this site
@@ -5077,13 +5094,6 @@ RECORDED: dict[str, str] = {
     "scaffold.py:init_layout#3": (
         "a read and a hand deletion: read .kyosei-store to see which store it names, "
         "and delete it if that store is gone. Deciding it is gone is the judgment"
-    ),
-    # KYO-686.c1: the helper every `invoke` of a layout-choosing `kyo init` answers for,
-    # so this walk cannot reach the refusal.
-    "scaffold.py:_require_transcript_answer#0": (
-        "re-invocation with --read-transcripts yes or no, the answer being the operator's; "
-        "tests/test_kyo686_required_transcript_answer.py provokes the refusal on every "
-        "route and proves the flag clears it"
     ),
     # KYO-416.c2: `--prefix` contradicting a store being adopted. The remedy is a
     # re-invocation with the caller's own arguments changed (drop --prefix, give the
