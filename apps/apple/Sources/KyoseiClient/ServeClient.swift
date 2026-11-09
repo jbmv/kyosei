@@ -120,6 +120,19 @@ public struct ServeClient: Sendable {
         try await get("v1/projects/\(project)/sessions")
     }
 
+    /// One image the person sent, and its media type.
+    public func image(
+        project: String, session: String, turn: String, index: Int
+    ) async throws -> (data: Data, mediaType: String) {
+        let path = "v1/projects/\(project)/sessions/\(session)/images/\(turn)/\(index)"
+        let (data, response) = try await URLSession.shared.data(from: url(path))
+        let http = response as? HTTPURLResponse
+        guard http?.statusCode == 200 else {
+            throw ServeError.status(http?.statusCode ?? 0, String(decoding: data, as: UTF8.self))
+        }
+        return (data, http?.value(forHTTPHeaderField: "Content-Type") ?? "image/png")
+    }
+
     public func turns(project: String, session: String) async throws -> Data {
         try await get("v1/projects/\(project)/sessions/\(session)/turns")
     }

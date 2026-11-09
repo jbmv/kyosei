@@ -3,8 +3,14 @@
 // version replaces it in place.
 import { render } from "./pipeline";
 
-interface Turn { id: string; at: string; text: string }
-interface Reply { message_id: string; at: string; text: string }
+interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
+interface Reply { message_id: string; at: string; text: string; thinking?: string | null }
+interface Delivery {
+  uuid: string; at: string; kind: string; text: string | null; sender: string | null;
+  sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
+  status: string | null; summary: string | null;
+}
+interface Subagent { agent_id: string; description: string; agent_type: string }
 interface ToolCall {
   call_id: string; at: string; name: string; input: Record<string, unknown> | null;
   result: { text: string | null; is_error: boolean } | null;
@@ -12,7 +18,8 @@ interface ToolCall {
 interface CommandOutput { uuid: string; at: string; command: string; args: string; text: string }
 interface Batch {
   reset?: boolean; turns?: Turn[]; replies?: Reply[]; tool_calls?: ToolCall[];
-  command_outputs?: CommandOutput[]; subagents?: { agent_id: string }[]; facts?: Facts | null;
+  command_outputs?: CommandOutput[]; subagents?: Subagent[]; deliveries?: Delivery[];
+  facts?: Facts | null;
 }
 interface Facts { git_branch: string | null; context: { percent: number | null } | null }
 interface SessionRow {
@@ -64,17 +71,57 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
   rendered.set(key, version);
 }
 
+const imageData = new Map<string, string>();
+
+function drawImage(turn: Turn, index: number): HTMLElement {
+  const key = `${turn.id}/${index}`;
+  const image = document.createElement("img");
+  image.className = "turn-image";
+  const data = imageData.get(key);
+  if (data) {
+    image.src = data;
+  } else {
+    image.dataset.image = key;
+    (window as any).webkit?.messageHandlers?.image?.postMessage({ turn: turn.id, index });
+  }
+  return image;
+}
+
 function drawTurn(turn: Turn): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
-  element.textContent = turn.text;
+  for (const { index } of turn.images ?? []) element.append(drawImage(turn, index));
+  if (turn.text) element.append(document.createTextNode(turn.text));
   return element;
 }
 
 function drawReply(reply: Reply): HTMLElement {
   const element = document.createElement("article");
   element.className = "reply";
-  element.innerHTML = render(reply.text);
+  element.innerHTML = reply.text ? render(reply.text) : "";
+  if (reply.thinking) {
+    const thinking = document.createElement("div");
+    thinking.className = "thinking";
+    thinking.textContent = reply.thinking;
+    element.prepend(thinking);
+  }
+  return element;
+}
+
+function drawDelivery(delivery: Delivery): HTMLElement {
+  const element = document.createElement("details");
+  element.className = "delivery";
+  const head = document.createElement("summary");
+  head.textContent = delivery.kind === "peer"
+    ? "Message from subagent"
+    : delivery.summary ?? "Task notification";
+  element.append(head);
+  if (delivery.text) {
+    const body = document.createElement("div");
+    body.className = "reply";
+    body.innerHTML = render(delivery.text);
+    element.append(body);
+  }
   return element;
 }
 
@@ -113,6 +160,7 @@ const workingText = document.getElementById("working-text")!;
 const calls = new Map<string, ToolCall>();
 let screenState: string | null = null;
 let background: Background | null = null;
+let workingLine: string | null = null;
 let latestAt = "";
 
 const TOOL_VERBS: Record<string, string> = {
@@ -150,7 +198,7 @@ function workingWords(): string {
     const call = runningCall();
     words = call
       ? `${TOOL_VERBS[call.name] ?? `Using ${call.name}`}  ${elapsed(call.at)}`
-      : `Working${latestAt ? `  ${elapsed(latestAt)}` : ""}`;
+      : workingLine ?? `Working${latestAt ? `  ${elapsed(latestAt)}` : ""}`;
   }
   return [words, backgroundWords()].filter(Boolean).join("  ·  ");
 }
@@ -428,7 +476,8 @@ function arrange(): void {
 // ------------------------------------------------------------- the menu and the side panel
 
 const SIDE_CLOSED_KEY = "side-closed";
-const subagents = new Set<string>();
+const subagents = new Map<string, Subagent>();
+const deliveries: Delivery[] = [];
 let facts: Facts | null = null;
 let menu: Menu | null = null;
 
@@ -485,23 +534,50 @@ function drawSide(): void {
   setText("side-context", percent === null ? "unknown" : `${percent}%`);
   (document.getElementById("context-fill") as HTMLElement).style.width = `${percent ?? 0}%`;
 
-  const running = background?.running ? background.agents : [];
-  const list = document.getElementById("side-tasks")!;
-  list.replaceChildren(
-    ...running.map((agent) => {
+  const agents = [...subagents.values()];
+  const runningAgents = agents.filter((agent) => !agentFinished(agent));
+  sideList("side-agents", runningAgents.map(agentLabel));
+  setText("side-agents-finished", `${agents.length - runningAgents.length} finished`);
+
+  const own = [...calls.values()].filter(isOwnBackgroundTask);
+  const runningOwn = own.filter((call) => !callFinished(call));
+  sideList(
+    "side-tasks",
+    runningOwn.map((call) => String(call.input?.description ?? summary(call) ?? call.name)),
+  );
+  setText("side-finished", `${own.length - runningOwn.length} finished`);
+}
+
+function sideList(id: string, labels: string[]): void {
+  document.getElementById(id)!.replaceChildren(
+    ...labels.map((label) => {
       const item = document.createElement("div");
       item.className = "side-task";
-      item.textContent = agent.description || agent.type;
+      item.textContent = label;
+      item.title = label;
       return item;
     }),
   );
-  if (background?.shells) {
-    const item = document.createElement("div");
-    item.className = "side-task";
-    item.textContent = plural(background.shells, "shell");
-    list.append(item);
-  }
-  setText("side-finished", `${Math.max(0, subagents.size - running.length)} finished`);
+}
+
+/** "KYO-692 Subagent", from the record the orchestrator named when it started the agent. */
+function agentLabel(agent: Subagent): string {
+  const record = agent.description.match(/\b[A-Z][A-Z0-9]*-\d+\b/);
+  return record ? `${record[0]} Subagent` : agent.description || agent.agent_type;
+}
+
+function agentFinished(agent: Subagent): boolean {
+  return deliveries.some((delivery) =>
+    delivery.task_id === agent.agent_id || (delivery.handback && delivery.sender_id === agent.agent_id));
+}
+
+function callFinished(call: ToolCall): boolean {
+  return deliveries.some((delivery) => delivery.call_id === call.call_id);
+}
+
+/** This session's own background work. A subagent's is the subagent's, and is not listed. */
+function isOwnBackgroundTask(call: ToolCall): boolean {
+  return call.name === "Monitor" || (call.name === "Bash" && call.input?.run_in_background === true);
 }
 
 try {
@@ -515,10 +591,40 @@ document.getElementById("side-toggle")!.addEventListener("click", () => {
   } catch {}
 });
 
+document.getElementById("terminal-toggle")!.addEventListener("click", () => {
+  document.body.classList.toggle("terminal-open");
+});
+
 document.getElementById("sessions-more")!.addEventListener("click", () => {
   allSessions = !allSessions;
   drawMenu();
 });
+
+// The terminal goes on showing a reply after it has landed, and alternates between showing
+// it and not while a tool runs, so the reply in progress is filtered before it is drawn.
+const LIVE_HOLD_MS = 1200;
+const LIVE_COMPARED_CHARS = 80;
+const landedKeys: string[] = [];
+let liveText: string | null = null;
+let liveClear: number | undefined;
+
+function lettersAndDigits(text: string): string {
+  return text.replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function alreadyLanded(text: string): boolean {
+  const head = lettersAndDigits(text).slice(0, LIVE_COMPARED_CHARS);
+  return Boolean(head) && landedKeys.some((key) => key.startsWith(head));
+}
+
+function clearLive(): void {
+  if (liveClear !== undefined) clearTimeout(liveClear);
+  liveClear = undefined;
+  liveText = null;
+  keepingPlace(() => {
+    live.innerHTML = "";
+  });
+}
 
 function drawCommandOutput(output: CommandOutput): HTMLElement {
   const element = document.createElement("article");
@@ -541,10 +647,27 @@ const kyo = {
     calls.clear();
     diffs.clear();
     subagents.clear();
+    deliveries.length = 0;
+    landedKeys.length = 0;
     facts = null;
     latestAt = "";
-    live.innerHTML = "";
+    clearLive();
     drawSide();
+  },
+
+  image(frame: { key: string; data: string }): void {
+    imageData.set(frame.key, frame.data);
+    document.querySelectorAll<HTMLImageElement>(`img[data-image="${frame.key}"]`).forEach((image) => {
+      image.src = frame.data;
+      image.removeAttribute("data-image");
+    });
+  },
+
+  terminal(frame: { terminal?: { text: string; working_line: string | null } | null }): void {
+    workingLine = frame.terminal?.working_line ?? null;
+    document.getElementById("terminal")!.textContent =
+      frame.terminal?.text ?? "This session has no terminal to show.";
+    drawWorking();
   },
 
   facts(frame: { facts?: Facts | null }): void {
@@ -562,13 +685,20 @@ const kyo = {
     keepingPlace(() => {
       if (batch.reset) kyo.clear();
       for (const turn of batch.turns ?? []) {
-        place(`t:${turn.id}`, turn.at, turn.text, () => drawTurn(turn));
+        const version = `${turn.text}|${turn.images?.length ?? 0}`;
+        place(`t:${turn.id}`, turn.at, version, () => drawTurn(turn));
       }
       for (const reply of batch.replies ?? []) {
-        // A record with only thinking or tool use has no text to show.
-        if (reply.text) {
-          place(`r:${reply.message_id}`, reply.at, reply.text, () => drawReply(reply));
+        if (reply.text) landedKeys.push(lettersAndDigits(reply.text));
+        // A record with only tool use has nothing to show.
+        if (reply.text || reply.thinking) {
+          const version = `${reply.text}|${reply.thinking ?? ""}`;
+          place(`r:${reply.message_id}`, reply.at, version, () => drawReply(reply));
         }
+      }
+      for (const delivery of batch.deliveries ?? []) {
+        deliveries.push(delivery);
+        place(`d:${delivery.uuid}`, delivery.at, delivery.text ?? "", () => drawDelivery(delivery));
       }
       for (const call of batch.tool_calls ?? []) {
         const version = `${call.result?.text ?? ""}${call.result?.is_error ?? ""}`;
@@ -578,10 +708,12 @@ const kyo = {
       for (const output of batch.command_outputs ?? []) {
         place(`o:${output.uuid}`, output.at, output.text, () => drawCommandOutput(output));
       }
-      for (const agent of batch.subagents ?? []) subagents.add(agent.agent_id);
+      for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
     });
     if (batch.facts) facts = batch.facts;
+    // The final text has arrived, so the in-progress copy goes at once.
+    if (liveText !== null && alreadyLanded(liveText)) clearLive();
     drawSide();
     for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.command_outputs]) {
       for (const item of list ?? []) if (item.at > latestAt) latestAt = item.at;
@@ -590,17 +722,26 @@ const kyo = {
     log(`items ${elements.size}`);
   },
 
-  /** The reply being drawn on the terminal now, or none. */
+  /** The reply being drawn on the terminal now, or none. A gap in the stream is held briefly. */
   live(frame: { text: string | null }): void {
-    keepingPlace(() => {
-      live.innerHTML = frame.text ? render(frame.text) : "";
-    });
+    const text = frame.text;
+    if (text && !runningCall() && !alreadyLanded(text)) {
+      if (liveClear !== undefined) clearTimeout(liveClear);
+      liveClear = undefined;
+      liveText = text;
+      keepingPlace(() => {
+        live.innerHTML = render(text);
+      });
+    } else if (liveText !== null && liveClear === undefined) {
+      liveClear = window.setTimeout(clearLive, LIVE_HOLD_MS);
+    }
   },
 
   ready(frame: ScreenFrame & { reply_in_progress?: string | { text: string } | null }): void {
     const value = frame.reply_in_progress;
     kyo.live({ text: typeof value === "string" ? value : value?.text ?? null });
     kyo.facts(frame as { facts?: Facts | null });
+    kyo.terminal(frame as { terminal?: { text: string; working_line: string | null } | null });
     kyo.screen(frame);
   },
 

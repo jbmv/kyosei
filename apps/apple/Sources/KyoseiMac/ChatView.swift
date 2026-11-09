@@ -43,6 +43,7 @@ struct ChatWebView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "log")
         configuration.userContentController.add(context.coordinator, name: "select")
+        configuration.userContentController.add(context.coordinator, name: "image")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
@@ -85,6 +86,12 @@ struct ChatWebView: NSViewRepresentable {
                 let session = body["session"] as? String
             {
                 feed.select(session: session)
+                return
+            }
+            if message.name == "image", let body = message.body as? [String: Any],
+                let turn = body["turn"] as? String, let index = body["index"] as? Int
+            {
+                feed.loadImage(turn: turn, index: index)
                 return
             }
             print("[page] \(message.body)")

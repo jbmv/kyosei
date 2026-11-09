@@ -53,6 +53,21 @@ final class SessionFeed {
         task = Task { await run() }
     }
 
+    /// Fetches one of the person's images for the page, which may load only its own files.
+    func loadImage(turn: String, index: Int) {
+        guard let session = current else { return }
+        Task {
+            guard
+                let image = try? await client.image(
+                    project: project, session: session, turn: turn, index: index),
+                session == current
+            else { return }
+            let data = "data:\(image.mediaType);base64,\(image.data.base64EncodedString())"
+            let key = "\(turn)/\(index)"
+            send("image", #"{"key": \#(quoted(key)), "data": \#(quoted(data))}"#)
+        }
+    }
+
     private func send(_ function: String, _ json: String) {
         webView?.evaluateJavaScript("window.kyo.\(function)(\(json))") { _, error in
             if let error { print("[feed] \(function): \(error)") }
@@ -103,6 +118,7 @@ final class SessionFeed {
                 guard row.live else {
                     // An ended session has nothing to follow.
                     send("screen", #"{"screen": null}"#)
+                    send("terminal", #"{"terminal": null}"#)
                     try await Task.sleep(for: .seconds(3600))
                     continue
                 }
@@ -136,6 +152,8 @@ final class SessionFeed {
                 takeFacts(from: Data(event.data.utf8))
             case "screen":
                 send("screen", event.data)
+            case "terminal":
+                send("terminal", event.data)
             case "reset", "session":
                 return  // Read the session again from the top.
             default:
