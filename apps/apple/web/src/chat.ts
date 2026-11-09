@@ -1154,11 +1154,6 @@ function attemptSend(): void {
     return;
   }
   composerNote.textContent = "Sending…";
-  const only = segments.length === 1 ? segments[0].text.trim() : "";
-  if (/^\/[a-z][\w:-]*(\s[^\n]*)?$/i.test(only)) {
-    post("slash", { command: only });
-    return;
-  }
   post("send", { segments });
 }
 

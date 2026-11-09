@@ -174,27 +174,6 @@ final class SessionFeed {
         }
     }
 
-    /// A slash command goes straight to the session, which takes one only when idle.
-    func slash(command: String) {
-        guard let session = current, let token = Self.deviceToken(),
-            let data = try? JSONSerialization.data(withJSONObject: ["command": command])
-        else { return }
-        Task {
-            guard
-                let reply = try? await client.authorised(
-                    "POST", sessionPath(session, "slash"), token: token, body: data)
-            else {
-                send("sent", #"{"error": "The server could not be reached."}"#)
-                return
-            }
-            if reply.status == 200 {
-                send("sent", "{}")
-            } else {
-                send("sent", #"{"error": \#(quoted(refusal(reply.data)))}"#)
-            }
-        }
-    }
-
     func interrupt() {
         guard let session = current, let token = Self.deviceToken() else { return }
         Task {
