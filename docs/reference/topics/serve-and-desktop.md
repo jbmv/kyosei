@@ -286,9 +286,18 @@ Nothing is reconstructed for an omitted block.
 first reply:
 
 ```
-facts:   at, model, effort, git_branch, permission_mode, context
+facts:   at, model, effort, git_branch, permission_mode, context, lines
 context: tokens, window, percent
+lines:   added, removed
 ```
+
+`lines` is the running total of lines added and removed by the session and all of its
+subagents, summed from the patches its Edit and Write results record. A Write that creates a
+file records no patch and counts the newlines in its content plus one, so a file ending in a
+newline counts one more than it has lines; this is Claude Code's own rule, and the total
+matches the figure it saves for a session. The total covers one session id, so it starts
+again after `/clear`. It is kept current as subagents write, which the `facts` event reports
+even when no new reply has landed.
 
 `permission_mode` is the mode the transcript last recorded, under Claude Code's own name for
 it, and `null` when the transcript records none. It can be newer than `at`, since Claude Code
@@ -368,7 +377,7 @@ naming one of:
 |---|---|
 | `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`: the state when the stream opened |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
-| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply or a change of permission mode changes them |
+| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode or a line changed by the session or a subagent changes them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
 | `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |

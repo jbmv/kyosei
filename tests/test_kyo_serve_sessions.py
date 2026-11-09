@@ -1447,3 +1447,41 @@ def test_the_operating_reference_states_the_shapes() -> None:
         "total_tokens",
     ):
         assert needle in reference, needle
+
+
+# ------------------------------------- KYO-701: lines changed by a session and its subagents
+
+LINES_FILE = FIXTURES / "lines-total.synthetic.jsonl"
+
+
+def place_lines_session(bed: Bed) -> list[dict]:
+    """The fixture's session rows in the bed's transcript, and each subagent's in its file."""
+    rows = [json.loads(line) for line in LINES_FILE.read_text(encoding="utf-8").splitlines()]
+    bed.write_transcript([json.dumps(row) + "\n" for row in rows if not row["isSidechain"]])
+    agents: dict[str, list[dict]] = {}
+    for row in rows:
+        if row["isSidechain"]:
+            agents.setdefault(row["agentId"], []).append(row)
+    directory = bed.transcripts / OLD / "subagents"
+    directory.mkdir(parents=True, exist_ok=True)
+    for agent, held in agents.items():
+        text = "".join(json.dumps(row) + "\n" for row in held)
+        (directory / f"agent-{agent}.jsonl").write_text(text, encoding="utf-8")
+    return rows
+
+
+def test_facts_state_the_lines_of_the_session_and_its_subagents(bed: Bed) -> None:
+    place_lines_session(bed)
+    facts = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]
+    assert facts["lines"] == {"added": 11, "removed": 3}
+
+
+def test_the_stream_states_lines_a_running_subagent_wrote(bed: Bed, stream) -> None:
+    place_lines_session(bed)
+    opened = stream()
+    assert opened.event("ready")["facts"]["lines"] == {"added": 11, "removed": 3}
+    agent = bed.transcripts / OLD / "subagents" / "agent-a4444444444444444.jsonl"
+    row = {"isSidechain": True, "toolUseResult": {"structuredPatch": [{"lines": ["+x", "-y"]}]}}
+    with agent.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+    assert opened.event("facts")["facts"]["lines"] == {"added": 12, "removed": 4}

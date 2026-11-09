@@ -880,9 +880,7 @@ def check_quote(
             )
         else:
             if read.readable:
-                turns = apply_paste_index(
-                    pair_with_history(read.turns, history), paste_flags or {}
-                )
+                turns = apply_paste_index(pair_with_history(read.turns, history), paste_flags or {})
                 decided = _decide(turns, pieces, turn, SOURCE_TRANSCRIPT)
                 if decided is not None:
                     return decided
@@ -1990,6 +1988,119 @@ def subagent_transcript(session_path: Path, agent_id: str) -> Path | None:
     except OSError:
         return None
     return directory / wanted if wanted in names else None
+
+
+# ------------------------------------------------------------- lines a session changed (KYO-701)
+
+#: Only a row holding this is parsed, since most rows of a long transcript are not edits.
+_PATCH_NEEDLE = b'"structuredPatch"'
+
+
+@dataclass(frozen=True)
+class LinesChanged:
+    """Lines added and removed, as the patches of a session's Edit and Write results state."""
+
+    added: int = 0
+    removed: int = 0
+
+
+def patch_lines(result: object) -> LinesChanged:
+    """The lines one tool result changed, by Claude Code's own rule for its running total.
+
+    A hunk's lines beginning ``+`` and ``-`` are counted. A Write that creates a file records
+    no hunks, and Claude Code counts its newlines plus one, so content ending in a newline
+    counts one more than the file has lines; this is kept so that the total is the figure
+    Claude Code states. Measured on 2.1.319 against the ``lastLinesAdded`` it saves.
+    """
+    if not isinstance(result, dict):
+        return LinesChanged()
+    hunks = result.get("structuredPatch")
+    if not isinstance(hunks, list):
+        return LinesChanged()
+    added = removed = 0
+    for hunk in hunks:
+        lines = hunk.get("lines") if isinstance(hunk, dict) else None
+        for line in lines if isinstance(lines, list) else []:
+            if isinstance(line, str):
+                added += line.startswith("+")
+                removed += line.startswith("-")
+    content = result.get("content")
+    if not hunks and result.get("type") == "create" and isinstance(content, str) and content:
+        added = content.count("\n") + 1
+    return LinesChanged(added, removed)
+
+
+@dataclass
+class _FileLines:
+    offset: int = 0
+    added: int = 0
+    removed: int = 0
+
+
+class SessionLines:
+    """The running total of lines changed by a session and all of its subagents.
+
+    Each file is followed from where it was last read, and one that has not grown is not
+    opened, so a sample costs a directory listing however many subagents ran. A file that
+    has shrunk was rewritten and is counted again. A file that cannot be read keeps the
+    count already held for it, so a total never falls because of a transient error.
+    """
+
+    def __init__(self, session_path: Path) -> None:
+        self.session_path = session_path
+        self.directory = session_path.parent / session_path.stem / "subagents"
+        self._files: dict[str, _FileLines] = {}
+
+    def read(self) -> LinesChanged:
+        """Read what has been appended, and return the total."""
+        self._follow(str(self.session_path), self._size(self.session_path))
+        try:
+            with os.scandir(self.directory) as entries:
+                found = [e for e in entries if e.name.endswith(".jsonl") and e.is_file()]
+                for entry in found:
+                    self._follow(entry.path, entry.stat().st_size)
+        except OSError:
+            pass  # no subagent has run, or the listing failed; what is held still stands
+        return LinesChanged(
+            sum(held.added for held in self._files.values()),
+            sum(held.removed for held in self._files.values()),
+        )
+
+    @staticmethod
+    def _size(path: Path) -> int | None:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return None
+
+    def _follow(self, path: str, size: int | None) -> None:
+        held = self._files.setdefault(path, _FileLines())
+        if size is None or size == held.offset:
+            return
+        if size < held.offset:
+            held.offset, held.added, held.removed = 0, 0, 0
+        try:
+            with open(path, "rb") as handle:
+                handle.seek(held.offset)
+                for raw in handle:
+                    if not raw.endswith(b"\n"):
+                        break  # a line still being written is left for the next read
+                    held.offset += len(raw)
+                    if _PATCH_NEEDLE in raw:
+                        self._count(raw, held)
+        except OSError:
+            return
+
+    @staticmethod
+    def _count(raw: bytes, held: _FileLines) -> None:
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return
+        if isinstance(record, dict):
+            lines = patch_lines(record.get("toolUseResult"))
+            held.added += lines.added
+            held.removed += lines.removed
 
 
 def session_title(path: Path) -> str | None:
