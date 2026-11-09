@@ -4,8 +4,9 @@ Under ``/v1/projects/{project}/sessions``:
 
 - ``GET sessions`` -- the project's recent sessions, each with whether it has a pane and
   whether work is running;
-- ``GET sessions/{id}/turns[?cursor=]`` -- the session's turns, replies, tool calls and
-  subagents, and a cursor to ask for what is new;
+- ``GET sessions/{id}/turns[?cursor=]`` -- the session's turns, replies, tool calls,
+  subagents and slash-command output, its facts as of the latest reply (KYO-691), and a
+  cursor to ask for what is new;
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
   objects, the reply in progress and changes to the screen;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it.
@@ -84,10 +85,10 @@ OPENING = b"retry: 1000\n: kyo serve session events\n\n"
 
 _SAMPLER_THREAD = "kyo-serve-session-sampler"
 
-_CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)\.([0-9a-f]{12})$")
+_CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([0-9a-f]{12})$")
 
-#: The four lists of a delta, in the order a cursor counts them.
-_LISTS = ("turns", "replies", "tool_calls", "subagents")
+#: The lists of a delta, in the order a cursor counts them.
+_LISTS = ("turns", "replies", "tool_calls", "subagents", "command_outputs")
 
 
 # ------------------------------------------------------------------- the objects as JSON
@@ -159,6 +160,32 @@ def _subagent_json(ref: Any) -> dict:
     }
 
 
+def _command_output_json(output: Any) -> dict:
+    return {
+        "uuid": output.uuid,
+        "at": output.at,
+        "command": output.command,
+        "args": output.args,
+        "text": output.text,
+    }
+
+
+def _facts_json(facts: Any) -> dict | None:
+    if facts is None:
+        return None
+    return {
+        "at": facts.at,
+        "model": facts.model,
+        "effort": facts.effort,
+        "git_branch": facts.git_branch,
+        "context": {
+            "tokens": facts.context.tokens,
+            "window": facts.context.window,
+            "percent": facts.context.percent,
+        },
+    }
+
+
 def _background_json(work: Any) -> dict | None:
     if work is None:
         return None
@@ -203,8 +230,8 @@ def _pane_json(lookup: Any) -> dict:
 # ----------------------------------------------------------------------------- the cursor
 
 
-def _lists(delta: Any) -> tuple[list, list, list, list]:
-    return (delta.turns, delta.replies, delta.tool_calls, delta.subagents)
+def _lists(delta: Any) -> tuple[list, list, list, list, list]:
+    return (delta.turns, delta.replies, delta.tool_calls, delta.subagents, delta.command_outputs)
 
 
 def _identity(index: int, item: Any) -> str:
@@ -215,7 +242,9 @@ def _identity(index: int, item: Any) -> str:
         return item.record_uuids[-1]
     if index == 2:
         return f"{item.uuid}|{item.result.uuid if item.result else ''}"
-    return item.agent_id
+    if index == 3:
+        return item.agent_id
+    return item.uuid
 
 
 class _Position:
@@ -245,7 +274,7 @@ class _Position:
 
 @dataclass(frozen=True)
 class Cursor:
-    counts: tuple[int, int, int, int]
+    counts: tuple[int, ...]
     digest: str
 
 
@@ -265,18 +294,19 @@ def parse_cursor(text: str | None, *, refuse: bool = True) -> Cursor | None:
             f"{text!r} is not a cursor this server issued; pass the `cursor` of an earlier "
             "response, or drop ?cursor to read the session from its start",
         )
-    a, b, c, d, digest = match.groups()
-    return Cursor((int(a), int(b), int(c), int(d)), digest)
+    *counts, digest = match.groups()
+    return Cursor(tuple(int(count) for count in counts), digest)
 
 
 def objects_json(lists: Iterable[list]) -> dict[str, list]:
     """The lists as JSON, each object once at its latest version and in first-seen order."""
-    turns, replies, calls, subagents = lists
+    turns, replies, calls, subagents, outputs = lists
     return {
         "turns": [_turn_json(item) for item in _latest(turns, lambda t: t.id)],
         "replies": [_reply_json(item) for item in _latest(replies, lambda r: r.message_id)],
         "tool_calls": [_tool_call_json(item) for item in _latest(calls, lambda c: c.call_id)],
         "subagents": [_subagent_json(item) for item in _latest(subagents, lambda s: s.agent_id)],
+        "command_outputs": [_command_output_json(item) for item in outputs],
     }
 
 
@@ -400,6 +430,7 @@ class ProjectSessions:
             "reset": reset,
             "readable": live.transcript.readable,
             "why": live.transcript.why,
+            "facts": _facts_json(live.facts()),
             **objects_json(lists),
         }
 
@@ -471,6 +502,7 @@ class _Sampler:
         self._position = _Position()
         self._screen: dict | None = None
         self._reply: str | None = None
+        self._facts: dict | None = None
         self._next_follow = 0.0
         self._last_error: str | None = None
 
@@ -494,6 +526,7 @@ class _Sampler:
             self._position.feed(_lists(update.delta))
             self._screen = _screen_json(update.screen)
             self._reply = update.reply_in_progress
+            self._facts = _facts_json(self._live.facts())
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
             self._thread = threading.Thread(target=self._run, name=_SAMPLER_THREAD, daemon=True)
             self._thread.start()
@@ -515,6 +548,7 @@ class _Sampler:
                 "pane": _pane_json(live.pane_lookup),
                 "screen": self._screen,
                 "reply_in_progress": self._reply,
+                "facts": self._facts,
             },
             event_id=self._position.cursor,
         )
@@ -581,6 +615,11 @@ class _Sampler:
                     event_id=cursor,
                 )
             )
+        if any(lists) or followed:
+            now_facts = _facts_json(live.facts())
+            if now_facts != self._facts:
+                self._facts = now_facts
+                self._broadcast(frame("facts", {"session_id": self.session_id, "facts": now_facts}))
         now_screen = _screen_json(screen)
         if now_screen != self._screen:
             self._screen = now_screen

@@ -1189,6 +1189,33 @@ _CLEAR_LINK_WINDOW_BYTES = 512 * 1024
 #: The command row at the head of a transcript started by ``/clear``.
 _CLEAR_COMMAND = "<command-name>/clear</command-name>"
 
+#: ``message.model`` on a reply Claude Code wrote itself, such as an API error; its usage is
+#: all zeros and says nothing about the session (KYO-691).
+_SYNTHETIC_MODEL = "<synthetic>"
+
+_COMMAND_NAME = re.compile(r"<command-name>(.*?)</command-name>", re.S)
+
+#: A row holding a slash command's output and nothing else. Both forms are measured to 2.1.319:
+#: a ``system`` row of subtype ``local_command`` and an older ``user`` row. A row beginning
+#: with ``<local-command-caveat>`` is the harness's notice, not output.
+_COMMAND_OUTPUT = re.compile(r"<local-command-(stdout|stderr)>(.*)</local-command-\1>", re.S)
+
+#: Terminal styling in a command's output: CSI sequences such as colours, and OSC sequences.
+_ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
+
+#: Claude Code's cached model catalogue, under its configuration directory.
+_MODEL_CATALOG_DIR = Path("cache") / "model-catalog"
+
+#: The catalogue's surface for the command-line tool; the desktop app's is ``ccd``.
+_CATALOG_SURFACE = "cc"
+
+#: Models the catalogue gives 1M for but which Claude Code runs at 200K unless the session
+#: asked for ``[1m]`` (2.1.319's built-in table, ``context.maximum_window``). The transcript
+#: shows the request in ``requestedModel``; without it the window is not known.
+_WINDOW_NEEDS_SUFFIX = frozenset({"claude-opus-4-6", "claude-sonnet-4-6"})
+
+_LONG_CONTEXT_SUFFIX = "[1m]"
+
 
 @dataclass(frozen=True)
 class Usage:
@@ -1252,6 +1279,39 @@ class SubagentRef:
     agent_type: str | None
 
 
+@dataclass(frozen=True)
+class CommandOutput:
+    """What a slash command printed, as the transcript records it (KYO-691).
+
+    ``text`` is the output without its terminal styling. ``command`` and ``args`` come from
+    the command row the output answers, and are None when that row is not in the transcript.
+    A command that printed nothing has no row of output and yields no object.
+    """
+
+    uuid: str
+    at: str
+    command: str | None
+    args: str | None
+    text: str
+
+
+@dataclass(frozen=True)
+class ReplyFacts:
+    """What Claude Code recorded about the session on one reply (KYO-691).
+
+    ``effort`` and ``git_branch`` are None on a row without them, as on older releases.
+    ``requested_model`` is the model as the session asked for it, which alone shows ``[1m]``.
+    """
+
+    at: str
+    message_id: str
+    model: str | None
+    requested_model: str | None
+    effort: str | None
+    git_branch: str | None
+    usage: Usage
+
+
 @dataclass
 class TranscriptDelta:
     """What one :meth:`SessionTranscript.read` found or changed; a tool call reappears
@@ -1261,6 +1321,7 @@ class TranscriptDelta:
     replies: list[Reply] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     subagents: list[SubagentRef] = field(default_factory=list)
+    command_outputs: list[CommandOutput] = field(default_factory=list)
 
 
 @dataclass
@@ -1301,6 +1362,76 @@ def _usage_of(raw: object) -> Usage | None:
     return Usage(*values)
 
 
+def _text_field(record: dict, key: str) -> str | None:
+    value = record.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _command_row_text(record: dict) -> str | None:
+    """The text of a row that may be a slash command or its output, or None."""
+    if record.get("type") == "system":
+        content = record.get("content") if record.get("subtype") == "local_command" else None
+        return content if isinstance(content, str) else None
+    if record.get("type") != "user" or record.get("toolUseResult") is not None:
+        return None
+    return _text_of((record.get("message") or {}).get("content"))
+
+
+def _catalog_window(document: object, model: str) -> int | None:
+    """``model``'s window in one cached catalogue file's document, or None."""
+    catalog = document.get("catalog") if isinstance(document, dict) else None
+    config = catalog.get("config") if isinstance(catalog, dict) else None
+    models = config.get("models") if isinstance(config, dict) else None
+    for row in models if isinstance(models, list) else []:
+        if isinstance(row, dict) and row.get("id") == model:
+            runtime = row.get("runtime")
+            window = runtime.get("max_input_tokens") if isinstance(runtime, dict) else None
+            if isinstance(window, int) and not isinstance(window, bool) and window > 0:
+                return window
+    return None
+
+
+def _catalog_documents(config: Path) -> list[dict]:
+    """The cached catalogue files, the command-line tool's first and then the newest first."""
+    documents = []
+    for path in sorted((config / _MODEL_CATALOG_DIR).glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(document, dict) and isinstance(document.get("catalog"), dict):
+            documents.append(document)
+
+    def rank(document: dict) -> tuple[bool, float]:
+        fetched = document.get("fetchedAt")
+        at = fetched if isinstance(fetched, int | float) else 0
+        return (document["catalog"].get("surface") == _CATALOG_SURFACE, at)
+
+    return sorted(documents, key=rank, reverse=True)
+
+
+def context_window(model: str | None, requested_model: str | None, config: Path) -> int | None:
+    """The context window of ``model`` in tokens, or None when it cannot be known (KYO-691).
+
+    The transcript does not state a window. Claude Code keeps the catalogue it works from
+    under its configuration directory, each model's window in ``runtime.max_input_tokens``,
+    so a window is read from there. A model the catalogue does not name, a catalogue that
+    is absent or changes shape, and a model whose window depends on an opt-in the session
+    did not record all yield None: the caller then gives no percentage. Settings that
+    change a window for one process, such as ``CLAUDE_CODE_DISABLE_1M_CONTEXT``, are not
+    recorded anywhere this can read.
+    """
+    if model is None:
+        return None
+    if model in _WINDOW_NEEDS_SUFFIX and not (requested_model or "").endswith(_LONG_CONTEXT_SUFFIX):
+        return None
+    for document in _catalog_documents(config):
+        window = _catalog_window(document, model)
+        if window is not None:
+            return window
+    return None
+
+
 def _result_text(content: object) -> str:
     """A tool result's text: a string, or its ``text`` blocks. Images are left out."""
     if isinstance(content, str):
@@ -1338,6 +1469,9 @@ class SessionTranscript:
         self._call_ids: dict[str, str] = {}
         self._subagents: dict[str, SubagentRef] = {}
         self._asked: set[str] = set()
+        self._commands: dict[str, tuple[str, str]] = {}
+        self._outputs: dict[str, CommandOutput] = {}
+        self._latest_facts: ReplyFacts | None = None
 
     @property
     def turns(self) -> list[Turn]:
@@ -1354,6 +1488,15 @@ class SessionTranscript:
     @property
     def subagents(self) -> list[SubagentRef]:
         return list(self._subagents.values())
+
+    @property
+    def command_outputs(self) -> list[CommandOutput]:
+        return sorted(self._outputs.values(), key=lambda o: o.at)
+
+    @property
+    def latest_facts(self) -> ReplyFacts | None:
+        """What the latest reply recorded; a reply Claude Code wrote itself does not count."""
+        return self._latest_facts
 
     @property
     def readable(self) -> bool:
@@ -1405,6 +1548,7 @@ class SessionTranscript:
             self._asked |= _questions_asked(record)
             self._take_assistant(record, uuid, stamp, delta)
             return
+        self._take_command(record, uuid, stamp, delta)
         turn = _person_turn(record, self._asked)
         if turn is not None:
             self._turns[turn.id] = turn
@@ -1427,6 +1571,16 @@ class SessionTranscript:
         usage = _usage_of(message.get("usage"))
         if usage is not None:
             held.usage = usage
+            if message.get("model") != _SYNTHETIC_MODEL:
+                self._latest_facts = ReplyFacts(
+                    stamp,
+                    message_id,
+                    _text_field(message, "model"),
+                    _text_field(record, "requestedModel"),
+                    _text_field(record, "effort"),
+                    _text_field(record, "gitBranch"),
+                    usage,
+                )
         for block in blocks:
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 if not held.has_text:
@@ -1435,6 +1589,28 @@ class SessionTranscript:
             elif block.get("type") == "tool_use":
                 self._take_tool_use(block, uuid, stamp, delta)
         delta.replies.append(held.reply())
+
+    def _take_command(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
+        text = _command_row_text(record)
+        if text is None:
+            return
+        stripped = text.strip()
+        if stripped.startswith(("<command-message>", "<command-name>")):
+            name = _COMMAND_NAME.search(stripped)
+            if name is not None:
+                args = _COMMAND_ARGS.search(stripped)
+                self._commands[uuid] = (name.group(1), args.group(1) if args else "")
+            return
+        output = _COMMAND_OUTPUT.fullmatch(stripped)
+        if output is None or "origin" in record:  # with an origin, a person typed those tags
+            return
+        printed = _ANSI.sub("", output.group(2)).strip()
+        if not printed:
+            return
+        command, args = self._commands.get(record.get("parentUuid"), (None, None))
+        found = CommandOutput(uuid, stamp, command, args, printed)
+        self._outputs[uuid] = found
+        delta.command_outputs.append(found)
 
     def _take_tool_use(self, block: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
         call_id, name = block.get("id"), block.get("name")

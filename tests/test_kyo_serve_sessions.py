@@ -33,6 +33,8 @@ OLD = "108d6543-12e9-4ae4-85fb-f303424bfa6a"
 NEW = "718208ce-6423-4004-9771-10cfb6d615e8"
 OLD_FILE = FIXTURES / "pair" / f"{OLD}.jsonl"
 NEW_FILE = FIXTURES / "pair" / f"{NEW}.jsonl"
+FACTS_FILE = FIXTURES / "facts" / "session.synthetic.jsonl"
+CATALOG = FIXTURES / "facts" / "model-catalog-cc.synthetic.json"
 ENDED = "22222222-2222-4222-8222-222222222222"
 KILLED = "33333333-3333-4333-8333-333333333333"
 ELSEWHERE = "44444444-4444-4444-8444-444444444444"
@@ -404,8 +406,106 @@ def test_a_rewritten_transcript_resets_the_cursor(bed: Bed) -> None:
 
 
 def test_a_cursor_past_the_end_resets(bed: Bed) -> None:
-    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor=999.999.999.999.abcdefabcdef"))
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor=999.999.999.999.999.abcdefabcdef"))
     assert second["reset"] is True and second["turns"]
+
+
+# --------------------------------------------- KYO-691: facts and slash-command output
+
+
+def install_catalog(bed: Bed) -> None:
+    directory = bed.claude / "cache" / "model-catalog"
+    directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy(CATALOG, directory / "acct-org-cc.json")
+
+
+def test_turns_state_model_effort_branch_and_context(bed: Bed) -> None:
+    install_catalog(bed)
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    facts = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]
+    assert facts["model"] == "claude-opus-5-5"
+    assert facts["effort"] == "medium"
+    assert facts["git_branch"] == "feature/facts"
+    assert facts["context"] == {"tokens": 226_458, "window": 1_000_000, "percent": 23}
+
+
+def test_a_model_of_unknown_window_gets_tokens_and_no_percent(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))  # no catalogue installed
+    context = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["context"]
+    assert context == {"tokens": 226_458, "window": None, "percent": None}
+
+
+def test_facts_are_stated_on_a_read_with_nothing_new(bed: Bed) -> None:
+    install_catalog(bed)
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["turns"] == [] and second["replies"] == []
+    assert second["facts"] == first["facts"]
+
+
+def test_a_session_with_no_reply_has_no_facts(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(1, source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"] is None
+
+
+def test_turns_return_slash_command_output_in_time_order(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert_no_raw_row(document)
+    outputs = document["command_outputs"]
+    assert all(set(o) == {"uuid", "at", "command", "args", "text"} for o in outputs)
+    assert [o["command"] for o in outputs] == ["/context", "/effort"]
+    # Between the first reply and the last, on the same clock as the other objects.
+    ats = [o["at"] for o in outputs]
+    assert ats == sorted(ats)
+    assert document["replies"][0]["at"] < ats[0] and ats[-1] < document["replies"][1]["at"]
+
+
+def test_a_cursor_returns_only_new_command_output(bed: Bed) -> None:
+    rows = bed.rows(source=FACTS_FILE)
+    bed.write_transcript(rows[:4])
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert [o["command"] for o in first["command_outputs"]] == ["/context"]
+    bed.append(rows[4:6])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["reset"] is False
+    assert [o["command"] for o in second["command_outputs"]] == ["/effort"]
+
+
+def test_a_cursor_counts_command_output_so_a_changed_one_resets(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE)[:4])
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    bed.write_transcript(bed.rows(source=FACTS_FILE)[:2])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["reset"] is True
+
+
+def test_the_stream_states_facts_when_it_opens_and_when_a_reply_changes_them(
+    bed: Bed, stream
+) -> None:
+    install_catalog(bed)
+    rows = bed.rows(source=FACTS_FILE)
+    bed.write_transcript(rows[:2])
+    opened = stream()
+    ready = opened.event("ready")
+    assert ready["facts"]["effort"] == "high" and ready["facts"]["git_branch"] == "main"
+    assert ready["facts"]["context"]["tokens"] == 125
+    bed.append(rows[2:])
+    event = opened.event("facts")
+    assert event["session_id"] == OLD
+    assert event["facts"]["effort"] == "medium"
+    assert event["facts"]["context"]["percent"] == 23
+
+
+def test_the_stream_delivers_command_output(bed: Bed, stream) -> None:
+    rows = bed.rows(source=FACTS_FILE)
+    bed.write_transcript(rows[:2])
+    opened = stream()
+    opened.event("ready")
+    bed.append(rows[2:4])
+    event = opened.event("transcript")
+    assert [o["command"] for o in event["command_outputs"]] == ["/context"]
 
 
 def test_a_garbled_cursor_is_refused_and_dropping_it_clears_the_refusal(bed: Bed) -> None:
@@ -831,5 +931,9 @@ def test_the_operating_reference_states_the_shapes() -> None:
         "event: reply",
         "event: screen",
         "event: session",
+        "event: facts",
+        "`command_outputs`",
+        "git_branch",
+        "cache/model-catalog/",
     ):
         assert needle in reference, needle
