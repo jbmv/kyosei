@@ -25,7 +25,8 @@ import os
 import re
 import shutil
 import subprocess
-from collections import deque
+import threading
+from collections import OrderedDict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,12 @@ _RETIRED_KEPT = 32
 
 #: How far back the pane is read when the reply in progress has scrolled off the screen.
 _SCROLLBACK_LINES = 2000
+
+#: How many sessions' line totals are kept between reads.
+_LINE_TOTALS_KEPT = 64
+
+_line_totals: OrderedDict[Path, transcript.SessionLines] = OrderedDict()
+_line_totals_lock = threading.Lock()
 
 NOT_OPTED_IN = (
     "this project has not opted in to reading transcripts, so the session layer will not open "
@@ -122,6 +129,24 @@ class SessionFacts:
     context: ContextUse
     #: As the transcript last recorded it, which may be after the latest reply (KYO-698).
     permission_mode: str | None = None
+    #: Across the session and all of its subagents, so it can move without a reply (KYO-701).
+    lines: transcript.LinesChanged = transcript.LinesChanged()
+
+
+def read_line_totals(path: Path) -> transcript.LinesChanged:
+    """The total for the session at ``path``, reading only what was appended since the last.
+
+    Held for the life of the process, because a route opens a new :class:`LiveSession` on
+    each request and a session's subagents can be many and large.
+    """
+    with _line_totals_lock:
+        follower = _line_totals.get(path)
+        if follower is None:
+            follower = _line_totals[path] = transcript.SessionLines(path)
+            while len(_line_totals) > _LINE_TOTALS_KEPT:
+                _line_totals.popitem(last=False)
+        _line_totals.move_to_end(path)
+        return follower.read()
 
 
 def context_use(usage: transcript.Usage, window: int | None) -> ContextUse:
@@ -249,7 +274,12 @@ class LiveSession:
             latest.git_branch,
             context_use(latest.usage, window),
             self.transcript.latest_permission_mode,
+            self.lines_changed(),
         )
+
+    def lines_changed(self) -> transcript.LinesChanged:
+        """The lines this session and its subagents have changed, as of now (KYO-701)."""
+        return read_line_totals(self.transcript.path)
 
     def tmux(self) -> Tmux:
         """A tmux client on the server holding this session's pane."""

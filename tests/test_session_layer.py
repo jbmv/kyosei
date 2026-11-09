@@ -1637,3 +1637,137 @@ def test_branch_lines_reports_none_for_a_name_the_repository_does_not_hold(
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     assert session_layer.branch_lines(repo, "0" * 40, "gone") is None
+
+
+# ------------------------------------- KYO-701: lines changed by a session and its subagents
+#
+# ``lines-total.synthetic.jsonl`` has the keys measured on 2.1.319 and figures written for the
+# test. Its sidechain rows are the subagents' files, split out by ``place_lines_session``: the
+# session's own rows change +6 -1, the first subagent's +4 -2 and the second's +1 -0.
+
+LINES_FILE = FIXTURES / "lines-total.synthetic.jsonl"
+LINES_SESSION = "77777777-7777-4777-8777-777777777777"
+LINES_AGENT = "a4444444444444444"
+
+
+def place_lines_session(directory: Path) -> Path:
+    """The fixture as Claude Code lays it out: the session's file, each subagent's beside it."""
+    session: list[str] = []
+    agents: dict[str, list[str]] = {}
+    for line in LINES_FILE.read_text(encoding="utf-8").splitlines(keepends=True):
+        record = json.loads(line)
+        (agents.setdefault(record["agentId"], []) if record["isSidechain"] else session).append(
+            line
+        )
+    path = directory / f"{LINES_SESSION}.jsonl"
+    path.write_text("".join(session), encoding="utf-8")
+    (directory / LINES_SESSION / "subagents").mkdir(parents=True)
+    for agent, lines in agents.items():
+        agent_path = directory / LINES_SESSION / "subagents" / f"agent-{agent}.jsonl"
+        agent_path.write_text("".join(lines), encoding="utf-8")
+    return path
+
+
+def lines_agent_row(added: int) -> str:
+    patch = {"structuredPatch": [{"lines": [f"+{i}" for i in range(added)]}]}
+    return json.dumps({"isSidechain": True, "toolUseResult": patch}) + "\n"
+
+
+def test_the_total_sums_the_session_and_every_subagent(tmp_path: Path) -> None:
+    lines = transcript.SessionLines(place_lines_session(tmp_path))
+    assert lines.read() == transcript.LinesChanged(11, 3)
+
+
+def test_a_session_with_no_subagents_counts_its_own_patches(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    shutil.rmtree(tmp_path / LINES_SESSION)
+    assert transcript.SessionLines(path).read() == transcript.LinesChanged(6, 1)
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        ({"structuredPatch": [{"lines": [" c", "-a", "+b"]}]}, (1, 1)),
+        ({"type": "create", "content": "one\ntwo\n", "structuredPatch": []}, (3, 0)),
+        ({"type": "create", "content": "one", "structuredPatch": []}, (1, 0)),
+        ({"type": "create", "content": "", "structuredPatch": []}, (0, 0)),
+        ({"type": "update", "content": "same\n", "structuredPatch": []}, (0, 0)),
+        ({"structuredPatch": [{"lines": ["\\ No newline at end of file"]}]}, (0, 0)),
+        ({"structuredPatch": "not a list"}, (0, 0)),
+        ("Error: refused", (0, 0)),
+        (None, (0, 0)),
+    ],
+)
+def test_one_results_lines(result: object, expected: tuple[int, int]) -> None:
+    assert transcript.patch_lines(result) == transcript.LinesChanged(*expected)
+
+
+def test_a_running_session_and_a_running_subagent_stay_current(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    agent = tmp_path / LINES_SESSION / "subagents" / f"agent-{LINES_AGENT}.jsonl"
+    lines = transcript.SessionLines(path)
+    assert lines.read() == transcript.LinesChanged(11, 3)
+    with agent.open("a", encoding="utf-8") as handle:
+        handle.write(lines_agent_row(5))
+    assert lines.read() == transcript.LinesChanged(16, 3)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(lines_agent_row(2))
+    assert lines.read() == transcript.LinesChanged(18, 3)
+    late = tmp_path / LINES_SESSION / "subagents" / "agent-a6666666666666666.jsonl"
+    late.write_text(lines_agent_row(1), encoding="utf-8")
+    assert lines.read() == transcript.LinesChanged(19, 3)
+
+
+def test_a_line_still_being_written_waits_for_its_end(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    lines = transcript.SessionLines(path)
+    lines.read()
+    whole = lines_agent_row(4)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(whole[:20])
+    assert lines.read() == transcript.LinesChanged(11, 3)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(whole[20:])
+    assert lines.read() == transcript.LinesChanged(15, 3)
+
+
+def test_only_what_was_appended_is_read(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    agent = tmp_path / LINES_SESSION / "subagents" / f"agent-{LINES_AGENT}.jsonl"
+    lines = transcript.SessionLines(path)
+    lines.read()
+    # What is already counted is blanked at the same length, so a total that read the file
+    # again would fall.
+    held = agent.read_bytes()
+    blank = (b" " * (len(held) - 1)) + b"\n"
+    agent.write_bytes(blank)
+    assert lines.read() == transcript.LinesChanged(11, 3)
+    with agent.open("a", encoding="utf-8") as handle:
+        handle.write(lines_agent_row(1))
+    assert lines.read() == transcript.LinesChanged(12, 3)
+
+
+def test_a_rewritten_file_is_counted_again(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    agent = tmp_path / LINES_SESSION / "subagents" / f"agent-{LINES_AGENT}.jsonl"
+    lines = transcript.SessionLines(path)
+    lines.read()
+    agent.write_text(lines_agent_row(1), encoding="utf-8")
+    assert lines.read() == transcript.LinesChanged(8, 1)
+
+
+def test_facts_state_the_total_and_the_layer_keeps_one_follower(tmp_path: Path) -> None:
+    path = place_lines_session(tmp_path)
+    live = session_layer.LiveSession(
+        LINES_SESSION, path, config_dir=tmp_path, environ={"PATH": ""}, log_dir=tmp_path / "log"
+    )
+    live.transcript.read()
+    facts = live.facts()
+    assert facts is not None and facts.lines == transcript.LinesChanged(11, 3)
+    agent = tmp_path / LINES_SESSION / "subagents" / f"agent-{LINES_AGENT}.jsonl"
+    agent.write_bytes(b" " * (agent.stat().st_size - 1) + b"\n")
+    # A second opening, as a route makes on each request, reads nothing it has read.
+    again = session_layer.LiveSession(
+        LINES_SESSION, path, config_dir=tmp_path, environ={"PATH": ""}, log_dir=tmp_path / "log"
+    )
+    assert again.lines_changed() == transcript.LinesChanged(11, 3)

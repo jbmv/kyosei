@@ -243,7 +243,12 @@ def _facts_json(facts: Any) -> dict | None:
             "window": facts.context.window,
             "percent": facts.context.percent,
         },
+        "lines": _lines_json(facts.lines),
     }
+
+
+def _lines_json(lines: Any) -> dict:
+    return {"added": lines.added, "removed": lines.removed}
 
 
 def _background_json(work: Any) -> dict | None:
@@ -821,8 +826,14 @@ class _Sampler:
                 )
             )
         # A permission-mode row is none of the lists, and a change of mode has to reach the strip.
-        held_mode = (self._facts or {}).get("permission_mode")
-        if any(lists) or followed or live.transcript.latest_permission_mode != held_mode:
+        # So is a running subagent's edit, which reaches only that subagent's own file.
+        held = self._facts or {}
+        if (
+            any(lists)
+            or followed
+            or live.transcript.latest_permission_mode != held.get("permission_mode")
+            or _lines_json(live.lines_changed()) != held.get("lines")
+        ):
             now_facts = _facts_json(live.facts())
             if now_facts != self._facts:
                 self._facts = now_facts
