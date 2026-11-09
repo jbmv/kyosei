@@ -66,7 +66,7 @@ from kyosei.errors import EXIT_DOCTOR
 from kyosei.stop_audit import STOP_TICK_PERIOD_SECONDS, StopAudit, StopAuditLedger
 from kyosei.stop_target import STOP_TARGET_MATCHED, STOP_TARGET_UNRESOLVED
 
-from .conftest import event_lines, legacy_unresolved_rows
+from .conftest import declare_person, event_lines, legacy_unresolved_rows
 from .test_kyo134_unresolved_stop_record import (
     _stop_audit_events,
     controller_dirty,  # noqa: F401
@@ -857,6 +857,7 @@ def test_a_tick_shaped_population_is_a_notice_printed_in_full_and_doctor_exits_z
     kyo, controller_dirty: Path, tmp_path: Path, monkeypatch  # noqa: F811
 ) -> None:
     """KYO-214.c1/c2/c4 in one run: the whole finding, both surfaces, exit 0."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     dispatch_id = _tick_notice(kyo, tmp_path, "wt-214-notice", monkeypatch)
 
     result = kyo("doctor", "--json")
@@ -900,6 +901,7 @@ def test_moving_the_notice_back_to_the_problem_tier_fails_the_command_again(
     which is both the bug KYO-214 was filed for and the proof that the assertion above
     is load-bearing rather than a property of the fixture.
     """
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     dispatch_id = _tick_notice(kyo, tmp_path, "wt-214-canary", monkeypatch)
     monkeypatch.setattr(doctor_module, "NOTICE_CHECKS", frozenset())
 

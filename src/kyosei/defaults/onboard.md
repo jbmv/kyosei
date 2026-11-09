@@ -224,6 +224,27 @@ Ask these together, in one message. Propose an answer for each from what you rea
   installed, because there is nothing to turn on; say in one line that
   `uv tool install 'kyosei[recx]'` adds it, after which the session-start brief asks until
   a choice is recorded.
+- **[D13] People credited.** Ask: "Whose judgement should Kyosei record by name when a
+  verdict, a gate or a decision rests on a person? (Default: you, under a short key such as
+  your username.)" The answer goes under `people:` in `kyosei/config.yml`, each key with an
+  optional `name`. With nobody declared, nothing is refused for lacking a credit and
+  `kyo doctor` prints one notice saying so; a no is recorded as `D13: declined` under
+  `onboarding:`, which ends the notice.
+- **[D14] Reading transcripts.** Ask, giving the disclosure in full: "May Kyosei read your
+  Claude Code transcripts for this project? It is used to check that words credited to you
+  are yours, and to count the turns of a discussion a credit cites. **What is read:** the
+  transcript of the session a credit names, and your prompt history
+  (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
+  this machine, only when a credit is written or rechecked. **What is stored:** the check's
+  outcome, the matched record's id and timestamp, the form of the words (typed, mid-turn,
+  a choice, an accepted suggestion), and for a cited discussion the counts of turns, the
+  active seconds and the first and last timestamps. No text, path or hash of a transcript
+  is stored; the words being credited are stored either way, because the credit holds
+  them. **What never leaves this machine:** the transcripts and the prompt history. Kyosei
+  sends neither anywhere and copies neither into the store; a store remote carries only
+  what is listed as stored. (Default: no.)" Write the answer as `read_transcripts: true` or
+  `read_transcripts: false` in `kyosei/config.yml`. Without it no transcript is read and
+  a credit records its check as `not-applicable`.
 - **[E1] Machine layout.** Ask: "CLI only on this machine (default), this machine with the
   desktop app, or a dev box you reach from a laptop?"
 - **[E3] `kyo serve`.** Ask only if **[E1]** is not CLI only: "May I run
@@ -255,7 +276,7 @@ Do not ask these; state them in one line each where they matter:
   (`ssh host "zsh -lc 'kyo ...'"`) because `~/.local/bin` is not on a non-interactive PATH.
 
 Then apply round two yourself: edit `kyosei/config.yml` (`worker_model`, `worktree_setup`,
-`orchestrator_only_commands`, `onboarding`), `kyosei/scopes.yml`, `kyosei/documents.yml`,
+`orchestrator_only_commands`, `people`, `read_transcripts`, `onboarding`), `kyosei/scopes.yml`, `kyosei/documents.yml`,
 CLAUDE.md, run `kyo prior-art-setting` with **[D12]**'s answer and the install commands
 the operator agreed to, and commit the store. For the agent types **[C4]** chose, run
 `kyo install-agents --type worker=<model>:<effort> --type designer=<model>:<effort>`,
@@ -302,6 +323,7 @@ Kyosei setup: readback
   orchestrator_only_commands: <commands, or none>
   scopes:                     <names, or none>
   documents:                  <declared documents, or none>
+  read_transcripts:           <true, false, or unanswered>
   onboarding:                 <each declined or deferred decision: id, status, reason; or none>
   machine layout:             <CLI only | one machine with the app | dev box and light client>
   kyo serve:                  <running at login, or not installed>

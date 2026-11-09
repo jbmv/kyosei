@@ -30,6 +30,12 @@ override. Nothing replaces it: the row and its words stay readable, ``withdrawn_
 ``withdrawn_by`` and ``withdrawn_why`` say when, by whom and why, and it counts nowhere a
 current credit counts, so the rows it named are uncredited again.
 
+WHERE THE ENFORCEMENT APPLIES (KYO-654 DC12, KYO-656). Only in a project whose ``people:``
+declares someone (:func:`enforced`). Until then the points above write their row with no
+credit, so an upgrade of kyo refuses nothing before the project's operator has chosen, and
+``kyo doctor`` carries one notice saying so. A credit flag given in such a project still
+asks for a credit, and is refused for naming nobody declared.
+
 Shared by all of them: ``credit-person-undeclared``, ``credit-quote-not-found`` (the
 transcript is present and none of the person's turns holds the words; KYO-640 P6 allows
 no override) and ``credit-quote-ambiguous``. Passing both ``--session`` and
@@ -43,7 +49,10 @@ WHERE THE WORDS WERE SAID. ``--session`` defaults to ``$CLAUDE_CODE_SESSION_ID``
 Claude Code sets in its shell; the quote is then checked against that session's
 transcript by :mod:`kyosei.harness.claude_code_transcript`, and only
 ``CheckResult.store_fields()`` is stored. ``--source-other`` is one line saying where
-words said outside Claude Code were said, recorded ``not-applicable``.
+words said outside Claude Code were said, recorded ``not-applicable``. So is every credit
+in a project that has not opted in to reading transcripts
+(:func:`kyosei.config.transcripts_opted_in`, KYO-656): the session is stored as given and
+no transcript is opened, for the quote, the refining turn or a discussion span.
 
 ROLES. ``observed``: the person looked at something (a verdict, a gate). ``decided``: the
 person decided a decision record, with ``--decision-file`` saying what was recommended,
@@ -62,7 +71,8 @@ never text: the person's turns; the agent's REPLIES to the person, one per agent
 before the person's next turn, so a reply split across records between tool calls counts
 once (KYO-644.c9); active seconds, leaving out every gap longer than
 ``SPAN_BREAK_SECONDS`` (fifteen minutes); and the span's first and last timestamps. With
-no transcript the span's ids are stored and its measures left empty.
+no transcript, or in a project that has not opted in, the span's ids are stored and its
+measures left empty.
 """
 
 from __future__ import annotations
@@ -77,7 +87,7 @@ import yaml
 from . import commands, export, ids
 from .cmd_sessions import recorded_transcript_path
 from .commands import Context, Output, _add_evidence, _touch_record
-from .config import declared_people, person_label
+from .config import READ_TRANSCRIPTS_KEY, declared_people, person_label, transcripts_opted_in
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
 from .errors import ContractViolation, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
@@ -97,6 +107,12 @@ SOURCE_CLAUDE_CODE = "claude-code"
 SOURCE_OTHER = "other"
 CHECK_NOT_APPLICABLE = "not-applicable"
 
+#: Why nothing was read in a project that has not opted in (KYO-656).
+NOT_OPTED_IN_WHY = (
+    "this project has not opted in to reading transcripts "
+    f"(`{READ_TRANSCRIPTS_KEY}:` in kyosei/config.yml), so no transcript was read"
+)
+
 #: ``gates.cleared_as`` values (``contracts.GATE_CLEARED_AS``).
 CLEARED_ANSWERED = "answered"
 CLEARED_WITHDRAWN = "withdrawn"
@@ -112,6 +128,7 @@ CONTRACT_CREDIT_BASIS_NOT_APPROVAL = "credit-basis-not-approval"
 CONTRACT_CREDIT_SUBJECT_ALREADY_CREDITED = "credit-subject-already-credited"
 CONTRACT_CREDIT_BATCH_INVALID = "credit-batch-invalid"
 CONTRACT_CREDIT_TRANSCRIPT_STILL_ABSENT = "credit-transcript-still-absent"
+CONTRACT_CREDIT_TRANSCRIPTS_NOT_OPTED_IN = "credit-transcripts-not-opted-in"
 
 #: The keys a ``--decision-file`` may carry.
 DECISION_FILE_KEYS = frozenset(
@@ -189,12 +206,15 @@ def add_credit_flags(
         )
 
 
-def requested(args: Namespace) -> bool:
-    """Whether this invocation gave any flag that only a credit reads."""
+def requested(args: Namespace, *, words_flag: bool = True) -> bool:
+    """Whether this invocation gave any flag that only a credit reads.
+
+    ``words_flag`` False leaves ``--quote-file`` out, for a command that reads the person's
+    words from it whether or not a credit is written (`kyo confirm`)."""
     return any(
         getattr(args, name, None)
-        for name in ("person", "quote_file", "session", "turn", "source_other", "decision_file")
-    )
+        for name in ("person", "session", "turn", "source_other", "decision_file")
+    ) or bool(words_flag and getattr(args, "quote_file", None))
 
 
 # ------------------------------------------------------------------- the resolution
@@ -242,6 +262,18 @@ class Credit:
             if self.check.get("source_turn"):
                 out += ["--turn", self.check["source_turn"]]
         return out
+
+
+def enforced(store) -> bool:
+    """KYO-656 (KYO-654, DC12): whether credits are required in this project at all, which
+    is whether its ``people:`` declares anyone."""
+    return bool(declared_people(store.config))
+
+
+def exempt(store, args: Namespace, *, words_flag: bool = True) -> bool:
+    """KYO-656: no credit is needed for this write, because the project declares nobody and
+    the invocation asked for none."""
+    return not enforced(store) and not requested(args, words_flag=words_flag)
 
 
 def _person(store, given: str | None) -> str | None:
@@ -348,6 +380,24 @@ def resolve(
             },
             check_why="said outside Claude Code, so no transcript was read",
         )
+    elif not transcripts_opted_in(store.config):
+        assert session is not None
+        credit = Credit(
+            person,
+            role,
+            quote_text,
+            SOURCE_CLAUDE_CODE,
+            session,
+            None,
+            check={
+                "transcript_check": CHECK_NOT_APPLICABLE,
+                # As given: nothing here read a transcript to confirm it.
+                "source_turn": getattr(args, "turn", None),
+                "observed_at": None,
+                "words_form": None,
+            },
+            check_why=NOT_OPTED_IN_WHY,
+        )
     else:
         assert session is not None
         result = _check(ctx, session, quote_text, getattr(args, "turn", None), person)
@@ -364,13 +414,13 @@ def resolve(
     if role == ROLE_DECIDED:
         if decision_text is None:
             decision_text = read_prose(decision_path, what="--decision-file")
-        credit.decision = _decision(ctx, decision_text, credit, reconstructed=reconstructed)
+        credit.decision = _decision(ctx, store, decision_text, credit, reconstructed=reconstructed)
     elif decision_path is not None:
         raise UsageError(
             f"--decision-file belongs to a decided credit; this one is {role}, which records "
             "no recommendation, outcome or alternatives"
         )
-    credit.span, credit.span_why = _span(ctx, args, credit)
+    credit.span, credit.span_why = _span(ctx, store, args, credit)
     return credit
 
 
@@ -425,7 +475,7 @@ def _check_role_subjects(role: str, kinds: set[str]) -> None:
         )
 
 def _decision(
-    ctx: Context, text: str, credit: Credit, *, reconstructed: bool = False
+    ctx: Context, store, text: str, credit: Credit, *, reconstructed: bool = False
 ) -> dict:
     """The ``--decision-file``: what was recommended, the outcome, the alternatives.
 
@@ -497,7 +547,7 @@ def _decision(
                 "recommendation as refining_turn (and refining_session when it is not "
                 "the credit's session)"
             )
-        _require_person_turn(ctx, str(refining_session), str(refining_turn))
+        _require_person_turn(ctx, store, str(refining_session), str(refining_turn))
     elif refining_turn:
         raise UsageError(
             f"--decision-file refining_turn belongs to outcome 'refined', not {outcome!r}"
@@ -516,8 +566,10 @@ def _decision(
     }
 
 
-def _require_person_turn(ctx: Context, session: str, turn: str) -> None:
+def _require_person_turn(ctx: Context, store, session: str, turn: str) -> None:
     """A refining turn must be one of the person's when the transcript can say so."""
+    if not transcripts_opted_in(store.config):
+        return
     try:
         read = transcript.find_person_turns(
             session, recorded=recorded_transcript_path(ctx.root, session), environ=ctx.environ
@@ -531,7 +583,7 @@ def _require_person_turn(ctx: Context, session: str, turn: str) -> None:
         )
 
 
-def _span(ctx: Context, args: Namespace, credit: Credit) -> tuple[dict, str]:
+def _span(ctx: Context, store, args: Namespace, credit: Credit) -> tuple[dict, str]:
     first = getattr(args, "span_first", None)
     last = getattr(args, "span_last", None)
     if not first and not last:
@@ -546,6 +598,10 @@ def _span(ctx: Context, args: Namespace, credit: Credit) -> tuple[dict, str]:
             "--span-first and --span-last name records of a Claude Code session, and this "
             "credit names none: give --span-session"
         )
+    fields = {"span_session": session, "span_first_turn": first, "span_last_turn": last}
+    if not transcripts_opted_in(store.config):
+        fields.update(transcript.SpanMeasure(CHECK_NOT_APPLICABLE, NOT_OPTED_IN_WHY).store_fields())
+        return fields, NOT_OPTED_IN_WHY
     try:
         measure = transcript.measure_span(
             session,
@@ -558,7 +614,6 @@ def _span(ctx: Context, args: Namespace, credit: Credit) -> tuple[dict, str]:
         raise UsageError(f"{exc}; --span-session takes the session's UUID") from exc
     if measure.outcome in (transcript.SPAN_TURN_NOT_FOUND, transcript.SPAN_REVERSED):
         raise UsageError(f"the discussion span cannot be measured: {measure.why}")
-    fields = {"span_session": session, "span_first_turn": first, "span_last_turn": last}
     fields.update(measure.store_fields())
     return fields, measure.why
 
@@ -1082,6 +1137,16 @@ def recheck(ctx: Context, args: Namespace) -> Output:
             "only a credit recorded transcript-absent is rechecked"
         )
     record_id = old["record_id"]
+    if not transcripts_opted_in(store.config):
+        raise ContractViolation(
+            CONTRACT_CREDIT_TRANSCRIPTS_NOT_OPTED_IN,
+            [
+                f"--recheck {credit_id} reads a transcript, and {NOT_OPTED_IN_WHY}: nothing "
+                "was written",
+                f"add `{READ_TRANSCRIPTS_KEY}: true` to kyosei/config.yml if the operator "
+                "agrees (setup decision D14), then rerun this command",
+            ],
+        )
     quote = store.evidence_artifact(old["quote_id"])["text"]
     result = _check(ctx, old["source_session"], quote, old["source_turn"], old["person"])
     if result.outcome == transcript.TRANSCRIPT_ABSENT:
@@ -1527,7 +1592,7 @@ def gate_clearing(
         f"or, when the wait no longer applies: `{command} --withdrawn --why <reason>`",
     ]
     if not requested(args):
-        if human:
+        if human and enforced(store):
             raise ContractViolation(
                 CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT,
                 [
@@ -1613,7 +1678,7 @@ def filing_credit(
     any other kind. ``--quote-file`` holds the person's words deciding it; given without
     ``--evidence-file`` it is also the filing's evidence, read once
     (``cmd_records._evidence_at_filing``), so a direct filing stays one command."""
-    if not kind_def.requires_credit:
+    if not kind_def.requires_credit or exempt(store, args):
         return None
     quote_file = getattr(args, "quote_file", None)
     if quote_file and not getattr(args, "evidence_file", None):

@@ -475,6 +475,11 @@ def _pointer(
     )
 
 
+def _credit_flags(credit: credits.Credit | None) -> list[str]:
+    """The flags naming ``credit`` to a composed step; none where no person is declared."""
+    return credit.flags() if credit is not None else []
+
+
 def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     """``kyo confirm <record> (--quote TEXT | --quote-file FILE) [--criterion ...]
     [--gate GID] [--no-close]`` — KYO-494.
@@ -517,7 +522,12 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     # verdict and the gate are added to it with --credit, so it names every row settled.
     existing = _existing_credit(store, record_id, quote, resolved, skipped)
     credit = None
-    if (targets or gate is not None) and existing is None:
+    # KYO-656: a project that declares nobody records the confirmation with no credit.
+    if (
+        (targets or gate is not None)
+        and existing is None
+        and not credits.exempt(store, args, words_flag=False)
+    ):
         credit = credits.resolve(
             ctx,
             store,
@@ -545,7 +555,7 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         for target in targets:
             cid = target["criterion_id"]
             tail = ["--verdict", CONFIRM_VERDICT, "--method", CONFIRM_METHOD, "--evidence-file"]
-            who = ["--credit", credit_id] if credit_id else credit.flags()
+            who = ["--credit", credit_id] if credit_id else _credit_flags(credit)
             step = _composed(
                 ctx,
                 ["verify", cid, *tail, str(words), *who],
@@ -565,6 +575,17 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             if held:
                 attached = held[0]
                 skipped.append({"evidence_id": attached, "reason": "already attached"})
+            elif credit is None and credit_id is None:
+                # KYO-656: with no credit to carry the words they are attached on their own.
+                step = _composed(
+                    ctx,
+                    ["attach", record_id, "--file", str(words), "--supports", record_id],
+                    ["attach", record_id, "--file", label, "--supports", record_id],
+                    cmd_evidence.cmd_attach,
+                )
+                steps.append(step)
+                if step.refused is None:
+                    attached = (step.data or {}).get("evidence_id")
 
         gates_cleared: list[dict] = []
         gates_left: list[dict] = []
@@ -596,6 +617,8 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
                 # words as its quote, supporting the record, as `kyo attach` did before.
                 if credit_id:
                     who, shown = ["--credit", credit_id], ["--credit", credit_id]
+                elif credit is None:  # KYO-656: no person declared, so no credit
+                    who, shown = [], []
                 else:
                     who = ["--quote-file", str(words), *credit.flags()]
                     shown = ["--quote-file", label, *credit.flags()]

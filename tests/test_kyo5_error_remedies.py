@@ -106,6 +106,7 @@ from .conftest import (
     invoke,
     kinds_yml,
     new_record,
+    opt_in_transcripts,
     requires_credit,
     requires_evidence,
 )
@@ -3788,7 +3789,7 @@ PROVOKED: dict[str, Expectation] = {
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
     # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
-    "credits.py:recheck#5": (
+    "credits.py:recheck#6": (
         "the transcript placed where Claude Code keeps it, then the same `kyo credit "
         "--recheck <id>`; proved by test_kyo653_a_transcript_still_absent_is_cleared_by_placing_it"
     ),
@@ -4983,6 +4984,18 @@ RECORDED: dict[str, str] = {
     # KYO-556.c5: `kind_policy_notice`, parsed exactly as `kind_grants_notice` above.
     # `tests/test_kind_policy_notice.py` writes the bad value, asserts the refusal,
     # writes `false`, and asserts `kyo doctor` runs clean again.
+    # KYO-656: a hand edit, then the same command; proved by
+    # test_kyo656_transcript_opt_in.py::test_a_recheck_is_refused_until_the_project_opts_in.
+    "credits.py:recheck#5": (
+        "a hand edit adding read_transcripts: true to config.yml, then rerunning the same "
+        "`kyo credit --recheck`; proved by test_a_recheck_is_refused_until_the_project_opts_in"
+    ),
+    # KYO-656: a text editor again; test_kyo656_transcript_opt_in.py writes the bad value,
+    # asserts the refusal, deletes the line and asserts the config loads.
+    "config.py:load_config#14": (
+        "hand edit: write read_transcripts: true or false in config.yml, or delete the "
+        "line; proved by test_a_read_transcripts_value_that_is_not_a_boolean_is_refused"
+    ),
     "config.py:load_config#13": (
         "hand edit: write kind_policy_notice: false in config.yml, or delete the line. "
         "A text editor either way, and which is meant is the project's decision about "
@@ -6763,6 +6776,7 @@ _K644_SESSION = "3c4d5e6f-1111-4a2b-9c3d-0123456789ab"
 def _k644_project(at: Path) -> tuple[Path, str, Run]:
     root, record = _project_with_a_record(at)
     declare_person(root)
+    opt_in_transcripts(root)  # the KYO-644 and KYO-653 remedies here are the transcript's
     return root, record, _runner(root)
 
 

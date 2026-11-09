@@ -322,6 +322,10 @@ class Config:
     #: file's order; empty in every project that declares none, and empty means no credit
     #: can name anyone. Read through :func:`declared_people` and :func:`person_label`.
     people: dict[str, str | None] = field(default_factory=dict)
+    #: KYO-656. ``read_transcripts:``, the answer to setup decision D14: True where the
+    #: project opted in, False where it declined, None where it never answered. Read
+    #: through :func:`transcripts_opted_in`, which treats None as False.
+    read_transcripts: bool | None = None
 
     @property
     def repo_root(self) -> Path:
@@ -1445,6 +1449,15 @@ def load_config(
             f"the notice on; found {policy_notice!r} — write `kind_policy_notice: false` "
             "to turn the notice off, or delete the line"
         )
+    # KYO-656: refused rather than coerced. Reading a person's transcripts is opt-in, and
+    # a value this build has to interpret could opt a project in by accident.
+    read_transcripts = raw.get(READ_TRANSCRIPTS_KEY)
+    if read_transcripts is not None and not isinstance(read_transcripts, bool):
+        raise KyoseiError(
+            f"{path} key {READ_TRANSCRIPTS_KEY!r} must be true or false, or absent, which "
+            f"reads as false; found {read_transcripts!r} — write `{READ_TRANSCRIPTS_KEY}: "
+            "true` to opt in or `false` to decline, or delete the line"
+        )
     people = parse_people(raw.get(PEOPLE_KEY), path)
     layout_at_init = raw.get("layout_at_init")
     return Config(
@@ -1467,6 +1480,7 @@ def load_config(
         code_repo_id=code_repo_id.strip() if code_repo_id is not None else None,
         store_via_main_checkout=store_via_main_checkout,
         people=people,
+        read_transcripts=read_transcripts,
     )
 
 
@@ -1816,6 +1830,23 @@ def person_label(config: Config, key: str) -> str:
     return config.people.get(key) or key
 
 
+# ---------------------------------------------------------- KYO-656: reading transcripts
+
+#: The config key that records setup decision D14 (KYO-654, DC12).
+READ_TRANSCRIPTS_KEY = "read_transcripts"
+
+
+def transcripts_opted_in(config: Config) -> bool:
+    """KYO-656: whether this project may read a person's transcripts.
+
+    The one question every reader asks before it opens a transcript or the prompt history
+    (:mod:`kyosei.harness.claude_code_transcript` holds the readers and asks nothing
+    itself). Only an explicit ``read_transcripts: true`` answers yes: a project that never
+    answered has not agreed, so an upgrade reads nothing new (KYO-654, DC12).
+    """
+    return config.read_transcripts is True
+
+
 # ---------------------------------------------------------------- KYO-560: onboarding
 
 #: The config key that records the setup decisions an operator declined or deferred.
@@ -1956,6 +1987,17 @@ CONFIG_KEY_EXAMPLES: dict[str, str] = {
         "#   jbmv: {}\n"
         "#   ada:\n"
         "#     name: Ada"
+    ),
+    READ_TRANSCRIPTS_KEY: (
+        "# KYO-656. Setup decision D14: whether Kyosei may read this project's Claude Code\n"
+        "# transcripts and prompt history, on this machine, to check that words credited\n"
+        "# to a person are theirs. The store keeps the check's outcome, the matched record's\n"
+        "# id and time, and counts and times for a cited discussion; no transcript text. Left\n"
+        "# commented out, or `false`, nothing is read and a credit records its check as\n"
+        "# not-applicable. A kyo older than this key refuses it, so set it only once every\n"
+        "# kyo that reads this store has it.\n"
+        "#\n"
+        "# read_transcripts: true"
     ),
     "worker_model": (
         "# KYO-61. Uncomment to name the model this project's dispatched workers run on\n"

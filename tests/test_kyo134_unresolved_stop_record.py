@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import event_lines
+from .conftest import declare_person, event_lines
 from .test_subagent_stop_worktree import (
     CONTROLLER_EDIT,
     _running_dispatch,
@@ -171,6 +171,7 @@ def test_doctor_reports_an_unaudited_stop_while_its_dispatch_is_still_running(
     the surface a controller already reads. It was exiting 3, which rendered the whole
     Stop hook as an error block on every stop for the life of every dispatch.
     """
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     dispatch_id = _unresolved_stop(kyo, tmp_path, controller_dirty, "wt-doctor")
 
     result = kyo("doctor", "--json")
