@@ -24,9 +24,9 @@ from pathlib import Path
 import pytest
 
 import kyosei
-from kyosei import cmd_sessions, serve, serve_sessions
+from kyosei import cmd_sessions, serve, serve_sessions, session_layer
 
-from .conftest import opt_in_transcripts
+from .conftest import git_init, new_record, opt_in_transcripts
 from .test_kyo_serve import Client, body_json, register, start, stop
 
 FIXTURES = Path(__file__).parent / "fixtures" / "session_layer"
@@ -583,7 +583,7 @@ def test_turns_return_deliveries_as_their_own_objects_in_time_order(bed: Bed) ->
     assert not {d["uuid"] for d in deliveries} & {t["id"] for t in document["turns"]}
     assert set(deliveries[0]) == {
         "uuid", "at", "kind", "text", "sender", "sender_id", "handback", "task_id",
-        "call_id", "status", "summary",
+        "call_id", "status", "summary", "usage",
     }  # fmt: skip
     handback = next(d for d in deliveries if d["handback"])
     assert handback["sender"] == "kyosei-worker" and "written for this test" in handback["text"]
@@ -787,6 +787,115 @@ def test_an_agent_of_a_session_this_project_does_not_record_is_not_served(bed: B
     shutil.copyfile(OLD_FILE, bed.transcripts / f"{ELSEWHERE}.jsonl")
     place_agent(bed, ELSEWHERE)
     assert bed.get(f"{SESSIONS}/{ELSEWHERE}/subagents/{AGENT}")[0] == 404
+
+
+# --------------------------------------------- KYO-695: a task's usage, a dispatch's lines
+
+AGENT_USAGE_FILE = FIXTURES / "agent-usage.synthetic.jsonl"
+WORKER, PLAIN, UNKNOWN = ("a1111111111111111", "a2222222222222222", "a3333333333333333")
+
+
+def place_usage_session(bed: Bed) -> None:
+    shutil.copyfile(AGENT_USAGE_FILE, bed.transcript)
+    directory = bed.transcripts / OLD / "subagents"
+    directory.mkdir(parents=True, exist_ok=True)
+    for agent in (WORKER, PLAIN, UNKNOWN):
+        shutil.copyfile(AGENT_FILE, directory / f"agent-{agent}.jsonl")
+
+
+def worker_on_a_branch(bed: Bed, kyo) -> tuple[str, str]:
+    """Dispatch TST-1 on branch ``feat``, which adds two lines and removes one past its base."""
+    git_init(bed.project)
+    record = new_record(kyo)
+    dispatched = kyo("dispatch", record, "--no-create-worktree", "--branch", "feat", "--json")
+    assert dispatched.code == 0, dispatched
+    assert dispatched.json["dispatch_id"] == "TST-1.d1"
+    base = dispatched.json["worked_from_sha"]
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=bed.project, check=True, capture_output=True)
+
+    run("checkout", "-q", "-b", "feat", base)
+    (bed.project / "work.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    run("add", "work.txt")
+    run("commit", "-q", "-m", "a file")
+    base_of_change = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=bed.project, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (bed.project / "work.txt").write_text("one\nTWO\nthree\nfour\n", encoding="utf-8")
+    run("commit", "-q", "-am", "a change")
+    run("checkout", "-q", "main")
+    return base, base_of_change
+
+
+def test_a_deliverys_usage_is_served_and_is_none_where_the_row_records_none(bed: Bed) -> None:
+    place_usage_session(bed)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    deliveries = {item["task_id"]: item for item in document["deliveries"]}
+    assert deliveries[WORKER]["usage"] == {
+        "total_tokens": 77593,
+        "tool_uses": 12,
+        "duration_ms": 122833,
+    }
+    assert deliveries[PLAIN]["usage"] == {
+        "total_tokens": None,
+        "tool_uses": 4,
+        "duration_ms": None,
+    }
+    assert deliveries["bg7"]["usage"] is None
+
+
+def test_a_dispatched_workers_route_states_its_record_branch_and_lines(bed: Bed, kyo) -> None:
+    base, _ = worker_on_a_branch(bed, kyo)
+    place_usage_session(bed)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{WORKER}"))
+    # From the dispatch's base: the file's three new lines and the change's +2 -1 net to +4 -0.
+    assert document["dispatch"] == {
+        "id": "TST-1.d1",
+        "record": "TST-1",
+        "branch": "feat",
+        "added": 4,
+        "removed": 0,
+    }
+    assert document["dispatch_why"] is None
+    assert document["tool_calls"]  # the subagent's own calls are still served
+    assert base
+
+
+def test_the_lines_are_between_the_base_and_the_tip_not_the_last_commit(bed: Bed, kyo) -> None:
+    _, change_base = worker_on_a_branch(bed, kyo)
+    assert session_layer.branch_lines(bed.project, change_base, "feat") == (2, 1)
+
+
+def test_a_subagent_no_dispatch_names_has_none(bed: Bed, kyo) -> None:
+    worker_on_a_branch(bed, kyo)
+    place_usage_session(bed)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{PLAIN}"))
+    assert document["dispatch"] is None and "no dispatch names" in document["dispatch_why"]
+
+
+def test_a_prompt_naming_a_dispatch_the_store_lacks_has_none(bed: Bed, kyo) -> None:
+    worker_on_a_branch(bed, kyo)
+    place_usage_session(bed)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{UNKNOWN}"))
+    assert document["dispatch"] is None and "TST-99.d1" in document["dispatch_why"]
+
+
+def test_a_deleted_branch_has_none(bed: Bed, kyo) -> None:
+    worker_on_a_branch(bed, kyo)
+    place_usage_session(bed)
+    subprocess.run(["git", "branch", "-D", "feat"], cwd=bed.project, check=True)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{WORKER}"))
+    assert document["dispatch"] is None and "TST-1.d1" in document["dispatch_why"]
+
+
+def test_a_store_that_cannot_be_read_leaves_the_tool_calls_served(bed: Bed, kyo) -> None:
+    worker_on_a_branch(bed, kyo)
+    place_usage_session(bed)
+    (bed.project / "kyosei" / "kyosei.db").unlink()
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{WORKER}"))
+    assert document["dispatch"] is None and "could not be read" in document["dispatch_why"]
+    assert document["tool_calls"]
 
 
 def test_the_subagent_route_refuses_until_the_project_opts_in(
@@ -1299,5 +1408,7 @@ def test_the_operating_reference_states_the_shapes() -> None:
         "`command_outputs`",
         "git_branch",
         "cache/model-catalog/",
+        "`dispatch_why`",
+        "total_tokens",
     ):
         assert needle in reference, needle

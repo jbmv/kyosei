@@ -196,7 +196,7 @@ because that format is not a published interface and changes between releases.
 | `GET /v1/projects/<name>/sessions/<id>/turns[?cursor=...]` | the session's transcript objects |
 | `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now, classified and as text |
 | `GET /v1/projects/<name>/sessions/<id>/images/<turn>/<index>` | one image the person sent, as its own bytes |
-| `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls |
+| `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls, and for a dispatched worker its dispatch's branch and line counts |
 | `GET /v1/projects/<name>/sessions/<id>/changes` | the lines the session's working directory holds that no commit does |
 | `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
 
@@ -235,7 +235,8 @@ tool call: call_id, uuid, at, name, input, result
 subagent:  agent_id, tool_call_uuid, description, agent_type
 command output: uuid, at, command, args, text
 delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, status,
-           summary
+           summary, usage
+           usage: total_tokens, tool_uses, duration_ms
 ```
 
 `typed` is the person's own words (the text between any pastes), and `text` is the whole
@@ -262,7 +263,9 @@ other kind the transcript names is passed on. `text` is the message without the 
 wrapper: a hand-back's report, a peer's own words, or a notification's result or else its
 summary. `sender`, `sender_id` and `handback` describe a peer, and `task_id`, `call_id` (the
 `call_id` of the tool call it answers), `status` and `summary` describe a notification; each is `null`, or false for `handback`,
-where it does not apply.
+where it does not apply. `usage` is what a notification's row records the task as having used:
+a subagent's notification records it and a background command's does not, so it is `null`
+there, and a figure the row leaves out is `null` within it.
 
 A person's message can hold images. `images` lists them without their bytes, and
 `GET .../sessions/<id>/images/<turn>/<index>` returns one, where `<turn>` is the turn's
@@ -297,11 +300,22 @@ environment setting that changes one session's window, such as
 `CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
 
 **A subagent.** `GET .../sessions/<id>/subagents/<agent>` is `{"ok", "session_id", "agent_id",
-"readable", "why", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
+"readable", "why", "dispatch", "dispatch_why", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
 call has the shape above. It reads the subagent's own transcript, beside the session's, so a
 subagent still running can be read before it appears in `subagents`. An agent id that is not
 this session's answers 404. `readable: false` means the file's rows are of no format this
 build recognises, and `why` says so.
+
+`dispatch` is `{"id", "record", "branch", "added", "removed"}` for a subagent started as a
+dispatched worker, which its prompt states by opening with "the dispatched worker for" and
+the dispatch's id, optionally after "You are". `added` and `removed` are `git diff --numstat`
+summed from the dispatch's base commit to the branch's tip, in the project's code repository,
+and a binary file counts no lines. They are on this route rather than on the `subagents` of
+`/turns` because they take a store read and git commands per subagent. `dispatch` is `null`
+when no dispatch names the subagent, when the store holds no such dispatch, when the
+dispatch declared no branch, when its branch or base commit is not in the repository, or
+when the store or the repository cannot be read, and `dispatch_why` then says which.
+`dispatch_why` is otherwise `null`. The route writes nothing to the store or the repository.
 
 **Uncommitted changes.** `GET .../sessions/<id>/changes` is `{"ok", "session_id", "cwd", "root",
 "why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`. `added` and

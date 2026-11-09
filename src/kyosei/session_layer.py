@@ -21,6 +21,7 @@ READING A TRANSCRIPT IS OPT-IN PER PROJECT (KYO-656). :func:`open_session` asks
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from collections import deque
@@ -297,6 +298,18 @@ class LiveSession:
         reader.read()
         return reader
 
+    def subagent_dispatch(self, agent_id: str) -> str | None:
+        """The id of the dispatch subagent ``agent_id`` was started as a worker for, or None.
+
+        Read from the prompt of the tool call that started it, so an agent this session's
+        transcript has not listed yet names none. Raises :class:`OSError`.
+        """
+        self.transcript.read()
+        for ref in self.transcript.subagents:
+            if ref.agent_id == agent_id:
+                return dispatch_named(ref.prompt)
+        return None
+
     def _capture(self) -> str | None:
         """The pane's screen, or None when there is no pane to read.
 
@@ -347,6 +360,19 @@ class LiveSession:
                 return (current, beside) if changed else None
         link = transcript.clear_successor(path)
         return (link.session_id, link.path) if link is not None else None
+
+
+#: How a dispatched worker's prompt opens. Only its opening counts: a prompt asking another
+#: agent to review "the dispatched worker for X" names a dispatch that agent is not working.
+_DISPATCH_NAMED = re.compile(
+    r"\s*(?:you are )?the dispatched worker for (\S+?\.d\d+)(?!\d)", re.IGNORECASE
+)
+
+
+def dispatch_named(prompt: str) -> str | None:
+    """The dispatch id a subagent's prompt starts it as the worker for, or None."""
+    found = _DISPATCH_NAMED.match(prompt)
+    return found.group(1) if found else None
 
 
 def _pid_exists(pid: int) -> bool:
@@ -450,6 +476,27 @@ _GIT_LOCATION_VARIABLES = (
 )
 
 
+def _git_environment(environ: Mapping[str, str] | None) -> dict[str, str]:
+    source = os.environ if environ is None else environ
+    return {key: value for key, value in source.items() if key not in _GIT_LOCATION_VARIABLES}
+
+
+def _git_reader(binary: str, env: Mapping[str, str]):
+    """A function running one read-only git command in a directory."""
+
+    def git(directory: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [binary, *_GIT_READ_ONLY, *args],
+            cwd=directory,
+            env=env,
+            capture_output=True,
+            timeout=GIT_SECONDS,
+            check=False,
+        )
+
+    return git
+
+
 def uncommitted_changes(
     cwd: str | None, *, environ: Mapping[str, str] | None = None
 ) -> UncommittedChanges:
@@ -464,11 +511,7 @@ def uncommitted_changes(
     repository's configuration cannot start a program from here. A failure to read a diff
     raises :class:`KyoseiError`.
     """
-    env = {
-        key: value
-        for key, value in (os.environ if environ is None else environ).items()
-        if key not in _GIT_LOCATION_VARIABLES
-    }
+    env = _git_environment(environ)
     if not cwd:
         return UncommittedChanges(cwd, why="no working directory is recorded for this session")
     where = Path(cwd)
@@ -477,17 +520,7 @@ def uncommitted_changes(
     binary = shutil.which("git", path=env.get("PATH"))
     if binary is None:
         return UncommittedChanges(cwd, why="git was not found on this server's PATH")
-
-    def git(directory: Path, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [binary, *_GIT_READ_ONLY, *args],
-            cwd=directory,
-            env=env,
-            capture_output=True,
-            timeout=GIT_SECONDS,
-            check=False,
-        )
-
+    git = _git_reader(binary, env)
     top = git(where, "rev-parse", "--show-toplevel")
     if top.returncode != 0:
         said = top.stderr.decode("utf-8", errors="replace").strip()
@@ -506,6 +539,34 @@ def uncommitted_changes(
     return UncommittedChanges(
         cwd, str(root), None, added, removed, files, _untracked(root, listed.stdout)
     )
+
+
+def branch_lines(
+    root: Path, base: str, branch: str, *, environ: Mapping[str, str] | None = None
+) -> tuple[int, int] | None:
+    """Lines added and removed between commit ``base`` and the tip of ``branch``, by read-only git.
+
+    None when either is not in the repository at ``root``, as when the branch has been
+    deleted. Binary files count no lines. A failure to read the diff raises
+    :class:`KyoseiError`.
+    """
+    env = _git_environment(environ)
+    binary = shutil.which("git", path=env.get("PATH"))
+    if binary is None:
+        return None
+    git = _git_reader(binary, env)
+    shas: list[str] = []
+    for name in (base, f"refs/heads/{branch}"):
+        found = git(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
+        if found.returncode != 0:
+            return None
+        shas.append(found.stdout.decode("ascii").strip())
+    diff = git(root, "-c", "diff.relative=false", "diff", "--numstat", *shas, "--")
+    if diff.returncode != 0:
+        said = diff.stderr.decode("utf-8", errors="replace").strip()
+        raise KyoseiError(f"git could not read {root}: {said}")
+    added, removed, _files = _numstat(diff.stdout)
+    return added, removed
 
 
 def _numstat(output: bytes) -> tuple[int, int, int]:

@@ -10,7 +10,7 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/images/{turn}/{index}`` -- one image the person sent (KYO-692), whose
   bytes are carried by no other route;
 - ``GET sessions/{id}/subagents/{agent}`` -- one subagent's tool calls, from its own
-  transcript (KYO-693);
+  transcript (KYO-693), and for a dispatched worker its dispatch and branch lines (KYO-695);
 - ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
   commit does (KYO-693);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
@@ -58,6 +58,7 @@ from __future__ import annotations
 import hashlib
 import queue
 import re
+import sqlite3
 import subprocess
 import threading
 import time
@@ -68,10 +69,11 @@ from typing import Any
 from . import session_layer
 from .cmd_sessions import STATE_ENDED, read_sessions
 from .config import READ_TRANSCRIPTS_KEY, Config, load_config, transcripts_opted_in
-from .errors import KyoseiError
+from .errors import KyoseiError, NotFound
 from .serve import API_PREFIX, Refusal
 from .serve_events import KEEPALIVE, frame
 from .serve_files import ProjectPaths, project_paths
+from .store import open_store
 
 #: How often a subscribed session is sampled. One capture measured about 4.4 ms.
 SAMPLE_SECONDS = 0.5
@@ -212,6 +214,17 @@ def _delivery_json(delivery: Any) -> dict:
         "call_id": delivery.call_id,
         "status": delivery.status,
         "summary": delivery.summary,
+        "usage": _task_usage_json(delivery.usage),
+    }
+
+
+def _task_usage_json(usage: Any) -> dict | None:
+    if usage is None:
+        return None
+    return {
+        "total_tokens": usage.total_tokens,
+        "tool_uses": usage.tool_uses,
+        "duration_ms": usage.duration_ms,
     }
 
 
@@ -525,11 +538,18 @@ class ProjectSessions:
         return found.media_type, found.data
 
     def subagent(self, session_id: str, agent_id: str) -> dict:
-        """One subagent's tool calls, read from its own transcript."""
+        """One subagent's tool calls, read from its own transcript, and its dispatch's lines.
+
+        The lines are here rather than on the ``subagents`` of ``/turns`` because they cost a
+        store read and git commands per subagent. That list is read for every subagent of a
+        session at once, and carried by a cursor that re-sends an object only when the
+        transcript changes it, which a branch moving does not.
+        """
         self.require(session_id)
         live = self.open_live(session_id)
         try:
             reader = live.subagent(agent_id)
+            named = None if reader is None else live.subagent_dispatch(agent_id)
         except OSError as exc:
             raise _unreadable(session_id, exc) from exc
         if reader is None:
@@ -539,14 +559,56 @@ class ProjectSessions:
                 f"GET {API_PREFIX}/projects/{{project}}/sessions/{session_id}/turns name those "
                 "it holds",
             )
+        dispatch, dispatch_why = self._dispatch_lines(named)
         return {
             "ok": True,
             "session_id": session_id,
             "agent_id": agent_id,
             "readable": reader.readable,
             "why": reader.why,
+            "dispatch": dispatch,
+            "dispatch_why": dispatch_why,
             "tool_calls": [_tool_call_json(call) for call in reader.tool_calls],
         }
+
+    def _dispatch_lines(self, dispatch_id: str | None) -> tuple[dict | None, str | None]:
+        """The dispatch's record, branch and line counts, or None and why there are none.
+
+        A store or a repository that cannot be read leaves the subagent's tool calls
+        readable, so it is stated here rather than refusing the route.
+        """
+        if dispatch_id is None:
+            return None, "no dispatch names this subagent"
+        try:
+            store = open_store(
+                self.paths.store_root, code_root=self.paths.code_root, read_only=True
+            )
+            try:
+                row = store.dispatch(dispatch_id)
+            finally:
+                store.close()
+            branch = row["branch"]
+            lines = (
+                None
+                if not branch
+                else session_layer.branch_lines(
+                    self.paths.code_root, row["worked_from_sha"], branch, environ=self.environ
+                )
+            )
+        except NotFound:
+            return None, f"this project's store holds no dispatch {dispatch_id}"
+        except (KyoseiError, OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
+            return None, f"dispatch {dispatch_id} could not be read: {exc}"
+        if lines is None:
+            return None, f"dispatch {dispatch_id}'s branch or base commit is not in the repository"
+        added, removed = lines
+        return {
+            "id": dispatch_id,
+            "record": row["record_id"],
+            "branch": branch,
+            "added": added,
+            "removed": removed,
+        }, None
 
     def changes(self, session_id: str) -> dict:
         """What the session's working directory holds that no commit does."""
