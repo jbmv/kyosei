@@ -414,6 +414,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-09** — `KYO-705` (task) — Notes, anchors and tags in the store (schema)
 - **2026-11-09** — `KYO-702` (bug) — The fake launchctl fixture's teardown errors when its tmux server is slow to stop
 - **2026-11-09** — `KYO-694` (bug) — The reply in progress alternates with nothing on every sample while a tool runs, and holds tool output
 - **2026-11-09** — `KYO-688` (task) — Session layer: one adapter for the transcript, one for the pane, in Kyosei's terms
