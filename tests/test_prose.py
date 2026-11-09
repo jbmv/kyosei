@@ -89,6 +89,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--against",  # a git ref name, not prose (M8, KYO-13.c5)
         "--worktree",  # a directory path the work happens in, not prose (M9, KYO-22)
         "--branch",  # a git branch name the commits must land on, not prose (KYO-32)
+        "--read-transcripts",  # yes or no, a choice of two (KYO-686)
         "--store",  # a directory path the split store lives at, not prose (KYO-54)
         "--model",  # a model name the worker runs on, not prose (KYO-61)
         "--since-note",  # a shift-note id (PREFIX-Sn), not prose and not a time (KYO-498)
