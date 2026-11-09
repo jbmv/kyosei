@@ -25,9 +25,14 @@ interface Batch {
 }
 interface Facts { git_branch: string | null; context: { percent: number | null } | null }
 interface SessionRow {
-  session_id: string; live: boolean; first_seen: string; remote_control_url: string | null;
+  session_id: string; title: string | null; live: boolean; first_seen: string;
+  remote_control_url: string | null;
 }
-interface Menu { project: string; current: string | null; sessions: { sessions: SessionRow[] } }
+interface Changes { added: number; removed: number; untracked: { files: number } }
+interface Menu {
+  project: string; current: string | null; sessions: { sessions: SessionRow[] };
+  changes: Changes | null;
+}
 
 const chat = document.getElementById("chat")!;
 const live = document.getElementById("live")!;
@@ -214,9 +219,12 @@ function drawWorking(): void {
   });
 }
 
+// Only the times change here: rebuilding the rows each second would lose a click in progress.
 setInterval(() => {
   drawWorking();
-  drawSide();
+  document.querySelectorAll<HTMLElement>("[data-since]").forEach((time) => {
+    time.textContent = elapsed(time.dataset.since!);
+  });
 }, 1000);
 
 // ---------------------------------------------------- tool-call runs and the edited-files card
@@ -482,6 +490,9 @@ function arrange(): void {
 
 const SIDE_CLOSED_KEY = "side-closed";
 const subagents = new Map<string, Subagent>();
+const openAgents = new Set<string>();
+const agentCalls = new Map<string, ToolCall[]>();
+let showFinishedAgents = false;
 const deliveries: Delivery[] = [];
 let facts: Facts | null = null;
 let menu: Menu | null = null;
@@ -494,7 +505,7 @@ function select(session: string): void {
 }
 
 function sessionLabel(row: SessionRow): string {
-  return new Date(row.first_seen).toLocaleString([], {
+  return row.title ?? new Date(row.first_seen).toLocaleString([], {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   });
 }
@@ -515,7 +526,10 @@ function drawMenu(): void {
         dot.className = "live-dot";
         item.append(dot);
       }
-      item.append(sessionLabel(row));
+      const label = document.createElement("span");
+      label.className = "session-label";
+      label.textContent = sessionLabel(row);
+      item.append(label);
       item.addEventListener("click", () => select(row.session_id));
       return item;
     }),
@@ -539,16 +553,12 @@ function drawSide(): void {
   setText("side-context", percent === null ? "unknown" : `${percent}%`);
   (document.getElementById("context-fill") as HTMLElement).style.width = `${percent ?? 0}%`;
 
-  const agents = [...subagents.values()];
-  const runningAgents = agents.filter((agent) => !agentFinished(agent));
-  sideList(
-    "side-agents",
-    runningAgents.map((agent) => ({
-      label: agent.description || agent.agent_type,
-      since: [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at,
-    })),
-  );
-  setText("side-agents-finished", `${agents.length - runningAgents.length} finished`);
+  const changes = menu?.changes;
+  setText("side-added", `+${changes?.added ?? 0}`);
+  setText("side-removed", `−${changes?.removed ?? 0}`);
+  setText("side-untracked", changes?.untracked.files ? `${plural(changes.untracked.files, "new file")}` : "");
+
+  drawAgents();
 
   const own = [...calls.values()].filter(isOwnBackgroundTask);
   const runningOwn = own.filter((call) => !callFinished(call));
@@ -560,6 +570,61 @@ function drawSide(): void {
     })),
   );
   setText("side-finished", `${own.length - runningOwn.length} finished`);
+}
+
+function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
+  const row = document.createElement("div");
+  row.className = "side-task clickable";
+  const name = document.createElement("span");
+  name.className = "side-task-name";
+  name.textContent = agent.description || agent.agent_type;
+  name.title = name.textContent;
+  row.append(name);
+  const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at;
+  if (running && since) {
+    const time = document.createElement("span");
+    time.className = "side-task-time";
+    time.dataset.since = since;
+    time.textContent = elapsed(since);
+    row.append(time);
+  }
+  row.addEventListener("click", () => {
+    if (openAgents.has(agent.agent_id)) openAgents.delete(agent.agent_id);
+    else {
+      openAgents.add(agent.agent_id);
+      requestAgent(agent.agent_id);
+    }
+    drawAgents();
+  });
+  if (!openAgents.has(agent.agent_id)) return [row];
+  const list = document.createElement("div");
+  list.className = "agent-calls";
+  const toolCalls = agentCalls.get(agent.agent_id);
+  if (!toolCalls) list.textContent = "Loading";
+  else if (!toolCalls.length) list.textContent = "No tool calls";
+  for (const call of toolCalls ?? []) {
+    const line = document.createElement("div");
+    line.textContent = `${call.name}  ${summary(call)}`;
+    line.title = line.textContent;
+    if (call.result?.is_error) line.className = "failed";
+    list.append(line);
+  }
+  return [row, list];
+}
+
+function drawAgents(): void {
+  const agents = [...subagents.values()];
+  const running = agents.filter((agent) => !agentFinished(agent));
+  const finished = agents.filter(agentFinished).reverse();
+  document.getElementById("side-agents")!.replaceChildren(
+    ...running.flatMap((agent) => drawAgentRow(agent, true)),
+    ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
+  );
+  setText("side-agents-finished", `${finished.length} finished`);
+}
+
+function requestAgent(agent: string): void {
+  (window as any).webkit?.messageHandlers?.agent?.postMessage({ agent });
 }
 
 function sideList(id: string, rows: { label: string; since?: string }[]): void {
@@ -575,6 +640,7 @@ function sideList(id: string, rows: { label: string; since?: string }[]): void {
       if (since) {
         const time = document.createElement("span");
         time.className = "side-task-time";
+        time.dataset.since = since;
         time.textContent = elapsed(since);
         item.append(time);
       }
@@ -639,6 +705,11 @@ terminalPane.addEventListener("wheel", (event) => {
   event.stopPropagation();
 }, { passive: false });
 
+document.getElementById("side-agents-finished")!.addEventListener("click", () => {
+  showFinishedAgents = !showFinishedAgents;
+  drawAgents();
+});
+
 document.getElementById("terminal-toggle")!.addEventListener("click", () => {
   document.body.classList.toggle("terminal-open");
   fitTerminal();
@@ -696,6 +767,8 @@ const kyo = {
     calls.clear();
     diffs.clear();
     subagents.clear();
+    openAgents.clear();
+    agentCalls.clear();
     deliveries.length = 0;
     landedKeys.length = 0;
     terminalColumns = 0;
@@ -731,6 +804,16 @@ const kyo = {
     menu = data;
     drawMenu();
     drawSide();
+    // A subagent still running has more tool calls each time.
+    for (const id of openAgents) {
+      const agent = subagents.get(id);
+      if (agent && !agentFinished(agent)) requestAgent(id);
+    }
+  },
+
+  agent(data: { agent_id: string; tool_calls: ToolCall[] }): void {
+    agentCalls.set(data.agent_id, data.tool_calls);
+    drawAgents();
   },
 
   apply(batch: Batch): void {

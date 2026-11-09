@@ -44,6 +44,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "log")
         configuration.userContentController.add(context.coordinator, name: "select")
         configuration.userContentController.add(context.coordinator, name: "image")
+        configuration.userContentController.add(context.coordinator, name: "agent")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
@@ -86,6 +87,12 @@ struct ChatWebView: NSViewRepresentable {
                 let session = body["session"] as? String
             {
                 feed.select(session: session)
+                return
+            }
+            if message.name == "agent", let body = message.body as? [String: Any],
+                let agent = body["agent"] as? String
+            {
+                feed.loadAgent(agent)
                 return
             }
             if message.name == "image", let body = message.body as? [String: Any],

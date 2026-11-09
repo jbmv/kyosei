@@ -120,6 +120,14 @@ public struct ServeClient: Sendable {
         try await get("v1/projects/\(project)/sessions")
     }
 
+    public func subagent(project: String, session: String, agent: String) async throws -> Data {
+        try await get("v1/projects/\(project)/sessions/\(session)/subagents/\(agent)")
+    }
+
+    public func changes(project: String, session: String) async throws -> Data {
+        try await get("v1/projects/\(project)/sessions/\(session)/changes")
+    }
+
     /// One image the person sent, and its media type.
     public func image(
         project: String, session: String, turn: String, index: Int

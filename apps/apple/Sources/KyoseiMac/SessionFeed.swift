@@ -81,10 +81,26 @@ final class SessionFeed {
 
     private func sendMenu() async {
         guard let sessions = try? await client.sessionsData(project: project) else { return }
+        var changes: Data?
+        if let current { changes = try? await client.changes(project: project, session: current) }
         let json =
-            #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "sessions": "#
-            + String(decoding: sessions, as: UTF8.self) + "}"
+            #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "changes": "#
+            + (changes.map { String(decoding: $0, as: UTF8.self) } ?? "null")
+            + #", "sessions": "# + String(decoding: sessions, as: UTF8.self) + "}"
         send("menu", json)
+    }
+
+    /// Fetches one subagent's tool calls for the panel.
+    func loadAgent(_ agent: String) {
+        guard let session = current else { return }
+        Task {
+            guard
+                let data = try? await client.subagent(
+                    project: project, session: session, agent: agent),
+                session == current
+            else { return }
+            send("agent", String(decoding: data, as: UTF8.self))
+        }
     }
 
     private func takeFacts(from json: Data) {
