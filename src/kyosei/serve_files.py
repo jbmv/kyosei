@@ -12,6 +12,10 @@ WHAT IS WRITABLE. Exactly two things per project:
   ``store_root`` `kyo where` reports and the desktop joins ``ideas/`` to);
 - the session scratchpad, ``<per-project home>/scratchpad.md``, one fixed path.
 
+And for this machine rather than a project: the send log, and the composer's unsent text
+(KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json``, private to this
+account and refused if it would lie inside a git repository.
+
 HOW IT HOLDS. One resolver, :func:`ideas_target`, for every idea route, read or
 write: the relative path is checked as text first (no absolute path, no NUL, no empty,
 ``.`` or ``..`` segment -- refused before anything touches the disk), then joined to
@@ -44,10 +48,12 @@ boundary is against what a request can ask for, not against the machine's own us
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import mimetypes
 import os
+import re
 import stat
 import tempfile
 import threading
@@ -55,7 +61,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .config import COMPOSER_DIRNAME, store_home
 from .serve import Refusal
+from .transcript_archive import enclosing_git_repository
 
 if TYPE_CHECKING:
     from .config import Layout
@@ -437,12 +445,14 @@ def put_file(
     *,
     if_match: str | None,
     if_none_match: str | None,
+    private: bool = False,
 ) -> tuple[int, dict]:
     """Write ``data`` to ``path`` under the precondition the headers state.
 
     ``(201, …)`` for a create, ``(200, …)`` for a replace; the body carries the new
     etag. A missing parent is created: for an idea, folders inside ``ideas/``, where
     the resolver has already placed ``path``; for the scratchpad, its per-project home.
+    ``private`` creates the file readable by this account alone (a composer draft).
     """
     if if_match is None and if_none_match is None:
         raise Refusal(
@@ -488,7 +498,7 @@ def put_file(
                 etag=etag_of(current),
             )
         path.parent.mkdir(parents=True, exist_ok=True)
-        _write_atomically(path, data, create=current is None)
+        _write_atomically(path, data, create=current is None, private=private)
     return (201 if current is None else 200), {
         "ok": True,
         "path": shown,
@@ -497,12 +507,13 @@ def put_file(
     }
 
 
-def _write_atomically(path: Path, data: bytes, *, create: bool) -> None:
+def _write_atomically(path: Path, data: bytes, *, create: bool, private: bool = False) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.chmod(tmp, 0o644 if create else stat.S_IMODE(path.stat().st_mode))
+        created_mode = 0o600 if private else 0o644
+        os.chmod(tmp, created_mode if create else stat.S_IMODE(path.stat().st_mode))
         if create:
             try:
                 os.link(tmp, path)
@@ -604,3 +615,93 @@ def make_private_directory(path: Path) -> None:
 def open_private_log(path: Path) -> int:
     """A log of this machine's, open to append and readable by this account alone."""
     return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+
+
+# --------------------------------------------- the composer's unsent text (KYO-703)
+
+
+#: What follows ``$KYOSEI_HOME/composer/``: one directory per kind of unsent text.
+DRAFTS = "drafts"
+HELD = "held"
+
+#: A session id as a file name: Claude Code's are UUIDs, and nothing else may name a file.
+_SESSION_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def composer_kind_directory(environ: dict[str, str], kind: str) -> Path:
+    """Where one kind of unsent text lives, without creating or checking anything."""
+    return store_home(environ) / COMPOSER_DIRNAME / kind
+
+
+def composer_directory(environ: dict[str, str], kind: str) -> Path:
+    """The directory of one kind of unsent text, created private, or the refusal to use it.
+
+    Unsent text is as sensitive as a transcript. A project's own directory under the split
+    layout is a git repository (the store), which is why this is ``$KYOSEI_HOME/composer``
+    and why a home that lies inside a repository is refused.
+    """
+    directory = composer_kind_directory(environ, kind)
+    try:
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _composer_refusal(directory, str(exc)) from exc
+    repository = enclosing_git_repository(directory)
+    if repository is not None:
+        raise _composer_refusal(
+            directory,
+            f"it lies inside the git repository at {repository}, where unsent text could be "
+            "committed; point $KYOSEI_HOME at a directory outside every git repository",
+        )
+    return directory
+
+
+def composer_path(environ: dict[str, str], kind: str, session_id: str) -> Path:
+    """The one file holding this kind of unsent text for ``session_id``, for reading."""
+    if not _SESSION_FILE.match(session_id):
+        raise Refusal(
+            400,
+            f"{session_id!r} cannot name a session's unsent text; a session id holds only "
+            "letters, digits, dots, hyphens and underscores",
+            reason="bad-request",
+        )
+    return composer_kind_directory(environ, kind) / f"{session_id}.json"
+
+
+def composer_target(environ: dict[str, str], kind: str, session_id: str) -> Path:
+    """That file, for writing: its directory exists, private, and outside any repository."""
+    path = composer_path(environ, kind, session_id)
+    composer_directory(environ, kind)
+    return path
+
+
+def _composer_refusal(directory: Path, why: str) -> Refusal:
+    return Refusal(
+        500,
+        f"unsent text cannot be kept in {directory}: {why}. Nothing was stored",
+        reason="composer-state-unusable",
+    )
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Replace ``path`` whole, durably, readable by this account alone.
+
+    ``mkstemp`` creates the temporary file private, so a reader never finds a wider mode
+    and a crash leaves either the old text or the new.
+    """
+    with _WRITE_LOCK:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+
+
+def remove_private(path: Path) -> None:
+    """Remove a file of unsent text; one already gone is the wanted outcome."""
+    with _WRITE_LOCK, contextlib.suppress(FileNotFoundError):
+        path.unlink()

@@ -39,6 +39,12 @@ segment's text. The file is opened before anything else, so a send that could no
 recorded does not happen, and a refused attempt is logged like any other. A request whose
 token names no device has no device in its row, and a body is parsed only once its token has
 been accepted, so a refused token's row has no segments.
+
+A HELD MESSAGE (KYO-703) is stored by :mod:`kyosei.serve_held` and delivered from here, so
+this stays the one module that reaches the sending methods. :func:`deliver_held` checks what
+a send route checks, afresh at each attempt, because the message waited and the machine's
+setting or the device may have changed. Its log rows have the actions ``hold``, ``retract``
+and ``held-delivery``.
 """
 
 from __future__ import annotations
@@ -69,6 +75,10 @@ LOG_FILE = "send-log.jsonl"
 MESSAGE = "send"
 SLASH = "slash"
 INTERRUPT = "interrupt"
+#: Log actions of a held message; a hold is parsed as a message is.
+HOLD = "hold"
+RETRACT = "retract"
+HELD_DELIVERY = "held-delivery"
 
 #: What follows ``sessions/{id}/``. Each answers POST only.
 ROUTES = (MESSAGE, SLASH, INTERRUPT)
@@ -107,6 +117,8 @@ class _Attempt:
     outcome: str = "failed"
     status: int = 500
     reason: str | None = None
+    #: What a hold's store said about the message, for the response. Not logged.
+    held: dict | None = None
 
     def row(self) -> dict:
         return {
@@ -123,7 +135,7 @@ class _Attempt:
         }
 
 
-class _Body:
+class Body:
     """The request's body, read at most once.
 
     A body that is refused unread is still read and discarded, because closing a socket with
@@ -257,6 +269,34 @@ def _require_may_send(device: device_tokens.Device) -> None:
         )
 
 
+def require_device(environ: dict[str, str], authorization: str | None) -> device_tokens.Device:
+    """The device presenting this token, if it may drive sessions; else the refusal.
+
+    The composer's routes, which change no session, ask for this and not for the machine's
+    ``serve_send`` setting, so that text can be saved and taken back while sending is off.
+    """
+    device = _device_presented(environ, authorization)
+    _require_may_send(device)
+    return device
+
+
+def _held_device(environ: dict[str, str], device_id: str) -> device_tokens.Device:
+    """The device that held a message, as the token file says it is now."""
+    try:
+        devices = device_tokens.read_devices(device_tokens.tokens_path(environ))
+    except KyoseiError as exc:
+        raise Refusal(500, str(exc), reason="tokens-unreadable") from exc
+    for device in devices:
+        if device.id == device_id:
+            return device
+    raise Refusal(
+        403,
+        f"the device that held this message, {device_id}, is no longer in the token file; "
+        "retract the message and send it from a device with a token",
+        reason="held-device-unknown",
+    )
+
+
 def _bad_request(message: str) -> Refusal:
     return Refusal(400, message, reason="bad-request")
 
@@ -325,7 +365,7 @@ def _parsed(action: str, document: dict) -> tuple[list[_Segment], bool]:
     automatic = document.get("automatic", False)
     if not isinstance(automatic, bool):
         raise _bad_request('"automatic" must be true or false')
-    if action == MESSAGE:
+    if action in (MESSAGE, HOLD):
         return _message_segments(document), automatic
     if action == SLASH:
         return [_command_segment(document)], automatic
@@ -335,20 +375,30 @@ def _parsed(action: str, document: dict) -> tuple[list[_Segment], bool]:
 # ------------------------------------------------------------------------------- sending
 
 
+def _keys(live: session_layer.LiveSession, action: str, segments: list[_Segment]) -> None:
+    """Hand the keys to the session layer. The caller holds :data:`_SEND_LOCK`."""
+    if action in (MESSAGE, HELD_DELIVERY):
+        live.send_message(
+            [
+                session_layer.Typed(s.text) if s.kind == TYPED else session_layer.Pasted(s.text)
+                for s in segments
+            ]
+        )
+    elif action == SLASH:
+        live.send_slash_command(segments[0].text)
+    else:
+        live.send_interrupt()
+
+
 def _deliver(live: session_layer.LiveSession, action: str, segments: list[_Segment]) -> None:
     """Hand the keys to the session layer, one send at a time."""
     with _SEND_LOCK:
-        if action == MESSAGE:
-            live.send_message(
-                [
-                    session_layer.Typed(s.text) if s.kind == TYPED else session_layer.Pasted(s.text)
-                    for s in segments
-                ]
-            )
-        elif action == SLASH:
-            live.send_slash_command(segments[0].text)
-        else:
-            live.send_interrupt()
+        _keys(live, action, segments)
+
+
+#: Called with the device, whether the message is automatic and its segments; stores the
+#: message and returns its description for the response.
+HoldMessage = Callable[[dict, bool, list[dict]], dict]
 
 
 def _attempt(
@@ -357,8 +407,9 @@ def _attempt(
     session_id: str,
     action: str,
     authorization: str | None,
-    body: _Body,
+    body: Body,
     attempt: _Attempt,
+    hold: HoldMessage | None = None,
 ) -> None:
     """Everything that stands in front of a send, then the send. Fills in ``attempt``."""
     _require_enabled(environ)
@@ -377,6 +428,11 @@ def _attempt(
             "running in tmux on this machine",
             reason="no-pane",
         )
+    if hold is not None:
+        attempt.held = hold(
+            attempt.device, attempt.automatic, [{"kind": s.kind, "text": s.text} for s in segments]
+        )
+        return
     try:
         _deliver(live, action, segments)
     except session_layer.PaneNotReady as exc:
@@ -398,9 +454,15 @@ def perform(
     action: str,
     authorization: str | None,
     read_body: Callable[[], bytes],
+    *,
+    hold: HoldMessage | None = None,
 ) -> dict[str, Any]:
-    """Carry out one send route and log it; returns the response document or raises."""
-    body = _Body(read_body)
+    """Carry out one send route and log it; returns the response document or raises.
+
+    With ``hold``, the message passes every check a send does and is then given to it to
+    keep instead of being sent.
+    """
+    body = Body(read_body)
     attempt = _Attempt(action, project_name, session_id)
     try:
         descriptor = _open_log(environ)
@@ -409,7 +471,7 @@ def perform(
         raise
     try:
         try:
-            _attempt(environ, root_of, session_id, action, authorization, body, attempt)
+            _attempt(environ, root_of, session_id, action, authorization, body, attempt, hold)
         except Refusal as refusal:
             body.drain()
             attempt.status = refusal.status
@@ -419,7 +481,7 @@ def perform(
         except BaseException:
             attempt.reason = "server-error"
             raise
-        attempt.outcome, attempt.status = "sent", 200
+        attempt.outcome, attempt.status = ("held" if hold is not None else "sent"), 200
     finally:
         try:
             _append(descriptor, attempt)
@@ -433,7 +495,7 @@ def perform(
                 ) from exc
         finally:
             os.close(descriptor)
-    return {
+    document: dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
         "action": action,
@@ -442,3 +504,176 @@ def perform(
         "segments": attempt.segments,
         "automatic": attempt.automatic,
     }
+    if hold is not None:
+        document["held"] = attempt.held
+    return document
+
+
+# ------------------------------------------------------------------------ a held message
+
+
+@dataclass(frozen=True)
+class HeldOutcome:
+    """What one attempt at a held message came to."""
+
+    #: ``delivered``, ``waiting`` (tried again later) or ``failed`` (keys may have reached
+    #: the pane, so it is not tried again).
+    outcome: str
+    reason: str | None = None
+    detail: str | None = None
+    #: This attempt saw an idle screen and has not yet sent (see ``settled``).
+    idle: bool = False
+    #: Set when the keys were sent and the log could not record it.
+    log_problem: str | None = None
+
+
+def _waiting(reason: str | None = None, detail: str | None = None, *, idle: bool = False):
+    return HeldOutcome("waiting", reason, detail, idle)
+
+
+#: The layer's names for the two states of a screen with its input box showing, as the screen
+#: route publishes them. The session layer names no constant for them.
+_IDLE = "idle"
+_WORKING = "working"
+
+
+def _not_idle(screen: Any) -> HeldOutcome | None:
+    """Why this screen must not receive a held message, or None when it may."""
+    if screen is None:
+        return _waiting("no-pane", "the pane could not be read")
+    if screen.state == _WORKING:
+        return _waiting()
+    if screen.state != _IDLE:
+        return _waiting(
+            "screen-not-ready",
+            f"the screen shows {screen.state}, which is left to the person to answer; the "
+            "message is delivered once the session is idle again",
+        )
+    if screen.input_text:
+        return _waiting(
+            "input-box-in-use",
+            "text is in the terminal's input box, and delivering would erase it; the message "
+            "is delivered once the box is empty",
+        )
+    return None
+
+
+def deliver_held(
+    environ: dict[str, str],
+    message: dict[str, Any],
+    root_of: Callable[[], str],
+    *,
+    settled: bool,
+    mark_delivering: Callable[[], None],
+) -> HeldOutcome:
+    """Try to deliver one held message, and say what happened. Reads the pane once or twice.
+
+    ``settled`` says a previous look found this screen idle. A message goes only on the second
+    of two looks a poll apart, because one wrong reading would put it into a running turn,
+    which is the thing holding exists to prevent. The screen is read again under the send lock
+    immediately before the keys, since the layer's own check would accept a working screen.
+    ``mark_delivering`` runs before the first key, so a server that dies during the keys
+    leaves a message that says so and is not sent twice.
+    """
+    project_name, session_id = message["project"], message["session_id"]
+    try:
+        _require_enabled(environ)
+        _require_may_send(_held_device(environ, message["device"]["id"]))
+        project = ProjectSessions(root_of(), environ)
+        project.require(session_id)
+        live = project.open_live(session_id)
+        if live.pane is None:
+            raise Refusal(
+                409,
+                f"session {session_id} has no pane ({live.pane_lookup.why}); the message is "
+                "delivered if the session returns to a tmux pane, or it can be retracted",
+                reason="no-pane",
+            )
+        screen = live.screen()
+    except Refusal as refusal:
+        return _waiting(refusal.extra.get("reason", "session-route"), str(refusal))
+    except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+        return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
+    blocked = _not_idle(screen)
+    if blocked is not None:
+        return blocked
+    if not settled:
+        return _waiting(idle=True)
+    segments = [_Segment(s["kind"], s["text"]) for s in message["segments"]]
+    attempt = _Attempt(
+        HELD_DELIVERY,
+        project_name,
+        session_id,
+        device=message["device"],
+        segments=[segment.logged() for segment in segments],
+        automatic=message["automatic"],
+    )
+    try:
+        descriptor = _open_log(environ)
+    except Refusal as refusal:
+        return _waiting("send-log-unusable", str(refusal))
+    result: HeldOutcome
+    try:
+        with _SEND_LOCK:
+            try:
+                blocked = _not_idle(live.screen())
+            except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+                return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
+            if blocked is not None:
+                return blocked
+            mark_delivering()
+            try:
+                _keys(live, HELD_DELIVERY, segments)
+            except session_layer.PaneNotReady as exc:
+                attempt.outcome, attempt.status, attempt.reason = "refused", 409, "screen-not-ready"
+                result = _waiting("screen-not-ready", str(exc))
+            except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+                attempt.outcome, attempt.status, attempt.reason = "failed", 502, "send-failed"
+                result = HeldOutcome(
+                    "failed",
+                    "send-failed",
+                    f"delivering to session {session_id} did not finish, and keys may have "
+                    f"reached the pane, so it is not tried again: {exc}. Retract the message "
+                    "and send it again if the transcript does not show it",
+                )
+            else:
+                attempt.outcome, attempt.status = "sent", 200
+                result = HeldOutcome("delivered")
+        try:
+            _append(descriptor, attempt)
+        except OSError as exc:
+            if result.outcome == "delivered":
+                result = HeldOutcome("delivered", log_problem=str(exc))
+    finally:
+        os.close(descriptor)
+    return result
+
+
+def log_held(
+    environ: dict[str, str], message: dict[str, Any], action: str, device: dict | None
+) -> None:
+    """Record what became of a held message that did not reach the pane.
+
+    Best effort: the text is back with the person, and refusing the retraction because the log
+    is unusable would keep it from them.
+    """
+    segments = [_Segment(s["kind"], s["text"]).logged() for s in message["segments"]]
+    attempt = _Attempt(
+        action,
+        message["project"],
+        message["session_id"],
+        device=device,
+        segments=segments,
+        automatic=message["automatic"],
+        outcome="retracted",
+        status=200,
+    )
+    try:
+        descriptor = _open_log(environ)
+    except Refusal:
+        return
+    try:
+        with contextlib.suppress(OSError):
+            _append(descriptor, attempt)
+    finally:
+        os.close(descriptor)

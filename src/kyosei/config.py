@@ -82,6 +82,8 @@ TURNS_CURSOR_NAME = "turns-cursor.json"
 #: KYO-683: the directory directly under ``$KYOSEI_HOME`` holding per-project transcript
 #: archives. A sibling of the stores because a split store is itself a git repository.
 TRANSCRIPT_ARCHIVE_DIRNAME = "transcript-archive"
+#: ``kyo serve``'s saved drafts and held messages, under ``$KYOSEI_HOME`` (KYO-703).
+COMPOSER_DIRNAME = "composer"
 
 #: KYO-362: where `kyo doctor --hook` leaves the report its one stderr line points at.
 #: Beside :data:`DB_NAME` and :data:`SESSIONS_NAME`, and on the same side of the line

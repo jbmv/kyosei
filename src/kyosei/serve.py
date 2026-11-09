@@ -58,6 +58,10 @@ are the only routes that change a session. They are off until the machine's owne
 permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is the one
 ``kyosei.serve*`` module that can reach the session layer's sending half.
 
+THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
+composer boxes (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
+message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device token.
+
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
 it binds, ``kyo serve`` asks its port who is there (:func:`serve_install.refuse_if_held`)
@@ -274,6 +278,12 @@ SESSION_SUBAGENT_ROUTE = "subagents"
 #: :data:`kyosei.serve_send.ROUTES`, spelled here because that module imports this one.
 SESSION_SEND_ROUTES = ("send", "slash", "interrupt")
 
+#: KYO-703: the composer's routes under ``sessions/{id}/``, and the methods each answers.
+SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
+    "draft": ("GET", "PUT"),
+    "held": ("GET", "POST", "DELETE"),
+}
+
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
 _IMAGE_CACHE = "private, max-age=86400"
@@ -445,6 +455,11 @@ class KyoServer(ThreadingHTTPServer):
 
         self.session_sample_seconds = SAMPLE_SECONDS
         self.session_hub = SessionHub(self)
+        #: KYO-703: messages held until a turn ends, and how often one is looked at.
+        from .serve_held import HELD_POLL_SECONDS, HeldMessages
+
+        self.held_poll_seconds = HELD_POLL_SECONDS
+        self.held_messages = HeldMessages(self)
         self.pid = os.getpid()
         self.started_at = clock.now()
         try:
@@ -458,6 +473,7 @@ class KyoServer(ThreadingHTTPServer):
         self.port = self.server_address[1]
         #: The build this process started as, the reference `stale` compares with.
         self.started_version = self.version_payload()
+        self.held_messages.resume()
 
     def shutdown(self) -> None:
         self.stopping.set()
@@ -668,6 +684,13 @@ class ServeHandler(BaseHTTPRequestHandler):
             and rest[4] in SESSION_SEND_ROUTES
         ):
             allowed = ("POST",)
+        elif (
+            len(rest) == 5
+            and rest[0] == "projects"
+            and rest[2] == "sessions"
+            and rest[4] in SESSION_COMPOSER_ROUTES
+        ):
+            allowed = SESSION_COMPOSER_ROUTES[rest[4]]
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
             if not (
                 len(rest) == 3
@@ -695,6 +718,8 @@ class ServeHandler(BaseHTTPRequestHandler):
         if rest[2] == "sessions":
             if len(rest) == 5 and rest[4] in SESSION_SEND_ROUTES:
                 return self._session_send(rest[1], rest[3], rest[4], split.query)
+            if len(rest) == 5 and rest[4] in SESSION_COMPOSER_ROUTES:
+                return self._session_composer(method, rest[1], rest[3], rest[4], split.query)
             return self._session_route(rest[1], rest[3:], split.query)
         return self._file_route(method, rest[1], rest[2], "/".join(rest[3:]))
 
@@ -858,6 +883,47 @@ class ServeHandler(BaseHTTPRequestHandler):
             self._body,
         )
         return 200, _json_bytes(document)
+
+    def _session_composer(
+        self, method: str, name: str, session_id: str, route: str, query: str
+    ) -> tuple:
+        """The draft and held routes, each carrying a device token, so no query string."""
+        from . import serve_drafts
+
+        if query:
+            raise Refusal(
+                400,
+                f"the {route} route takes no query string; send the token as "
+                "`Authorization: Bearer <token>` and everything else in the body",
+            )
+
+        def root_of() -> str:
+            return self.server.project(name).root
+
+        authorization = self.headers.get("Authorization")
+        if route == "draft":
+            status, document = serve_drafts.perform(
+                self.server.environ,
+                root_of,
+                session_id,
+                method,
+                authorization,
+                if_match=self.headers.get("If-Match"),
+                if_none_match=self.headers.get("If-None-Match"),
+                read_body=self._body,
+            )
+            etag = document["etag"]
+            return status, _json_bytes(document), _JSON_TYPE, {"ETag": etag} if etag else {}
+        held = self.server.held_messages
+        if method == "POST":
+            return 200, _json_bytes(
+                held.hold(name, root_of, session_id, authorization, self._body)
+            )
+        if method == "GET":
+            return 200, _json_bytes(held.read(root_of, session_id, authorization))
+        return 200, _json_bytes(
+            held.retract(root_of, session_id, authorization, self.headers.get("If-Match"))
+        )
 
     def _session_image(self, project, session_id: str, turn: str, index: str) -> tuple:
         if not (index.isascii() and index.isdigit()):
