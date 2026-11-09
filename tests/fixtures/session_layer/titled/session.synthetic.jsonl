@@ -1,0 +1,6 @@
+{"type":"ai-title","aiTitle":"An early title","sessionId":"77777777-7777-4777-8777-777777777777"}
+{"isSidechain":false,"type":"user","uuid":"00000000-0000-4000-8000-000000000001","timestamp":"2026-11-09T12:01:00.000Z","sessionId":"77777777-7777-4777-8777-777777777777","cwd":"/work","version":"2.1.319","gitBranch":"main","userType":"external","entrypoint":"cli","message":{"role":"user","content":"Hello"},"origin":{"kind":"human"},"promptId":"p"}
+{"type":"ai-title","aiTitle":"The latest title","sessionId":"77777777-7777-4777-8777-777777777777"}
+{"isSidechain":false,"agentId":"a14ca9deaf9c51bd1","type":"user","uuid":"00000000-0000-4000-8000-000000000002","timestamp":"2026-11-09T12:02:00.000Z","sessionId":"77777777-7777-4777-8777-777777777777","cwd":"/work","version":"2.1.319","gitBranch":"main","userType":"external","entrypoint":"cli","message":{"role":"user","content":"ai-title"},"origin":{"kind":"human"},"promptId":"p","note":"\"ai-title\"","aiTitle":"Not a title"}
+{"type":"ai-title","aiTitle":"   ","sessionId":"77777777-7777-4777-8777-777777777777"}
+{"type":"ai-title","sessionId":"77777777-7777-4777-8777-777777777777"}

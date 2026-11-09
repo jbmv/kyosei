@@ -15,6 +15,7 @@ a reply whose three token counts add to the 226,458 Claude Code's context panel 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1148,3 +1149,194 @@ def test_a_working_row_above_the_persons_prompt_is_not_the_working_line() -> Non
     screen_now = pane.classify(raw)
     assert screen_now.state == pane.WORKING
     assert pane.terminal(raw, screen_now).working_line is None
+
+
+# ---------------------------------------- KYO-693: titles, subagents, uncommitted changes
+#
+# ``titled/session.synthetic.jsonl`` and ``subagent/agent-*.jsonl`` are synthetic: each row
+# has the keys measured on 2.1.319 and text written for the test.
+
+TITLED_FILE = FIXTURES / "titled" / "session.synthetic.jsonl"
+AGENT_FILE = FIXTURES / "subagent" / "agent-a14ca9deaf9c51bd1.jsonl"
+
+
+def test_the_latest_title_wins_and_other_rows_naming_it_do_not_count() -> None:
+    assert transcript.session_title(TITLED_FILE) == "The latest title"
+
+
+def test_a_title_is_found_when_a_block_boundary_splits_its_row(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(transcript, "_TITLE_BLOCK_BYTES", 16)
+    assert transcript.session_title(TITLED_FILE) == "The latest title"
+    empty = tmp_path / "empty.jsonl"
+    empty.write_bytes(b"")
+    assert transcript.session_title(empty) is None
+
+
+def test_a_transcript_holding_no_title_has_none() -> None:
+    assert transcript.session_title(OLD_FILE) is None
+
+
+def test_a_partial_last_line_is_not_read_as_a_title(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    whole = '{"type":"ai-title","aiTitle":"Whole"}\n'
+    path.write_text(whole + '{"type":"ai-title","aiTi', encoding="utf-8")
+    assert transcript.session_title(path) == "Whole"
+
+
+def test_a_session_title_refuses_until_the_project_opts_in(project: Path) -> None:
+    config = load_config(project)
+    with pytest.raises(KyoseiError, match="read_transcripts: true"):
+        session_layer.session_title(config, project, "x", environ=dict(os.environ))
+
+
+def test_a_subagent_transcript_is_found_only_beside_its_own_session(tmp_path: Path) -> None:
+    session = tmp_path / "abc.jsonl"
+    session.write_text("", encoding="utf-8")
+    directory = tmp_path / "abc" / "subagents"
+    directory.mkdir(parents=True)
+    (directory / "agent-a1.jsonl").write_text("", encoding="utf-8")
+    assert transcript.subagent_transcript(session, "a1") == directory / "agent-a1.jsonl"
+    assert transcript.subagent_transcript(session, "a2") is None
+    assert transcript.subagent_transcript(session, "../../abc") is None
+    assert transcript.subagent_transcript(tmp_path / "other.jsonl", "a1") is None
+
+
+def test_a_subagents_rows_are_read_only_when_asked_for() -> None:
+    sidechain = transcript.SessionTranscript(AGENT_FILE, sidechain=True)
+    sidechain.read()
+    assert [call.name for call in sidechain.tool_calls] == ["Bash", "Read"]
+    assert sidechain.readable is True
+    main = transcript.SessionTranscript(AGENT_FILE)
+    main.read()
+    assert main.tool_calls == [] and main.replies == []
+
+
+def test_a_subagent_file_of_no_known_format_says_so(tmp_path: Path) -> None:
+    path = tmp_path / "agent-x.jsonl"
+    path.write_text('{"type":"user","uuid":"u","timestamp":"t"}\n', encoding="utf-8")
+    reader = transcript.SessionTranscript(path, sidechain=True)
+    reader.read()
+    assert reader.readable is False and "isSidechain" in reader.why
+
+
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@t",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@t",
+}
+
+
+def run_git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, env={**os.environ, **GIT_ENV}, check=True)
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    path = tmp_path / "repo"
+    path.mkdir()
+    (path / "kept.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (path / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    run_git(path, "init", "-q")
+    run_git(path, "add", "kept.txt", ".gitignore")
+    run_git(path, "commit", "-q", "-m", "first")
+    return path
+
+
+def changes(path: Path, **env: str) -> session_layer.UncommittedChanges:
+    return session_layer.uncommitted_changes(str(path), environ={**os.environ, **env})
+
+
+def test_a_modified_file_counts_and_an_untracked_file_stands_apart(repo: Path) -> None:
+    (repo / "kept.txt").write_text("one\nTWO\nthree\nfour\n", encoding="utf-8")
+    (repo / "new.txt").write_text("a\nb\nno newline", encoding="utf-8")
+    (repo / "ignored.txt").write_text("ignored\n", encoding="utf-8")
+    found = changes(repo)
+    assert (found.added, found.removed, found.files) == (2, 1, 1)
+    assert found.untracked == session_layer.UntrackedFiles(1, 3, 0)
+    assert found.why is None and Path(found.root).resolve() == repo.resolve()
+
+
+def test_staged_lines_count_as_uncommitted(repo: Path) -> None:
+    (repo / "kept.txt").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+    run_git(repo, "add", "kept.txt")
+    found = changes(repo)
+    assert (found.added, found.removed, found.files) == (1, 0, 1)
+
+
+def test_a_session_in_a_subdirectory_sees_the_whole_repository(repo: Path) -> None:
+    deeper = repo / "sub" / "deeper"
+    deeper.mkdir(parents=True)
+    (repo / "new.txt").write_text("a\n", encoding="utf-8")
+    (repo / "kept.txt").write_text("one\ntwo\n", encoding="utf-8")
+    found = changes(deeper)
+    assert (found.added, found.removed) == (0, 1)
+    assert found.untracked.files == 1
+
+
+def test_binary_and_unreadable_untracked_files_are_counted_as_uncounted(repo: Path) -> None:
+    (repo / "image.bin").write_bytes(b"\0\x01\x02")
+    (repo / "link").symlink_to(repo / "kept.txt")
+    assert changes(repo).untracked == session_layer.UntrackedFiles(2, 0, 2)
+
+
+def test_a_binary_tracked_file_adds_to_files_and_to_no_line_count(repo: Path) -> None:
+    (repo / "image.bin").write_bytes(b"\0\x01\x02")
+    run_git(repo, "add", "image.bin")
+    found = changes(repo)
+    assert (found.added, found.removed, found.files) == (0, 0, 1)
+
+
+def test_a_repository_before_its_first_commit_counts_what_is_staged(tmp_path: Path) -> None:
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    run_git(fresh, "init", "-q")
+    (fresh / "a.txt").write_text("a\nb\n", encoding="utf-8")
+    run_git(fresh, "add", "a.txt")
+    found = changes(fresh)
+    assert found.why is None and (found.added, found.removed, found.files) == (2, 0, 1)
+
+
+def test_a_directory_outside_any_repository_says_so(tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    found = changes(plain, GIT_CEILING_DIRECTORIES=str(tmp_path))
+    assert found.root is None and found.why and (found.added, found.removed) == (0, 0)
+
+
+def test_a_session_without_a_working_directory_says_so() -> None:
+    found = session_layer.uncommitted_changes(None, environ=dict(os.environ))
+    assert found.root is None and "no working directory" in found.why
+
+
+def test_no_git_on_the_path_says_so(repo: Path) -> None:
+    found = session_layer.uncommitted_changes(str(repo), environ={"PATH": "/nonexistent"})
+    assert found.root is None and "git" in found.why
+
+
+def test_an_inherited_git_dir_does_not_point_the_read_elsewhere(repo: Path, tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    run_git(other, "init", "-q")
+    (repo / "kept.txt").write_text("one\n", encoding="utf-8")
+    found = changes(repo, GIT_DIR=str(other / ".git"))
+    assert (found.added, found.removed) == (0, 2)
+
+
+def test_reading_changes_writes_nothing_to_the_index(repo: Path) -> None:
+    (repo / "kept.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")  # same bytes, new mtime
+    os.utime(repo / "kept.txt", (2_000_000_000, 2_000_000_000))
+    before = (repo / ".git" / "index").read_bytes()
+    changes(repo)
+    assert (repo / ".git" / "index").read_bytes() == before
+
+
+def test_a_repositorys_fsmonitor_setting_runs_nothing_from_here(repo: Path, tmp_path: Path) -> None:
+    marker = tmp_path / "ran"
+    hook = tmp_path / "monitor.sh"
+    hook.write_text(f'#!/bin/sh\ntouch "{marker}"\n', encoding="utf-8")
+    hook.chmod(0o755)
+    run_git(repo, "config", "core.fsmonitor", str(hook))
+    (repo / "kept.txt").write_text("one\n", encoding="utf-8")
+    changes(repo)
+    assert not marker.exists()

@@ -4320,7 +4320,7 @@ FINDINGS: dict[str, str] = {}
 RECORDED: dict[str, str] = {
     # KYO-688: the session layer's opt-in refusal; its remedy is the project's own
     # `read_transcripts: true`, proved by clearing it in tests/test_session_layer.py.
-    "session_layer.py:open_session#0": (
+    "session_layer.py:_transcripts_of#0": (
         "setting `read_transcripts: true` in kyosei/config.yml; proved by "
         "test_the_refusal_names_the_remedy_and_the_remedy_clears_it"
     ),

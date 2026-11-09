@@ -47,8 +47,9 @@ file-writing function.
 
 THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (GET),
 ``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events),
-``sessions/{id}/screen`` and ``sessions/{id}/images/{turn}/{index}``, all read-only and in a
-project that has opted in to reading transcripts. This module only routes them;
+``sessions/{id}/screen``, ``sessions/{id}/changes``, ``sessions/{id}/images/{turn}/{index}``
+and ``sessions/{id}/subagents/{agent}``, all read-only and in a project that has opted in to
+reading transcripts. This module only routes them;
 :mod:`kyosei.serve_sessions` holds the rest, and no ``kyosei.serve*`` module can reach the
 session layer's sending half.
 
@@ -254,10 +255,13 @@ FILE_ROUTES: dict[str, tuple[str, ...]] = {
 _PATH_ROUTES = ("ideas", "docs")
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
-SESSION_ROUTES = ("turns", "events", "screen")
+SESSION_ROUTES = ("turns", "events", "screen", "changes")
 
 #: KYO-692: ``sessions/{id}/images/{turn}/{index}``, one image the person sent.
 SESSION_IMAGE_ROUTE = "images"
+
+#: KYO-693: ``sessions/{id}/subagents/{agent}``, one subagent's tool calls.
+SESSION_SUBAGENT_ROUTE = "subagents"
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -651,6 +655,7 @@ class ServeHandler(BaseHTTPRequestHandler):
                 len(rest) == 3
                 or (len(rest) == 5 and rest[4] in SESSION_ROUTES)
                 or (len(rest) == 7 and rest[4] == SESSION_IMAGE_ROUTE)
+                or (len(rest) == 6 and rest[4] == SESSION_SUBAGENT_ROUTE)
             ):
                 raise _no_route(method, split.path)
             allowed = ("GET",)
@@ -794,6 +799,10 @@ class ServeHandler(BaseHTTPRequestHandler):
         session_id, route, *tail = rest
         if route == SESSION_IMAGE_ROUTE:
             return self._session_image(project, session_id, *tail)
+        if route == SESSION_SUBAGENT_ROUTE:
+            return 200, _json_bytes(project.subagent(session_id, tail[0]))
+        if route == "changes":
+            return 200, _json_bytes(project.changes(session_id))
         if route == "turns":
             return 200, _json_bytes(
                 project.turns(session_id, serve_sessions.parse_cursor(cursor))
@@ -1073,8 +1082,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f"GET/PUT/DELETE {project}/ideas/{{relpath}}, POST {project}/ideas-move and "
         f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
         f"GET {project}/events, GET {project}/sessions and GET "
-        f"{project}/sessions/{{id}}/turns, .../events, .../screen or "
-        f".../images/{{turn}}/{{index}}",
+        f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
+        f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}",
     )
 
 
