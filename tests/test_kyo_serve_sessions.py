@@ -982,9 +982,37 @@ def test_changes_are_the_tracked_lines_with_untracked_files_counted_apart(
     assert document["untracked"] == {"files": 1, "lines": 3, "uncounted": 0}
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/owner/name.git",
+        "https://SECRET@github.com/owner/name.git",
+        "git@github.com:owner/name.git",
+    ],
+)
+def test_changes_state_the_origin_as_owner_and_name(bed: Bed, tmp_path: Path, url: str) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
+    record_cwd(bed, str(repo))
+    status, _, body = bed.get(CHANGES_ROUTE)
+    assert status == 200 and body_json(body)["remote"] == "owner/name"
+    assert b"SECRET" not in body
+
+
+def test_changes_state_no_remote_for_a_repository_without_an_origin(
+    bed: Bed, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    record_cwd(bed, str(repo))
+    document = json_body(bed.get(CHANGES_ROUTE))
+    assert document["remote"] is None and document["why"] is None
+
+
 def test_changes_for_a_working_directory_that_is_gone_say_so(bed: Bed) -> None:
     document = json_body(bed.get(CHANGES_ROUTE))  # the bed records /work, which does not exist
-    assert document["root"] is None and "/work" in document["why"]
+    assert document["root"] is None and document["remote"] is None and "/work" in document["why"]
     assert (document["added"], document["removed"]) == (0, 0)
 
 

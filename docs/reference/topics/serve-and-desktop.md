@@ -198,7 +198,7 @@ because that format is not a published interface and changes between releases.
 | `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now, classified and as text |
 | `GET /v1/projects/<name>/sessions/<id>/images/<turn>/<index>` | one image the person sent, as its own bytes |
 | `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls, and for a dispatched worker its dispatch's branch and line counts |
-| `GET /v1/projects/<name>/sessions/<id>/changes` | the lines the session's working directory holds that no commit does |
+| `GET /v1/projects/<name>/sessions/<id>/changes` | the lines the session's working directory holds that no commit does, and the repository's remote |
 | `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
 
 **The list.** `{"ok", "sessions": [...], "problem"}`, one row per session that
@@ -323,7 +323,11 @@ when the store or the repository cannot be read, and `dispatch_why` then says wh
 `dispatch_why` is otherwise `null`. The route writes nothing to the store or the repository.
 
 **Uncommitted changes.** `GET .../sessions/<id>/changes` is `{"ok", "session_id", "cwd", "root",
-"why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`. `added` and
+"remote", "why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`.
+`remote` is the repository's `origin` remote as `owner/name`, read from an HTTPS, SSH or `git:`
+URL, and a host's nested groups stay in it, as `group/sub/name`. It is `null` when there is no
+`origin`, or when `origin` is a local path or cannot be read as a repository on a host. Only
+the URL's path reaches `remote`, so a user name or token in the URL does not. `added` and
 `removed` are `git diff HEAD --numstat` summed over the repository holding the session's
 working directory, staged or not, and `files` counts the tracked files that differ. A binary
 file adds to `files` and to no line count. Before the first commit the figures are what has
