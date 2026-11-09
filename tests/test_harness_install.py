@@ -362,7 +362,8 @@ def test_a_hand_typed_push_after_a_plugin_install_prints_the_kyo60_warning(
     assert PRE_PUSH_MARKER in hook.read_text(encoding="utf-8")
     assert hook.stat().st_mode & 0o111
     assert result.json["pre_push"]["changes"] == [
-        f"git pre-push: wrote {hook} (advisory; `git push --no-verify` skips it, and "
+        f"git pre-push: wrote {hook} (warns about a published store, refuses a private "
+        "term in a pushed commit; `git push --no-verify` skips it, and "
         ".git/hooks is not versioned, so a fresh clone will not have it)"
     ]
     assert not (root / ".claude" / "settings.json").exists(), "no copies were written"

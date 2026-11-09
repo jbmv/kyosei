@@ -274,8 +274,8 @@ or `kyo install-hooks` on the copies) wire `kyo
 check-push --pre-tool-use` into `PreToolUse`, where it exits 2 and the push never
 runs — an agent asking to push has no standing to publish the maintainer's
 private thinking, and must surface the decision instead of taking it. Setup
-also writes `.git/hooks/pre-push`, which runs `kyo check-push --advisory`: same
-message, exit 0, and `git push --no-verify` skips it, because a human pushing
+also writes `.git/hooks/pre-push`, which runs `kyo check-push --pre-push`: same
+message, no refusal, and `git push --no-verify` skips it, because a human pushing
 their own repository owns that call. On the plugin `kyo harness install
 claude-code` writes it, and `kyo harness migrate` writes it when a project moving
 from the copies lacks it (KYO-612); on the copies `kyo install-hooks` does. A
@@ -293,8 +293,13 @@ repository's own git directory, and otherwise writes nothing and prints the
 directory and the line to add to its `pre-push` yourself:
 
 ```sh
-command -v kyo >/dev/null 2>&1 && { kyo check-push --advisory || true; }
+command -v kyo >/dev/null 2>&1 && { kyo check-push --pre-push "$1" || { [ $? -ne 4 ] || exit 1; }; }
 ```
+
+The line reads the ref lines git gives the hook on stdin, so it goes before anything
+else in the hook that reads them. A hook installed before this mode existed still runs
+`kyo check-push --advisory`, which warns about the store and reads no commits; running
+the setup command again replaces it.
 
 **It fires once.** Two ways to make it stop, and they are genuinely different:
 
@@ -320,6 +325,45 @@ that pushes three layers down. On a hook that *blocks*, matching broadly is the
 dangerous direction, so the match is narrow and the misses are accepted. The git
 `pre-push` hook is what stands behind that gap: it sees every push git itself
 performs, however it was invoked.
+
+**A private term in a pushed commit is refused, for people and agents (KYO-669).**
+Commit messages and author names are published with the commits. `kyo check-push`
+matches those of the commits a push sends against the project's private terms: the
+other projects in the machine's registry (`kyo projects list`), and the words in
+`private-words.txt` beside `kinds.yml` in the store, under the rules documented in
+`kyosei.private_terms`. A home path (`/Users/<account>`, `/home/<account>`) counts as
+well. A project with neither a registry entry for another project nor a word file has
+nothing to refuse, and the project's own name and prefix are never private.
+
+Publishing a store is a decision a person may reasonably make, so that half only
+warns. A private term in a public commit is almost always a mistake and is expensive
+to undo, so this half refuses a person's push as well as an agent's:
+
+```
+$ git push
+kyo: contract push-carries-a-private-term not met:
+  - this push would send a commit with a private term or home path ...
+  -     1a2b3c4d5e6f message line 3 (project name)
+  - remedy — amend the message before pushing: ...
+```
+
+The refusal names the commit and the line and never prints the term. Amend the message
+(`git commit --amend`, or `git rebase -i` for an earlier commit) and push again; `git
+push --no-verify` is the deliberate way past it. The git hook's mode, `--pre-push`,
+exits 4, and the hook stops a push on that status alone, so the store warning and a
+missing or broken `kyo` still cannot stop one. For an agent the refusal is `PreToolUse`'s
+exit 2, and comes after the store refusal when both apply.
+
+The commits examined are the ones the push sends. The git hook reads the ref lines git
+gives it, and excludes what the remote-tracking refs of that remote already hold, so a
+branch with no counterpart on the remote is read for its new commits only. The
+`PreToolUse` hook has no ref lines and must not contact the remote, so it works out the
+same range from the command line: the named refspecs, or the current branch when none
+is named, and `--all`, `--mirror` and `--tags`. A `--delete` or `--dry-run` sends
+nothing. It reads a `push.default` of `matching` or a configured `remote.<name>.push` as
+the current branch, and the git hook, which is given the real refs, stands behind that
+gap. If the terms or the commits cannot be read, the command says so and refuses
+nothing.
 
 **What it does recognise, and whose store it judges (KYO-409).** A push is a
 `git` invocation whose subcommand is `push` (global options such as `-C` and `-c`

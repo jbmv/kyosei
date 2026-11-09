@@ -37,9 +37,10 @@ Both `kyosei` and `kyo` are installed and are the same program.
    it also enables the plugin there at local scope (`claude plugin install kyosei@kyosei
    --scope local`), which writes `.claude/settings.local.json`. If git does not already
    ignore that file, it adds it to the project's `.gitignore` first and says so. It also
-   does the two things a plugin cannot carry (KYO-612, KYO-613): it writes the advisory
-   git `pre-push` hook, which warns a person pushing by hand that the push publishes an
-   in-repo store (see "Before your first push" in [store.md](store.md)), and once the
+   does the two things a plugin cannot carry (KYO-612, KYO-613): it writes the git
+   `pre-push` hook, which warns a person pushing by hand that the push publishes an
+   in-repo store and refuses a commit carrying a private term (see "Before your first
+   push" in [store.md](store.md)), and once the
    plugin is enabled it removes the setup-incomplete section `kyo init` wrote into
    CLAUDE.md. A `pre-push` hook of your own is never overwritten; the command names the
    line to add to it instead.

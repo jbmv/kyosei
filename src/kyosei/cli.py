@@ -1873,19 +1873,30 @@ def build_parser() -> KyoseiParser:
         "check-push",
         parents=[common],
         help="publication guard: fail if pushing this repository would publish an "
-        "unacknowledged Kyosei store (KYO-60)",
+        "unacknowledged Kyosei store (KYO-60), and, for a push, if a commit it sends "
+        "carries a private term or home path (KYO-669)",
     )
     p_check_push.add_argument(
         "--pre-tool-use",
         action="store_true",
         help="read Claude Code's PreToolUse payload on stdin and check only when it "
-        "describes a command that publishes; how the packaged hook invokes this",
+        "describes a command that publishes, including the messages and author names of "
+        "the commits it would send; how the packaged hook invokes this",
     )
     p_check_push.add_argument(
         "--advisory",
         action="store_true",
-        help="warn and exit 0 instead of blocking — what the git pre-push hook runs, "
-        "because a human pushing their own repository owns that decision",
+        help="warn about a published store and exit 0 instead of blocking, because a "
+        "human pushing their own repository owns that decision; what git pre-push hooks "
+        "installed before --pre-push run",
+    )
+    p_check_push.add_argument(
+        "--pre-push",
+        metavar="REMOTE",
+        help="what the git pre-push hook runs, with git's remote name and its ref lines "
+        "on stdin: warns about a published store as --advisory does, and exits 4 if a "
+        "commit being pushed carries a private term or home path in its message or author "
+        "name; the term is never printed",
     )
     p_check_push.add_argument(
         "--acknowledge",

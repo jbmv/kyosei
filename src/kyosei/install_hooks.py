@@ -8,7 +8,7 @@ import copy
 import json
 from pathlib import Path
 
-from .errors import KyoseiError
+from .errors import EXIT_PRIVATE_TERM, KyoseiError
 from .scaffold import (
     HOOKS_SOURCE_SUBDIR,
     PACKAGED_ASSET_SOURCE_DIR,
@@ -817,29 +817,33 @@ def install_hooks_refusal(root: Path) -> str | None:
 #: consumer has a pre-push hook of their own", which it never overwrites.
 PRE_PUSH_MARKER = "# installed by `kyo install-hooks` (KYO-60)"
 
-#: Warns, and exits 0 whatever happens. The asymmetry with the ``PreToolUse`` hook
-#: is the design, not an oversight: an agent asking to push has no standing to
-#: publish the maintainer's private thinking, so that hook *blocks*; a human
-#: pushing their own repository owns that decision, so this one only tells them
-#: what it is. `git push --no-verify` skips it entirely, which is correct.
+#: Warns about a published store and exits 0, and refuses a push only for a private term
+#: in a commit being pushed. The asymmetry on the store is the design: an agent asking to
+#: push has no standing to publish the maintainer's private thinking, so the
+#: ``PreToolUse`` hook *blocks*; a human pushing their own repository owns that decision,
+#: so this one only tells them what it is. A private term in a public commit is almost
+#: always a mistake and is expensive to undo, so that alone is refused here too (KYO-669).
 #:
-#: ``|| true`` is load-bearing twice over: `kyo check-push` exits 2 by design when
-#: it has something to say, and a `kyo` that is not on this shell's PATH at all
-#: must not turn every push in the repository into a failure.
+#: Only :data:`~kyosei.errors.EXIT_PRIVATE_TERM` stops a push, and that test is
+#: load-bearing: `kyo check-push` can exit non-zero for reasons that say nothing about the
+#: commits, and a `kyo` that is missing from this shell's PATH or broken must not turn
+#: every push in the repository into a failure. `git push --no-verify` skips the hook.
 PRE_PUSH_SCRIPT = f"""#!/bin/sh
 {PRE_PUSH_MARKER}
 #
-# Advisory only. Prints, once, what pushing this repository would publish from its
-# Kyosei store, and never blocks: `git push --no-verify` skips it, and so does a
-# machine where `kyo` is not installed. Silence means one of three things -- the
-# store is not in this repository, somebody has already acknowledged this, or
-# there is no `kyo` here.
+# Prints, once, what pushing this repository would publish from its Kyosei store, which
+# never blocks. Refuses the push only when a commit being pushed has a private term or
+# a home path in its message or author name; `git push --no-verify` is the deliberate
+# way past that. A machine where `kyo` is not installed, or where it fails, is left to
+# push. Silence about the store means one of three things -- the store is not in this
+# repository, somebody has already acknowledged this, or there is no `kyo` here.
 #
 # NOTE: .git/hooks is not versioned. A fresh clone of this repository does NOT
 # have this file; run `kyo harness install claude-code` there to get it back
 # (`kyo install-hooks` in a project on the tracked copies).
 command -v kyo >/dev/null 2>&1 || exit 0
-kyo check-push --advisory || true
+kyo check-push --pre-push "$1"
+[ "$?" -eq {EXIT_PRIVATE_TERM} ] && exit 1
 exit 0
 """
 
@@ -876,9 +880,11 @@ def git_common_dir(code_root: Path) -> Path | None:
 #: KYO-416.c6: the line a consumer adds by hand to a pre-push hook Kyosei will not
 #: write for them. Guarded on `kyo` existing, on :data:`PRE_PUSH_SCRIPT`'s terms — a
 #: machine without `kyo` must not fail every push — but without that script's
-#: ``exit 0``, which would end a shared hook before whatever else it runs.
+#: ``exit 0``, which would end a shared hook before whatever else it runs. It reads the
+#: ref lines on the hook's stdin, so it goes before anything else in the hook that does.
 PRE_PUSH_MANUAL_LINE = (
-    "command -v kyo >/dev/null 2>&1 && { kyo check-push --advisory || true; }"
+    'command -v kyo >/dev/null 2>&1 && { kyo check-push --pre-push "$1" || '
+    f"{{ [ $? -ne {EXIT_PRIVATE_TERM} ] || exit 1; }}; }}"
 )
 
 
@@ -932,7 +938,7 @@ def install_git_pre_push_hook(
             f"git pre-push: this repository's hooks directory is {hooks_dir} "
             "(core.hooksPath), which is outside its own git directory — shared with "
             "other repositories, or tracked in this one — so no pre-push hook was "
-            f"written there. To get the advisory warning, add this line to "
+            f"written there. To get this check, add this line to "
             f"{target} yourself: {PRE_PUSH_MANUAL_LINE}"
         ]
     if target.is_file():
@@ -948,7 +954,7 @@ def install_git_pre_push_hook(
         # routes that call this (`kyo install-hooks` and `kyo harness install`).
         return [], [
             f"git pre-push: {target} already exists and is not ours, so it was left alone "
-            "— to get the advisory warning before a push, add this line to it yourself: "
+            "— to get this check before a push, add this line to it yourself: "
             f"{PRE_PUSH_MANUAL_LINE}"
         ]
     if not print_only:
@@ -956,7 +962,8 @@ def install_git_pre_push_hook(
         target.write_text(PRE_PUSH_SCRIPT, encoding="utf-8")
         target.chmod(0o755)
     return [
-        f"git pre-push: wrote {target} (advisory; `git push --no-verify` skips it, and "
+        f"git pre-push: wrote {target} (warns about a published store, refuses a private "
+        "term in a pushed commit; `git push --no-verify` skips it, and "
         ".git/hooks is not versioned, so a fresh clone will not have it)"
     ], []
 

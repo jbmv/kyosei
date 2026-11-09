@@ -1260,6 +1260,10 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "rather than blocked; the controller-facing half is the PreToolUse block and "
         "`--acknowledge`, and both are in section 0"
     ),
+    ("check-push", "--pre-push"): (
+        "what the generated git pre-push hook runs with git's own ref lines on stdin; nobody "
+        "types it, and the refusal it can produce names its own remedy"
+    ),
     ("docs", "--suppressed"): (
         "lists what a declared `#symbol` stopped `kyo docs preview` from raising "
         "(KYO-352) — an audit a WORKER runs in its own worktree, beside the preview it "

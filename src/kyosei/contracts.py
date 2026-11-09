@@ -1592,6 +1592,13 @@ CONTRACT_WORKTREE_HAS_UNCOMMITTED_WORK = "worktree-has-uncommitted-work"
 #: :data:`kyosei.schema.CONFIG_CONSUMERS`.
 CONTRACT_PUSH_PUBLISHES_THE_STORE = "push-publishes-the-store"
 
+#: KYO-669: a commit being pushed names a private project, a listed word or a home path
+#: in its message or author name. Unlike the store warning above this refuses a person's
+#: push as well as an agent's: publishing a store is a decision a person may reasonably
+#: make, and a private term in a public commit is almost always a mistake that is
+#: expensive to undo. `git push --no-verify` stays the deliberate way past it.
+CONTRACT_PUSH_CARRIES_A_PRIVATE_TERM = "push-carries-a-private-term"
+
 #: KYO-298: the fourth thing a hook can refuse, and the second aimed at an agent's
 #: standing rather than its worktree hygiene. The whole suite is the CONTROLLER's to
 #: run, once, after a wave merges — a worker that runs it inside its own worktree

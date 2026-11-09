@@ -32,7 +32,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo check-build`](#kyo-check-build) | optional | no | has the `kyo` under this session changed since its opening brief? Compares the running build with the one this session's session-start brief recorded; read-only (KYO-398) |
 | [`kyo check-clean`](#kyo-check-clean) | optional | no | worker stop guard: fail if the worktree holds uncommitted work outside the directories `check-branch` forbids a branch to touch |
 | [`kyo check-command`](#kyo-check-command) | optional | no | worker command guard: refuse a command this project declares orchestrator-only (`controller_only_commands`), or one whose declared timeout is over its ceiling (`worker_command_timeout_ceiling_seconds`), inside a running dispatch's worktree (KYO-298, KYO-312) |
-| [`kyo check-push`](#kyo-check-push) | optional | no | publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60) |
+| [`kyo check-push`](#kyo-check-push) | optional | no | publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60), and, for a push, if a commit it sends carries a private term or home path (KYO-669) |
 | [`kyo claim`](#kyo-claim) | yes | yes | record a claim about a record (law 9) |
 | [`kyo close-wave`](#kyo-close-wave) | yes | yes | close a merged wave: move each record to completion, run the declared generators, commit store and generated files together, then print (or, with --run-after, run) the declared after-steps — refused before any write unless every record can finish and the declared suite passed at this code (KYO-536) |
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
@@ -321,18 +321,19 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 ## `kyo check-push`
 
-publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60)
+publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60), and, for a push, if a commit it sends carries a private term or home path (KYO-669)
 
 Needs a Kyosei project: **optional** — it runs, and says so, where there is no project.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo check-push [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--pre-tool-use] [--advisory] [--acknowledge]`
+Usage: `kyo check-push [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--pre-tool-use] [--advisory] [--pre-push REMOTE] [--acknowledge]`
 
 ### Options
 
-- `--pre-tool-use` — optional. read Claude Code's PreToolUse payload on stdin and check only when it describes a command that publishes; how the packaged hook invokes this
-- `--advisory` — optional. warn and exit 0 instead of blocking — what the git pre-push hook runs, because a human pushing their own repository owns that decision
+- `--pre-tool-use` — optional. read Claude Code's PreToolUse payload on stdin and check only when it describes a command that publishes, including the messages and author names of the commits it would send; how the packaged hook invokes this
+- `--advisory` — optional. warn about a published store and exit 0 instead of blocking, because a human pushing their own repository owns that decision; what git pre-push hooks installed before --pre-push run
+- `--pre-push REMOTE` — optional. what the git pre-push hook runs, with git's remote name and its ref lines on stdin: warns about a published store as --advisory does, and exits 4 if a commit being pushed carries a private term or home path in its message or author name; the term is never printed
 - `--acknowledge` — optional. accept, once and for all, that pushing publishes this store: records who and when in kyosei/config.yml, after which this command is silent
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
