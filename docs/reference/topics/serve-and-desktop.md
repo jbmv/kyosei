@@ -393,8 +393,9 @@ replaced by the transcript's reply when its record lands.
 
 The stream stands beside `/events` and does not extend it. `/events` is one project's `stat`
 fingerprint; this one samples a pane, which costs a subprocess, so one sampler serves
-every client of a session and stops when the last one leaves. Nothing samples a pane while
-no client is subscribed. The sampler reads the session twice a second. Under the launchd
+every client of a session and stops when the last one leaves. Apart from the watching of a
+held message (below), nothing samples a pane while no client is subscribed. The sampler
+reads the session twice a second. Under the launchd
 agent, tmux is found on the installing shell's `PATH` or in the Homebrew locations, and the
 sockets are the machine's defaults, since no `TMUX_TMPDIR` is carried. Claude Code's
 directory is `~/.claude`; a `CLAUDE_CONFIG_DIR` set only in a shell does not reach the agent.
@@ -461,6 +462,61 @@ action, project, session, device, each segment's kind, length in characters and 
 digest, whether it was automatic, and its outcome (`sent`, `refused`, `failed`) with status
 and reason. It never holds a segment's text. If the log cannot be written, or would lie inside
 a git repository, the send is refused before any key is sent.
+
+### Saved drafts and held messages (KYO-703)
+
+The composer's unsent text is kept by the server, so that it survives closing the app and
+moving between devices. Both kinds live under `$KYOSEI_HOME/composer/`, in files private to
+your account, and the write is refused if that directory would lie inside a git repository.
+Each route needs a device token with the `send` permission, sent as for the send routes, and
+refuses a query string. A project must have opted in to reading transcripts and record the
+session. The routes are under `/v1/projects/<name>/sessions/<id>/`.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `draft` | GET | The saved boxes, or `boxes: []` and `etag: null` when there are none |
+| `draft` | PUT | Replace them: `{"boxes": [{"text": ...}, ...]}` |
+| `held` | POST | Hold a message: the body of `send` |
+| `held` | GET | The held message with its text, or `held: null` |
+| `held` | DELETE | Retract it, with `If-Match: <its id>` |
+
+**A draft** is written with `If-Match: <etag>`, or `If-None-Match: *` for a first draft, and
+a writer holding an older etag is refused with 412 and the current etag, so one device cannot
+overwrite another's newer draft. The etag covers the stored file, including the time of the
+write. A box may carry keys beside `text`; the server keeps them unread. Sending need not be
+switched on, since a draft does not touch a session.
+
+**A held message** is kept until the session's screen is idle and then delivered as `send`
+would type it. It passes the checks a send makes, so holding needs `serve_send: true`. A
+session holds one at a time; a second is refused with `already-held`, naming the id to
+retract. A message held on an idle screen is delivered on the next looks. `GET` and the
+response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (`held` or
+`delivering`), `reason`, `detail` and `retrying`.
+
+The server watches a held session once a second, in its own thread, whether or not a client
+is connected; the thread ends when nothing is held. A look costs one pane lookup and one
+capture. The message is delivered on the second of two looks that find the screen idle, and
+the screen is read once more immediately before the keys are sent. It stays held, with a
+`reason` and a sentence in `detail`, when delivery would be wrong: `screen-not-ready` (a
+prompt, question, panel or unrecognised screen, which is left to you), `input-box-in-use`
+(text in the terminal's own input box, which delivery would erase), `no-pane`, `send-disabled`,
+`revoked-token`, `no-send-permission`, `held-device-unknown`, `tokens-unreadable`,
+`settings-unreadable`, `send-log-unusable`, `pane-unreadable`. These are looked at again on
+every poll. `retrying: false` means it will not be tried again and you must retract it, since
+keys may have reached the pane: `send-failed`, and `delivery-interrupted` for a message the
+server was delivering when it stopped.
+
+`DELETE` returns `id`, `automatic` and `segments` with their text, and the message is not
+delivered. It waits for any delivery already in flight, so it either returns the text or is
+refused with 404 `not-held`, never both; `not-held` also answers a message already delivered
+or taken back. `If-Match` is required and must name the held message (428 without it, 412 if it
+names another), so a device cannot take back a newer message it has not seen. Retracting
+works while sending is off.
+
+The send log records holds, retractions and deliveries with the actions `hold`, `retract` and
+`held-delivery`. A delivery that the log cannot record does not start, and the message stays
+held. On a session's event stream, the `ready` event carries `held` and a `held` event reports
+`outcome` (`held`, `delivered`, `retracted`), `id` and the message; neither carries text.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 

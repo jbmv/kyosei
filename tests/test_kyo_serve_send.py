@@ -666,6 +666,8 @@ def test_only_the_send_module_can_reach_the_sending_functions() -> None:
         "serve_files.py",
         "serve_sessions.py",
         "serve_send.py",
+        "serve_held.py",
+        "serve_drafts.py",
         "device_tokens.py",
     } <= {p.name for p in modules}
     offenders = {
