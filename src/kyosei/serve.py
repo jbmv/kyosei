@@ -203,6 +203,7 @@ NOT_SERVED: dict[str, str] = {
     "check-command": _GUARD,
     "check-push": _GUARD,
     "pre-tool-use": _GUARD,
+    "turns": "it is a session hook writing the local turn index and archive, not a read",
     "install-hooks": _WRITES_FILES,
     "install-skill": _WRITES_FILES,
     "install-procedures": _WRITES_FILES,
