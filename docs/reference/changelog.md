@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-700` (task) — Session API: the repository's remote
 - **2026-11-09** — `KYO-699` (task) — kyo serve session API, send half: per-device tokens, sending input, and the send log
 - **2026-11-09** — `KYO-698` (task) — Session API: the session's permission mode
 - **2026-11-09** — `KYO-695` (task) — Session API: a finished subagent's token use and its branch's line counts
@@ -411,6 +412,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-09** — `KYO-702` (bug) — The fake launchctl fixture's teardown errors when its tmux server is slow to stop
 - **2026-11-09** — `KYO-694` (bug) — The reply in progress alternates with nothing on every sample while a tool runs, and holds tool output
 - **2026-11-09** — `KYO-688` (task) — Session layer: one adapter for the transcript, one for the pane, in Kyosei's terms
 - **2026-11-09** — `KYO-687` (bug) — A message sent mid-turn leaves the turn index with a duplicate line and the enclosing prompt unconfirmed
