@@ -184,6 +184,45 @@ def test_a_mid_turn_message_the_hook_missed_is_added_from_the_transcript(
     assert len(index(project)) == 2, "a second Stop adds nothing"
 
 
+def test_a_mid_turn_message_leaves_one_line_per_prompt(kyo, project: Path) -> None:
+    """Both hook payloads carry the enclosing prompt's id, as they do in a real session."""
+    opt_in_transcripts(project)
+    prompt_hook(kyo, PROMPT_1, prompt="start")
+    (before,) = index(project)
+    prompt_hook(kyo, PROMPT_1, prompt=PASTE)
+    assert index(project) == [before], "the repeated prompt id adds no line and changes none"
+    write_transcript(
+        [
+            person("p-1", PROMPT_1, "start", "2026-11-08T10:00:00.000Z"),
+            tool_result("t-1", PROMPT_1, "2026-11-08T10:00:03.000Z"),
+            queued("q-1", PASTE, "2026-11-08T10:00:05.000Z"),
+            tool_result("t-2", PROMPT_1, "2026-11-08T10:00:08.000Z"),
+        ]
+    )
+    assert stop_hook(kyo).code == 0
+    enclosing, message = index(project)
+    assert enclosing["prompt_id"] == PROMPT_1 and enclosing["turn"] == "p-1"
+    assert enclosing["origin"] == "human" and enclosing["source"] == cmd_turns.SOURCE_HOOK
+    assert enclosing["at"] == before["at"] and enclosing["pasted"] is False
+    assert message["prompt_id"] is None and message["turn"] == "q-1"
+    assert message["origin"] == "human" and message["pasted"] is True
+    assert message["at"] == "2026-11-08T10:00:05.000Z"
+    assert cmd_turns.confirmed_paste_flags(project, SESSION) == {
+        PROMPT_1: False,
+        "p-1": False,
+        "q-1": True,
+    }
+    stop_hook(kyo)
+    assert index(project) == [enclosing, message], "a second Stop changes nothing"
+
+
+def test_a_repeated_prompt_id_is_judged_within_its_own_session(kyo, project: Path) -> None:
+    opt_in_transcripts(project)
+    prompt_hook(kyo, PROMPT_1)
+    prompt_hook(kyo, PROMPT_1, session=AFTER_CLEAR)
+    assert [line["session"] for line in index(project)] == [SESSION, AFTER_CLEAR]
+
+
 def test_a_prompt_the_hook_never_saw_is_added_from_the_transcript(kyo, project: Path) -> None:
     opt_in_transcripts(project)
     write_transcript([person("p-1", PROMPT_1, "start", "2026-11-08T10:00:00.000Z")])
