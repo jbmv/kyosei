@@ -475,7 +475,7 @@ decides, and how a setup agent can find the answer before asking.
   whose it was and whether it carried pasted content, and no text.
 - **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
-  git repository, and which a credit is checked against when the original no longer exists.
+  git repository, and which a credit is checked against when the original is absent.
 - **What never leaves the machine:** the transcripts, the archive and the prompt history.
   Kyosei sends none of them anywhere and copies none of them into the store; a store remote
   carries only what is listed as stored.

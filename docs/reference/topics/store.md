@@ -447,7 +447,7 @@ decision D14) keeps a copy of each session's transcript and subagent transcripts
 id>.jsonl` and `<session id>/subagents/`. It lies outside every git repository, which `kyo
 doctor` checks, and a split store's directory is not a place for it, since the store is
 itself a repository. The Stop and SessionEnd hook copies only what is new, and the credit
-reader falls back to the copy when the original no longer exists. A `/clear` starts a new
+reader falls back to the copy when the original is absent. A `/clear` starts a new
 transcript file with a new session id, so the archive holds one file per transcript file,
 which is not one per run of a session.
 

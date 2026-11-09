@@ -246,7 +246,7 @@ Ask these together, in one message. Propose an answer for each from what you rea
   session, prompt id, time, whose it was and whether it carried pasted content, and no
   text. **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
-  is checked against when the original no longer exists. **What never leaves this
+  is checked against when the original is absent. **What never leaves this
   machine:** the transcripts, the archive and the prompt history. Kyosei sends none of them
   anywhere and copies none of them into the store; a store remote carries only what is
   listed as stored. **Read either way:** the Remote Control session id in a session's
