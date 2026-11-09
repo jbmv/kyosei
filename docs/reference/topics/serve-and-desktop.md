@@ -196,6 +196,8 @@ because that format is not a published interface and changes between releases.
 | `GET /v1/projects/<name>/sessions/<id>/turns[?cursor=...]` | the session's transcript objects |
 | `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now, classified and as text |
 | `GET /v1/projects/<name>/sessions/<id>/images/<turn>/<index>` | one image the person sent, as its own bytes |
+| `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls |
+| `GET /v1/projects/<name>/sessions/<id>/changes` | the lines the session's working directory holds that no commit does |
 | `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
 
 **The list.** `{"ok", "sessions": [...], "problem"}`, one row per session that
@@ -203,10 +205,12 @@ because that format is not a published interface and changes between releases.
 otherwise `null`. A row is:
 
 ```
-session_id, state ("running" | "ended"), live, first_seen, last_seen, ended_at, cwd,
+session_id, title, state ("running" | "ended"), live, first_seen, last_seen, ended_at, cwd,
 remote_control_url, has_pane, pane_why, work_running, screen_state, background
 ```
 
+`title` is the title the session's transcript holds, the latest if it holds several, and
+`null` when it holds none or cannot be read; nothing is derived in its place.
 `live` is whether Claude Code's own process registry holds a running process on the
 session, so a killed session reads `state: "running"` and `live: false`. `has_pane` is
 whether that process is in a tmux pane on `-L default` or `-L kyosei`; `pane_why` says why
@@ -291,6 +295,27 @@ Code caches under `cache/model-catalog/` in its configuration directory. `window
 unless the session asked for `[1m]`, because their window depends on that request. An
 environment setting that changes one session's window, such as
 `CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
+
+**A subagent.** `GET .../sessions/<id>/subagents/<agent>` is `{"ok", "session_id", "agent_id",
+"readable", "why", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
+call has the shape above. It reads the subagent's own transcript, beside the session's, so a
+subagent still running can be read before it appears in `subagents`. An agent id that is not
+this session's answers 404. `readable: false` means the file's rows are of no format this
+build recognises, and `why` says so.
+
+**Uncommitted changes.** `GET .../sessions/<id>/changes` is `{"ok", "session_id", "cwd", "root",
+"why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`. `added` and
+`removed` are `git diff HEAD --numstat` summed over the repository holding the session's
+working directory, staged or not, and `files` counts the tracked files that differ. A binary
+file adds to `files` and to no line count. Before the first commit the figures are what has
+been staged. Files that are neither tracked nor ignored are counted apart, in `untracked`:
+`lines` is what they hold, and `uncounted` is how many could not be counted, being binary, not
+regular files, larger than 16 MiB, or past the first 2,000. `added` and `removed` are the
+figures to compare with the Changes row on claude.ai, because Claude Code's own diff
+statistics give an untracked file no lines. When there is nothing uncommitted that row may
+instead show a branch's difference from its base, which this route does not report. The
+route runs read-only git commands and changes nothing. When the working directory is gone
+or is not in a repository, `root` is `null`, the figures are zero and `why` says so.
 
 **The screen.** `{"ok", "session_id", "pane": {"present", "why", "pane_id",
 "tmux_session"}, "screen", "terminal", "work_running"}`. `screen` is the session layer's

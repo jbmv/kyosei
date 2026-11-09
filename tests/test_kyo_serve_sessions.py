@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -50,6 +51,7 @@ ROUTES = [
     f"{SESSIONS}/{OLD}/turns",
     f"{SESSIONS}/{OLD}/screen",
     f"{SESSIONS}/{OLD}/events",
+    f"{SESSIONS}/{OLD}/changes",
 ]
 
 
@@ -93,14 +95,21 @@ class Bed:
         return self.client.get(path, **kwargs)
 
 
-def _entry(session_id: str, *, state: str, seen: str, transcript: Path | None = None) -> dict:
+def _entry(
+    session_id: str,
+    *,
+    state: str,
+    seen: str,
+    transcript: Path | None = None,
+    cwd: str = "/work",
+) -> dict:
     return {
         "session_id": session_id,
         "state": state,
         "first_seen": seen,
         "last_seen": seen,
         "last_event": "Stop",
-        "cwd": "/work",
+        "cwd": cwd,
         "remote_control_id": None,
         "url": None,
         "remote_control_outcome": "absent",
@@ -694,6 +703,160 @@ def test_the_image_route_answers_get_only(bed: Bed, method: str) -> None:
     headers = {"Content-Type": "application/json"} if method == "POST" else {}
     status, response_headers, _ = bed.client.request(IMAGE_ROUTE, method=method, headers=headers)
     assert status == 405 and response_headers["Allow"] == "GET"
+
+
+# ------------------------------------- KYO-693: titles, a subagent's calls, uncommitted lines
+
+TITLED_FILE = FIXTURES / "titled" / "session.synthetic.jsonl"
+AGENT = "a14ca9deaf9c51bd1"  # the pair fixture's subagent, so /turns names it too
+AGENT_FILE = FIXTURES / "subagent" / f"agent-{AGENT}.jsonl"
+AGENT_ROUTE = f"{SESSIONS}/{OLD}/subagents/{AGENT}"
+CHANGES_ROUTE = f"{SESSIONS}/{OLD}/changes"
+
+
+def place_agent(bed: Bed, session_id: str = OLD) -> None:
+    directory = bed.transcripts / session_id / "subagents"
+    directory.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(AGENT_FILE, directory / AGENT_FILE.name)
+
+
+def test_each_row_states_the_title_its_transcript_holds(bed: Bed) -> None:
+    shutil.copyfile(TITLED_FILE, bed.transcript)
+    rows = {row["session_id"]: row for row in json_body(bed.get(SESSIONS))["sessions"]}
+    assert rows[OLD]["title"] == "The latest title"
+
+
+def test_an_ended_session_has_its_title_without_a_pane_being_read(bed: Bed) -> None:
+    shutil.copyfile(TITLED_FILE, bed.transcripts / f"{ENDED}.jsonl")
+    entries = [_entry(ENDED, state="ended", seen="2026-11-09T11:00:00.000Z")]
+    assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(bed.project), entries) is None
+    rows = json_body(bed.get(SESSIONS))["sessions"]
+    assert rows[0]["title"] == "The latest title"
+    assert bed.pane_reads() == 0
+
+
+def test_a_transcript_holding_no_title_gets_none_rather_than_an_invented_one(bed: Bed) -> None:
+    rows = {row["session_id"]: row for row in json_body(bed.get(SESSIONS))["sessions"]}
+    assert rows[OLD]["title"] is None  # the fixture has no ai-title row
+    assert rows[ENDED]["title"] is None  # and this session has no transcript at all
+
+
+def test_a_subagents_tool_calls_come_from_its_own_transcript(bed: Bed) -> None:
+    place_agent(bed)
+    document = json_body(bed.get(AGENT_ROUTE))
+    assert document["session_id"] == OLD and document["agent_id"] == AGENT
+    assert document["readable"] is True
+    calls = document["tool_calls"]
+    assert [call["name"] for call in calls] == ["Bash", "Read"]
+    assert calls[0]["input"] == {"command": "ls /work | wc -l"}
+    assert calls[0]["result"]["text"] == "4" and calls[0]["result"]["is_error"] is False
+    assert calls[1]["result"] is None  # that call has not finished
+    assert_no_raw_row(document)
+
+
+def test_turns_list_a_subagent_the_route_serves(bed: Bed) -> None:
+    place_agent(bed)
+    turns = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    listed = [item["agent_id"] for item in turns["subagents"]]
+    assert AGENT in listed
+    assert json_body(bed.get(AGENT_ROUTE))["tool_calls"]
+
+
+def test_an_agent_id_that_is_not_this_sessions_is_refused_and_names_where_to_look(bed: Bed) -> None:
+    place_agent(bed)
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/subagents/nosuch")
+    assert status == 404
+    error = body_json(body)["error"]
+    assert "nosuch" in error and f"/sessions/{OLD}/turns" in error
+
+
+def test_an_agent_of_another_recorded_session_is_refused_here(bed: Bed) -> None:
+    place_agent(bed, ENDED)
+    assert bed.get(AGENT_ROUTE)[0] == 404
+
+
+@pytest.mark.parametrize("agent", ["..%2F..%2F" + OLD, "..", "agent-" + AGENT + ".jsonl"])
+def test_an_agent_id_cannot_name_a_file_outside_the_sessions_subagents(
+    bed: Bed, agent: str
+) -> None:
+    place_agent(bed)
+    assert bed.get(f"{SESSIONS}/{OLD}/subagents/{agent}")[0] == 404
+
+
+def test_an_agent_of_a_session_this_project_does_not_record_is_not_served(bed: Bed) -> None:
+    shutil.copyfile(OLD_FILE, bed.transcripts / f"{ELSEWHERE}.jsonl")
+    place_agent(bed, ELSEWHERE)
+    assert bed.get(f"{SESSIONS}/{ELSEWHERE}/subagents/{AGENT}")[0] == 404
+
+
+def test_the_subagent_route_refuses_until_the_project_opts_in(
+    unopted: Client, project: Path
+) -> None:
+    home = Path(unopted.server.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-work"
+    shutil.copyfile(OLD_FILE, home / f"{OLD}.jsonl")
+    (home / OLD / "subagents").mkdir(parents=True)
+    shutil.copyfile(AGENT_FILE, home / OLD / "subagents" / AGENT_FILE.name)
+    status, _, body = unopted.get(AGENT_ROUTE)
+    assert status == 403 and "read_transcripts: true" in body_json(body)["error"]
+    assert b"toolu_sub1" not in body
+    opt_in_transcripts(project)
+    assert unopted.get(AGENT_ROUTE)[0] == 200
+
+
+@pytest.mark.parametrize("route", [AGENT_ROUTE, CHANGES_ROUTE])
+def test_the_new_routes_refuse_a_host_and_an_origin_they_do_not_know(bed: Bed, route: str) -> None:
+    place_agent(bed)
+    status, _, body = bed.get(route, host="evil.example")
+    assert status == 403 and "--allow-host" in body_json(body)["error"]
+    status, _, body = bed.get(route, headers={"Origin": "https://evil.example"})
+    assert status == 403 and "--allow-origin" in body_json(body)["error"]
+
+
+@pytest.mark.parametrize("route", [AGENT_ROUTE, CHANGES_ROUTE])
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+def test_the_new_routes_answer_get_only(bed: Bed, route: str, method: str) -> None:
+    headers = {"Content-Type": "application/json"} if method == "POST" else {}
+    status, response_headers, _ = bed.client.request(route, method=method, headers=headers)
+    assert status == 405 and response_headers["Allow"] == "GET"
+
+
+def init_repo(path: Path) -> None:
+    path.mkdir()
+    who = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+    env = {**os.environ, **dict.fromkeys(who, "t")}
+    (path / "kept.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    for args in (["init", "-q"], ["add", "kept.txt"], ["commit", "-q", "-m", "first"]):
+        subprocess.run(["git", *args], cwd=path, env=env, check=True)
+
+
+def record_cwd(bed: Bed, cwd: str) -> None:
+    entries = [_entry(OLD, state="running", seen="2026-11-09T10:00:00.000Z", cwd=cwd)]
+    assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(bed.project), entries) is None
+
+
+def test_changes_are_the_tracked_lines_with_untracked_files_counted_apart(
+    bed: Bed, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    (repo / "kept.txt").write_text("one\nTWO\nthree\nfour\n", encoding="utf-8")  # +2 -1
+    (repo / "new.txt").write_text("a\nb\nc\n", encoding="utf-8")  # untracked, three lines
+    record_cwd(bed, str(repo))
+    document = json_body(bed.get(CHANGES_ROUTE))
+    assert document["cwd"] == str(repo) and document["why"] is None
+    assert Path(document["root"]).resolve() == repo.resolve()
+    assert (document["added"], document["removed"], document["files"]) == (2, 1, 1)
+    assert document["untracked"] == {"files": 1, "lines": 3, "uncounted": 0}
+
+
+def test_changes_for_a_working_directory_that_is_gone_say_so(bed: Bed) -> None:
+    document = json_body(bed.get(CHANGES_ROUTE))  # the bed records /work, which does not exist
+    assert document["root"] is None and "/work" in document["why"]
+    assert (document["added"], document["removed"]) == (0, 0)
+
+
+def test_the_changes_of_a_session_this_project_does_not_record_are_not_served(bed: Bed) -> None:
+    assert bed.get(f"{SESSIONS}/{ELSEWHERE}/changes")[0] == 404
 
 
 def test_turns_return_what_the_transcript_records_of_thinking(bed: Bed) -> None:

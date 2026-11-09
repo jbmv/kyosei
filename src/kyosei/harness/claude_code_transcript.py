@@ -1260,6 +1260,12 @@ _PEER = "peer"
 #: not trusted to name a Content-Type, since ``image/svg+xml`` would run as a page.
 _IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 
+#: The row holding a session's title, and how much of a transcript is read at a time looking
+#: for the last one.
+_TITLE_ROW = "ai-title"
+_TITLE_NEEDLE = b'"ai-title"'
+_TITLE_BLOCK_BYTES = 1 << 20
+
 
 @dataclass(frozen=True)
 class Usage:
@@ -1661,13 +1667,16 @@ class SessionTranscript:
     :meth:`read` consumes whole lines past the offset and leaves a partial last line for
     the next call, so a file being written is never mis-parsed and no record is read
     twice. A file shorter than the offset has been rewritten, and is read again from the
-    start. Sidechain records are left out: a subagent's transcript is its own file, which
-    :class:`SubagentRef` points at.
+    start. Sidechain records are left out of a session's own transcript: a subagent's
+    transcript is its own file, which :class:`SubagentRef` points at and
+    :func:`subagent_transcript` finds, and is read with ``sidechain=True``, since every
+    record in it is one.
     """
 
-    def __init__(self, path: Path, offset: int = 0) -> None:
+    def __init__(self, path: Path, offset: int = 0, *, sidechain: bool = False) -> None:
         self.path = path
         self.offset = offset
+        self.sidechain = sidechain
         self._reset()
 
     def _reset(self) -> None:
@@ -1715,7 +1724,10 @@ class SessionTranscript:
 
     @property
     def readable(self) -> bool:
-        """False when no record carries ``origin``: the format is not one this reader knows."""
+        """False when no record carries ``origin``: the format is not one this reader knows.
+
+        A subagent's records carry none, so in its file the mark is ``isSidechain`` instead.
+        """
         return self.has_origin
 
     def read(self) -> TranscriptDelta:
@@ -1743,21 +1755,26 @@ class SessionTranscript:
         self.why = (
             f"{len(self._turns)} turns and {len(self._messages)} replies read"
             if self.has_origin
-            else "no record in the transcript carries `origin`, so its format is not one this "
-            "reader knows"
+            else f"no record in the transcript carries `{self._format_mark}`, so its format is "
+            "not one this reader knows"
         )
         return delta
 
+    @property
+    def _format_mark(self) -> str:
+        return "isSidechain" if self.sidechain else "origin"
+
     def _take(self, record: dict, delta: TranscriptDelta) -> None:
         kind = record.get("type")
-        if "origin" in record or (
+        if self._format_mark in record or (
             kind == "attachment"
             and _is_queued_command(record)
             and "origin" in (record.get("attachment") or {})
         ):
             self.has_origin = True
         uuid, stamp = record.get("uuid"), record.get("timestamp")
-        if record.get("isSidechain") or not isinstance(uuid, str) or not isinstance(stamp, str):
+        left_out = record.get("isSidechain") and not self.sidechain
+        if left_out or not isinstance(uuid, str) or not isinstance(stamp, str):
             return
         if kind == "assistant":
             self._asked |= _questions_asked(record)
@@ -1913,6 +1930,59 @@ class SessionTranscript:
         )
         self._subagents[agent_id] = ref
         delta.subagents.append(ref)
+
+
+def subagent_transcript(session_path: Path, agent_id: str) -> Path | None:
+    """The transcript of subagent ``agent_id`` of the session at ``session_path``, or None.
+
+    It is ``<session>/subagents/agent-<id>.jsonl`` beside the session's own file. The id is
+    compared with the names that directory holds and is never built into a path, so an id
+    from a request cannot leave the directory, and an agent of another session is not there.
+    """
+    wanted = f"agent-{agent_id}.jsonl"
+    directory = session_path.parent / session_path.stem / "subagents"
+    try:
+        names = [entry.name for entry in directory.iterdir() if entry.is_file()]
+    except OSError:
+        return None
+    return directory / wanted if wanted in names else None
+
+
+def session_title(path: Path) -> str | None:
+    """The title the transcript at ``path`` holds, or None when it holds none.
+
+    Claude Code writes the title as an ``ai-title`` row, again and again through a session
+    and with the latest one standing, so the file is read backwards from its end, which
+    finds it in the last block however long the file is. A session list asks this of every
+    row. Raises :class:`OSError` when the file cannot be opened.
+    """
+    with path.open("rb") as handle:
+        position = handle.seek(0, os.SEEK_END)
+        carried = b""  # the part of a line that began in the block before this one
+        while position > 0:
+            step = min(_TITLE_BLOCK_BYTES, position)
+            position -= step
+            handle.seek(position)
+            lines = (handle.read(step) + carried).split(b"\n")
+            carried = lines.pop(0) if position > 0 else b""
+            for raw in reversed(lines):
+                title = _title_of(raw)
+                if title is not None:
+                    return title
+    return None
+
+
+def _title_of(raw: bytes) -> str | None:
+    if _TITLE_NEEDLE not in raw:
+        return None
+    try:
+        record = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get("type") != _TITLE_ROW:
+        return None
+    title = record.get("aiTitle")
+    return title if isinstance(title, str) and title.strip() else None
 
 
 @dataclass(frozen=True)

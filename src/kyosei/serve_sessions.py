@@ -9,6 +9,10 @@ Under ``/v1/projects/{project}/sessions``:
   its facts as of the latest reply (KYO-691), and a cursor to ask for what is new;
 - ``GET sessions/{id}/images/{turn}/{index}`` -- one image the person sent (KYO-692), whose
   bytes are carried by no other route;
+- ``GET sessions/{id}/subagents/{agent}`` -- one subagent's tool calls, from its own
+  transcript (KYO-693);
+- ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
+  commit does (KYO-693);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
   objects, the reply in progress and changes to the screen and the terminal's text;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
@@ -166,6 +170,22 @@ def _subagent_json(ref: Any) -> dict:
         "tool_call_uuid": ref.tool_call_uuid,
         "description": ref.description,
         "agent_type": ref.agent_type,
+    }
+
+
+def _changes_json(changes: Any) -> dict:
+    return {
+        "cwd": changes.cwd,
+        "root": changes.root,
+        "why": changes.why,
+        "added": changes.added,
+        "removed": changes.removed,
+        "files": changes.files,
+        "untracked": {
+            "files": changes.untracked.files,
+            "lines": changes.untracked.lines,
+            "uncounted": changes.untracked.uncounted,
+        },
     }
 
 
@@ -423,6 +443,7 @@ class ProjectSessions:
     def _row(self, entry: dict) -> dict:
         row = {
             "session_id": entry.get("session_id"),
+            "title": self._title(entry),
             "state": entry.get("state"),
             "live": False,
             "first_seen": entry.get("first_seen"),
@@ -454,6 +475,18 @@ class ProjectSessions:
             row["screen_state"] = screen.state
             row["background"] = _background_json(screen.background)
         return row
+
+    def _title(self, entry: dict) -> str | None:
+        """The transcript's title for a row; None when it holds none or cannot be read."""
+        try:
+            return session_layer.session_title(
+                self.config,
+                self.paths.store_root,
+                str(entry.get("session_id")),
+                environ=self.environ,
+            )
+        except (KyoseiError, OSError):
+            return None
 
     def turns(self, session_id: str, given: Cursor | None) -> dict:
         self.require(session_id)
@@ -490,6 +523,45 @@ class ProjectSessions:
                 "name those it holds",
             )
         return found.media_type, found.data
+
+    def subagent(self, session_id: str, agent_id: str) -> dict:
+        """One subagent's tool calls, read from its own transcript."""
+        self.require(session_id)
+        live = self.open_live(session_id)
+        try:
+            reader = live.subagent(agent_id)
+        except OSError as exc:
+            raise _unreadable(session_id, exc) from exc
+        if reader is None:
+            raise Refusal(
+                404,
+                f"session {session_id} holds no subagent {agent_id}; the `subagents` of "
+                f"GET {API_PREFIX}/projects/{{project}}/sessions/{session_id}/turns name those "
+                "it holds",
+            )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "readable": reader.readable,
+            "why": reader.why,
+            "tool_calls": [_tool_call_json(call) for call in reader.tool_calls],
+        }
+
+    def changes(self, session_id: str) -> dict:
+        """What the session's working directory holds that no commit does."""
+        self.require(session_id)
+        entries = read_sessions(self.paths.sessions).entries
+        cwd = next(e.get("cwd") for e in entries if e.get("session_id") == session_id)
+        try:
+            found = session_layer.uncommitted_changes(
+                cwd if isinstance(cwd, str) else None, environ=self.environ
+            )
+        except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+            raise Refusal(
+                502, f"the changes of session {session_id} could not be read: {exc}"
+            ) from exc
+        return {"ok": True, "session_id": session_id, **_changes_json(found)}
 
     def screen(self, session_id: str) -> dict:
         self.require(session_id)
