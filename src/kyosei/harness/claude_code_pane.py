@@ -71,7 +71,9 @@ UNRECOGNISED = "unrecognised"
 #: The words of the trust dialog's "yes" option; ``cmd_controller`` reads the same screen.
 _TRUST_TEXT = "Yes, I trust this folder"
 _RULE = re.compile(r"^[─▔]{20,}$")
-_SGR = re.compile(r"\x1b\[[0-9;:]*[A-Za-z]")
+_SGR = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+#: What ``capture-pane -e`` carries besides colours: an OSC 8 hyperlink around a link's text.
+_OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 _BULLET_COLOUR = re.compile(r"(\x1b\[[0-9;:]*m)*⏺")
 _OPTION = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$")
 _QUESTION = re.compile(r"^\s*Do you want to .+\?\s*$")
@@ -79,6 +81,9 @@ _SHELLS = re.compile(r"·\s*(\d+)\s+shells?\b")
 _AGENT_ROW = re.compile(r"^\s*◯\s+(\S+)\s{2,}(.+?)(?:\s{2,}\S.*)?$")
 #: The spinner row of a turn, always at the left margin; a reply's own lines are indented.
 _SPINNER_ROW = re.compile(r"^[·✢✳✶✻✽*]\s")
+#: A spinner row of a turn still running. A finished turn's row keeps the glyph and has no
+#: ellipsis (``✻ Baked for 4s · done 9:12 AM``), and the verb varies from one turn to the next.
+_WORKING_ROW = re.compile(r"^[·✢✳✶✻✽*]\s+(.*….*?)\s*$")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*•]\s|\d+\.\s)")
 
 #: Bullet colours of the rows that are not reply text, measured on the default theme:
@@ -106,7 +111,7 @@ PANE_SOCKETS: tuple[tuple[str, ...], ...] = (("-L", "default"), ("-L", "kyosei")
 
 
 def _strip(raw: str) -> str:
-    return _SGR.sub("", raw).replace("\xa0", " ")
+    return _SGR.sub("", _OSC.sub("", raw)).replace("\xa0", " ")
 
 
 def plain_screen(raw: str) -> str:
@@ -247,6 +252,38 @@ def classify(raw: str, *, log_unrecognised_screen: Callable[[str], None] | None 
     if log_unrecognised_screen is not None:
         log_unrecognised_screen(plain)
     return Screen(UNRECOGNISED)
+
+
+@dataclass(frozen=True)
+class Terminal:
+    """The words on a captured screen, for a client to show (KYO-692)."""
+
+    #: The screen with its styling removed, and no trailing spaces or trailing blank lines.
+    text: str
+    #: The working line's words without its spinner glyph, as the terminal has drawn them
+    #: while a turn runs; None on any other screen, or while the turn's row is off the screen.
+    working_line: str | None
+
+
+def _working_line(lines: list[str], raw_lines: list[str]) -> str | None:
+    """The spinner row between the input box and the person's prompt, by its words."""
+    box = _input_box(lines, raw_lines)
+    if box is None:
+        return None
+    for line in reversed(lines[: box.first - 1]):
+        if line.startswith("❯ "):
+            return None
+        found = _WORKING_ROW.match(line)
+        if found:
+            return found.group(1)
+    return None
+
+
+def terminal(raw: str, screen: Screen) -> Terminal:
+    """The text of ``raw``, the capture that was classified as ``screen``."""
+    lines = _strip(raw).split("\n")
+    working = _working_line(lines, raw.split("\n")) if screen.state == WORKING else None
+    return Terminal("\n".join(line.rstrip() for line in lines).rstrip(), working)
 
 
 def log_unrecognised(screen: str, directory: Path) -> Path | None:

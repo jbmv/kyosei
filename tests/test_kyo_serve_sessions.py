@@ -17,6 +17,7 @@ import os
 import shutil
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -35,9 +36,11 @@ OLD_FILE = FIXTURES / "pair" / f"{OLD}.jsonl"
 NEW_FILE = FIXTURES / "pair" / f"{NEW}.jsonl"
 FACTS_FILE = FIXTURES / "facts" / "session.synthetic.jsonl"
 CATALOG = FIXTURES / "facts" / "model-catalog-cc.synthetic.json"
+DELIVERED_FILE = FIXTURES / "delivered" / "session.synthetic.jsonl"
 ENDED = "22222222-2222-4222-8222-222222222222"
 KILLED = "33333333-3333-4333-8333-333333333333"
 ELSEWHERE = "44444444-4444-4444-8444-444444444444"
+SIGNATURE_ONLY = "c2lnbmF0dXJlLW9ubHk="
 
 BASE = "/v1/projects/proj"
 SESSIONS = f"{BASE}/sessions"
@@ -314,13 +317,14 @@ def test_turns_are_the_session_layers_objects_and_never_a_row(bed: Bed) -> None:
     assert document["readable"] is True and document["reset"] is False
 
     assert set(document["turns"][0]) == {
-        "id", "at", "form", "text", "typed", "paste_known", "prompt_id"
+        "id", "at", "form", "text", "typed", "paste_known", "prompt_id", "images"
     }  # fmt: skip
     assert {t["form"] for t in document["turns"]} >= {"typed", "mid-turn", "answer"}
     assert document["turns"][0]["text"].startswith("Write three paragraphs")
 
     assert set(document["replies"][0]) == {
-        "message_id", "uuid", "at", "text", "model", "usage", "record_uuids"
+        "message_id", "uuid", "at", "text", "thinking", "thinking_omitted", "model", "usage",
+        "record_uuids"
     }  # fmt: skip
     assert any(r["text"].startswith("A lighthouse is") for r in document["replies"])
     assert len({r["message_id"] for r in document["replies"]}) == len(document["replies"])
@@ -406,7 +410,8 @@ def test_a_rewritten_transcript_resets_the_cursor(bed: Bed) -> None:
 
 
 def test_a_cursor_past_the_end_resets(bed: Bed) -> None:
-    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor=999.999.999.999.999.abcdefabcdef"))
+    past = "999.999.999.999.999.999.abcdefabcdef"
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={past}"))
     assert second["reset"] is True and second["turns"]
 
 
@@ -536,6 +541,168 @@ def test_a_session_of_another_project_is_not_served(bed: Bed) -> None:
 
 
 # --------------------------------------------------------------- c3: the per-session stream
+
+
+# -------------------------------------------------------- KYO-692: deliveries and images
+
+
+def delivered_row(position: int) -> str:
+    return f"00000000-0000-4000-8000-{position:012d}"
+
+
+IMAGE_ROUTE = f"{SESSIONS}/{OLD}/images/{delivered_row(1)}/0"
+
+
+def show_delivered(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=DELIVERED_FILE))
+
+
+def test_turns_return_deliveries_as_their_own_objects_in_time_order(bed: Bed) -> None:
+    show_delivered(bed)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert_no_raw_row(document)
+    deliveries = document["deliveries"]
+    assert [d["kind"] for d in deliveries] == [
+        "task-notification",
+        "peer",
+        "task-notification",
+        "task-notification",
+        "peer",
+        "channel",
+    ]
+    assert [d["at"] for d in deliveries] == sorted(d["at"] for d in deliveries)
+    assert not {d["uuid"] for d in deliveries} & {t["id"] for t in document["turns"]}
+    assert set(deliveries[0]) == {
+        "uuid", "at", "kind", "text", "sender", "sender_id", "handback", "task_id",
+        "call_id", "status", "summary",
+    }  # fmt: skip
+    handback = next(d for d in deliveries if d["handback"])
+    assert handback["sender"] == "kyosei-worker" and "written for this test" in handback["text"]
+
+
+def test_a_cursor_returns_only_new_deliveries(bed: Bed) -> None:
+    rows = bed.rows(source=DELIVERED_FILE)
+    bed.write_transcript(rows[:8])  # through the first two user-record deliveries
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert len(first["deliveries"]) == 2
+    bed.append(rows[8:9])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["reset"] is False
+    assert [d["uuid"] for d in second["deliveries"]] == [delivered_row(9)]
+    assert second["turns"] == [] and second["replies"] == []
+
+
+def test_the_stream_delivers_a_delivery(bed: Bed, stream) -> None:
+    rows = bed.rows(source=DELIVERED_FILE)
+    bed.write_transcript(rows[:1])
+    opened = stream()
+    opened.event("ready")
+    bed.append(rows[6:7])
+    event = opened.event("transcript")
+    assert [d["kind"] for d in event["deliveries"]] == ["peer"]
+
+
+def test_a_turn_names_its_images_and_carries_no_bytes(bed: Bed) -> None:
+    show_delivered(bed)
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/turns")
+    assert status == 200
+    document = body_json(body)
+    turn = next(t for t in document["turns"] if t["id"] == delivered_row(1))
+    assert [i["index"] for i in turn["images"]] == [0, 2]
+    assert all(i["media_type"] == "image/png" and i["size"] > 0 for i in turn["images"])
+    assert b"iVBORw0KGgo" not in body  # the base64 opening of every PNG
+    damaged = next(t for t in document["turns"] if t["id"] == delivered_row(17))
+    assert damaged["images"]  # listed by its header; the bytes route answers for the data
+
+
+def test_an_image_is_served_with_its_own_type(bed: Bed) -> None:
+    show_delivered(bed)
+    status, headers, body = bed.get(IMAGE_ROUTE)
+    assert status == 200 and body.startswith(b"\x89PNG\r\n\x1a\n")
+    assert headers["Content-Type"] == "image/png"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Cache-Control"].startswith("private")
+    other = bed.get(f"{SESSIONS}/{OLD}/images/{delivered_row(1)}/2")[2]
+    assert other != body
+
+
+def test_a_refused_image_names_where_to_find_those_the_turn_holds(bed: Bed) -> None:
+    show_delivered(bed)
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/images/{delivered_row(1)}/5")
+    assert status == 404
+    error = body_json(body)["error"]
+    assert "`images`" in error and f"sessions/{OLD}/turns" in error
+    listed = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["turns"][0]["images"]  # the remedy
+    assert bed.get(f"{SESSIONS}/{OLD}/images/{delivered_row(1)}/{listed[0]['index']}")[0] == 200
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        f"images/{delivered_row(16)}/0",  # a tool's image
+        f"images/{delivered_row(17)}/0",  # data that is not base64
+        f"images/{delivered_row(1)}/1",  # a type that could run as a page
+    ],
+)
+def test_an_image_the_person_cannot_be_shown_is_refused(bed: Bed, tail: str) -> None:
+    show_delivered(bed)
+    assert bed.get(f"{SESSIONS}/{OLD}/{tail}")[0] == 404
+
+
+@pytest.mark.parametrize("index", ["x", "-1", "1.5", "²"])
+def test_an_image_index_must_be_a_number(bed: Bed, index: str) -> None:
+    show_delivered(bed)
+    quoted = urllib.parse.quote(index)
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/images/{delivered_row(1)}/{quoted}")
+    assert status == 404, body
+
+
+def test_an_image_of_a_session_of_another_project_is_not_served(bed: Bed) -> None:
+    show_delivered(bed)
+    unrecorded = bed.transcripts / f"{ELSEWHERE}.jsonl"
+    shutil.copyfile(DELIVERED_FILE, unrecorded)
+    route = f"{SESSIONS}/{ELSEWHERE}/images/{delivered_row(1)}/0"
+    assert bed.get(route)[0] == 404
+
+
+def test_the_image_route_refuses_until_the_project_opts_in(unopted: Client, project: Path) -> None:
+    transcript = Path(unopted.server.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-work"
+    shutil.copyfile(DELIVERED_FILE, transcript / f"{OLD}.jsonl")
+    status, _, body = unopted.get(IMAGE_ROUTE)
+    assert status == 403 and "read_transcripts: true" in body_json(body)["error"]
+    assert b"PNG" not in body
+    opt_in_transcripts(project)
+    status, headers, _ = unopted.get(IMAGE_ROUTE)
+    assert status == 200 and headers["Content-Type"] == "image/png"
+
+
+def test_the_image_route_refuses_a_host_it_does_not_know(bed: Bed) -> None:
+    show_delivered(bed)
+    status, _, body = bed.get(IMAGE_ROUTE, host="evil.example")
+    assert status == 403 and "--allow-host" in body_json(body)["error"]
+
+
+def test_the_image_route_refuses_a_foreign_origin(bed: Bed) -> None:
+    show_delivered(bed)
+    status, _, body = bed.get(IMAGE_ROUTE, headers={"Origin": "https://evil.example"})
+    assert status == 403 and "--allow-origin" in body_json(body)["error"]
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+def test_the_image_route_answers_get_only(bed: Bed, method: str) -> None:
+    show_delivered(bed)
+    headers = {"Content-Type": "application/json"} if method == "POST" else {}
+    status, response_headers, _ = bed.client.request(IMAGE_ROUTE, method=method, headers=headers)
+    assert status == 405 and response_headers["Allow"] == "GET"
+
+
+def test_turns_return_what_the_transcript_records_of_thinking(bed: Bed) -> None:
+    show_delivered(bed)
+    replies = {r["message_id"]: r for r in json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["replies"]}
+    assert replies["msg_b"]["thinking"] == "Checking the colours."
+    assert replies["msg_b"]["thinking_omitted"] == 1
+    assert replies["msg_a"]["thinking"] is None and replies["msg_a"]["thinking_omitted"] == 1
+    assert SIGNATURE_ONLY not in json.dumps(replies)
 
 
 def _wait_for(predicate, *, within: float = 10.0) -> None:
@@ -725,11 +892,39 @@ def test_the_screen_route_returns_the_layers_classification(
     assert "text" not in document["screen"] and "raw" not in document["screen"]
 
 
+def test_the_screen_route_returns_the_panes_text_without_styling(bed: Bed) -> None:
+    bed.show_frame("frame-03.txt")
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
+    assert "\x1b" not in document["terminal"]["text"]
+    assert "Claude Code" in document["terminal"]["text"]
+    assert document["terminal"]["working_line"] == "Thinking… (2s · ↓ 139 tokens)"
+    assert document["screen"]["state"] == "working"
+
+
+def test_the_working_line_is_absent_once_the_turn_is_over(bed: Bed) -> None:
+    bed.show("idle.txt")
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
+    assert document["terminal"]["working_line"] is None and document["terminal"]["text"]
+
+
+def test_the_stream_states_the_terminal_when_it_opens_and_when_it_changes(bed: Bed, stream) -> None:
+    bed.show("idle.txt")
+    opened = stream()
+    assert opened.event("ready")["terminal"]["working_line"] is None
+    bed.show_frame("frame-03.txt")
+    event = opened.event("terminal")
+    assert event["terminal"]["working_line"] == "Thinking… (2s · ↓ 139 tokens)"
+    assert "\x1b" not in event["terminal"]["text"]
+    bed.show_frame("frame-04.txt")
+    assert opened.event("terminal")["terminal"]["working_line"] == "Thinking… (3s · ↓ 146 tokens)"
+
+
 def test_the_screen_route_for_a_session_with_no_pane(bed: Bed) -> None:
     registry = bed.claude / "sessions" / f"{os.getpid()}.json"
     registry.write_text(json.dumps({"pid": os.getpid(), "sessionId": ENDED}), encoding="utf-8")
     document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
     assert document["screen"] is None and document["work_running"] is None
+    assert document["terminal"] is None
     assert document["pane"]["present"] is False and document["pane"]["why"]
 
 
@@ -932,6 +1127,12 @@ def test_the_operating_reference_states_the_shapes() -> None:
         "event: screen",
         "event: session",
         "event: facts",
+        "event: terminal",
+        "`deliveries`",
+        "`images`",
+        "/sessions/<id>/images/<turn>/<index>",
+        "`thinking_omitted`",
+        "`working_line`",
         "`command_outputs`",
         "git_branch",
         "cache/model-catalog/",

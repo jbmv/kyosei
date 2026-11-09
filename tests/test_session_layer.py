@@ -942,3 +942,209 @@ def test_a_live_session_states_its_facts(tmp_path: Path) -> None:
         "feature/facts",
     )
     assert facts.context == session_layer.ContextUse(226_458, 1_000_000, 23)
+
+
+# --------------------------------------------------- KYO-692: what else the session holds
+#
+# ``delivered/session.synthetic.jsonl`` is synthetic: each row has the keys measured on
+# 2.1.319 and text written for the test. Its comments are in the script that wrote it, and
+# each row's position is fixed by the assertions below.
+
+DELIVERED_FILE = FIXTURES / "delivered" / "session.synthetic.jsonl"
+
+
+def delivered_view() -> transcript.SessionTranscript:
+    return view(DELIVERED_FILE)
+
+
+def row_id(position: int) -> str:
+    return f"00000000-0000-4000-8000-{position:012d}"
+
+
+def test_every_delivery_is_its_own_object_in_time_order_with_its_kind() -> None:
+    deliveries = delivered_view().deliveries
+    assert [(d.kind, d.uuid) for d in deliveries] == [
+        ("task-notification", row_id(11)),  # recorded after rows stamped later
+        ("peer", row_id(7)),
+        ("task-notification", row_id(8)),
+        ("task-notification", row_id(9)),
+        ("peer", row_id(10)),
+        ("channel", row_id(14)),
+    ]
+    assert [d.at for d in deliveries] == sorted(d.at for d in deliveries)
+
+
+def test_no_delivery_is_returned_as_the_persons_turn() -> None:
+    reader = delivered_view()
+    delivered = {d.uuid for d in reader.deliveries}
+    assert delivered and not delivered & {t.id for t in reader.turns}
+    said = " ".join(t.full_text for t in reader.turns)
+    for words in ("hand-back", "Agent finished", "peer's own words", "From a channel"):
+        assert words not in said
+
+
+def test_the_person_is_not_a_delivery() -> None:
+    reader = delivered_view()
+    mid_turn = next(t for t in reader.turns if t.form == transcript.FORM_MID_TURN)
+    assert mid_turn.full_text == "A mid-turn message from the person."
+    assert mid_turn.id not in {d.uuid for d in reader.deliveries}
+
+
+def test_text_the_harness_injected_is_no_delivery() -> None:
+    reader = delivered_view()
+    assert row_id(15) not in {d.uuid for d in reader.deliveries}
+    assert row_id(15) not in {t.id for t in reader.turns}
+
+
+def test_a_hand_back_is_its_report_and_names_its_sender() -> None:
+    handback = next(d for d in delivered_view().deliveries if d.uuid == row_id(7))
+    assert handback.handback is True
+    assert handback.text == "The hand-back report, written for this test."
+    assert (handback.sender, handback.sender_id) == ("kyosei-worker", "agent42")
+
+
+def test_a_peers_message_is_its_body_without_the_wrapper() -> None:
+    peer = next(d for d in delivered_view().deliveries if d.uuid == row_id(10))
+    assert peer.text == "A peer's own words." and peer.handback is False
+
+
+def test_a_notification_is_read_out_of_its_tags() -> None:
+    deliveries = {d.uuid: d for d in delivered_view().deliveries}
+    finished = deliveries[row_id(9)]
+    assert finished.text == "The agent's result text." and finished.summary == "Agent finished"
+    assert (finished.task_id, finished.call_id, finished.status) == (
+        "abc123",
+        "toolu_1",
+        "completed",
+    )
+    failed = deliveries[row_id(8)]
+    assert failed.text == "Background command failed" and failed.status == "failed"
+    assert failed.call_id is None
+    assert deliveries[row_id(11)].task_id == "bg8"
+
+
+def test_a_turn_lists_its_images_without_their_bytes() -> None:
+    reader = delivered_view()
+    first = next(t for t in reader.turns if t.id == row_id(1))
+    assert [(i.index, i.media_type) for i in first.images] == [(0, "image/png"), (2, "image/png")]
+    data = reader.image(row_id(1), 0)
+    assert data is not None and first.images[0].size == len(data.data)
+    assert all("base64" not in repr(i) and len(repr(i)) < 120 for i in first.images)
+
+
+def test_an_image_is_read_back_from_its_record() -> None:
+    reader = delivered_view()
+    found = reader.image(row_id(1), 2)
+    assert found is not None and found.media_type == "image/png"
+    assert found.data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert reader.image(row_id(1), 0).data != found.data  # the index picks the block
+
+
+def test_a_message_that_is_an_image_alone_is_a_turn_with_no_words() -> None:
+    turn = next(t for t in delivered_view().turns if t.id == row_id(13))
+    assert turn.full_text == "" and turn.segments == () and len(turn.images) == 1
+
+
+def test_a_type_that_could_run_as_a_page_is_not_served() -> None:
+    reader = delivered_view()
+    assert reader.image(row_id(1), 1) is None
+    assert 1 not in {i.index for t in reader.turns if t.id == row_id(1) for i in t.images}
+
+
+@pytest.mark.parametrize(
+    ("turn", "index"),
+    [
+        (row_id(1), 9),  # an index the record does not hold
+        ("00000000-0000-4000-8000-999999999999", 0),  # no such record
+        (row_id(16), 0),  # an image in a tool's result is not the person's
+        (row_id(7), 0),  # a delivery holds none
+        (row_id(17), 0),  # data that is not base64
+    ],
+)
+def test_an_image_that_is_not_there_is_none(turn: str, index: int) -> None:
+    assert delivered_view().image(turn, index) is None
+
+
+def test_the_credit_check_does_not_count_a_message_that_is_an_image_alone() -> None:
+    read = transcript.read_transcripts([DELIVERED_FILE])
+    assert row_id(13) not in {turn.id for turn in read.turns}
+
+
+def test_thinking_is_the_text_the_transcript_records() -> None:
+    reply = next(r for r in delivered_view().replies if r.message_id == "msg_b")
+    assert reply.thinking == "Checking the colours." and reply.thinking_omitted == 1
+    assert reply.text == "And blue."
+
+
+def test_nothing_is_invented_for_a_block_that_records_only_a_signature() -> None:
+    reply = next(r for r in delivered_view().replies if r.message_id == "msg_a")
+    assert reply.thinking is None and reply.thinking_omitted == 1
+    assert reply.text == "A red square."
+
+
+def test_a_reply_with_no_thinking_blocks_says_so() -> None:
+    reply = view(FIXTURES / "facts" / "session.synthetic.jsonl").replies[0]
+    assert reply.thinking is None and reply.thinking_omitted == 0
+
+
+FRAMES = FIXTURES / "sequence"
+ALL_CAPTURES = sorted(SCREENS.glob("*.txt")) + sorted(FRAMES.glob("*.txt"))
+
+
+@pytest.mark.parametrize("capture", ALL_CAPTURES, ids=lambda p: p.name)
+def test_the_terminals_text_has_no_styling_left(capture: Path) -> None:
+    raw = capture.read_text(encoding="utf-8")
+    words = pane.terminal(raw, pane.classify(raw))
+    assert "\x1b" not in words.text and "\xa0" not in words.text
+    assert words.text and all(line == line.rstrip() for line in words.text.split("\n"))
+
+
+def test_the_terminals_text_keeps_the_screens_words() -> None:
+    raw = (FRAMES / "frame-03.txt").read_text(encoding="utf-8")
+    assert "\x1b]8;" in raw, "the sample should hold an OSC 8 hyperlink for this to test"
+    text = pane.terminal(raw, pane.classify(raw)).text
+    assert "Claude Code v2.1.319" in text
+    assert "/rc" in text and "claude.ai/code/session" not in text  # the link's target is not drawn
+
+
+@pytest.mark.parametrize(
+    ("frame", "line"),
+    [
+        ("frame-00.txt", "Thinking… (2s · ↓ 57 tokens)"),
+        ("frame-03.txt", "Thinking… (2s · ↓ 139 tokens)"),
+        ("frame-09.txt", "Thinking… (4s · ↓ 363 tokens)"),
+    ],
+)
+def test_the_working_line_is_read_while_a_turn_runs(frame: str, line: str) -> None:
+    raw = (FRAMES / frame).read_text(encoding="utf-8")
+    screen_now = pane.classify(raw)
+    assert screen_now.state == pane.WORKING
+    assert pane.terminal(raw, screen_now).working_line == line
+
+
+def test_a_turn_whose_working_line_is_off_the_screen_has_none() -> None:
+    raw = (FRAMES / "frame-07.txt").read_text(encoding="utf-8")
+    screen_now = pane.classify(raw)
+    assert screen_now.state == pane.WORKING
+    assert pane.terminal(raw, screen_now).working_line is None
+
+
+@pytest.mark.parametrize("name", ["idle.txt", "tasks-footer-no-agents.txt", "permission-bash.txt"])
+def test_no_working_line_on_a_screen_that_is_not_working(name: str) -> None:
+    raw = screen(name)
+    assert pane.terminal(raw, pane.classify(raw)).working_line is None
+
+
+def test_a_finished_turns_row_is_no_working_line() -> None:
+    raw = (FRAMES / "frame-10.txt").read_text(encoding="utf-8")
+    assert pane.terminal(raw, pane.classify(raw)).working_line is None
+    assert "Baked for 4s" in raw
+
+
+def test_a_working_row_above_the_persons_prompt_is_not_the_working_line() -> None:
+    raw = (FRAMES / "frame-07.txt").read_text(encoding="utf-8").replace(
+        "❯ ", "✶ Stale… (9s)\n❯ earlier\n\n❯ ", 1
+    )
+    screen_now = pane.classify(raw)
+    assert screen_now.state == pane.WORKING
+    assert pane.terminal(raw, screen_now).working_line is None
