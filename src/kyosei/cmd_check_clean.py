@@ -30,6 +30,7 @@ from .commands import (
     Output,
 )
 from .config import (
+    COMPOSER_DIRNAME,
     LAYOUT_IN_REPO,
     STORE_HOME_ENV,
     TRANSCRIPT_ARCHIVE_DIRNAME,
@@ -368,13 +369,14 @@ def _home_dirs(home: Path) -> list[str] | None:
     controller's own new dispatch worktrees land two levels down, under
     ``<home>/<project>/dispatch worktrees/`` (KYO-70), and must not read as a leak. The
     transcript archive (KYO-683) is created by an orchestrator's Stop hook, which can land
-    during any dispatch, and is left out for the same reason.
+    during any dispatch, and is left out for the same reason; so is ``kyo serve``'s composer
+    directory (KYO-703), created by a device saving a draft at any moment.
     """
     try:
         return sorted(
             child.name
             for child in home.iterdir()
-            if child.is_dir() and child.name != TRANSCRIPT_ARCHIVE_DIRNAME
+            if child.is_dir() and child.name not in (TRANSCRIPT_ARCHIVE_DIRNAME, COMPOSER_DIRNAME)
         )
     except FileNotFoundError:
         return []

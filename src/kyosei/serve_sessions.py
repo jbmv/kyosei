@@ -14,7 +14,8 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
   commit does (KYO-693), and the repository's ``origin`` remote (KYO-700);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
-  objects, the reply in progress and changes to the screen and the terminal's text;
+  objects, the reply in progress, changes to the screen and the terminal's text, and the
+  state of a held message (KYO-703), without its text;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
   and its text.
 
@@ -752,6 +753,7 @@ class _Sampler:
                 "terminal": self._terminal,
                 "reply_in_progress": self._reply,
                 "facts": self._facts,
+                "held": self.hub.held(self.session_id),
             },
             event_id=self._position.cursor,
         )
@@ -909,6 +911,17 @@ class SessionHub:
                     if self._samplers.get(key) is sampler:
                         del self._samplers[key]
                 sampler.stop.set()
+
+    def held(self, session_id: str) -> dict | None:
+        """The session's held message as a stream states it: no text (KYO-703)."""
+        return self.server.held_messages.announced(session_id)
+
+    def announce(self, session_id: str, chunk: bytes) -> None:
+        """Send an event to every subscriber of ``session_id``, under any id it is known by."""
+        with self._lock:
+            found = {id(s): s for key, s in self._samplers.items() if key[1] == session_id}
+        for sampler in found.values():
+            sampler._broadcast(chunk)
 
     def samplers(self) -> list[_Sampler]:
         """The running samplers, each once (for ``kyo serve``'s own tests)."""
