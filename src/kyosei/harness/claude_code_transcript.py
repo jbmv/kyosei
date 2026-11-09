@@ -1331,6 +1331,8 @@ class SubagentRef:
     tool_call_uuid: str
     description: str
     agent_type: str | None
+    #: The prompt it was started with, which is where a dispatched worker's dispatch is named.
+    prompt: str = ""
 
 
 @dataclass(frozen=True)
@@ -1347,6 +1349,18 @@ class CommandOutput:
     command: str | None
     args: str | None
     text: str
+
+
+@dataclass(frozen=True)
+class TaskUsage:
+    """What a task notification records a task as having used (KYO-695).
+
+    A figure the row does not state is None, and a row stating none of them has no object.
+    """
+
+    total_tokens: int | None
+    tool_uses: int | None
+    duration_ms: int | None
 
 
 @dataclass(frozen=True)
@@ -1371,6 +1385,9 @@ class Delivery:
     call_id: str | None = None
     status: str | None = None
     summary: str | None = None
+    #: What the task used, on a notification whose row records it. A background command's
+    #: notification records none.
+    usage: TaskUsage | None = None
 
 
 @dataclass(frozen=True)
@@ -1611,13 +1628,24 @@ def _element(text: str, name: str) -> str | None:
     return found.group(1).strip() if found else None
 
 
+def _task_usage(raw: object) -> TaskUsage | None:
+    """The usage object of a notification's row, or None when it states no figure."""
+    if not isinstance(raw, dict):
+        return None
+    figures = [raw.get(name) for name in ("totalTokens", "toolUses", "durationMs")]
+    known = [f if isinstance(f, int) and not isinstance(f, bool) else None for f in figures]
+    return TaskUsage(*known) if any(f is not None for f in known) else None
+
+
 def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
     """The message another party delivered in this record, or None."""
+    usage = None
     if record.get("type") == "attachment":
         if not _is_queued_command(record):
             return None
         attachment = record["attachment"]
         origin, content = attachment.get("origin"), attachment.get("prompt")
+        usage = _task_usage(attachment.get("usage"))
         kind = _origin_kind(origin)
         if kind is None and attachment.get("commandMode") == _TASK_NOTIFICATION:
             kind = _TASK_NOTIFICATION
@@ -1642,6 +1670,7 @@ def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
             call_id=_element(delivered, "tool-use-id"),
             status=_element(delivered, "status"),
             summary=summary,
+            usage=usage,
         )
     return Delivery(uuid, stamp, kind, delivered)
 
@@ -1922,11 +1951,13 @@ class SessionTranscript:
             return
         description = call.input.get("description")
         agent_type = call.input.get("subagent_type")
+        prompt = call.input.get("prompt")
         ref = SubagentRef(
             agent_id,
             call.uuid,
             description if isinstance(description, str) else "",
             agent_type if isinstance(agent_type, str) else None,
+            prompt if isinstance(prompt, str) else "",
         )
         self._subagents[agent_id] = ref
         delta.subagents.append(ref)

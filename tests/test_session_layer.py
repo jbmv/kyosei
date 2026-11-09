@@ -1434,3 +1434,53 @@ def test_a_repositorys_fsmonitor_setting_runs_nothing_from_here(repo: Path, tmp_
     (repo / "kept.txt").write_text("one\n", encoding="utf-8")
     changes(repo)
     assert not marker.exists()
+
+
+# --------------------------------------- KYO-695: a task's usage and its dispatch's lines
+#
+# ``agent-usage.synthetic.jsonl`` is synthetic: each row has the keys measured on 2.1.319
+# and figures written for the test. Three subagents are started; the first notification
+# states all three figures, the second one, the third none and the fourth an invalid object.
+
+AGENT_USAGE_FILE = FIXTURES / "agent-usage.synthetic.jsonl"
+
+
+def test_a_notification_states_the_usage_its_row_records() -> None:
+    usage = {d.task_id: d.usage for d in view(AGENT_USAGE_FILE).deliveries}
+    assert usage["a1111111111111111"] == transcript.TaskUsage(77593, 12, 122833)
+
+
+def test_a_figure_the_row_leaves_out_is_none_and_so_is_a_row_with_no_figure() -> None:
+    usage = {d.task_id: d.usage for d in view(AGENT_USAGE_FILE).deliveries}
+    assert usage["a2222222222222222"] == transcript.TaskUsage(None, 4, None)
+    assert usage["bg7"] is None
+    assert usage["a3333333333333333"] is None  # the row's usage is not an object
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("You are the dispatched worker for KYO-692.d1. Your worktree is here.", "KYO-692.d1"),
+        ("you are the dispatched worker for ABC-7.d12", "ABC-7.d12"),
+        ("  the dispatched worker for KYO-1.d3 follows.", "KYO-1.d3"),
+        ("Review the work of the dispatched worker for KYO-1.d1.", None),
+        ("Count the files.", None),
+        ("", None),
+    ],
+)
+def test_only_a_prompts_opening_names_its_dispatch(prompt: str, expected: str | None) -> None:
+    assert session_layer.dispatch_named(prompt) == expected
+
+
+def test_a_subagent_keeps_the_prompt_it_was_started_with() -> None:
+    prompts = {ref.agent_id: ref.prompt for ref in view(AGENT_USAGE_FILE).subagents}
+    assert prompts["a2222222222222222"] == "Count the files under /work."
+
+
+def test_branch_lines_reports_none_for_a_name_the_repository_does_not_hold(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    assert session_layer.branch_lines(repo, "0" * 40, "gone") is None
