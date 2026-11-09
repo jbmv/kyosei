@@ -152,6 +152,7 @@ export const KYO_WRITING_COMMANDS: readonly string[] = [
   "flag",
   "docs",
   "note",
+  "notes",
   "rebuild",
   "export",
   "install-hooks",

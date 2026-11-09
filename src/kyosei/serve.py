@@ -178,6 +178,7 @@ _WRITES_FILES = "it writes files in the project"
 NOT_SERVED: dict[str, str] = {
     "init": "it creates a project",
     "new": _WRITES_STORE,
+    "notes": _WRITES_STORE,
     "credit": _WRITES_STORE,
     "promote": _WRITES_STORE,
     "spawn": _WRITES_STORE,
