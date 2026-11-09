@@ -7,7 +7,9 @@ paths under ``/work``. Two screens are not recordings, because a throwaway must 
 or answer them, and say so in their names: ``trust-dialog.synthetic.txt`` is the dialog as
 ``tests/test_kyo_controller.py`` already measured it, and
 ``idle-suggestion.reconstructed.txt`` is the input line's escape bytes as measured during
-this work, placed under a recorded rule.
+this work, placed under a recorded rule. The two files under ``facts/`` are synthetic too
+(KYO-691): each row has the keys measured on 2.1.319 and text written for the test, including
+a reply whose three token counts add to the 226,458 Claude Code's context panel showed.
 """
 
 from __future__ import annotations
@@ -743,3 +745,200 @@ def test_the_samples_hold_no_private_text() -> None:
 )
 def test_the_sample_guard_catches_a_leak(text: str) -> None:
     assert PRIVATE.search(text) is not None
+
+
+# ---------------------------------------------- KYO-691: facts and slash-command output
+
+
+FACTS_FILE = FIXTURES / "facts" / "session.synthetic.jsonl"
+CATALOG = FIXTURES / "facts" / "model-catalog-cc.synthetic.json"
+
+
+def install_catalog(config: Path, name: str = "acct-org-cc.json", text: str | None = None) -> Path:
+    directory = config / "cache" / "model-catalog"
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / name
+    target.write_text(text if text is not None else CATALOG.read_text(encoding="utf-8"), "utf-8")
+    return target
+
+
+def test_the_latest_reply_states_model_effort_and_branch() -> None:
+    latest = view(FACTS_FILE).latest_facts
+    assert latest is not None
+    assert (latest.model, latest.effort, latest.git_branch) == (
+        "claude-opus-5-5",
+        "medium",
+        "feature/facts",
+    )
+    assert latest.message_id == "msg_two"
+
+
+def test_a_reply_claude_code_wrote_itself_does_not_count_as_the_latest() -> None:
+    rows = [json.loads(line) for line in FACTS_FILE.read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["message"]["model"] == "<synthetic>"
+    assert view(FACTS_FILE).latest_facts.git_branch != rows[-1]["gitBranch"]
+
+
+def test_a_transcript_without_those_keys_states_none_of_them() -> None:
+    latest = view().latest_facts  # the recorded pair's scrub kept neither key
+    assert latest is not None and latest.effort is None and latest.git_branch is None
+
+
+def test_context_is_the_three_input_counts_added() -> None:
+    latest = view(FACTS_FILE).latest_facts
+    use = session_layer.context_use(latest.usage, 1_000_000)
+    assert use == session_layer.ContextUse(226_458, 1_000_000, 23)  # the panel's 226.5k and 23%
+
+
+def test_percent_rounds_half_up_as_the_panel_does() -> None:
+    usage = transcript.Usage(1, 0, 0, 0)
+    assert session_layer.context_use(usage, 200).percent == 1  # round() would give 0
+    assert session_layer.context_use(transcript.Usage(250, 0, 0, 0), 200).percent == 100
+
+
+def test_an_unknown_window_gives_tokens_and_no_percent() -> None:
+    use = session_layer.context_use(transcript.Usage(5, 6, 7, 8), None)
+    assert use == session_layer.ContextUse(20, None, None)
+
+
+def test_the_window_comes_from_claude_codes_catalogue(tmp_path: Path) -> None:
+    install_catalog(tmp_path)
+    assert transcript.context_window("claude-opus-5-5", "claude-opus-5-5", tmp_path) == 1_000_000
+    assert transcript.context_window("claude-haiku-4-5-20251001", None, tmp_path) == 200_000
+
+
+@pytest.mark.parametrize("model", ["claude-unreleased-9", None])
+def test_a_model_the_catalogue_does_not_name_has_no_window(tmp_path: Path, model) -> None:
+    install_catalog(tmp_path)
+    assert transcript.context_window(model, model, tmp_path) is None
+
+
+def test_no_catalogue_means_no_window(tmp_path: Path) -> None:
+    assert transcript.context_window("claude-opus-5-5", None, tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{ not json",
+        "[]",
+        '{"catalog": 3}',
+        '{"catalog": {"config": {"models": [{"id": "claude-opus-5-5", "runtime": {}}]}}}',
+    ],
+)
+def test_a_catalogue_of_another_shape_means_no_window(tmp_path: Path, text: str) -> None:
+    install_catalog(tmp_path, text=text)
+    assert transcript.context_window("claude-opus-5-5", None, tmp_path) is None
+
+
+def test_a_window_that_depends_on_an_opt_in_is_stated_only_when_the_session_opted_in(
+    tmp_path: Path,
+) -> None:
+    install_catalog(tmp_path)
+    assert transcript.context_window("claude-opus-4-6", "claude-opus-4-6", tmp_path) is None
+    assert transcript.context_window("claude-opus-4-6", None, tmp_path) is None
+    assert (
+        transcript.context_window("claude-opus-4-6", "claude-opus-4-6[1m]", tmp_path) == 1_000_000
+    )
+
+
+def test_the_command_line_tools_newest_catalogue_is_preferred(tmp_path: Path) -> None:
+    def document(surface: str, fetched: int, window: int) -> str:
+        row = {"id": "claude-x", "runtime": {"max_input_tokens": window}}
+        return json.dumps(
+            {"fetchedAt": fetched, "catalog": {"surface": surface, "config": {"models": [row]}}}
+        )
+
+    install_catalog(tmp_path, "a-ccd.json", document("ccd", 900, 111_000))
+    assert transcript.context_window("claude-x", None, tmp_path) == 111_000
+    install_catalog(tmp_path, "b-cc.json", document("cc", 100, 222_000))
+    install_catalog(tmp_path, "c-cc.json", document("cc", 500, 333_000))
+    assert transcript.context_window("claude-x", None, tmp_path) == 333_000
+
+
+def test_slash_command_output_is_returned_in_time_order() -> None:
+    outputs = view(FACTS_FILE).command_outputs
+    assert [(o.command, o.args) for o in outputs] == [("/context", ""), ("/effort", "medium")]
+    assert [o.at for o in outputs] == sorted(o.at for o in outputs)
+
+
+def test_command_output_has_no_terminal_styling() -> None:
+    first = view(FACTS_FILE).command_outputs[0]
+    assert "\x1b" not in first.text
+    assert first.text.startswith("Context Usage")
+    assert "227.4k/1m tokens (23%)" in first.text
+
+
+def test_an_output_the_transcript_does_not_record_is_not_invented() -> None:
+    reader = view(FACTS_FILE)
+    # /rename has a command row and no output; /color has an output row that is empty.
+    assert {o.command for o in reader.command_outputs} == {"/context", "/effort"}
+    # The caveat notice is the harness's own text, not a command's output.
+    assert not any("run directly" in o.text for o in reader.command_outputs)
+
+
+def test_a_subagents_command_output_is_left_out() -> None:
+    assert not any("subagent" in o.text for o in view(FACTS_FILE).command_outputs)
+
+
+def test_a_person_typing_the_tags_is_a_turn_and_not_an_output() -> None:
+    reader = view(FACTS_FILE)
+    assert any("typed by a person" in t.full_text for t in reader.turns)
+    assert not any("typed by a person" in o.text for o in reader.command_outputs)
+
+
+def test_a_command_outputs_row_is_not_also_a_turn() -> None:
+    assert not any("Set effort level" in t.full_text for t in view(FACTS_FILE).turns)
+
+
+def test_an_output_whose_command_row_is_absent_names_no_command(tmp_path: Path) -> None:
+    rows = FACTS_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = [r for r in rows if "<command-name>/context" not in r]
+    path = tmp_path / "t.jsonl"
+    path.write_text("".join(kept), encoding="utf-8")
+    first = view(path).command_outputs[0]
+    assert first.text.startswith("Context Usage")
+    assert first.command is None and first.args is None
+
+
+def test_command_outputs_arrive_in_the_delta_of_the_read_that_found_them(tmp_path: Path) -> None:
+    rows = FACTS_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    path = tmp_path / "t.jsonl"
+    path.write_text("".join(rows[:4]), encoding="utf-8")
+    reader = transcript.SessionTranscript(path)
+    assert [o.command for o in reader.read().command_outputs] == ["/context"]
+    with path.open("a", encoding="utf-8") as handle:
+        handle.writelines(rows[4:])
+    assert [o.command for o in reader.read().command_outputs] == ["/effort"]
+
+
+def test_a_rewritten_transcript_forgets_its_facts_and_outputs(tmp_path: Path) -> None:
+    rows = FACTS_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    path = tmp_path / "t.jsonl"
+    path.write_text("".join(rows), encoding="utf-8")
+    reader = view(path)
+    assert reader.latest_facts is not None and reader.command_outputs
+    path.write_text(rows[0], encoding="utf-8")
+    reader.read()
+    assert reader.latest_facts is None and reader.command_outputs == []
+
+
+def test_a_live_session_states_its_facts(tmp_path: Path) -> None:
+    install_catalog(tmp_path)
+    live = session_layer.LiveSession(
+        "55555555-5555-4555-8555-555555555555",
+        FACTS_FILE,
+        config_dir=tmp_path,
+        environ={"PATH": ""},
+        log_dir=tmp_path / "log",
+    )
+    assert live.facts() is None  # nothing read yet
+    live.transcript.read()
+    facts = live.facts()
+    assert facts is not None
+    assert (facts.model, facts.effort, facts.git_branch) == (
+        "claude-opus-5-5",
+        "medium",
+        "feature/facts",
+    )
+    assert facts.context == session_layer.ContextUse(226_458, 1_000_000, 23)

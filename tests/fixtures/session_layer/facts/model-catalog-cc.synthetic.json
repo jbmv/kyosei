@@ -1,0 +1,34 @@
+{
+ "version": 2,
+ "fetchedAt": 1794232344216,
+ "staleAt": 1794235731312,
+ "catalog": {
+  "surface": "cc",
+  "config": {
+   "id": "cc",
+   "models": [
+    {
+     "id": "claude-opus-5-5",
+     "name": "Opus 5.5",
+     "runtime": {
+      "max_input_tokens": 1000000
+     }
+    },
+    {
+     "id": "claude-haiku-4-5-20251001",
+     "name": "Haiku 4.5",
+     "runtime": {
+      "max_input_tokens": 200000
+     }
+    },
+    {
+     "id": "claude-opus-4-6",
+     "name": "Opus 4.6",
+     "runtime": {
+      "max_input_tokens": 1000000
+     }
+    }
+   ]
+  }
+ }
+}

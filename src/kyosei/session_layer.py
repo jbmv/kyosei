@@ -88,6 +88,37 @@ class LiveReply:
 
 
 @dataclass(frozen=True)
+class ContextUse:
+    """How much of the context window the latest reply used (KYO-691)."""
+
+    #: The reply's input, cache-read and cache-creation tokens added together.
+    tokens: int
+    #: None when the window of the reply's model cannot be known.
+    window: int | None
+    #: Rounded as Claude Code's own panel rounds it; None whenever ``window`` is.
+    percent: int | None
+
+
+@dataclass(frozen=True)
+class SessionFacts:
+    """What the status strip shows, as of the session's latest reply (KYO-691)."""
+
+    at: str
+    model: str | None
+    effort: str | None
+    git_branch: str | None
+    context: ContextUse
+
+
+def context_use(usage: transcript.Usage, window: int | None) -> ContextUse:
+    tokens = usage.input_tokens + usage.cache_read_tokens + usage.cache_creation_tokens
+    if window is None:
+        return ContextUse(tokens, None, None)
+    # Integer rounding half up: round() would send an exact half to the even neighbour.
+    return ContextUse(tokens, window, min(100, (tokens * 100 + window // 2) // window))
+
+
+@dataclass(frozen=True)
 class SessionUpdate:
     """What one :meth:`LiveSession.refresh` learned."""
 
@@ -148,6 +179,20 @@ class LiveSession:
             if entry.session_id == self.session_id and _pid_exists(entry.pid):
                 return True
         return False
+
+    def facts(self) -> SessionFacts | None:
+        """The session's model, effort, branch and context use; None before its first reply."""
+        latest = self.transcript.latest_facts
+        if latest is None:
+            return None
+        window = transcript.context_window(latest.model, latest.requested_model, self.config_dir)
+        return SessionFacts(
+            latest.at,
+            latest.model,
+            latest.effort,
+            latest.git_branch,
+            context_use(latest.usage, window),
+        )
 
     def tmux(self) -> Tmux:
         """A tmux client on the server holding this session's pane."""

@@ -215,8 +215,9 @@ why. `background` is `{"running", "shells", "agents": [{"type", "description"}]}
 `null` with no screen. An ended session is listed without being opened, so the list reads
 a pane only for a session marked running, once each per request.
 
-**Turns.** `{"ok", "session_id", "cursor", "reset", "readable", "why", "turns", "replies",
-"tool_calls", "subagents"}`. Each list holds one entry per object, at its latest version:
+**Turns.** `{"ok", "session_id", "cursor", "reset", "readable", "why", "facts", "turns",
+"replies", "tool_calls", "subagents", "command_outputs"}`. Each list holds one entry per
+object, at its latest version:
 
 ```
 turn:      id, at, form ("typed" | "mid-turn" | "answer" | "accepted-suggestion"), text,
@@ -226,6 +227,7 @@ reply:     message_id, uuid, at, text, model, usage, record_uuids
 tool call: call_id, uuid, at, name, input, result
            result: uuid, at, text, is_error (null until the result lands)
 subagent:  agent_id, tool_call_uuid, description, agent_type
+command output: uuid, at, command, args, text
 ```
 
 `typed` is the person's own words (the text between any pastes), and `text` is the whole
@@ -239,6 +241,29 @@ changes it, as when a tool result lands, and a client replaces what it holds. A 
 transcript does not match the cursor, so the lists hold the whole session. `readable: false` means
 no record had a format this build recognises, and `why` says so. A first read of a long
 session is one response holding all of it.
+
+`command_outputs` holds what slash commands printed, where the transcript records it, in
+time order on the same clock as the other lists' `at`. `text` has the output's terminal
+styling removed. `command` and `args` are `null` when the command's own row is not in the
+transcript, and a command that printed nothing has no entry.
+
+`facts` is the session as of its latest reply, whatever the cursor, and `null` before the
+first reply:
+
+```
+facts:   at, model, effort, git_branch, context
+context: tokens, window, percent
+```
+
+`tokens` is the latest reply's input, cache-read and cache-creation tokens added together.
+`percent` is rounded to a whole number, as Claude Code's context panel rounds it. `/context`
+can read slightly higher, because it also estimates what has been added since that reply.
+The transcript does not state a window, so `window` comes from the model catalogue Claude
+Code caches under `cache/model-catalog/` in its configuration directory. `window` and
+`percent` are `null` for a model the catalogue does not name, and for Opus 4.6 and Sonnet 4.6
+unless the session asked for `[1m]`, because their window depends on that request. An
+environment setting that changes one session's window, such as
+`CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
 
 **The screen.** `{"ok", "session_id", "pane": {"present", "why", "pane_id",
 "tmux_session"}, "screen", "work_running"}`. `screen` is the session layer's classification,
@@ -261,8 +286,9 @@ naming one of:
 
 | Frame | `data` |
 |---|---|
-| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `reply_in_progress`: the state when the stream opened |
-| `event: transcript` | `session_id`, `cursor`, and the four lists above, new or changed objects only |
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `reply_in_progress`, `facts`: the state when the stream opened |
+| `event: transcript` | `session_id`, `cursor`, and the five lists above, new or changed objects only |
+| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply changes them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
 | `event: session` | `session_id`, `previous_session_id`, `followed_clear`: the session moved to a new id on `/clear`; its objects continue under the new id |
