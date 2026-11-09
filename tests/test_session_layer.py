@@ -1436,6 +1436,65 @@ def test_a_repositorys_fsmonitor_setting_runs_nothing_from_here(repo: Path, tmp_
     assert not marker.exists()
 
 
+# ------------------------------------------------ KYO-698: the session's permission mode
+#
+# ``permission-mode.synthetic.jsonl`` is synthetic: each row has the keys measured on a real
+# transcript and text written for the test. Its rows are a mode row, a person's row, a reply,
+# a mode row with a new mode, a subagent's row, a person's row with a new mode, and a reply.
+
+PERMISSION_MODE_FILE = FIXTURES / "permission-mode.synthetic.jsonl"
+
+
+@pytest.mark.parametrize(
+    ("rows", "mode"),
+    [
+        (1, "default"),  # a mode row, which has no uuid and no timestamp
+        (3, "default"),
+        (4, "plan"),  # recorded after the latest reply
+        (5, "plan"),  # a subagent's row is not the session's
+        (6, "acceptEdits"),  # a person's row carries it too
+        (7, "acceptEdits"),
+    ],
+)
+def test_the_permission_mode_is_the_one_last_recorded(tmp_path: Path, rows: int, mode: str) -> None:
+    lines = PERMISSION_MODE_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    partial = tmp_path / "session.jsonl"
+    partial.write_text("".join(lines[:rows]), encoding="utf-8")
+    assert view(partial).latest_permission_mode == mode
+
+
+def test_a_transcript_recording_no_permission_mode_states_none() -> None:
+    assert view(FACTS_FILE).latest_permission_mode is None
+
+
+def test_a_rewritten_transcript_forgets_its_permission_mode(tmp_path: Path) -> None:
+    path = tmp_path / "session.jsonl"
+    shutil.copyfile(PERMISSION_MODE_FILE, path)
+    reader = view(path)
+    assert reader.latest_permission_mode == "acceptEdits"
+    path.write_text("", encoding="utf-8")
+    reader.read()
+    assert reader.latest_permission_mode is None
+
+
+@pytest.mark.parametrize(
+    ("source", "mode"), [(PERMISSION_MODE_FILE, "acceptEdits"), (FACTS_FILE, None)]
+)
+def test_a_live_session_states_its_permission_mode(
+    tmp_path: Path, source: Path, mode: str | None
+) -> None:
+    live = session_layer.LiveSession(
+        "66666666-6666-4666-8666-666666666666",
+        source,
+        config_dir=tmp_path,
+        environ={"PATH": ""},
+        log_dir=tmp_path / "log",
+    )
+    live.transcript.read()
+    facts = live.facts()
+    assert facts is not None and facts.permission_mode == mode
+
+
 # --------------------------------------- KYO-695: a task's usage and its dispatch's lines
 #
 # ``agent-usage.synthetic.jsonl`` is synthetic: each row has the keys measured on 2.1.319

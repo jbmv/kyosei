@@ -111,6 +111,8 @@ class SessionFacts:
     effort: str | None
     git_branch: str | None
     context: ContextUse
+    #: As the transcript last recorded it, which may be after the latest reply (KYO-698).
+    permission_mode: str | None = None
 
 
 def context_use(usage: transcript.Usage, window: int | None) -> ContextUse:
@@ -235,6 +237,7 @@ class LiveSession:
             latest.effort,
             latest.git_branch,
             context_use(latest.usage, window),
+            self.transcript.latest_permission_mode,
         )
 
     def tmux(self) -> Tmux:

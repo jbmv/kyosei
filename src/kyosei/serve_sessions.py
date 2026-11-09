@@ -236,6 +236,7 @@ def _facts_json(facts: Any) -> dict | None:
         "model": facts.model,
         "effort": facts.effort,
         "git_branch": facts.git_branch,
+        "permission_mode": facts.permission_mode,
         "context": {
             "tokens": facts.context.tokens,
             "window": facts.context.window,
@@ -818,7 +819,9 @@ class _Sampler:
                     event_id=cursor,
                 )
             )
-        if any(lists) or followed:
+        # A permission-mode row is none of the lists, and a change of mode has to reach the strip.
+        held_mode = (self._facts or {}).get("permission_mode")
+        if any(lists) or followed or live.transcript.latest_permission_mode != held_mode:
             now_facts = _facts_json(live.facts())
             if now_facts != self._facts:
                 self._facts = now_facts

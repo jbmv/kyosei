@@ -37,6 +37,7 @@ OLD_FILE = FIXTURES / "pair" / f"{OLD}.jsonl"
 NEW_FILE = FIXTURES / "pair" / f"{NEW}.jsonl"
 FACTS_FILE = FIXTURES / "facts" / "session.synthetic.jsonl"
 CATALOG = FIXTURES / "facts" / "model-catalog-cc.synthetic.json"
+PERMISSION_MODE_FILE = FIXTURES / "permission-mode.synthetic.jsonl"
 DELIVERED_FILE = FIXTURES / "delivered" / "session.synthetic.jsonl"
 ENDED = "22222222-2222-4222-8222-222222222222"
 KILLED = "33333333-3333-4333-8333-333333333333"
@@ -443,6 +444,17 @@ def test_turns_state_model_effort_branch_and_context(bed: Bed) -> None:
     assert facts["context"] == {"tokens": 226_458, "window": 1_000_000, "percent": 23}
 
 
+def test_turns_state_the_permission_mode_last_recorded(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=PERMISSION_MODE_FILE)[:4])
+    facts = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]
+    assert facts["permission_mode"] == "plan"
+
+
+def test_turns_state_no_permission_mode_where_the_transcript_records_none(bed: Bed) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["permission_mode"] is None
+
+
 def test_a_model_of_unknown_window_gets_tokens_and_no_percent(bed: Bed) -> None:
     bed.write_transcript(bed.rows(source=FACTS_FILE))  # no catalogue installed
     context = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["context"]
@@ -510,6 +522,19 @@ def test_the_stream_states_facts_when_it_opens_and_when_a_reply_changes_them(
     assert event["session_id"] == OLD
     assert event["facts"]["effort"] == "medium"
     assert event["facts"]["context"]["percent"] == 23
+
+
+def test_the_stream_states_a_change_of_permission_mode_that_no_reply_followed(
+    bed: Bed, stream
+) -> None:
+    rows = bed.rows(source=PERMISSION_MODE_FILE)
+    bed.write_transcript(rows[:3])
+    opened = stream()
+    assert opened.event("ready")["facts"]["permission_mode"] == "default"
+    bed.append(rows[3:4])
+    event = opened.event("facts")
+    assert event["session_id"] == OLD
+    assert event["facts"]["permission_mode"] == "plan"
 
 
 def test_the_stream_delivers_command_output(bed: Bed, stream) -> None:

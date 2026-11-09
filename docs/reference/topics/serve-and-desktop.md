@@ -285,9 +285,13 @@ Nothing is reconstructed for an omitted block.
 first reply:
 
 ```
-facts:   at, model, effort, git_branch, context
+facts:   at, model, effort, git_branch, permission_mode, context
 context: tokens, window, percent
 ```
+
+`permission_mode` is the mode the transcript last recorded, under Claude Code's own name for
+it, and `null` when the transcript records none. It can be newer than `at`, since Claude Code
+records a change of mode without a reply.
 
 `tokens` is the latest reply's input, cache-read and cache-creation tokens added together.
 `percent` is rounded to a whole number, as Claude Code's context panel rounds it. `/context`
@@ -359,7 +363,7 @@ naming one of:
 |---|---|
 | `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`: the state when the stream opened |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
-| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply changes them |
+| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply or a change of permission mode changes them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
 | `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |
