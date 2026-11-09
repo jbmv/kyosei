@@ -404,6 +404,9 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-09** — `KYO-688` (task) — Session layer: one adapter for the transcript, one for the pane, in Kyosei's terms
+- **2026-11-09** — `KYO-687` (bug) — A message sent mid-turn leaves the turn index with a duplicate line and the enclosing prompt unconfirmed
+- **2026-11-09** — `KYO-684` (bug) — Declaring a first person turns earlier uncredited rows into doctor problems
 - **2026-11-09** — `KYO-683` (task) — Archive each session's transcript outside git, and read from the archive when the original is gone
 - **2026-11-09** — `KYO-677` (bug) — Two output pins need a global init.defaultBranch, and CI's lint uses an unpinned ruff
 - **2026-11-09** — `KYO-657` (task) — The turn index (kyo turns --hook) and doctor's transcript-retention notice
