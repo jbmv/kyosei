@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-699` (task) — kyo serve session API, send half: per-device tokens, sending input, and the send log
 - **2026-11-09** — `KYO-698` (task) — Session API: the session's permission mode
 - **2026-11-09** — `KYO-695` (task) — Session API: a finished subagent's token use and its branch's line counts
 - **2026-11-09** — `KYO-693` (task) — Session API: session titles, a subagent's tool calls, and uncommitted changes
