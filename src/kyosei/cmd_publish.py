@@ -38,6 +38,16 @@ who inherits it can see whose call it was.
 push is attempted, from the store surfaces themselves — see
 :data:`SURFACE_COUNTERS`, one counter per surface
 :data:`kyosei.install_prose.COMMITTED_PROSE_SURFACES` declares.
+
+**A private term in a pushed commit is refused for everyone (KYO-669).** The messages
+and author names of the commits a push sends are matched against the terms in
+:mod:`kyosei.private_terms`. Publishing a store is a choice a person may reasonably
+make, so that half only warns them; a private term in a public commit is almost always
+a mistake and is expensive to undo, so this half refuses a person's push as well as an
+agent's. ``--pre-push`` is the git hook's mode and exits :data:`EXIT_PRIVATE_TERM`,
+which is the only status the hook turns into a refusal: the store warning, a missing
+``kyo`` and a broken ``kyo`` all leave a push alone. ``git push --no-verify`` remains
+the deliberate way past it.
 """
 
 from __future__ import annotations
@@ -66,10 +76,15 @@ from .config import (
     refuse_store_write,
     resolve_layout,
 )
-from .contracts import CONTRACT_PUSH_PUBLISHES_THE_STORE, GUARDED_BRANCH_DIRS
-from .errors import GuardRefusal, KyoseiError
+from .contracts import (
+    CONTRACT_PUSH_CARRIES_A_PRIVATE_TERM,
+    CONTRACT_PUSH_PUBLISHES_THE_STORE,
+    GUARDED_BRANCH_DIRS,
+)
+from .errors import EXIT_CONTRACT, EXIT_PRIVATE_TERM, GuardRefusal, KyoseiError
 from .git_queries import run_git
 from .install_prose import COMMITTED_PROSE_SURFACES
+from .private_terms import Terms, project_terms
 from .scaffold import IDEAS_DIR
 
 # ------------------------------------------------------- what counts as "a push"
@@ -99,6 +114,12 @@ def _git_push_moves(argv: tuple[str, ...]) -> list[str] | None:
     is not a ``git push`` at all. ``--git-dir``/``--work-tree`` contribute a ``"$"``
     entry, which :func:`kyosei.shell_words.moved` reads as unknown: they send the
     push somewhere this does not follow."""
+    walked = _walk_git_push(argv)
+    return None if walked is None else walked[0]
+
+
+def _walk_git_push(argv: tuple[str, ...]) -> tuple[list[str], int] | None:
+    """:func:`_git_push_moves`'s answer and the index of the ``push`` word in ``argv``."""
     if not argv or Path(argv[0]).name != "git":
         return None
     moves: list[str] = []
@@ -117,7 +138,7 @@ def _git_push_moves(argv: tuple[str, ...]) -> list[str] | None:
                 moves.append("$")
             index += 1
             continue
-        return moves if token == "push" else None
+        return (moves, index) if token == "push" else None
     return None
 
 
@@ -133,6 +154,8 @@ class Push:
     #: Where the push runs — the payload's cwd, moved by any ``cd`` ahead of it and by
     #: ``git -C`` — or ``None`` when a move this parse cannot follow made it unknown.
     directory: Path | None
+    #: The invocation's words, which say what it would send (KYO-669.c5).
+    argv: tuple[str, ...] = ()
 
 
 def pushes(command: str, *, cwd: Path | None) -> list[Push]:
@@ -151,11 +174,11 @@ def pushes(command: str, *, cwd: Path | None) -> list[Push]:
             where = step.cwd
             for target in moves:
                 where = shell_words.moved(where, target)
-            found.append(Push(step.segment, where))
+            found.append(Push(step.segment, where, tuple(argv)))
             continue
         for prefix in _IMPLICIT_PUSH_COMMANDS:
             if tuple(argv[: len(prefix)]) == prefix:
-                found.append(Push(step.segment, step.cwd))
+                found.append(Push(step.segment, step.cwd, tuple(argv)))
                 break
     return found
 
@@ -505,6 +528,294 @@ def warning_lines(state: PublicationState, *, trigger: str | None = None) -> lis
     return lines
 
 
+# ------------------------------------------- what the commits being pushed carry
+
+#: ``git push`` options that take their value as the next word when not written with ``=``.
+_PUSH_VALUE_OPTIONS = frozenset({"--repo", "--receive-pack", "--exec", "--push-option"})
+
+#: How many offending lines a refusal lists. A first push scans the whole history, and
+#: the ``--json`` payload carries every hit whatever this says.
+_MAX_HITS_SHOWN = 20
+
+
+@dataclass(frozen=True)
+class CommitScan:
+    """What scanning a push's commits found. ``hits`` name a commit and a line, never
+    a term; ``note`` says why commits that should have been read were not."""
+
+    hits: list[str] = field(default_factory=list)
+    commits: int = 0
+    note: str | None = None
+
+
+def _is_zero(sha: str) -> bool:
+    return set(sha) == {"0"}
+
+
+def _commits_sent(
+    root: Path, revisions: list[str], remote: str | None
+) -> list[tuple[str, str, str]]:
+    """``(sha, author name, message)`` of each commit ``revisions`` reach that ``remote``
+    does not already have, as far as its remote-tracking refs say.
+
+    Excluding those refs is what makes a branch with no counterpart on the remote
+    cheap and exact: such a push is reported with an all-zero remote sha, and walking
+    the tip's whole history would refuse it over commits that were published long ago
+    and that this push does not send. A ``remote`` that is not a configured remote (a
+    bare URL) has no tracking refs, so everything the revisions reach is read. That
+    errs towards reading too much, which is the safe direction here.
+
+    Raises :class:`OSError` when git cannot be run, and :class:`ValueError` when it ran
+    and refused.
+    """
+    if not revisions:
+        return []
+    known = run_git(root, "remote")
+    exclude = (
+        [f"--remotes={remote}"]
+        if known.returncode == 0 and remote in known.stdout.split()
+        else []
+    )
+    result = run_git(
+        root,
+        "log",
+        "--no-show-signature",
+        "-z",
+        "--format=%H%x00%an%x00%B",
+        *revisions,
+        "--not",
+        *exclude,
+        "--",
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise ValueError("git log refused the range")
+    fields = result.stdout.split("\0")
+    return [(fields[i], fields[i + 1], fields[i + 2]) for i in range(0, len(fields) - 2, 3)]
+
+
+def _commit_hits(terms: Terms, commits: list[tuple[str, str, str]]) -> list[str]:
+    """``<sha> message line <n> (kinds)`` and ``<sha> author name (kinds)``. The sha is
+    all that identifies a commit here: its subject may be the line that offends."""
+    hits: list[str] = []
+    for sha, author, message in commits:
+        short = sha[:12]
+        kinds = terms.kinds_on_published_line(author)
+        if kinds:
+            hits.append(f"{short} author name ({', '.join(kinds)})")
+        for number, line in enumerate(message.split("\n"), start=1):
+            kinds = terms.kinds_on_published_line(line)
+            if kinds:
+                hits.append(f"{short} message line {number} ({', '.join(kinds)})")
+    return hits
+
+
+def _scan_revisions(
+    layout: Layout, root: Path, revisions: list[str], remote: str | None
+) -> CommitScan:
+    """Match what ``revisions`` send. A failure to read the terms or the commits says
+    so and refuses nothing: a guard that cannot answer must not stop a push."""
+    try:
+        terms = project_terms(layout)
+    except (KyoseiError, OSError, UnicodeDecodeError):
+        return CommitScan(note="the private terms could not be read; no commit was scanned")
+    if terms.empty:
+        return CommitScan()
+    try:
+        commits = _commits_sent(root, revisions, remote)
+    except (OSError, ValueError):
+        return CommitScan(note="git could not list the commits being pushed; none was scanned")
+    return CommitScan(hits=_commit_hits(terms, commits), commits=len(commits))
+
+
+def scan_pre_push(layout: Layout, ref_lines: str, remote: str) -> CommitScan:
+    """Scan what git says it is pushing: one ``<local ref> <local sha> <remote ref>
+    <remote sha>`` line per ref, on the hook's stdin.
+
+    A local sha of zeros is a deletion, which sends nothing. A remote sha of zeros is a
+    branch the remote lacks, and a remote sha this clone has never fetched (the remote
+    moved on) cannot be excluded; for both, :func:`_commits_sent` bounds the walk by
+    the remote-tracking refs.
+    """
+    root = layout.code_root
+    revisions: list[str] = []
+    for line in ref_lines.splitlines():
+        parts = line.split()
+        if len(parts) != 4 or _is_zero(parts[1]):
+            continue
+        revisions.append(parts[1])
+        if not _is_zero(parts[3]) and _has_commit(root, parts[3]):
+            revisions.append(f"^{parts[3]}")
+    return _scan_revisions(layout, root, revisions, remote)
+
+
+def _has_commit(root: Path, sha: str) -> bool:
+    try:
+        return run_git(root, "cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+    except OSError:
+        return False
+
+
+def _default_push_remote(root: Path) -> str | None:
+    """The remote a bare ``git push`` from ``root`` would use, by git's own precedence."""
+
+    def config(key: str) -> str | None:
+        try:
+            result = run_git(root, "config", "--get", key)
+        except OSError:
+            return None
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    try:
+        head = run_git(root, "symbolic-ref", "--short", "-q", "HEAD")
+    except OSError:
+        return None
+    branch = head.stdout.strip() if head.returncode == 0 else ""
+    return (
+        (config(f"branch.{branch}.pushRemote") if branch else None)
+        or config("remote.pushDefault")
+        or (config(f"branch.{branch}.remote") if branch else None)
+        or "origin"
+    )
+
+
+def _resolve_commit(root: Path, name: str) -> str | None:
+    try:
+        result = run_git(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
+    except OSError:
+        return None
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
+def _what_a_push_sends(argv: tuple[str, ...], root: Path) -> tuple[list[str], str | None]:
+    """``(revisions, remote)`` a command line would send, read without the network.
+
+    ``git push --dry-run`` would answer exactly, and is not used because it contacts
+    the remote from inside a hook that runs before every push an agent attempts, and
+    can stop to ask for credentials. The git hook, which is given the real ref lines,
+    stands behind whatever this reading misses: a ``push.default`` of ``matching`` and
+    a configured ``remote.<name>.push`` are read as the current branch.
+    """
+    if Path(argv[0]).name == "gh":
+        if tuple(argv[:3]) == ("gh", "repo", "create") and "--push" not in argv:
+            return [], None
+        return ["HEAD"], _default_push_remote(root)
+
+    walked = _walk_git_push(argv)
+    if walked is None:
+        return [], None
+    words = list(argv[walked[1] + 1 :])
+    remote: str | None = None
+    selectors: list[str] = []
+    positional: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word == "--":
+            positional.extend(words[index:])
+            break
+        if word.startswith("--"):
+            name, equals, value = word.partition("=")
+            if name in ("--delete", "--dry-run"):
+                return [], None
+            if name in ("--all", "--branches"):
+                selectors.append("--branches")
+            elif name == "--mirror":
+                selectors.extend(["--branches", "--tags"])
+            elif name == "--tags":
+                selectors.append("--tags")
+            elif name in _PUSH_VALUE_OPTIONS:
+                if not equals and index < len(words):
+                    value = words[index]
+                    index += 1
+                if name == "--repo":
+                    remote = value
+        elif word.startswith("-") and len(word) > 1:
+            if {"d", "n"} & set(word[1:]):
+                return [], None
+            if word.endswith("o"):
+                index += 1
+        else:
+            positional.append(word)
+
+    if remote is None and positional:
+        remote = positional.pop(0)
+    remote = remote or _default_push_remote(root)
+
+    revisions = list(selectors)
+    specs = iter(positional)
+    for spec in specs:
+        source = f"refs/tags/{next(specs, '')}" if spec == "tag" else spec
+        source = source.removeprefix("+").split(":", 1)[0]
+        sha = _resolve_commit(root, source) if source else None
+        if sha:
+            revisions.append(sha)
+    if not positional and not selectors:
+        revisions.append("HEAD")
+    return revisions, remote
+
+
+def scan_pushes(found: list[Push], hook_layout: Layout) -> CommitScan:
+    """Scan every push on a command line, each in the project it would publish.
+
+    A push whose directory could not be followed, or that is not in a Kyosei project,
+    is not scanned. The store guard fails closed on the first, because a false block
+    there costs one acknowledgement; here a false block would be a refusal over
+    another repository's commits, and the git hook still reads the real ones.
+    """
+    hits: list[str] = []
+    commits = 0
+    notes: list[str] = []
+    for push in found:
+        target = push_layout(push.directory, hook_layout)
+        if push.directory is None or target is None or not target.configured:
+            continue
+        revisions, remote = _what_a_push_sends(push.argv, push.directory)
+        scan = _scan_revisions(target, push.directory, revisions, remote)
+        hits.extend(scan.hits)
+        commits += scan.commits
+        if scan.note:
+            notes.append(scan.note)
+    return CommitScan(
+        hits=list(dict.fromkeys(hits)),
+        commits=commits,
+        note=next(iter(notes), None),
+    )
+
+
+def private_term_lines(
+    hits: list[str], *, trigger: str | None, for_a_person: bool
+) -> list[str]:
+    """The refusal: which commit, which line, what kind, and how to clear it."""
+    headline = f"`{trigger}` would send" if trigger else "this push would send"
+    lines = [
+        f"{headline} a commit with a private term or home path in its message or author "
+        "name (the term is not printed; the terms are this machine's project registry and "
+        "this store's private-words.txt):"
+    ]
+    lines.extend(f"    {hit}" for hit in hits[:_MAX_HITS_SHOWN])
+    if len(hits) > _MAX_HITS_SHOWN:
+        lines.append(f"    and {len(hits) - _MAX_HITS_SHOWN} more")
+    lines.append(
+        "remedy — amend the message before pushing: `git commit --amend` for the newest "
+        "commit, `git rebase -i <commit>^` for an earlier one, and `--reset-author` or "
+        "`--author=<name>` on the amend for an author name; then push again"
+    )
+    if for_a_person:
+        lines.append(
+            "`git push --no-verify` is the deliberate way past this, once you have read "
+            "the line and it is meant to be public"
+        )
+    else:
+        lines.append(
+            "an agent has no standing to publish this: rewrite the message, or surface it "
+            "to the maintainer if the line is meant to be public"
+        )
+    return lines
+
+
 # ------------------------------------------------------------------ the command
 
 
@@ -595,7 +906,7 @@ def push_layout(directory: Path | None, hook_layout: Layout) -> Layout | None:
 
 
 def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Output:
-    """``kyo check-push [--pre-tool-use | --advisory | --acknowledge]``.
+    """``kyo check-push [--pre-tool-use | --advisory | --pre-push REMOTE | --acknowledge]``.
 
     Bare, it answers the question directly and exits 2 if a push from here would
     publish an unacknowledged store — which is what makes the behaviour testable
@@ -619,6 +930,8 @@ def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Out
 
     trigger: str | None = None
     directory: Path | None = layout.code_root
+    scan = CommitScan()
+    pre_push = args.pre_push is not None
     # KYO-591: the hook's own directory resolves to no Kyosei project. This guard is
     # not silenced wholesale like the other hook modes (`cmd_check_build.
     # QUIET_OUTSIDE_PROJECT`): a push from here may still publish a Kyosei project
@@ -662,11 +975,19 @@ def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Out
         )
         trigger = push.segment
         directory = push.directory
+        # The store refusal comes first and is complete on its own; there is no use
+        # naming a commit in a push that cannot go ahead for another reason.
+        if not state.blocks:
+            scan = scan_pushes(found, layout)
     else:
         state = publication_state(layout)
+        if pre_push:
+            # Typed by hand there are no ref lines, and reading a terminal would hang.
+            stdin_is_empty = sys.stdin is None or sys.stdin.closed or sys.stdin.isatty()
+            scan = scan_pre_push(layout, "" if stdin_is_empty else sys.stdin.read(), args.pre_push)
 
     data = {
-        "ok": not state.blocks,
+        "ok": not state.blocks and not scan.hits,
         "command": "check-push",
         "matched": trigger is not None,
         "trigger": trigger,
@@ -683,8 +1004,21 @@ def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Out
         "measured_in": str(state.measured_in) if state.measured_in else None,
         "counts": state.counts,
         "residue": state.residue,
-        "advisory": bool(args.advisory),
+        "advisory": bool(args.advisory) or pre_push,
+        "commits_scanned": scan.commits,
+        # Every hit, where the message lists the first few: none of these names a term.
+        "private_term_hits": scan.hits,
     }
+
+    if scan.hits:
+        raise GuardRefusal(
+            CONTRACT_PUSH_CARRIES_A_PRIVATE_TERM,
+            private_term_lines(scan.hits, trigger=trigger, for_a_person=pre_push),
+            data=data,
+            exit_code=EXIT_PRIVATE_TERM if pre_push else EXIT_CONTRACT,
+        )
+
+    notes = [f"check-push: {scan.note}"] if scan.note else []
 
     if not state.blocks:
         if state.publishes and state.acknowledged:
@@ -696,10 +1030,10 @@ def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Out
             reason = state.why()
         if outside_any_project:
             return Output([], data)
-        return Output([f"check-push: nothing to warn about — {reason}"], data)
+        return Output([f"check-push: nothing to warn about — {reason}", *notes], data)
 
     lines = warning_lines(state, trigger=trigger)
-    if args.advisory:
+    if args.advisory or pre_push:
         # The human half: say it, and get out of the way. `git push --no-verify`
         # skips this hook entirely, which is the correct escape for someone
         # pushing their own repository.
@@ -707,6 +1041,7 @@ def cmd_check_push(ctx: Context, args: Namespace, raw: str | None = None) -> Out
             [
                 "check-push (advisory — this does not block your push):",
                 *[f"  {line}" for line in lines],
+                *notes,
             ],
             data,
         )

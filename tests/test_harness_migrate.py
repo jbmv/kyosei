@@ -230,7 +230,8 @@ def test_migrate_writes_the_pre_push_hook_a_copies_project_lacked(
     assert result.code == 0, result
     assert PRE_PUSH_MARKER in pre_push.read_text(encoding="utf-8")
     assert result.json["pre_push"]["changes"] == [
-        f"git pre-push: wrote {pre_push} (advisory; `git push --no-verify` skips it, and "
+        f"git pre-push: wrote {pre_push} (warns about a published store, refuses a private "
+        "term in a pushed commit; `git push --no-verify` skips it, and "
         ".git/hooks is not versioned, so a fresh clone will not have it)"
     ]
     assert not any("pre-push" in entry["what"] for entry in result.json["left"])

@@ -845,7 +845,12 @@ def cmd_pre_tool_use(ctx: Context, args: Namespace) -> Output:
     """
     raw = "" if sys.stdin is None or sys.stdin.closed else sys.stdin.read()
     guard = Namespace(
-        pre_tool_use=True, advisory=False, acknowledge=False, command_line=None, timeout_ms=None
+        pre_tool_use=True,
+        advisory=False,
+        pre_push=None,
+        acknowledge=False,
+        command_line=None,
+        timeout_ms=None,
     )
     checks: dict[str, dict] = {}
     lines: list[str] = []

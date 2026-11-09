@@ -523,7 +523,8 @@ governs: src/kyosei/schema.py
 governs: src/kyosei/cli.py
 
 One command, JSON output everywhere (`--json`), exit codes with fixed meanings (0 ok; 1 runtime
-error / unknown ID; 2 contract violation; 3 doctor failure; 64 usage — argparse's own 2 is
+error / unknown ID; 2 contract violation; 3 doctor failure; 4 a private term in a pushed commit,
+from the git hook's mode of `kyo check-push` only; 64 usage — argparse's own 2 is
 overridden so 2 means exactly one thing), prose via stdin/file (one-line fields per law 5).
 
 ```

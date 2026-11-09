@@ -499,7 +499,7 @@ def test_install_hooks_writes_an_advisory_pre_push_hook(kyo, project: Path) -> N
     hook = project / ".git" / "hooks" / "pre-push"
     assert hook.is_file()
     text = hook.read_text(encoding="utf-8")
-    assert "kyo check-push --advisory" in text
+    assert "kyo check-push --pre-push" in text
     assert install_hooks.PRE_PUSH_MARKER in text
     assert hook.stat().st_mode & 0o111, "a git hook that is not executable never runs"
     # The limitation, stated in the artifact itself rather than only in a doc:

@@ -10,6 +10,7 @@ Exit codes are part of the CLI contract:
 1    runtime error — unknown id, illegal argument combination, IO failure
 2    transition-contract violation (law 7); the unmet item is named in the message
 3    ``kyo doctor`` found a broken invariant
+4    ``kyo check-push --pre-push`` refused: a commit being pushed carries a private term
 64   usage error (argparse). Deliberately *not* 2, so that 2 means exactly one thing.
 ===  ==========================================================================
 """
@@ -22,6 +23,7 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_CONTRACT = 2
 EXIT_DOCTOR = 3
+EXIT_PRIVATE_TERM = 4
 EXIT_USAGE = 64
 
 
@@ -269,8 +271,11 @@ class GuardRefusal(ContractViolation):
     an envelope key would move every one of them for every existing consumer.
     """
 
-    def __init__(self, contract: str, unmet: list[str], *, data: dict) -> None:
+    def __init__(
+        self, contract: str, unmet: list[str], *, data: dict, exit_code: int = EXIT_CONTRACT
+    ) -> None:
         super().__init__(contract, unmet)
+        self.exit_code = exit_code
         #: Merged into the ``--json`` error envelope by ``cli.main``. Copied rather
         #: than aliased so the raise cannot be made to report a dict the caller went
         #: on to mutate.

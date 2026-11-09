@@ -281,7 +281,8 @@ check-push` fails if pushing this repository would publish a Kyosei store that
 lives inside it and that nobody has accepted publishing — see "Before your
 first push" in [store.md](store.md). The hooks wire it into `PreToolUse` for agents, and
 `kyo harness install claude-code` (or `kyo install-hooks` on the copies) also writes a git
-`pre-push` hook that warns a human without blocking.
+`pre-push` hook that warns a human without blocking. Both refuse a push when a commit it
+sends carries a private term or home path in its message or author name (KYO-669).
 
 ### The whole suite is the orchestrator's: `controller_only_commands` (KYO-298)
 
@@ -1045,7 +1046,8 @@ kyo check-clean                            # worker stop guard: fails on uncommi
                                             # OUTSIDE those same two directories, and
                                             # outside .kyosei-report.json (KYO-206)
 kyo check-push                             # publication guard: fails if pushing this repo
-                                            # would publish an unacknowledged store
+                                            # would publish an unacknowledged store; as a hook,
+                                            # also refuses a private term in a pushed commit
 kyo check-push --acknowledge               # accept that once, recording who and when
 kyo check-command 'make test'              # worker command guard: fails if a command this
                                             # project declares orchestrator-only would run
