@@ -5,7 +5,9 @@ This module composes the two adapters, :mod:`kyosei.harness.claude_code_transcri
 and background work. It reads no transcript row and no screen line itself, so a change in a
 Claude Code release is repaired in the adapter it concerns.
 
-Nothing here is reachable from ``kyo serve`` or the CLI yet; the routes are chunk E4.
+``kyo serve`` reaches this layer through :mod:`kyosei.serve_sessions` (KYO-689, the read
+half of chunk E4). The layer's sending half is the pane adapter's and is not reachable
+from any ``kyosei.serve*`` module; ``tests/test_kyo_serve_sessions.py`` fails if one reaches it.
 
 During a turn the layer reads both sources, because a reply reaches the transcript as one
 row when it finishes while the screen changes throughout (spike S4). :class:`LiveReply`
@@ -135,6 +137,18 @@ class LiveSession:
     def pane(self) -> pane.PaneRef | None:
         return self.pane_lookup.pane
 
+    @property
+    def process_running(self) -> bool:
+        """Whether Claude Code's own registry holds a live process on this session.
+
+        A registry file can outlive a process killed without a chance to remove it, so
+        the recorded pid must also still exist.
+        """
+        for entry in pane.read_registry(self.config_dir):
+            if entry.session_id == self.session_id and _pid_exists(entry.pid):
+                return True
+        return False
+
     def tmux(self) -> Tmux:
         """A tmux client on the server holding this session's pane."""
         binary = self._tmux_binary()
@@ -153,8 +167,8 @@ class LiveSession:
         for reply in delta.replies:
             self.live_reply.observe_record(reply.text)
         screen, background, in_progress = None, None, None
-        if self.pane is not None:
-            raw = pane.capture(self.tmux(), self.pane.pane_id)
+        raw = self._capture()
+        if raw is not None:
             screen = pane.classify(raw, log_unrecognised_screen=self._unrecognised)
             background = screen.background
             if screen.state == pane.WORKING:
@@ -163,6 +177,29 @@ class LiveSession:
             else:
                 self.live_reply.text = None
         return SessionUpdate(self.session_id, delta, screen, in_progress, background, followed)
+
+    def screen(self) -> pane.Screen | None:
+        """What the pane shows now, without reading the transcript; None with no pane."""
+        raw = self._capture()
+        if raw is None:
+            return None
+        return pane.classify(raw, log_unrecognised_screen=self._unrecognised)
+
+    def _capture(self) -> str | None:
+        """The pane's screen, or None when there is no pane to read.
+
+        A pane that has gone captures as nothing, which is not a screen: it would classify
+        as unrecognised and be logged for cataloguing. The pane is looked up again, so a
+        session whose pane has closed reports none from then on.
+        """
+        ref = self.pane
+        if ref is None:
+            return None
+        raw = pane.capture(self.tmux(), ref.pane_id)
+        if raw.strip():
+            return raw
+        self.pane_lookup = self._find_pane()
+        return None
 
     def _scrollback(self, raw: str) -> str:
         """The capture to read the reply from: the screen, or scrollback when it has gone."""
@@ -198,6 +235,23 @@ class LiveSession:
                 return (current, beside) if changed else None
         link = transcript.clear_successor(path)
         return (link.session_id, link.path) if link is not None else None
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # it exists, under another account
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def is_working(screen: pane.Screen) -> bool:
+    """Whether a screen shows work running: a turn, or background shells or subagents."""
+    return screen.state == pane.WORKING or screen.background.running
 
 
 def open_session(

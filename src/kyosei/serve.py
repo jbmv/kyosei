@@ -45,6 +45,12 @@ nothing else (:func:`kyosei.serve_files.document_target`).
 ``tests/test_kyo_serve_files.py`` fails if any other ``kyosei.serve*`` module calls a
 file-writing function.
 
+THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (GET),
+``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events) and
+``sessions/{id}/screen``, all read-only and in a project that has opted in to reading
+transcripts. This module only routes them; :mod:`kyosei.serve_sessions` holds the rest, and
+no ``kyosei.serve*`` module can reach the session layer's sending half.
+
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
 it binds, ``kyo serve`` asks its port who is there (:func:`serve_install.refuse_if_held`)
@@ -61,6 +67,7 @@ import ipaddress
 import json
 import os
 import re
+import select
 import signal
 import socket
 import sys
@@ -245,6 +252,12 @@ FILE_ROUTES: dict[str, tuple[str, ...]] = {
 #: The file routes that take a path after their name.
 _PATH_ROUTES = ("ideas", "docs")
 
+#: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
+SESSION_ROUTES = ("turns", "events", "screen")
+
+#: The one query key a session route takes.
+_SESSION_QUERY_KEY = "cursor"
+
 _JSON_TYPE = "application/json; charset=utf-8"
 
 _QUERY_KEY = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -404,6 +417,11 @@ class KyoServer(ThreadingHTTPServer):
 
         self.poll_seconds = POLL_SECONDS
         self.keepalive_seconds = KEEPALIVE_SECONDS
+        #: KYO-689: the per-session streams' samplers, and their cadence (a test shortens it).
+        from .serve_sessions import SAMPLE_SECONDS, SessionHub
+
+        self.session_sample_seconds = SAMPLE_SECONDS
+        self.session_hub = SessionHub(self)
         self.pid = os.getpid()
         self.started_at = clock.now()
         try:
@@ -620,6 +638,10 @@ class ServeHandler(BaseHTTPRequestHandler):
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
+        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
+            if not (len(rest) == 3 or (len(rest) == 5 and rest[4] in SESSION_ROUTES)):
+                raise _no_route(method, split.path)
+            allowed = ("GET",)
         else:
             raise _no_route(method, split.path)
         if method not in allowed:
@@ -635,6 +657,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(self._projects())
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
+        if rest[2] == "sessions":
+            return self._session_route(rest[1], rest[3:], split.query)
         return self._file_route(method, rest[1], rest[2], "/".join(rest[3:]))
 
     # --------------------------------------------------------- files and events
@@ -743,6 +767,72 @@ class ServeHandler(BaseHTTPRequestHandler):
             poll_seconds=self.server.poll_seconds,
             keepalive_seconds=self.server.keepalive_seconds,
         )
+
+    # ------------------------------------------------------------ session routes
+
+    def _session_route(self, name: str, rest: list[str], query: str) -> tuple | None:
+        """Every session route, opt-in checked first (:mod:`kyosei.serve_sessions`)."""
+        from . import serve_sessions
+
+        root = self.server.project(name).root
+        project = serve_sessions.ProjectSessions(root, self.server.environ)
+        cursor = _session_cursor(query)
+        if not rest:
+            return 200, _json_bytes(project.list_sessions())
+        session_id, route = rest
+        if route == "turns":
+            return 200, _json_bytes(
+                project.turns(session_id, serve_sessions.parse_cursor(cursor))
+            )
+        if route == "screen":
+            return 200, _json_bytes(project.screen(session_id))
+        given = (
+            serve_sessions.parse_cursor(cursor)
+            if cursor
+            else serve_sessions.parse_cursor(self.headers.get("Last-Event-ID"), refuse=False)
+        )
+        self._session_events(project, session_id, given)
+        return None
+
+    def _session_events(self, project, session_id: str, given) -> None:
+        """A ``text/event-stream`` on one session, from the sampler it shares with any other
+        client of that session; a refusal comes before the status line."""
+        from . import serve_sessions
+
+        hub = self.server.session_hub
+        sub = hub.subscribe(project, session_id)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self._common_headers()
+            self.end_headers()
+            self.close_connection = True
+
+            def write(chunk: bytes) -> None:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+
+            serve_sessions.stream(
+                project,
+                session_id,
+                sub,
+                given,
+                write,
+                self.server.stopping,
+                self._client_gone,
+                keepalive_seconds=self.server.keepalive_seconds,
+            )
+        finally:
+            hub.unsubscribe(sub)
+
+    def _client_gone(self) -> bool:
+        """Whether this stream's client has closed: it sends nothing after its request."""
+        try:
+            ready, _, _ = select.select([self.connection], [], [], 0)
+            return bool(ready) and self.connection.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
 
     # --------------------------------------------------------------- routes
 
@@ -922,6 +1012,20 @@ def _check_namespace(command: str, served: Served, args: Namespace, root: str) -
             )
 
 
+def _session_cursor(query: str) -> str | None:
+    """The ``cursor`` a session route was given; any other query key is refused."""
+    cursor = None
+    for key, value, _bare in _query_pairs(query):
+        if key != _SESSION_QUERY_KEY:
+            raise Refusal(
+                400,
+                f"?{key} is not a query a session route takes; it takes ?{_SESSION_QUERY_KEY}, "
+                "the cursor of an earlier response",
+            )
+        cursor = value
+    return cursor
+
+
 def _query_pairs(query: str) -> list[tuple[str, str, bool]]:
     """``(key, value, bare)`` for each query item, in order; a repeated key repeats."""
     pairs = []
@@ -942,8 +1046,9 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{method} {path} is not a route; kyo serve answers GET {API_PREFIX}/version, GET "
         f"{API_PREFIX}/projects, GET {project}/cmd/{{command}}, GET {project}/ideas/, "
         f"GET/PUT/DELETE {project}/ideas/{{relpath}}, POST {project}/ideas-move and "
-        f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}} "
-        f"and GET {project}/events",
+        f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
+        f"GET {project}/events, GET {project}/sessions and GET "
+        f"{project}/sessions/{{id}}/turns, .../events or .../screen",
     )
 
 
