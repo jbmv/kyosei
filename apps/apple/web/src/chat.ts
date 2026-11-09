@@ -12,8 +12,13 @@ interface ToolCall {
 interface CommandOutput { uuid: string; at: string; command: string; args: string; text: string }
 interface Batch {
   reset?: boolean; turns?: Turn[]; replies?: Reply[]; tool_calls?: ToolCall[];
-  command_outputs?: CommandOutput[];
+  command_outputs?: CommandOutput[]; subagents?: { agent_id: string }[]; facts?: Facts | null;
 }
+interface Facts { git_branch: string | null; context: { percent: number | null } | null }
+interface SessionRow {
+  session_id: string; live: boolean; first_seen: string; remote_control_url: string | null;
+}
+interface Menu { project: string; current: string | null; sessions: { sessions: SessionRow[] } }
 
 const chat = document.getElementById("chat")!;
 const live = document.getElementById("live")!;
@@ -168,6 +173,8 @@ interface Change { added: number; removed: number; lines: { kind: string; text: 
 const MAX_DIFF_CELLS = 4_000_000;
 const openGroups = new Set<string>();
 const openFiles = new Set<string>();
+const openCards = new Set<string>();
+const MAX_FILES_SHOWN = 3;
 
 function linesOf(text: string): string[] {
   if (!text) return [];
@@ -213,14 +220,19 @@ function diffLines(before: string[], after: string[]): Change {
   };
 }
 
+const diffs = new Map<string, Change>();
+
 function changeOf(call: ToolCall): Change | null {
-  if (call.result?.is_error) return null;
-  const input = call.input ?? {};
-  if (call.name === "Edit") {
-    return diffLines(linesOf(String(input.old_string ?? "")), linesOf(String(input.new_string ?? "")));
+  if (call.result?.is_error || (call.name !== "Edit" && call.name !== "Write")) return null;
+  let change = diffs.get(call.call_id);
+  if (!change) {
+    const input = call.input ?? {};
+    change = call.name === "Edit"
+      ? diffLines(linesOf(String(input.old_string ?? "")), linesOf(String(input.new_string ?? "")))
+      : diffLines([], linesOf(String(input.content ?? "")));
+    diffs.set(call.call_id, change);
   }
-  if (call.name === "Write") return diffLines([], linesOf(String(input.content ?? "")));
-  return null;
+  return change;
 }
 
 function pathOf(call: ToolCall): string {
@@ -324,11 +336,15 @@ function addFilesCard(after: HTMLElement, edits: ToolCall[]): void {
   card.append(title);
   let totalAdded = 0;
   let totalRemoved = 0;
+  const expanded = openCards.has(after.dataset.key!);
+  let shown = 0;
   for (const [path, changes] of files) {
     const added = changes.reduce((sum, change) => sum + change.added, 0);
     const removed = changes.reduce((sum, change) => sum + change.removed, 0);
     totalAdded += added;
     totalRemoved += removed;
+    if (!expanded && shown === MAX_FILES_SHOWN) continue;
+    shown += 1;
     const key = `${after.dataset.key}|${path}`;
     const row = document.createElement("div");
     row.className = "file-row";
@@ -362,8 +378,17 @@ function addFilesCard(after: HTMLElement, edits: ToolCall[]): void {
     total.className = "file-row total";
     const name = document.createElement("span");
     name.className = "file-name";
-    name.textContent = "Total";
+    const canExpand = files.size > MAX_FILES_SHOWN;
+    name.textContent = !canExpand ? "Total" : expanded ? "Show fewer" : "See all";
     total.append(name, ...counts(totalAdded, totalRemoved));
+    if (canExpand) {
+      total.classList.add("expander");
+      total.addEventListener("click", () => {
+        if (openCards.has(after.dataset.key!)) openCards.delete(after.dataset.key!);
+        else openCards.add(after.dataset.key!);
+        arrange();
+      });
+    }
     card.append(total);
   }
   after.after(card);
@@ -400,6 +425,101 @@ function arrange(): void {
   endTurn(screenState !== "working");
 }
 
+// ------------------------------------------------------------- the menu and the side panel
+
+const SIDE_CLOSED_KEY = "side-closed";
+const subagents = new Set<string>();
+let facts: Facts | null = null;
+let menu: Menu | null = null;
+
+const SESSIONS_SHOWN = 4;
+let allSessions = false;
+
+function select(session: string): void {
+  (window as any).webkit?.messageHandlers?.select?.postMessage({ session });
+}
+
+function sessionLabel(row: SessionRow): string {
+  return new Date(row.first_seen).toLocaleString([], {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+function drawMenu(): void {
+  if (!menu) return;
+  const { current, sessions: { sessions } } = menu;
+  const shown = allSessions ? sessions : sessions.slice(0, SESSIONS_SHOWN);
+  const more = document.getElementById("sessions-more")!;
+  more.hidden = sessions.length <= SESSIONS_SHOWN;
+  more.textContent = allSessions ? "Show fewer" : "See all";
+  document.getElementById("sessions")!.replaceChildren(
+    ...shown.map((row) => {
+      const item = document.createElement("div");
+      item.className = row.session_id === current ? "session current" : "session";
+      if (row.live) {
+        const dot = document.createElement("span");
+        dot.className = "live-dot";
+        item.append(dot);
+      }
+      item.append(sessionLabel(row));
+      item.addEventListener("click", () => select(row.session_id));
+      return item;
+    }),
+  );
+}
+
+function setText(id: string, text: string): void {
+  document.getElementById(id)!.textContent = text;
+}
+
+function drawSide(): void {
+  const row = menu?.sessions.sessions.find((item) => item.session_id === menu?.current);
+  const link = document.getElementById("remote") as HTMLAnchorElement;
+  link.hidden = !row?.remote_control_url;
+  link.href = row?.remote_control_url ?? "";
+  setText("top-title", menu?.project ?? "");
+  setText("side-project", menu?.project ?? "");
+  setText("side-branch", facts?.git_branch ?? "");
+
+  const percent = facts?.context?.percent ?? null;
+  setText("side-context", percent === null ? "unknown" : `${percent}%`);
+  (document.getElementById("context-fill") as HTMLElement).style.width = `${percent ?? 0}%`;
+
+  const running = background?.running ? background.agents : [];
+  const list = document.getElementById("side-tasks")!;
+  list.replaceChildren(
+    ...running.map((agent) => {
+      const item = document.createElement("div");
+      item.className = "side-task";
+      item.textContent = agent.description || agent.type;
+      return item;
+    }),
+  );
+  if (background?.shells) {
+    const item = document.createElement("div");
+    item.className = "side-task";
+    item.textContent = plural(background.shells, "shell");
+    list.append(item);
+  }
+  setText("side-finished", `${Math.max(0, subagents.size - running.length)} finished`);
+}
+
+try {
+  document.body.classList.toggle("side-closed", localStorage.getItem(SIDE_CLOSED_KEY) === "1");
+} catch {}
+
+document.getElementById("side-toggle")!.addEventListener("click", () => {
+  const closed = document.body.classList.toggle("side-closed");
+  try {
+    localStorage.setItem(SIDE_CLOSED_KEY, closed ? "1" : "0");
+  } catch {}
+});
+
+document.getElementById("sessions-more")!.addEventListener("click", () => {
+  allSessions = !allSessions;
+  drawMenu();
+});
+
 function drawCommandOutput(output: CommandOutput): HTMLElement {
   const element = document.createElement("article");
   element.className = "command";
@@ -419,7 +539,23 @@ const kyo = {
     elements.clear();
     rendered.clear();
     calls.clear();
+    diffs.clear();
+    subagents.clear();
+    facts = null;
     latestAt = "";
+    live.innerHTML = "";
+    drawSide();
+  },
+
+  facts(frame: { facts?: Facts | null }): void {
+    if (frame.facts) facts = frame.facts;
+    drawSide();
+  },
+
+  menu(data: Menu): void {
+    menu = data;
+    drawMenu();
+    drawSide();
   },
 
   apply(batch: Batch): void {
@@ -442,8 +578,11 @@ const kyo = {
       for (const output of batch.command_outputs ?? []) {
         place(`o:${output.uuid}`, output.at, output.text, () => drawCommandOutput(output));
       }
+      for (const agent of batch.subagents ?? []) subagents.add(agent.agent_id);
       arrange();
     });
+    if (batch.facts) facts = batch.facts;
+    drawSide();
     for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.command_outputs]) {
       for (const item of list ?? []) if (item.at > latestAt) latestAt = item.at;
     }
@@ -461,6 +600,7 @@ const kyo = {
   ready(frame: ScreenFrame & { reply_in_progress?: string | { text: string } | null }): void {
     const value = frame.reply_in_progress;
     kyo.live({ text: typeof value === "string" ? value : value?.text ?? null });
+    kyo.facts(frame as { facts?: Facts | null });
     kyo.screen(frame);
   },
 
@@ -471,6 +611,7 @@ const kyo = {
     background = frame.screen?.background ?? null;
     if (changed) keepingPlace(arrange);
     drawWorking();
+    drawSide();
   },
 };
 

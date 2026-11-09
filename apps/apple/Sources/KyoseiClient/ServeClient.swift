@@ -116,6 +116,10 @@ public struct ServeClient: Sendable {
         return try JSONDecoder().decode(SessionList.self, from: data).sessions
     }
 
+    public func sessionsData(project: String) async throws -> Data {
+        try await get("v1/projects/\(project)/sessions")
+    }
+
     public func turns(project: String, session: String) async throws -> Data {
         try await get("v1/projects/\(project)/sessions/\(session)/turns")
     }

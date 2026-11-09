@@ -13,11 +13,73 @@
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
-    <main>
-      <div id="chat"></div>
-      <article id="live" class="reply"></article>
-      <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
-    </main>
+    <header id="top"><span id="top-title"></span></header>
+
+    <nav id="menu">
+      <div id="menu-panel">
+        <h4>Sessions</h4>
+        <div id="sessions"></div>
+        <div id="sessions-more" class="session" hidden></div>
+      </div>
+      <div id="menu-icon" aria-hidden="true">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor">
+          <rect x="0.5" y="0.5" width="17" height="13" rx="2.5" />
+          <line x1="5.5" y1="4" x2="5.5" y2="10" />
+        </svg>
+      </div>
+    </nav>
+
+    <button id="side-toggle" aria-label="Show or hide session details">
+      <svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor">
+        <line x1="5" y1="2" x2="15" y2="2" />
+        <line x1="5" y1="7" x2="15" y2="7" />
+        <line x1="5" y1="12" x2="15" y2="12" />
+        <circle cx="1.5" cy="2" r="0.6" fill="currentColor" />
+        <circle cx="1.5" cy="7" r="0.6" fill="currentColor" />
+        <circle cx="1.5" cy="12" r="0.6" fill="currentColor" />
+      </svg>
+    </button>
+
+    <aside id="side">
+      <section>
+        <h4>Environment</h4>
+        <div class="env">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+          <span class="env-text">Remote Control</span>
+          <a id="remote" hidden>Open on claude.ai</a>
+        </div>
+        <div class="env">
+          <svg viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg>
+          <span class="env-text" id="side-project"></span>
+        </div>
+        <div class="env">
+          <svg viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>
+          <span class="env-text" id="side-branch"></span>
+        </div>
+      </section>
+      <section>
+        <div class="side-row">
+          <h4>Context</h4>
+          <span class="context-value">
+            <span id="side-context"></span>
+            <span class="pill"><span id="context-fill"></span></span>
+          </span>
+        </div>
+      </section>
+      <section>
+        <h4>Background tasks</h4>
+        <div id="side-tasks"></div>
+        <div id="side-finished"></div>
+      </section>
+    </aside>
+
+    <div id="page">
+      <main>
+        <div id="chat"></div>
+        <article id="live" class="reply"></article>
+        <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
+      </main>
+    </div>
     <script src="chat.js"></script>
   </body>
 </html>

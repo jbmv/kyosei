@@ -7,25 +7,22 @@ import WebKit
 @MainActor
 @Observable
 final class SessionFeed {
+    private static let menuRefresh = Duration.seconds(5)
+
     private let client: ServeClient
-    private let project: String
+    private var selected: String?
+    private var current: String?
     private var task: Task<Void, Never>?
+    private var menuTask: Task<Void, Never>?
     @ObservationIgnored weak var webView: WKWebView?
 
+    let project: String
     private(set) var status = "connecting"
     private(set) var facts: SessionFacts?
-    let projectName: String
-
-    private func takeFacts(from json: Data) {
-        if let carried = try? JSONDecoder().decode(FactsCarrier.self, from: json).facts {
-            facts = carried
-        }
-    }
 
     init(client: ServeClient, project: String) {
         self.client = client
         self.project = project
-        self.projectName = project
     }
 
     static func fromEnvironment() -> SessionFeed {
@@ -38,6 +35,22 @@ final class SessionFeed {
     func start() {
         guard task == nil else { return }
         task = Task { await run() }
+        menuTask = Task {
+            while !Task.isCancelled {
+                await sendMenu()
+                try? await Task.sleep(for: Self.menuRefresh)
+            }
+        }
+    }
+
+    /// Show another session of this window's project. A window stays on one project, so that
+    /// one project's session is never opened from another's.
+    func select(session: String) {
+        selected = session
+        facts = nil
+        status = "connecting"
+        task?.cancel()
+        task = Task { await run() }
     }
 
     private func send(_ function: String, _ json: String) {
@@ -46,25 +59,58 @@ final class SessionFeed {
         }
     }
 
+    private func quoted(_ text: String?) -> String {
+        guard let text, let data = try? JSONEncoder().encode(text) else { return "null" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func sendMenu() async {
+        guard let sessions = try? await client.sessionsData(project: project) else { return }
+        let json =
+            #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "sessions": "#
+            + String(decoding: sessions, as: UTF8.self) + "}"
+        send("menu", json)
+    }
+
+    private func takeFacts(from json: Data) {
+        if let carried = try? JSONDecoder().decode(FactsCarrier.self, from: json).facts {
+            facts = carried
+        }
+    }
+
     private func run() async {
         while !Task.isCancelled {
             do {
                 let sessions = try await client.sessions(project: project)
-                guard let row = sessions.first(where: { $0.live && $0.has_pane }) ?? sessions.first
+                guard
+                    let row = sessions.first(where: { $0.session_id == selected })
+                        ?? sessions.first(where: { $0.live && $0.has_pane }) ?? sessions.first
                 else {
+                    current = nil
+                    send("clear", "null")
                     status = "no session"
                     try await Task.sleep(for: .seconds(3))
                     continue
                 }
                 let turns = try await client.turns(project: project, session: row.session_id)
+                try Task.checkCancellation()
+                current = row.session_id
                 send("clear", "null")
                 send("apply", String(decoding: turns, as: UTF8.self))
                 takeFacts(from: turns)
                 status = "connected"
+                await sendMenu()
+                guard row.live else {
+                    // An ended session has nothing to follow.
+                    send("screen", #"{"screen": null}"#)
+                    try await Task.sleep(for: .seconds(3600))
+                    continue
+                }
                 try await follow(session: row.session_id, turns: turns)
             } catch is CancellationError {
                 return
             } catch {
+                if Task.isCancelled { return }
                 status = "disconnected"
                 print("[feed] \(error)")
             }
@@ -86,6 +132,7 @@ final class SessionFeed {
                 send("ready", event.data)
                 takeFacts(from: Data(event.data.utf8))
             case "facts":
+                send("facts", event.data)
                 takeFacts(from: Data(event.data.utf8))
             case "screen":
                 send("screen", event.data)

@@ -19,7 +19,7 @@ struct ChatView: View {
                 }
                 Spacer()
                 if feed.status != "connected" { Text(feed.status) }
-                Text(feed.projectName)
+                Text(feed.project)
                 if let branch = feed.facts?.git_branch { Text(branch) }
             }
             .font(.system(size: 11))
@@ -42,6 +42,7 @@ struct ChatWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "log")
+        configuration.userContentController.add(context.coordinator, name: "select")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
@@ -80,6 +81,12 @@ struct ChatWebView: NSViewRepresentable {
         func userContentController(
             _ controller: WKUserContentController, didReceive message: WKScriptMessage
         ) {
+            if message.name == "select", let body = message.body as? [String: Any],
+                let session = body["session"] as? String
+            {
+                feed.select(session: session)
+                return
+            }
             print("[page] \(message.body)")
         }
     }
