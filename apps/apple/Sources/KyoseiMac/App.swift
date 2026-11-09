@@ -26,5 +26,9 @@ struct KyoseiMacApp: App {
                 .frame(minWidth: 560, minHeight: 400)
         }
         .defaultSize(width: 980, height: 860)
+
+        Settings {
+            SettingsView(feed: feed)
+        }
     }
 }

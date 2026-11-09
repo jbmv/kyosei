@@ -71,7 +71,11 @@ struct ChatWebView: NSViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
         feed.webView = view
-        let directory = Bundle.module.resourceURL!.appending(path: "renderer")
+        // A packaged app holds the renderer in its own resources.
+        let packaged = Bundle.main.url(
+            forResource: "KyoseiApple_KyoseiMac", withExtension: "bundle"
+        ).flatMap(Bundle.init(url:))
+        let directory = (packaged ?? Bundle.module).resourceURL!.appending(path: "renderer")
         view.loadFileURL(
             directory.appending(path: "chat.html"), allowingReadAccessTo: directory)
         return view

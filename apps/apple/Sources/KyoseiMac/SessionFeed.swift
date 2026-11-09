@@ -9,14 +9,14 @@ import WebKit
 final class SessionFeed {
     private static let menuRefresh = Duration.seconds(5)
 
-    private let client: ServeClient
+    private var client: ServeClient
     private var selected: String?
     private var current: String?
     private var task: Task<Void, Never>?
     private var menuTask: Task<Void, Never>?
     @ObservationIgnored weak var webView: WKWebView?
 
-    let project: String
+    private(set) var project: String
     private(set) var status = "connecting"
     private(set) var facts: SessionFacts?
     private(set) var remote: String?
@@ -30,11 +30,57 @@ final class SessionFeed {
         self.project = project
     }
 
+    private static let serverKey = "serverURL"
+    private static let projectKey = "project"
+    private static let localServer = "http://127.0.0.1:47370"
+    private static let tokenService = "dev.kyosei.device-token"
+    private static var environment: [String: String] { ProcessInfo.processInfo.environment }
+
+    static var savedServer: String {
+        environment["KYOSEI_SERVE_URL"] ?? UserDefaults.standard.string(forKey: serverKey)
+            ?? localServer
+    }
+
+    static var savedProject: String {
+        environment["KYOSEI_PROJECT"] ?? UserDefaults.standard.string(forKey: projectKey)
+            ?? "kyosei"
+    }
+
     static func fromEnvironment() -> SessionFeed {
-        let environment = ProcessInfo.processInfo.environment
-        let base = URL(string: environment["KYOSEI_SERVE_URL"] ?? "http://127.0.0.1:47370")!
-        return SessionFeed(
-            client: ServeClient(base: base), project: environment["KYOSEI_PROJECT"] ?? "kyosei")
+        SessionFeed(client: ServeClient(base: URL(string: savedServer)!), project: savedProject)
+    }
+
+    /// Points this window at another server or project, and reads it afresh.
+    func configure(server: URL, project: String) {
+        UserDefaults.standard.set(server.absoluteString, forKey: Self.serverKey)
+        UserDefaults.standard.set(project, forKey: Self.projectKey)
+        task?.cancel()
+        menuTask?.cancel()
+        task = nil
+        menuTask = nil
+        client = ServeClient(base: server)
+        self.project = project
+        selected = nil
+        current = nil
+        draftSession = nil
+        draftEtag = nil
+        facts = nil
+        remote = nil
+        status = "connecting"
+        send("clear", "null")
+        start()
+    }
+
+    /// Stores the device token through the system's own `security` tool.
+    static func storeDeviceToken(_ token: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-generic-password", "-U", "-s", tokenService, "-a", "device", "-w", token,
+        ]
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     func start() {
@@ -63,7 +109,7 @@ final class SessionFeed {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = [
-            "find-generic-password", "-s", "dev.kyosei.device-token", "-a", "studio-mac", "-w",
+            "find-generic-password", "-s", tokenService, "-w",
         ]
         let output = Pipe()
         process.standardOutput = output

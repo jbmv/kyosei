@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "KyoseiApple",
-    platforms: [.macOS("27.0")],
+    platforms: [.macOS("15.0")],
     products: [
         .executable(name: "KyoseiMac", targets: ["KyoseiMac"]),
         .library(name: "KyoseiClient", targets: ["KyoseiClient"]),

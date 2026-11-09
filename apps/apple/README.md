@@ -18,5 +18,9 @@ cd web && npm ci && npm run build && cd ..
 swift run KyoseiMac
 ```
 
-The app reads `kyo serve` at `http://127.0.0.1:47370`. `KYOSEI_SERVE_URL` names another
-address and `KYOSEI_PROJECT` another project.
+The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name another server
+and project, which `KYOSEI_SERVE_URL` and `KYOSEI_PROJECT` override. Sending needs a device
+token from `kyo devices issue`, entered in Settings and kept in the Keychain.
+
+`package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
+and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.
