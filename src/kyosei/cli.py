@@ -2263,7 +2263,8 @@ def build_parser() -> KyoseiParser:
         default=[],
         choices=device_tokens.PERMISSIONS,
         help="with issue: a permission the token carries (repeatable). `send` lets it use the "
-        "send routes; a token issued without it is refused there",
+        "send routes and `notes` the note routes; a token issued without the one a route "
+        "asks for is refused there",
     )
 
     p_onboard = sub.add_parser(

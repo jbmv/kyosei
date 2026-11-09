@@ -491,7 +491,7 @@ would type it. It passes the checks a send makes, so holding needs `serve_send: 
 session holds one at a time; a second is refused with `already-held`, naming the id to
 retract. A message held on an idle screen is delivered on the next looks. `GET` and the
 response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (`held` or
-`delivering`), `reason`, `detail` and `retrying`.
+`delivering`), `reason`, `detail`, `retrying` and `notes` (the ids of a set of notes, or empty).
 
 The server watches a held session once a second, in its own thread, whether or not a client
 is connected; the thread ends when nothing is held. A look costs one pane lookup and one
@@ -517,6 +517,90 @@ The send log records holds, retractions and deliveries with the actions `hold`, 
 `held-delivery`. A delivery that the log cannot record does not start, and the message stays
 held. On a session's event stream, the `ready` event carries `held` and a `held` event reports
 `outcome` (`held`, `delivered`, `retracted`), `id` and the message; neither carries text.
+
+### Notes: the note routes (KYO-706)
+
+A note is the person's text on the places it addresses, as `kyo notes` records it
+(`kyo reference notes`). Clients file, find, tag and send notes through these routes, each
+under `/v1/projects/<name>/` and each needing a device token with the `notes` permission:
+
+```
+kyo devices issue my-ipad --permission notes --permission send
+```
+
+The two permissions are separate because `send` drives a session and `notes` writes the
+store. A device that only takes notes needs `notes` alone, and sending a set of notes needs
+both. A token is sent as `Authorization: Bearer <token>`.
+
+| Route | Method | Body or query | What it does |
+|---|---|---|---|
+| `notes` | POST | `{"text", "anchors", "tags", "entered"}` | File a note |
+| `notes` | GET | `?tag=` (repeatable), `?on=`, `?anchored-to=`, `?session=`, `?person=` | The notes matching every filter, oldest first |
+| `notes/<id>` | GET | | One note |
+| `notes/<id>/tags` | POST | `{"add": [...], "remove": [...]}` | Move its tags |
+| `sessions/<id>/send-notes` | POST | `{"notes": [ids]}` | Send them as one message |
+
+`text` may be empty if there are tags. `anchors` are the objects `kyo notes add
+--anchors-file` takes, and a note may have none. `entered` is `typed`, `pasted`, `dictated` or
+`drawn`. A note's device is the name its token was issued to; a body cannot name one. A
+filter's `?on=` matches an anchor's target or a turn's session, `?session=` a turn's session,
+and `?anchored-to=` is one of `prompt`, `output`, `turn`, `record`, `document`, `file`, `note`.
+
+A note is filed and its tags are moved by the same code as `kyo notes`, so an event and the
+ledger lines are written as there, and a write holds the same lock: SQLite's write lock, then
+the export directory's. A write that cannot get it within the store's timeout is refused
+`store-locked` (503), and repeating the request clears it. These are the only writes `kyo
+serve` makes to a store; every other route opens it read-only.
+
+**Sending notes.** `send-notes` builds one plain-text message and holds it through the path
+above, so a message sent during a turn waits for the turn and the send checks all apply
+(`serve_send: true`, the `send` permission, a recorded session and a pane). The notes get the
+tag `sent` when the message is delivered, and not when it is held, refused or retracted. The
+response carries the held message's description, the `notes` and the `message` text. `GET
+held` and the retraction response name the `notes`, so a composer can restore them.
+
+The message has this form:
+
+```
+[kyo-message, 2 notes]
+
+Note 1 (KYO-N41)
+on your reply 8c1f73e2-0d9d-4c8e-a1d5-3f2e0b7a4c11 "the transcript does not stream; the..."
+why don't we just reformat it ourselves?
+
+Note 2 (KYO-N42)
+on KYO-12.g1
+on note KYO-N3
+this looks right on the iPad, approved
+```
+
+The first line counts the notes. Each note then opens with its number and id, and has one `on`
+line per anchor and none for a note with no anchor. An anchor is named by its id:
+
+| Anchor | Line |
+|---|---|
+| A reply | `on your reply <uuid> "<words>..."` |
+| A prompt | `on my prompt <uuid> "<words>..."` |
+| Of another session | either of those, with `in session <id>` before the words |
+| A record, criterion or gate | `on KYO-12.g1` |
+| A document or file | `on document <path> at <commit> lines 3-9 "<words>..."` |
+| Another note | `on note <id>` |
+
+`<words>` is the first six words of the span, read from the transcript or the commit when the
+message is made, and a `...` follows if the span goes on. When the words cannot be read, or a
+turn span no longer matches the digest stored with its anchor, the line ends `(words
+unavailable)` instead. Nothing longer is quoted, since the agent already has the conversation
+and the store holds no transcript text. After the `on` lines the person's text follows
+unchanged, so a transcript check still finds it. A note whose text holds a tab, or that was
+entered as a paste, is delivered as a paste.
+
+To read a span in full, an agent runs `kyo notes show <note id>`, which gives each anchor's
+session, uuid and character range, and for a document its path, commit and lines.
+
+Refusals carry a `reason`: `no-token`, `unknown-token`, `revoked-token`, `no-notes-permission`,
+`bad-request`, `not-found`, `store-locked`, `store-refused`, and on `send-notes` also
+`note-redacted` and `note-unsendable` (a control character in a filed note), plus those of the
+held route.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 

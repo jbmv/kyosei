@@ -62,6 +62,11 @@ THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's
 composer boxes (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
 message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device token.
 
+THE NOTE ROUTES (KYO-706). ``notes`` (GET, POST), ``notes/{id}`` (GET), ``notes/{id}/tags``
+(POST) and ``sessions/{id}/send-notes`` (POST) are :mod:`kyosei.serve_notes`, and need a device
+token holding the ``notes`` permission. They are the one exception to a read-only store: each
+write opens its own connection and goes through the transaction ``kyo notes`` uses.
+
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
 it binds, ``kyo serve`` asks its port who is there (:func:`serve_install.refuse_if_held`)
@@ -283,7 +288,13 @@ SESSION_SEND_ROUTES = ("send", "slash", "interrupt")
 SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     "draft": ("GET", "PUT"),
     "held": ("GET", "POST", "DELETE"),
+    # KYO-706: a set of notes, sent as one held message (serve_notes).
+    "send-notes": ("POST",),
 }
+
+#: KYO-706: the note routes, under ``/v1/projects/{project}/``.
+NOTES_ROUTE = "notes"
+_NOTE_TAGS_ROUTE = "tags"
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -678,6 +689,15 @@ class ServeHandler(BaseHTTPRequestHandler):
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
+        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == NOTES_ROUTE:
+            if len(rest) == 3:
+                allowed = ("GET", "POST")
+            elif len(rest) == 4:
+                allowed = ("GET",)
+            elif len(rest) == 5 and rest[4] == _NOTE_TAGS_ROUTE:
+                allowed = ("POST",)
+            else:
+                raise _no_route(method, split.path)
         elif (
             len(rest) == 5
             and rest[0] == "projects"
@@ -716,6 +736,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(self._projects())
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
+        if rest[2] == NOTES_ROUTE:
+            return self._note_route(method, rest[1], rest[3:], split.query)
         if rest[2] == "sessions":
             if len(rest) == 5 and rest[4] in SESSION_SEND_ROUTES:
                 return self._session_send(rest[1], rest[3], rest[4], split.query)
@@ -902,6 +924,12 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self.server.project(name).root
 
         authorization = self.headers.get("Authorization")
+        if route == "send-notes":
+            from . import serve_notes
+
+            return 200, _json_bytes(
+                serve_notes.send(self.server, name, root_of, session_id, authorization, self._body)
+            )
         if route == "draft":
             status, document = serve_drafts.perform(
                 self.server.environ,
@@ -924,6 +952,35 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(held.read(root_of, session_id, authorization))
         return 200, _json_bytes(
             held.retract(root_of, session_id, authorization, self.headers.get("If-Match"))
+        )
+
+    def _note_route(self, method: str, name: str, rest: list[str], query: str) -> tuple:
+        """Every note route. Everything it decides is :mod:`kyosei.serve_notes`'s."""
+        from . import serve_notes
+
+        if query and not (method == "GET" and not rest):
+            raise Refusal(
+                400,
+                "only GET of notes takes a query string; send the token as "
+                "`Authorization: Bearer <token>` and everything else in the JSON body",
+            )
+
+        def root_of() -> str:
+            return self.server.project(name).root
+
+        server, authorization = self.server, self.headers.get("Authorization")
+        if not rest and method == "POST":
+            return 201, _json_bytes(
+                serve_notes.create(server, root_of, authorization, self._body)
+            )
+        if not rest:
+            return 200, _json_bytes(
+                serve_notes.find(server, root_of, authorization, _query_pairs(query))
+            )
+        if len(rest) == 1:
+            return 200, _json_bytes(serve_notes.read(server, root_of, authorization, rest[0]))
+        return 200, _json_bytes(
+            serve_notes.tag(server, root_of, authorization, rest[0], self._body)
         )
 
     def _session_image(self, project, session_id: str, turn: str, index: str) -> tuple:
@@ -1192,8 +1249,9 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
         f"GET {project}/events, GET {project}/sessions and GET "
         f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
-        f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, and POST "
-        f"{project}/sessions/{{id}}/send, .../slash or .../interrupt",
+        f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, POST "
+        f"{project}/sessions/{{id}}/send, .../slash, .../interrupt or .../send-notes, GET/POST "
+        f"{project}/notes, GET {project}/notes/{{id}} and POST {project}/notes/{{id}}/tags",
     )
 
 

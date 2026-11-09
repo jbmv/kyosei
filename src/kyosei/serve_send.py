@@ -227,16 +227,22 @@ def _unauthorized(message: str, reason: str) -> Refusal:
     return Refusal(401, message, reason=reason, headers={"WWW-Authenticate": "Bearer"})
 
 
-_ISSUE_ONE = f"`kyo devices issue <name> --permission {device_tokens.PERMISSION_SEND}`"
+def _issue_one(permission: str) -> str:
+    return f"`kyo devices issue <name> --permission {permission}`"
 
 
-def _device_presented(environ: dict[str, str], authorization: str | None) -> device_tokens.Device:
-    """The device this request's token was issued to, or a refusal."""
+def _device_presented(
+    environ: dict[str, str],
+    authorization: str | None,
+    permission: str = device_tokens.PERMISSION_SEND,
+) -> device_tokens.Device:
+    """The device this request's token was issued to, or a refusal naming ``permission``."""
+    issue_one = _issue_one(permission)
     scheme, _, presented = (authorization or "").strip().partition(" ")
     if scheme.lower() != "bearer" or not presented.strip():
         raise _unauthorized(
-            "a send needs the header `Authorization: Bearer <token>`; a token is issued on "
-            f"this machine by {_ISSUE_ONE}",
+            "this route needs the header `Authorization: Bearer <token>`; a token is issued "
+            f"on this machine by {issue_one}",
             "no-token",
         )
     try:
@@ -246,37 +252,47 @@ def _device_presented(environ: dict[str, str], authorization: str | None) -> dev
     device = device_tokens.holder_of(presented.strip(), devices)
     if device is None:
         raise _unauthorized(
-            f"this token is not one this machine issued; issue one on it with {_ISSUE_ONE}",
+            f"this token is not one this machine issued; issue one on it with {issue_one}",
             "unknown-token",
         )
     return device
 
 
-def _require_may_send(device: device_tokens.Device) -> None:
+def _require_permission(device: device_tokens.Device, permission: str) -> None:
+    issue_one = _issue_one(permission)
     if device.revoked_at is not None:
         raise _unauthorized(
             f"the token of device {device.name} was revoked at {device.revoked_at}; issue a "
-            f"new one with {_ISSUE_ONE}",
+            f"new one with {issue_one}",
             "revoked-token",
         )
-    if device_tokens.PERMISSION_SEND not in device.permissions:
+    if permission not in device.permissions:
         raise Refusal(
             403,
-            f"the token of device {device.name} does not carry the "
-            f"{device_tokens.PERMISSION_SEND} permission; revoke it (`kyo devices revoke "
-            f"{device.name}`) and issue another with {_ISSUE_ONE}",
-            reason="no-send-permission",
+            f"the token of device {device.name} does not carry the {permission} permission; "
+            f"revoke it (`kyo devices revoke {device.name}`) and issue another with {issue_one}, "
+            "repeating --permission for each permission the device needs",
+            reason=f"no-{permission}-permission",
         )
 
 
-def require_device(environ: dict[str, str], authorization: str | None) -> device_tokens.Device:
-    """The device presenting this token, if it may drive sessions; else the refusal.
+def _require_may_send(device: device_tokens.Device) -> None:
+    _require_permission(device, device_tokens.PERMISSION_SEND)
+
+
+def require_device(
+    environ: dict[str, str],
+    authorization: str | None,
+    permission: str = device_tokens.PERMISSION_SEND,
+) -> device_tokens.Device:
+    """The device presenting this token, if it holds ``permission``; else the refusal.
 
     The composer's routes, which change no session, ask for this and not for the machine's
     ``serve_send`` setting, so that text can be saved and taken back while sending is off.
+    The note routes (:mod:`kyosei.serve_notes`) ask for the ``notes`` permission.
     """
-    device = _device_presented(environ, authorization)
-    _require_may_send(device)
+    device = _device_presented(environ, authorization, permission)
+    _require_permission(device, permission)
     return device
 
 
@@ -297,17 +313,17 @@ def _held_device(environ: dict[str, str], device_id: str) -> device_tokens.Devic
     )
 
 
-def _bad_request(message: str) -> Refusal:
+def bad_request(message: str) -> Refusal:
     return Refusal(400, message, reason="bad-request")
 
 
-def _document(raw: bytes) -> dict:
+def json_object(raw: bytes) -> dict:
     try:
         document = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise _bad_request(f"the body is not JSON: {exc}") from exc
+        raise bad_request(f"the body is not JSON: {exc}") from exc
     if not isinstance(document, dict):
-        raise _bad_request("the body must be a JSON object")
+        raise bad_request("the body must be a JSON object")
     return document
 
 
@@ -315,7 +331,7 @@ def _refuse_controls(text: str, allowed: str, what: str) -> None:
     """Refuse a control character, by its code point: sent to a pane it would act as a key."""
     for character in text:
         if character not in allowed and unicodedata.category(character) == "Cc":
-            raise _bad_request(
+            raise bad_request(
                 f"{what} holds the control character U+{ord(character):04X}, which would act "
                 "as a key in the pane. Remove it; a line break is a newline alone, and a tab "
                 "can only be sent in a pasted segment"
@@ -325,22 +341,22 @@ def _refuse_controls(text: str, allowed: str, what: str) -> None:
 def _message_segments(document: dict) -> list[_Segment]:
     raw = document.get("segments")
     if not isinstance(raw, list) or not raw:
-        raise _bad_request(
+        raise bad_request(
             'the body needs "segments": a list of {"kind": "typed" or "pasted", "text": ...}'
         )
     segments: list[_Segment] = []
     for index, item in enumerate(raw):
         if not isinstance(item, dict) or item.get("kind") not in (TYPED, PASTED):
-            raise _bad_request(f'segments[{index}] needs a "kind" of "typed" or "pasted"')
+            raise bad_request(f'segments[{index}] needs a "kind" of "typed" or "pasted"')
         text = item.get("text")
         if not isinstance(text, str) or not text:
-            raise _bad_request(f'segments[{index}] needs a non-empty "text"')
+            raise bad_request(f'segments[{index}] needs a non-empty "text"')
         kind = item["kind"]
         _refuse_controls(text, "\n" if kind == TYPED else "\n\t", f"segments[{index}]")
         segments.append(_Segment(kind, text))
     whole = "".join(segment.text for segment in segments).lstrip()
     if not whole:
-        raise _bad_request("the segments hold only white space, so there is no message to send")
+        raise bad_request("the segments hold only white space, so there is no message to send")
     if _COMMAND_SHAPED.match(whole):
         raise Refusal(
             400,
@@ -356,7 +372,7 @@ def _message_segments(document: dict) -> list[_Segment]:
 def _command_segment(document: dict) -> _Segment:
     command = document.get("command")
     if not isinstance(command, str) or not command.startswith("/"):
-        raise _bad_request('the body needs "command": one line beginning with /')
+        raise bad_request('the body needs "command": one line beginning with /')
     _refuse_controls(command, "", '"command"')
     return _Segment(COMMAND, command)
 
@@ -364,7 +380,7 @@ def _command_segment(document: dict) -> _Segment:
 def _parsed(action: str, document: dict) -> tuple[list[_Segment], bool]:
     automatic = document.get("automatic", False)
     if not isinstance(automatic, bool):
-        raise _bad_request('"automatic" must be true or false')
+        raise bad_request('"automatic" must be true or false')
     if action in (MESSAGE, HOLD):
         return _message_segments(document), automatic
     if action == SLASH:
@@ -416,7 +432,7 @@ def _attempt(
     device = _device_presented(environ, authorization)
     attempt.device = {"id": device.id, "name": device.name}
     _require_may_send(device)
-    segments, attempt.automatic = _parsed(action, _document(body.read()))
+    segments, attempt.automatic = _parsed(action, json_object(body.read()))
     attempt.segments = [segment.logged() for segment in segments]
     project = ProjectSessions(root_of(), environ)
     project.require(session_id)

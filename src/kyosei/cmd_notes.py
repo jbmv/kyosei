@@ -37,6 +37,10 @@ other case the caller supplies digest and role, and kyo records that it took the
 (``digest_check: given``). A span's characters are code points of the record's text, the
 ``text`` blocks joined by one newline, so a client measuring UTF-16 units must convert.
 
+TWO WRITERS, ONE WRITE PATH (KYO-706). ``kyo notes`` and ``kyo serve``'s note routes
+(:mod:`kyosei.serve_notes`) file a note with :func:`file_note` and change its tags with
+:func:`change_tags`, so the transaction, the event and the ledger lines cannot differ.
+
 CREDITS. A credit cites words checked against a transcript (:mod:`kyosei.credits`). A note is
 the person's own words at their source, so the credit source kind that reads one (a later
 chunk) will name the note by id and take ``person``, ``device`` and ``entered`` from it.
@@ -50,6 +54,7 @@ import json
 import re
 import socket
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from . import events_ledger, export, git_queries, ids, ledgers
@@ -137,10 +142,13 @@ def record_text(record: dict) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _read_record(ctx: Context, session: str, uuid: str) -> dict | None:
-    """The transcript record, or None when this project may not read it or it is gone."""
+def read_records(ctx: Context, session: str, uuids: set[str]) -> dict[str, dict]:
+    """The transcript records with these uuids, read in one pass over the session's files.
+
+    Empty when this project may not read the transcript or it is gone.
+    """
     if not transcripts_opted_in(ctx.store().config):
-        return None
+        return {}
     try:
         paths = transcript.candidate_transcripts(
             session,
@@ -150,11 +158,18 @@ def _read_record(ctx: Context, session: str, uuid: str) -> dict | None:
         )
     except ValueError as exc:
         raise UsageError(f"{exc}; a turn anchor's session is the session's UUID") from exc
+    found: dict[str, dict] = {}
     for path in paths:
         for record in transcript._parse_lines(path):
-            if record.get("uuid") == uuid:
-                return record
-    return None
+            uuid = record.get("uuid")
+            if uuid in uuids and uuid not in found:
+                found[uuid] = record
+    return found
+
+
+def _read_record(ctx: Context, session: str, uuid: str) -> dict | None:
+    """The transcript record, or None when this project may not read it or it is gone."""
+    return read_records(ctx, session, {uuid}).get(uuid)
 
 
 def _int(raw: dict, key: str, where: str) -> int:
@@ -389,12 +404,13 @@ def find_note_ids(
     target: str | None,
     anchored_to: str | None,
     person: str | None,
+    session: str | None = None,
 ) -> list[str]:
     """Every note matching all the filters, oldest first.
 
     ``target`` matches an anchor's target or its session, and a record id also matches the
-    criteria and gates of that record. ``target`` and ``anchored_to`` must hold of one
-    anchor together.
+    criteria and gates of that record. ``session`` matches a turn anchor's session alone.
+    ``target``, ``session`` and ``anchored_to`` must hold of one anchor together.
     """
     sql = "SELECT n.id FROM person_notes n WHERE 1=1"
     params: list[object] = []
@@ -415,6 +431,9 @@ def find_note_ids(
         else:
             conditions.append("(a.target = ? OR a.session = ?)")
             params += [target, target]
+    if session is not None:
+        conditions.append("a.session = ?")
+        params.append(session)
     if anchored_to is not None:
         kind, role = ANCHORED_TO[anchored_to]
         conditions.append("a.kind = ?")
@@ -430,33 +449,56 @@ def find_note_ids(
     return [row["id"] for row in store.conn.execute(sql + " ORDER BY n.seq", params)]
 
 
-def _add(ctx: Context, args: Namespace) -> Output:
-    if not args.entered:
-        raise UsageError(
-            f"kyo notes add needs --entered ({', '.join(ENTERED)}): how the text reached "
-            "kyo is a fact about the note that only the caller knows"
-        )
+def span_text(ctx: Context, anchor: dict, records: dict[str, dict]) -> str | None:
+    """The words an anchor addresses, read from where they live, or None.
+
+    ``anchor`` is as :func:`kyosei.export.person_note_document` gives it and ``records`` is
+    what :func:`read_records` found. None for an anchor with no span, a transcript or commit
+    that is gone, or a turn span whose digest no longer matches.
+    """
+    kind = anchor["kind"]
+    if kind == ANCHOR_TURN:
+        record = records.get(anchor["target"])
+        text = None if record is None else record_text(record)
+        start, end = anchor["char_start"], anchor["char_end"]
+        if text is None or end > len(text) or span_digest(text, start, end) != anchor["digest"]:
+            return None
+        return text[start:end]
+    if kind in (ANCHOR_DOCUMENT, ANCHOR_FILE):
+        text = _git_text(ctx, anchor["commit_sha"], anchor["target"])
+        if text is None:
+            return None
+        if "line_start" in anchor:
+            return "\n".join(text.splitlines()[anchor["line_start"] - 1 : anchor["line_end"]])
+        return text[anchor["char_start"] : anchor["char_end"]]
+    return None
+
+
+def file_note(
+    ctx: Context,
+    *,
+    text: str,
+    tags: list[str],
+    anchors_of: Callable[[Store], list[dict]],
+    device: str,
+    entered: str,
+    person: str | None = None,
+) -> dict:
+    """File one note and return its document: the one write path (module docstring).
+
+    ``anchors_of`` is called inside the transaction, so what an anchor names is checked
+    under the store's write lock.
+    """
     store = ctx.store()
-    text = read_prose(args.file, what="--file") if args.file else ""
-    tags = sorted({normalise_tag(tag) for tag in args.tag or []})
-    if not text.strip() and not tags:
-        raise UsageError(
-            "a note needs text (--file FILE, or '-' for stdin, law 5) or at least one --tag"
-        )
-    device = (
-        single_line(args.device, what="--device")
-        if args.device is not None
-        else socket.gethostname()
-    )
     with store.transaction():
-        person = _person(store, args.person)
-        anchors = _anchors(ctx, store, args)
+        who = _person(store, person)
+        anchors = anchors_of(store)
         note_id = store.add_person_note(
             text=text,
-            person=person,
+            person=who,
             author=ctx.actor,
             device=device,
-            entered=args.entered,
+            entered=entered,
             anchors=anchors,
             tags=tags,
         )
@@ -474,6 +516,36 @@ def _add(ctx: Context, args: Namespace) -> Output:
     events_ledger.append_events(store, [event])
     ledgers.append_person_note(store, line)
     ledgers.write_allocations(store)
+    return document
+
+
+def _add(ctx: Context, args: Namespace) -> Output:
+    if not args.entered:
+        raise UsageError(
+            f"kyo notes add needs --entered ({', '.join(ENTERED)}): how the text reached "
+            "kyo is a fact about the note that only the caller knows"
+        )
+    text = read_prose(args.file, what="--file") if args.file else ""
+    tags = sorted({normalise_tag(tag) for tag in args.tag or []})
+    if not text.strip() and not tags:
+        raise UsageError(
+            "a note needs text (--file FILE, or '-' for stdin, law 5) or at least one --tag"
+        )
+    device = (
+        single_line(args.device, what="--device")
+        if args.device is not None
+        else socket.gethostname()
+    )
+    document = file_note(
+        ctx,
+        text=text,
+        tags=tags,
+        anchors_of=lambda opened: _anchors(ctx, opened, args),
+        device=device,
+        entered=args.entered,
+        person=args.person,
+    )
+    note_id = document["id"]
     lines = [f"wrote note {note_id}"]
     if text:
         lines += echo_block("note", text)
@@ -512,6 +584,48 @@ def _show(ctx: Context, args: Namespace) -> Output:
     return Output(note_lines(note), {"ok": True, "command": "notes show", "note": note})
 
 
+def change_tags(
+    ctx: Context,
+    note_id: str,
+    *,
+    add: set[str],
+    remove: set[str],
+    person: str | None = None,
+) -> tuple[dict, list[dict], list[str]]:
+    """Move a filed note's tags: its document, the changes made, and the tags already so."""
+    store = ctx.store()
+    if store.person_note(note_id) is None:
+        raise NotFound(f"no note {note_id!r}: ids are printed when a note is added and listed")
+    with store.transaction():
+        who = _person(store, person)
+        rows = store.change_person_note_tags(
+            note_id, add=add, remove=remove, person=who, author=ctx.actor
+        )
+        document = export.person_note_document(store, note_id)
+        # Written only when a tag moved: a repeated request leaves no trace to explain.
+        event = (
+            store.record_event(
+                actor=ctx.actor,
+                command="notes tag",
+                record_id=None,
+                before=None,
+                after={
+                    "person_note_id": note_id,
+                    "person_note_tag_changes": [row["id"] for row in rows],
+                },
+            )
+            if rows
+            else None
+        )
+    if event is not None:
+        events_ledger.append_events(store, [event])
+        for row in rows:
+            ledgers.append_person_note_tag_change(store, row)
+        ledgers.write_allocations(store)
+    moved = {row["tag"] for row in rows}
+    return document, [dict(row) for row in rows], sorted((add | remove) - moved)
+
+
 def _tag(ctx: Context, args: Namespace) -> Output:
     if not args.id:
         raise UsageError("kyo notes tag needs a note id (PREFIX-NN)")
@@ -541,37 +655,9 @@ def _tag(ctx: Context, args: Namespace) -> Output:
     both = sorted(add & remove)
     if both:
         raise UsageError(f"--add and --remove both name {', '.join(both)}: nothing was written")
-    store = ctx.store()
-    if store.person_note(args.id) is None:
-        raise NotFound(f"no note {args.id!r}: ids are printed when a note is added and listed")
-    with store.transaction():
-        person = _person(store, args.person)
-        rows = store.change_person_note_tags(
-            args.id, add=add, remove=remove, person=person, author=ctx.actor
-        )
-        document = export.person_note_document(store, args.id)
-        # Written only when a tag moved: a repeated request leaves no trace to explain.
-        event = (
-            store.record_event(
-                actor=ctx.actor,
-                command="notes tag",
-                record_id=None,
-                before=None,
-                after={
-                    "person_note_id": args.id,
-                    "person_note_tag_changes": [row["id"] for row in rows],
-                },
-            )
-            if rows
-            else None
-        )
-    if event is not None:
-        events_ledger.append_events(store, [event])
-        for row in rows:
-            ledgers.append_person_note_tag_change(store, row)
-        ledgers.write_allocations(store)
-    moved = {row["tag"] for row in rows}
-    unchanged = sorted((add | remove) - moved)
+    document, rows, unchanged = change_tags(
+        ctx, args.id, add=add, remove=remove, person=args.person
+    )
     tags = ", ".join(document["tags"]) or "(none)"
     if rows:
         steps = ", ".join(("+" if r["action"] == "add" else "-") + r["tag"] for r in rows)
@@ -586,7 +672,7 @@ def _tag(ctx: Context, args: Namespace) -> Output:
             "ok": True,
             "command": "notes tag",
             "note": document,
-            "changes": [dict(row) for row in rows],
+            "changes": rows,
             "unchanged": unchanged,
         },
     )
