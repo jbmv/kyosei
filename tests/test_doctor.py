@@ -44,7 +44,7 @@ from kyosei.doctor_consumers import (
 from kyosei.errors import EXIT_DOCTOR
 from kyosei.schema import COLUMN_CONSUMERS, CONFIG_CONSUMERS, SCHEMA_VERSION
 
-from .conftest import export_of, new_record
+from .conftest import declare_person, export_of, new_record
 
 
 def _failing_checks(kyo) -> dict:
@@ -136,6 +136,7 @@ def test_a_leftover_html_directory_is_reported_as_a_notice(kyo, project: Path) -
     so is the whole remedy: nothing here deletes the human's
     own directory, on `check_hook_config`'s posture.
     """
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     (project / "kyosei" / "html").mkdir()
     (project / "kyosei" / "html" / "index.html").write_text("old board\n", encoding="utf-8")
 
@@ -159,6 +160,7 @@ def test_a_leftover_html_directory_is_reported_as_a_notice(kyo, project: Path) -
 def test_the_leftover_notice_is_silent_when_the_directory_is_absent(kyo, project: Path) -> None:
     """Every project that never generated a site, and every one that has since
     deleted theirs. A notice that fires at everyone is one nobody reads."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     assert not (project / "kyosei" / "html").exists()
     result = kyo("doctor", "--json")
     assert result.code == 0, result
@@ -172,6 +174,7 @@ def test_deleting_the_directory_clears_the_notice(kyo, project: Path) -> None:
     Asserted anyway, because "nothing clears it" and "it never goes away" are
     different claims and only the first one is true here.
     """
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     site = project / "kyosei" / "html"
     site.mkdir()
     (site / "index.html").write_text("old board\n", encoding="utf-8")
@@ -188,6 +191,7 @@ def test_a_run_with_problems_still_carries_both_lists(kyo, db) -> None:
     A consumer branching on `problems` must not have to test for the key's presence:
     `kyo doctor`'s failure carries the same envelope its success returns (KYO-187).
     """
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     record = new_record(kyo)
     with db() as conn:
         conn.execute("DELETE FROM events WHERE record_id = ?", (record,))
@@ -1336,6 +1340,7 @@ def test_doctor_hook_prints_one_line_and_leaves_the_report_in_a_file(
 ) -> None:
     """KYO-362.c2. The line carries the problem count, the failing check's name and
     the path; the findings themselves are in the file, and nowhere else."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     counter = _break_the_roundtrip(kyo, project)
     bare = kyo("doctor")
     assert bare.code == EXIT_DOCTOR, bare
@@ -1410,6 +1415,7 @@ def test_the_hook_line_names_kyo_doctor_and_that_command_prints_what_the_file_ho
     to read the detail in the terminal, and running it prints the findings the file
     holds. Not "a similar report" -- the same strings, because `sort_into_tiers` is
     the one place a finding is formatted (law 3)."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     _break_the_roundtrip(kyo, project)
     hooked = kyo("doctor", "--hook")
     assert "`kyo doctor`" in hooked.err, hooked.err

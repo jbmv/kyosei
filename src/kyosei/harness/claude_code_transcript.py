@@ -5,6 +5,13 @@ whether the quote is the person's own words in it. It is section 5 of the KYO-63
 proposal as amended by decision KYO-640 (P6, P7). Its caller is :mod:`kyosei.credits`
 (KYO-644), which every credit-writing command goes through.
 
+READING A TRANSCRIPT IS OPT-IN PER PROJECT (KYO-654, DC12; KYO-656). Nothing in this module
+consults a project's configuration, because it is given only a session id. Every caller
+asks :func:`kyosei.config.transcripts_opted_in` first, and in a project that has not opted
+in calls none of the readers below, so no transcript and no prompt history is opened.
+``tests/test_kyo656_transcript_opt_in.py`` fails on a module that imports this one and does
+not ask.
+
 WHERE THE FILES ARE, FROM CLAUDE CODE'S OWN DOCUMENTATION (KYO-643.c5). Read on
 2026-11-06 from three pages:
 

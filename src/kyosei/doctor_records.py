@@ -624,7 +624,10 @@ def check_credit_coverage_legacy(store: Store) -> list[str]:
     And failing would cost more than the finding is worth: exit 3 from the Stop hook over
     history no command can change at once would paint every stop red until the last batch.
     The same kind of row written at schema 28 or later is :func:`check_credit_coverage`'s.
+    A project declaring nobody has :func:`check_credit_people_undeclared`'s notice instead.
     """
+    if not store.config.people:
+        return []
     rows = [r for r in uncredited_rows(store) if _legacy(r)]
     if not rows:
         return []
@@ -670,8 +673,12 @@ def check_credit_coverage(store: Store) -> list[str]:
 
     A PROBLEM: enforcement (``kyo verify``, ``kyo confirm``, ``kyo ungate``, ``kyo new`` of
     a kind that requires a credit) refuses to write such a row, so one in the store means
-    the enforcement was bypassed, for example by a ledger merged from an older ``kyo``.
+    the enforcement was bypassed, for example by a ledger merged from an older ``kyo``, or
+    the row was written before this project declared anyone. A project still declaring
+    nobody is not enforced at all (KYO-656), so this asks nothing of it.
     """
+    if not store.config.people:
+        return []
     rows = [r for r in uncredited_rows(store) if not _legacy(r)]
     if not rows:
         return []
@@ -680,9 +687,39 @@ def check_credit_coverage(store: Store) -> list[str]:
     return [
         f"{len(rows)} human-observed verdict(s), human-gate clearing(s) or decision record(s) "
         f"written at schema_version {CREDITS_SINCE_SCHEMA} or later credit no person "
-        f"({some_of([r['id'] for r in rows])}): that cannot happen through the commands, so "
-        "the enforcement was bypassed, for example by a ledger merged from an older `kyo`. "
+        f"({some_of([r['id'] for r in rows])}): the commands refuse that once `people:` "
+        "declares someone, so each was written before anyone was declared or the enforcement "
+        "was bypassed, for example by a ledger merged from an older `kyo`. "
         "`kyo credit` names the person who observed or decided it (KYO-646)"
+    ]
+
+
+def check_credit_people_undeclared(store: Store) -> list[str]:
+    """KYO-656.c3 (KYO-654, DC12): this project declares no person, so credits are off.
+
+    A NOTICE, because nothing is wrong: enforcement applies only where ``people:`` declares
+    someone, so that upgrading kyo refuses nothing before the operator has chosen. It
+    replaces the two coverage checks, which would otherwise count every row in such a
+    project, and setup decision D13 recorded under ``onboarding:`` silences it, because the
+    operator has then chosen.
+    """
+    from .config import ONBOARDING_KEY, config_path_for, parse_onboarding, read_raw_config
+
+    if store.config.people:
+        return []
+    root = store.config.root
+    try:
+        answers = parse_onboarding(read_raw_config(root).get(ONBOARDING_KEY), config_path_for(root))
+    except KyoseiError:
+        answers = {}
+    if "D13" in answers:
+        return []
+    return [
+        "no person is declared under `people:` in kyosei/config.yml, so credits are not "
+        "enforced here: a human-observed verdict, `kyo confirm` and a person-gate clearing are "
+        "recorded without naming anyone. Declare one under `people:` to turn credits on, or "
+        "record `D13: declined` under `onboarding:`; `kyo onboard` asks this as setup decision "
+        "D13, and D14 asks whether credits may read transcripts (`read_transcripts:`) (KYO-656)"
     ]
 
 
@@ -695,9 +732,12 @@ def check_credit_transcripts_appeared(store: Store) -> list[str]:
     credit, which then stops being named: only a current credit is looked at.
     """
     from . import cmd_sessions
+    from .config import transcripts_opted_in
     from .currency import some_of
     from .harness import claude_code_transcript as transcript
 
+    if not transcripts_opted_in(store.config):
+        return []
     config = transcript.config_dir()
     root = store.config.kyosei_dir.parent
     appeared: list[str] = []

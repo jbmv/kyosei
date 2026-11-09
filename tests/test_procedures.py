@@ -56,7 +56,7 @@ from kyosei.procedures import ledger_differences as procedures_ledger_difference
 from kyosei.prose import contains_phrase
 from kyosei.scaffold import defaults_dir
 
-from .conftest import invoke, new_record
+from .conftest import declare_person, invoke, new_record
 from .test_dispatch_covers import _elsewhere, _scoped
 from .test_prose import MANGLED, RESIDUE_CASES
 from .this_store import store_path
@@ -1549,6 +1549,7 @@ def test_a_missing_rule_is_a_problem_because_one_command_clears_it(
     finding names `kyo install-procedures`, and a named remedy is exactly the case where
     the reader can act now — the bar `NOTICE_CHECKS` states. Moving this check into
     `NOTICE_CHECKS` turns this test red, which is the point of writing it."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     ledger = project / "kyosei" / "procedures.md"
     title = [r.title for r in worker_rules(_packaged())][-1]
     ledger.write_text(_without_rule(ledger.read_text(encoding="utf-8"), title), encoding="utf-8")
@@ -1571,6 +1572,7 @@ def test_a_reworded_rule_is_a_notice_and_never_fails_the_run(kyo, project: Path)
     — so failing on it asks a consumer to undo their own edit or read a red doctor
     forever. Declaring it in `NOTICE_CHECKS` is what makes "stays reported" bearable.
     Dropping it from that set turns this test red."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     ledger = project / "kyosei" / "procedures.md"
     ledger.write_text(
         _with_the_prose_rule_reverted(ledger.read_text(encoding="utf-8")), encoding="utf-8"
@@ -1869,6 +1871,7 @@ def test_adopt_rewrites_exactly_the_named_rule_from_the_packaged_default(
     """The direction KYO-132/KYO-149 each had to hand the controller by hand: a
     packaged rule was reworded, the store copy still carries the old text, and
     `--adopt` is the one reviewable command that takes the new wording on request."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     ledger = project / "kyosei" / "procedures.md"
     edited = _with_the_prose_rule_reverted(ledger.read_text(encoding="utf-8"))
     ledger.write_text(edited, encoding="utf-8")
@@ -2006,6 +2009,7 @@ def test_the_doctor_notice_names_the_adopt_flag_beside_the_rule(kyo, project: Pa
     """KYO-151.c2's last requirement: the notice `procedures_rules_differ` prints must
     read as a remedy, not only a finding — the controller should not have to already
     know `--adopt` exists to find it."""
+    declare_person(kyo.project)  # KYO-656's notice would otherwise be counted here
     ledger = project / "kyosei" / "procedures.md"
     ledger.write_text(
         _with_the_prose_rule_reworded(ledger.read_text(encoding="utf-8")), encoding="utf-8"

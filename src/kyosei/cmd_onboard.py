@@ -65,6 +65,8 @@ PROJECT_LABELS: tuple[str, ...] = (
     "orchestrator_only_commands",
     "scopes",
     "documents",
+    # KYO-656: setup decision D14, whether Kyosei may read transcripts.
+    "read_transcripts",
     # KYO-560: every declined or deferred setup decision, read back.
     "onboarding",
     "kyo doctor",
@@ -695,7 +697,33 @@ def _setup_items(layout, raw: dict) -> list[Item]:
                 "`kyo docs suggest` (drafts one and writes nothing; setup decision D8)",
             )
         )
+    items.append(_read_transcripts_item(raw, config_path))
     return items
+
+
+def _read_transcripts_item(raw: dict, config_path: Path) -> Item:
+    """KYO-656: the readback of setup decision D14. An absent key is a decision never made,
+    and it reads the same as ``false``: nothing is read."""
+    from .config import READ_TRANSCRIPTS_KEY as key
+
+    answer = raw.get(key)
+    if answer is None:
+        return Item(
+            key,
+            "missing",
+            "no answer recorded, so no transcript is read and a credit records its check as "
+            "not-applicable",
+            f"ask setup decision D14, then write `{key}: true` or `{key}: false` in {config_path}",
+        )
+    if not isinstance(answer, bool):
+        return Item(key, "unreadable", f"{key} is {answer!r}; it is true or false")
+    return Item(
+        key,
+        "present",
+        "true: a credit's words are checked against this machine's Claude Code transcripts"
+        if answer
+        else "false: no transcript is read and a credit records its check as not-applicable",
+    )
 
 
 #: KYO-560: which setup decision each project item is the trace of, so an answer
@@ -712,6 +740,7 @@ DECISION_OF_LABEL: dict[str, str] = {
     "orchestrator_only_commands": "D5",
     "scopes": "D7",
     "documents": "D8",
+    "read_transcripts": "D14",
 }
 
 

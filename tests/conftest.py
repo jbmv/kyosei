@@ -410,6 +410,14 @@ def declare_person(project: Path, key: str = TEST_PERSON) -> None:
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
+def opt_in_transcripts(project: Path) -> None:
+    """Write ``read_transcripts: true`` to the project's config.yml (KYO-656's key)."""
+    path = Path(project) / "kyosei" / "config.yml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["read_transcripts"] = True
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
 def decided(project: Path, words: str = "the person's words deciding it") -> list[str]:
     """The flags of a decided credit for a test filing a decision about something else
     (KYO-644): the person declared, their words and an unprompted decision file written

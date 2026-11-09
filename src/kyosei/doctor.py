@@ -65,7 +65,9 @@ The checks, and the law each one keeps honest:
                               or decision record written at schema 28 or later credits
                               no person (enforcement bypassed). Its two NOTICE siblings,
                               ``credit_coverage_legacy`` (the same rows written earlier)
-                              and ``credit_transcripts_appeared``, name `kyo credit`
+                              and ``credit_transcripts_appeared``, name `kyo credit`;
+                              ``credit_people_undeclared`` (KYO-656) replaces them where
+                              `people:` declares nobody
 ``check_completed_with_unmet_criteria``  KYO-415 — a record at its complete-role status
                               holding an unmet criterion. A NOTICE naming `kyo split
                               --to-successor` and reopening as the ways out
@@ -174,6 +176,7 @@ from .doctor_records import (
     check_completed_with_unmet_criteria,
     check_credit_coverage,
     check_credit_coverage_legacy,
+    check_credit_people_undeclared,
     check_credit_transcripts_appeared,
     check_criterion_states,
     check_criterion_verification_agreement,
@@ -312,6 +315,8 @@ CHECK_ORDER = (
     "credit_coverage",
     "credit_coverage_legacy",
     "credit_transcripts_appeared",
+    # KYO-656: in place of the two coverage checks where nobody is declared.
+    "credit_people_undeclared",
     "redactions",
     "statuses",
     "plan_membership",
@@ -381,6 +386,7 @@ CHECKS = {
     "credit_coverage": check_credit_coverage,
     "credit_coverage_legacy": check_credit_coverage_legacy,
     "credit_transcripts_appeared": check_credit_transcripts_appeared,
+    "credit_people_undeclared": check_credit_people_undeclared,
     "redactions": check_redactions,
     "statuses": check_statuses,
     "plan_membership": check_plan_membership,
@@ -431,6 +437,8 @@ TIER_NOTICE = "notice"
 #:   credits are approved in batches; exit 3 would paint every stop red until the last.
 #: * ``credit_transcripts_appeared`` (KYO-646): the credit is valid as written; a transcript
 #:   arriving later only makes a stronger check possible.
+#: * ``credit_people_undeclared`` (KYO-656): credits apply only where someone is declared,
+#:   and a project that has not chosen yet is in a legitimate state.
 #: * ``unresolved_stops`` (KYO-214): it clears on its own; the only remedy is waiting.
 #: * ``procedures_rules_differ`` (KYO-212): the ledger is the project's to edit, so a
 #:   different wording may be deliberate, and nothing in the tool rewrites a rule that
@@ -489,6 +497,7 @@ NOTICE_CHECKS = frozenset(
         "open_standing_obligations",
         "credit_coverage_legacy",
         "credit_transcripts_appeared",
+        "credit_people_undeclared",
     }
 )
 

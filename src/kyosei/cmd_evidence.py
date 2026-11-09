@@ -907,6 +907,8 @@ def _credit_for_verdict(
                 "--evidence-file"
             )
         return None, joined
+    if credits.exempt(store, args):  # KYO-656: this project declares nobody to credit
+        return None, None
     cid = args.criterion_id
     verdict = args.verdict
     credit = credits.resolve(

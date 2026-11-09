@@ -602,6 +602,9 @@ def span_text(credit: dict) -> str | None:
     ``--json``; wall-clock span is never shown as effort."""
     if credit.get("span_session") is None:
         return None
+    if credit.get("span_person_turns") is None:
+        # No transcript to measure, or a project not opted in to reading one (KYO-656).
+        return f"not measured, session {credit['span_session'][:8]}"
     return (
         f"{credit['span_person_turns']} of your messages, "
         f"{_plural(credit['span_agent_turns'], 'reply')}, "

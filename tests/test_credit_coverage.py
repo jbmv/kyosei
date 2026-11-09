@@ -14,7 +14,7 @@ from kyosei import doctor_records, events_ledger, ledgers
 from kyosei.errors import EXIT_DOCTOR
 from kyosei.store import open_store
 
-from .conftest import CREDIT_ELSEWHERE, declare_person, new_record
+from .conftest import CREDIT_ELSEWHERE, declare_person, new_record, opt_in_transcripts
 
 LEGACY = "credit_coverage_legacy"
 NEW = "credit_coverage"
@@ -192,6 +192,7 @@ def test_the_cut_off_is_per_row_not_per_store(kyo, project) -> None:
 
 
 def test_a_transcript_that_has_appeared_is_noticed(kyo, project, tmp_path, monkeypatch) -> None:
+    opt_in_transcripts(project)
     record, verdict = _human_verdict(kyo)
     session = "7212f0bb-a568-49c4-9b87-d3209a201b6b"
     credit = _credit(

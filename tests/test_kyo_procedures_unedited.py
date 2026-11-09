@@ -30,6 +30,7 @@ from kyosei.procedures import (
     wording_digest,
 )
 
+from .conftest import declare_person
 from .test_procedures import (
     POST_KYO93_WORDING,
     PRE_KYO93_WORDING,
@@ -155,6 +156,7 @@ def test_kyoseis_own_checkout_is_never_refreshed(tmp_path: Path, monkeypatch) ->
 def test_doctor_names_the_plain_rerun_for_an_unedited_rule_and_is_silent_after_it(
     kyo, project: Path
 ) -> None:
+    declare_person(project)  # KYO-656's notice would otherwise be counted here
     ledger = _ledger(project)
     ledger.write_text(
         _with_the_prose_rule_reverted(ledger.read_text(encoding="utf-8")), encoding="utf-8"
@@ -175,6 +177,7 @@ def test_doctor_names_the_plain_rerun_for_an_unedited_rule_and_is_silent_after_i
 
 
 def test_doctor_still_reports_a_reworded_rule_after_the_rerun(kyo, project: Path) -> None:
+    declare_person(project)  # KYO-656's notice would otherwise be counted here
     ledger = _ledger(project)
     reworded = _with_the_prose_rule_reworded(ledger.read_text(encoding="utf-8"))
     ledger.write_text(reworded, encoding="utf-8")

@@ -206,8 +206,10 @@ def test_a_superseding_credit_withdrawn_uncovers_the_row_too(kyo, project: Path)
 def test_a_withdrawn_transcript_absent_credit_is_not_noticed(
     kyo, project: Path, tmp_path: Path, monkeypatch
 ) -> None:
+    from .conftest import opt_in_transcripts
     from .test_credit_coverage import _credit, _human_verdict
 
+    opt_in_transcripts(project)
     record, verdict = _human_verdict(kyo)
     session = "7212f0bb-a568-49c4-9b87-d3209a201b6b"
     credit = _credit(

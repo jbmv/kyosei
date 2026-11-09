@@ -83,8 +83,9 @@ person's words alone in `--quote-file` (which also serves as the evidence when
 `--evidence-file` is not given), what was recommended, the outcome and the alternatives in
 `--decision-file`, the person (`--person`, defaulting to the only one declared under
 `people:`), and where the words were said (`--session`, defaulting to
-`$CLAUDE_CODE_SESSION_ID`, whose transcript is checked, or `--source-other`). The command
-reference lists the decision file's keys.
+`$CLAUDE_CODE_SESSION_ID`, whose transcript is checked where the project set
+`read_transcripts: true`, or `--source-other`). The command reference lists the decision
+file's keys. A project whose `people:` declares nobody files a decision with no credit.
 
 **Which spawn routes need evidence (KYO-522).** A reminder becomes a decision exactly when
 the operator answers in conversation, so `kyo spawn` from a source whose kind is `carried`

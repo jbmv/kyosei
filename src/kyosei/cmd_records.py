@@ -3299,7 +3299,7 @@ def clear_gates_on_carried_settle(
     """
     clearing = clearing or credits.GateClearing()
     open_rows = [row for row in store.gates(record_id) if not row["cleared_at"]]
-    if clearing.cleared_as() is None:
+    if clearing.cleared_as() is None and credits.enforced(store):
         credits.refuse_settle_over_person_gate(
             [row for row in open_rows if row["gate_type"] in credits.HUMAN_GATE_TYPES],
             settled_by,

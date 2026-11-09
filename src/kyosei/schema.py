@@ -1878,6 +1878,9 @@ CONFIG_CONSUMERS: dict[str, tuple[str, ...]] = {
     # what a renderer shows for one. An older `kyo` refuses a config key it does not know,
     # so declare `people:` only once every `kyo` reading the store is at schema 28.
     "people": ("config.declared_people", "config.person_label"),
+    # KYO-656: read only through this one predicate, so that everything which reads a
+    # person's transcript asks the same question.
+    "read_transcripts": ("config.transcripts_opted_in",),
 }
 
 #: Config keys a project may legitimately not carry (KYO-60).
@@ -1957,6 +1960,9 @@ OPTIONAL_CONFIG_KEYS: frozenset[str] = frozenset(
         # KYO-642: absent in every project written before the key; absence means no
         # person is declared, so no credit can name one.
         "people",
+        # KYO-656: absent in every project that has not answered setup decision D14, and
+        # absence reads as not opted in (KYO-654, DC12).
+        "read_transcripts",
     }
 )
 

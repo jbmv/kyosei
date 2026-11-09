@@ -21,9 +21,16 @@ from .conftest import (
     TEST_PERSON,
     declare_person,
     new_record,
+    opt_in_transcripts,
 )
 
 SESSION = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
+
+
+@pytest.fixture(autouse=True)
+def _reads_transcripts(project: Path) -> None:
+    """This file is about the check itself; KYO-656's opt-in has its own test file."""
+    opt_in_transcripts(project)
 
 
 # ------------------------------------------------------------------ transcript fixtures
@@ -291,6 +298,7 @@ def test_other_gates_clear_as_before(kyo, project: Path) -> None:
 
 
 def test_bulk_ungate_is_all_or_nothing_over_a_person_gate(kyo, project: Path) -> None:
+    declare_person(project)
     record, human = _gated(kyo)
     other = kyo("gate", record, "awaiting:event", "--do", "wait", "--json").json["gate_id"]
     refused = kyo("ungate", other, human, "--why", "x")
