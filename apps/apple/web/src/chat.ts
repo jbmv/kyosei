@@ -588,14 +588,6 @@ function setText(id: string, text: string): void {
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
   setText("top-title", session?.title ?? menu?.project ?? "");
-  const changes = menu?.changes;
-  // A clean tree has nothing to report, so the section is left out, as claude.ai does.
-  document.getElementById("side-changes")!.hidden =
-    !changes || !(changes.added || changes.removed || changes.untracked.files);
-  setText("side-added", `+${changes?.added ?? 0}`);
-  setText("side-removed", `−${changes?.removed ?? 0}`);
-  setText("side-untracked", changes?.untracked.files ? `${plural(changes.untracked.files, "new file")}` : "");
-
   drawAgents();
 
   const own = [...calls.values()].filter(isOwnBackgroundTask);

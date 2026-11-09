@@ -61,11 +61,17 @@ public struct SessionFacts: Decodable, Equatable, Sendable {
         public let percent: Int?
     }
 
+    public struct Lines: Decodable, Equatable, Sendable {
+        public let added: Int
+        public let removed: Int
+    }
+
     public let model: String?
     public let effort: String?
     public let git_branch: String?
     public let context: Context?
     public let permission_mode: String?
+    public let lines: Lines?
 }
 
 /// Any response or frame carrying `facts`.
