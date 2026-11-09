@@ -110,7 +110,8 @@ record, no promotion, no export, and the server starts no process. One
 module holds that line, `src/kyosei/serve_files.py`. Beside the command reads, it serves
 one more thing read-only: a governed document's text, at
 `/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
-(KYO-467) -- a source file, `kyosei/` or a `..` is refused.
+(KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
+reading transcripts also has its sessions served, read-only (see "Reading sessions" below).
 
 **In the foreground**, for a session or a trial:
 
@@ -176,6 +177,111 @@ user logged in to the machine, not only to you. Any process under another accoun
 read every project you serve and write every `ideas/` and scratchpad, and those writes
 run as you. On a single-user Mac that is nobody else. On a machine other people log in
 to, it is them too. Kyosei states this rather than engineering around it.
+
+### Reading sessions: the session routes (KYO-689)
+
+Beside the store and file routes, `kyo serve` serves a project's Claude Code sessions,
+read-only. These routes answer only in a project that has opted in with
+`read_transcripts: true` in `kyosei/config.yml`; until then each refuses (403) and names
+that setting. A session is served only by the project whose `sessions.json` records it.
+Every route stands behind the Host and Origin checks above, and answers `GET` only. None
+of these routes sends anything to a session.
+
+A client reads Kyosei's own objects: a Claude Code transcript row is never in a response,
+because that format is not a published interface and changes between releases.
+
+| Route | Answers |
+|---|---|
+| `GET /v1/projects/<name>/sessions` | the recent sessions, newest first and live sessions first |
+| `GET /v1/projects/<name>/sessions/<id>/turns[?cursor=...]` | the session's transcript objects |
+| `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now |
+| `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
+
+**The list.** `{"ok", "sessions": [...], "problem"}`, one row per session that
+`sessions.json` holds (the newest 32). `problem` says why the file could not be read and is
+otherwise `null`. A row is:
+
+```
+session_id, state ("running" | "ended"), live, first_seen, last_seen, ended_at, cwd,
+remote_control_url, has_pane, pane_why, work_running, screen_state, background
+```
+
+`live` is whether Claude Code's own process registry holds a running process on the
+session, so a killed session reads `state: "running"` and `live: false`. `has_pane` is
+whether that process is in a tmux pane on `-L default` or `-L kyosei`; `pane_why` says why
+when it is not. `work_running` is true when a turn is running or background shells or
+subagents are. It is `null` when there is no pane to read, and the row's other fields say
+why. `background` is `{"running", "shells", "agents": [{"type", "description"}]}`, or
+`null` with no screen. An ended session is listed without being opened, so the list reads
+a pane only for a session marked running, once each per request.
+
+**Turns.** `{"ok", "session_id", "cursor", "reset", "readable", "why", "turns", "replies",
+"tool_calls", "subagents"}`. Each list holds one entry per object, at its latest version:
+
+```
+turn:      id, at, form ("typed" | "mid-turn" | "answer" | "accepted-suggestion"), text,
+           typed, paste_known, prompt_id
+reply:     message_id, uuid, at, text, model, usage, record_uuids
+           usage: input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+tool call: call_id, uuid, at, name, input, result
+           result: uuid, at, text, is_error (null until the result lands)
+subagent:  agent_id, tool_call_uuid, description, agent_type
+```
+
+`typed` is the person's own words (the text between any pastes), and `text` is the whole
+message. `paste_known` is false when pasted text cannot be ruled out. A reply is keyed by
+`message_id` and a tool call by `call_id`: the same object is sent again when a later record
+changes it, as when a tool result lands, and a client replaces what it holds. A reply's
+`uuid` can change while its message is still being written, so it is not the key.
+
+`cursor` asks for what is new: pass back the `cursor` of the previous response as
+`?cursor=` and the lists hold only objects new or changed since. `reset: true` means the
+transcript does not match the cursor, so the lists hold the whole session. `readable: false` means
+no record had a format this build recognises, and `why` says so. A first read of a long
+session is one response holding all of it.
+
+**The screen.** `{"ok", "session_id", "pane": {"present", "why", "pane_id",
+"tmux_session"}, "screen", "work_running"}`. `screen` is the session layer's classification,
+and carries no text of the screen itself:
+
+```
+screen: state, question, options, input_text, background
+        state: "idle" | "working" | "permission-prompt" | "ask-user-question"
+               | "usage-panel" | "trust-dialog" | "unrecognised"
+        options: number, label, selected, description
+```
+
+`screen` and `work_running` are `null` when the session has no pane. A screen matching no
+known state is `unrecognised`, and the session layer also keeps a copy of it under
+`$KYOSEI_HOME/pane-unrecognised/` for cataloguing, outside any repository. A person
+answers an overlay in the session itself.
+
+**Events.** `text/event-stream`, a `: keepalive` comment on an idle stream, and each frame
+naming one of:
+
+| Frame | `data` |
+|---|---|
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `reply_in_progress`: the state when the stream opened |
+| `event: transcript` | `session_id`, `cursor`, and the four lists above, new or changed objects only |
+| `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
+| `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
+| `event: session` | `session_id`, `previous_session_id`, `followed_clear`: the session moved to a new id on `/clear`; its objects continue under the new id |
+| `event: reset` | `session_id`: the transcript does not match the stream's position; read `/turns` again |
+| `event: error` | `error`: the session could not be sampled; sampling continues |
+
+A `transcript` frame carries the id of its `cursor`, so a client that reconnects with
+`Last-Event-ID`, or that passes `?cursor=`, is sent what it missed first; objects sent twice
+replace themselves, and the frame that catches a client up also carries `reset`. The reply
+in progress is what the terminal has drawn so far, and is
+replaced by the transcript's reply when its record lands.
+
+The stream stands beside `/events` and does not extend it. `/events` is one project's `stat`
+fingerprint; this one samples a pane, which costs a subprocess, so one sampler serves
+every client of a session and stops when the last one leaves. Nothing samples a pane while
+no client is subscribed. The sampler reads the session twice a second. Under the launchd
+agent, tmux is found on the installing shell's `PATH` or in the Homebrew locations, and the
+sockets are the machine's defaults, since no `TMUX_TMPDIR` is carried. Claude Code's
+directory is `~/.claude`; a `CLAUDE_CONFIG_DIR` set only in a shell does not reach the agent.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 

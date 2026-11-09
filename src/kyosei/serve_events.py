@@ -32,6 +32,12 @@ appears later changes from ``gone`` to a stamp, which is an event.
 
 Streams do not take the server's command lock: a fingerprint reads no store content.
 A stream ends when its client goes away, or when the server stops.
+
+The per-session stream (KYO-689, :mod:`kyosei.serve_sessions`) stands beside this one
+rather than extending it: this stream is one project's stat fingerprint, polled by
+each client's own thread, open to every viewer; that one samples a pane, which costs a
+subprocess, so it shares one sampler among its clients and needs a project's transcript
+opt-in. It shares only :func:`frame` and the keepalive.
 """
 
 from __future__ import annotations
@@ -99,8 +105,15 @@ def fingerprint(paths: ProjectPaths) -> dict[str, str]:
     }
 
 
+def frame(event: str, data: object, *, event_id: str | None = None) -> bytes:
+    """One Server-Sent Event; ``event_id`` becomes the client's ``Last-Event-ID``."""
+    lines = [] if event_id is None else [f"id: {event_id}"]
+    lines += [f"event: {event}", f"data: {json.dumps(data, ensure_ascii=False)}"]
+    return ("\n".join(lines) + "\n\n").encode("utf-8")
+
+
 def changed_event(kind: str) -> bytes:
-    return f"event: changed\ndata: {json.dumps({'kind': kind})}\n\n".encode()
+    return frame("changed", {"kind": kind})
 
 
 KEEPALIVE = b": keepalive\n\n"

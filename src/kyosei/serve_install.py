@@ -21,7 +21,8 @@ it. ``--status`` only reads. ``--restart`` restarts an agent that is already the
 WHAT THE AGENT RUNS. The absolute path of the ``kyo`` that ran ``--install`` (the uv
 tool's ``~/.local/bin/kyo``, not the file it links to), so an upgrade takes effect at
 the next restart; with ``KYOSEI_HOME`` when it is set and the installing shell's
-``PATH``. The server runs ``git`` and nothing else, so no login shell is needed.
+``PATH``. The server runs ``git``, ``tmux`` and ``ps``, all found on that ``PATH``, and
+``tmux`` also in the Homebrew locations, so no login shell is needed.
 
 WHAT ANSWERS ON THE PORT (:func:`probe`). ``GET /v1/version`` on the loopback port:
 nothing listening, another ``kyo serve`` (its pid, build and ``stale``), or something

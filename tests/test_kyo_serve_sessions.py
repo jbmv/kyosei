@@ -1,0 +1,835 @@
+"""KYO-689: `kyo serve`'s session routes, the read half of chunk E4.
+
+The transcript samples are the recorded ones under ``tests/fixtures/session_layer/``. A
+fake ``tmux`` script on the server's ``PATH`` answers ``list-panes`` with one pane and
+``capture-pane`` with a fixture screen, and logs every call to a file: that log is what the
+one-sampler test counts. Every request goes over a real socket, every server is stopped by
+the fixture that started it, and every stream is read under a socket timeout, so a missing
+event fails a test rather than hanging it.
+"""
+
+from __future__ import annotations
+
+import ast
+import http.client
+import json
+import os
+import shutil
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+import kyosei
+from kyosei import cmd_sessions, serve, serve_sessions
+
+from .conftest import opt_in_transcripts
+from .test_kyo_serve import Client, body_json, register, start, stop
+
+FIXTURES = Path(__file__).parent / "fixtures" / "session_layer"
+SCREENS = FIXTURES / "screens"
+OLD = "108d6543-12e9-4ae4-85fb-f303424bfa6a"
+NEW = "718208ce-6423-4004-9771-10cfb6d615e8"
+OLD_FILE = FIXTURES / "pair" / f"{OLD}.jsonl"
+NEW_FILE = FIXTURES / "pair" / f"{NEW}.jsonl"
+ENDED = "22222222-2222-4222-8222-222222222222"
+KILLED = "33333333-3333-4333-8333-333333333333"
+ELSEWHERE = "44444444-4444-4444-8444-444444444444"
+
+BASE = "/v1/projects/proj"
+SESSIONS = f"{BASE}/sessions"
+
+ROUTES = [
+    SESSIONS,
+    f"{SESSIONS}/{OLD}/turns",
+    f"{SESSIONS}/{OLD}/screen",
+    f"{SESSIONS}/{OLD}/events",
+]
+
+
+class Bed:
+    """A served project with a recorded session, a fake tmux and a fake Claude Code home."""
+
+    def __init__(self, project: Path, tmp_path: Path, client: Client) -> None:
+        self.project = project
+        self.client = client
+        self.server: serve.KyoServer = client.server
+        self.claude = tmp_path / "claude"
+        self.tmux_log = tmp_path / "tmux.log"
+        self.screen_file = tmp_path / "screen.txt"
+        self.transcripts = self.claude / "projects" / "-work"
+        self.transcript = self.transcripts / f"{OLD}.jsonl"
+
+    def pane_reads(self) -> int:
+        if not self.tmux_log.exists():
+            return 0
+        return sum("capture-pane" in line for line in self.tmux_log.read_text().splitlines())
+
+    def show(self, name: str) -> None:
+        self.screen_file.write_text((SCREENS / name).read_text(encoding="utf-8"), encoding="utf-8")
+
+    def show_frame(self, name: str) -> None:
+        text = (FIXTURES / "sequence" / name).read_text(encoding="utf-8")
+        self.screen_file.write_text(text, encoding="utf-8")
+
+    def rows(self, count: int | None = None, source: Path = OLD_FILE) -> list[str]:
+        lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+        return lines if count is None else lines[:count]
+
+    def write_transcript(self, lines: list[str]) -> None:
+        self.transcript.write_text("".join(lines), encoding="utf-8")
+
+    def append(self, lines: list[str]) -> None:
+        with self.transcript.open("a", encoding="utf-8") as handle:
+            handle.writelines(lines)
+
+    def get(self, path: str, **kwargs):
+        return self.client.get(path, **kwargs)
+
+
+def _entry(session_id: str, *, state: str, seen: str, transcript: Path | None = None) -> dict:
+    return {
+        "session_id": session_id,
+        "state": state,
+        "first_seen": seen,
+        "last_seen": seen,
+        "last_event": "Stop",
+        "cwd": "/work",
+        "remote_control_id": None,
+        "url": None,
+        "remote_control_outcome": "absent",
+        "remote_control_why": "no record",
+        "ended_at": seen if state == cmd_sessions.STATE_ENDED else None,
+        "pid": None,
+        "process": None,
+        "host": None,
+        "transcript_path": str(transcript) if transcript else None,
+    }
+
+
+@pytest.fixture
+def running():
+    started: list[Client] = []
+
+    def _start(**kwargs) -> Client:
+        client = start(**kwargs)
+        started.append(client)
+        return client
+
+    yield _start
+    for client in started:
+        stop(client)
+
+
+@pytest.fixture
+def bed(project: Path, store_home: Path, tmp_path: Path, running) -> Bed:
+    """An opted-in project with one live session in a (fake) pane."""
+    opt_in_transcripts(project)
+    register(store_home, project)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "tmux"
+    pane_row = f"%%1\\t{os.getpid()}\\tfake\\n"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{tmp_path / "tmux.log"}"\n'
+        'case "$*" in\n'
+        f'  *list-panes*) printf "{pane_row}" ;;\n'
+        f'  *capture-pane*) cat "{tmp_path / "screen.txt"}" ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    claude = tmp_path / "claude"
+    (claude / "sessions").mkdir(parents=True)
+    (claude / "sessions" / f"{os.getpid()}.json").write_text(
+        json.dumps({"pid": os.getpid(), "sessionId": OLD, "status": "busy"}), encoding="utf-8"
+    )
+    (claude / "projects" / "-work").mkdir(parents=True)
+    environ = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "CLAUDE_CONFIG_DIR": str(claude),
+    }
+    client = running(environ=environ)
+    client.server.session_sample_seconds = 0.03
+    client.server.keepalive_seconds = 0.4
+    made = Bed(project, tmp_path, client)
+    made.write_transcript(made.rows())
+    made.show("idle.txt")
+    entries = [
+        _entry(OLD, state="running", seen="2026-11-09T10:00:00.000Z"),
+        _entry(ENDED, state="ended", seen="2026-11-09T11:00:00.000Z"),
+        _entry(KILLED, state="running", seen="2026-11-09T09:00:00.000Z"),
+    ]
+    assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(project), entries) is None
+    return made
+
+
+class Stream:
+    """One open session event stream, read line by line under a socket timeout."""
+
+    def __init__(self, bed: Bed, session_id: str = OLD, *, query: str = "", **headers: str) -> None:
+        self.conn = http.client.HTTPConnection("127.0.0.1", bed.client.port, timeout=15)
+        self.conn.putrequest("GET", f"{SESSIONS}/{session_id}/events{query}", skip_host=True)
+        self.conn.putheader("Host", f"127.0.0.1:{bed.client.port}")
+        for key, value in headers.items():
+            self.conn.putheader(key.replace("_", "-"), value)
+        self.conn.endheaders()
+        self.response = self.conn.getresponse()
+
+    def block(self) -> list[str]:
+        lines: list[str] = []
+        while True:
+            line = self.response.fp.readline()
+            if line == b"":
+                raise EOFError("the stream ended")
+            text = line.decode("utf-8").rstrip("\n")
+            if text == "":
+                if lines:
+                    return lines
+                continue
+            lines.append(text)
+
+    def event(self, name: str, *, within: float = 10.0) -> dict:
+        """The next event called ``name``, skipping keepalives and other events."""
+        deadline = time.monotonic() + within
+        while time.monotonic() < deadline:
+            block = self.block()
+            names = [line for line in block if line.startswith("event: ")]
+            if names == [f"event: {name}"]:
+                data = next(line for line in block if line.startswith("data: "))
+                return json.loads(data.removeprefix("data: "))
+        raise TimeoutError(f"no {name!r} event arrived")
+
+    def close(self) -> None:
+        self.response.close()  # http.client hands the socket to the response on HTTP/1.0
+        self.conn.close()
+
+
+@pytest.fixture
+def stream(bed: Bed):
+    opened: list[Stream] = []
+
+    def _open(session_id: str = OLD, *, query: str = "", **headers: str) -> Stream:
+        made = Stream(bed, session_id, query=query, **headers)
+        opened.append(made)
+        assert made.response.status == 200
+        assert made.response.headers["Content-Type"].startswith("text/event-stream")
+        assert made.block() == ["retry: 1000", ": kyo serve session events"]
+        return made
+
+    yield _open
+    for made in opened:
+        made.close()
+
+
+def json_body(status_headers_body) -> dict:
+    status, _, body = status_headers_body
+    assert status == 200, body
+    return body_json(body)
+
+
+# ------------------------------------------------------------------- c1: the session list
+
+
+def test_the_list_names_each_session_with_its_pane_and_whether_work_runs(bed: Bed) -> None:
+    document = json_body(bed.get(SESSIONS))
+    rows = {row["session_id"]: row for row in document["sessions"]}
+
+    live = rows[OLD]
+    assert live["state"] == "running" and live["live"] is True
+    assert live["has_pane"] is True and live["work_running"] is False
+    assert live["screen_state"] == "idle"
+
+    ended = rows[ENDED]
+    assert ended["state"] == "ended" and ended["live"] is False
+    assert ended["has_pane"] is False and ended["work_running"] is False
+
+
+def test_the_list_reports_work_running_from_the_screen(bed: Bed) -> None:
+    bed.show_frame("frame-05.txt")
+    row = next(r for r in json_body(bed.get(SESSIONS))["sessions"] if r["session_id"] == OLD)
+    assert row["work_running"] is True and row["screen_state"] == "working"
+
+
+def test_the_list_reports_background_work_on_an_idle_screen(bed: Bed) -> None:
+    bed.show("background-shells.txt")
+    row = next(r for r in json_body(bed.get(SESSIONS))["sessions"] if r["session_id"] == OLD)
+    assert row["work_running"] is True and row["background"]["shells"] > 0
+
+
+def test_a_session_marked_running_whose_process_is_gone_is_not_live(bed: Bed) -> None:
+    rows = {r["session_id"]: r for r in json_body(bed.get(SESSIONS))["sessions"]}
+    assert rows[KILLED]["state"] == "running" and rows[KILLED]["live"] is False
+    assert rows[KILLED]["has_pane"] is False
+    assert rows[KILLED]["work_running"] is None and rows[KILLED]["pane_why"]
+
+
+def test_live_sessions_come_first(bed: Bed) -> None:
+    ids = [row["session_id"] for row in json_body(bed.get(SESSIONS))["sessions"]]
+    assert ids[0] == OLD and ENDED in ids[1:]
+
+
+# ----------------------------------------------------- c2: turns, replies, tool calls, cursor
+
+
+#: Keys of a Claude Code transcript row that no object of the API carries.
+ROW_KEYS = {"parentUuid", "isSidechain", "sessionId", "origin", "toolUseResult", "promptSource"}
+
+
+def assert_no_raw_row(value: object) -> None:
+    """Fail if any object in ``value`` is, or holds, a transcript row."""
+    if isinstance(value, dict):
+        assert not (ROW_KEYS & value.keys()), f"a raw transcript row: {sorted(value)[:8]}"
+        for item in value.values():
+            assert_no_raw_row(item)
+    elif isinstance(value, list):
+        for item in value:
+            assert_no_raw_row(item)
+    elif isinstance(value, str) and value.startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return
+        if isinstance(parsed, dict):
+            assert not (ROW_KEYS & parsed.keys()), "a raw transcript row inside a string"
+
+
+def test_the_no_raw_row_check_catches_a_real_row() -> None:
+    row = json.loads(OLD_FILE.read_text(encoding="utf-8").splitlines()[0])
+    with pytest.raises(AssertionError):
+        assert_no_raw_row({"turns": [row]})
+    with pytest.raises(AssertionError):
+        assert_no_raw_row({"turns": [json.dumps(row)]})
+
+
+def test_turns_are_the_session_layers_objects_and_never_a_row(bed: Bed) -> None:
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert_no_raw_row(document)
+    assert document["ok"] is True and document["session_id"] == OLD
+    assert document["readable"] is True and document["reset"] is False
+
+    assert set(document["turns"][0]) == {
+        "id", "at", "form", "text", "typed", "paste_known", "prompt_id"
+    }  # fmt: skip
+    assert {t["form"] for t in document["turns"]} >= {"typed", "mid-turn", "answer"}
+    assert document["turns"][0]["text"].startswith("Write three paragraphs")
+
+    assert set(document["replies"][0]) == {
+        "message_id", "uuid", "at", "text", "model", "usage", "record_uuids"
+    }  # fmt: skip
+    assert any(r["text"].startswith("A lighthouse is") for r in document["replies"])
+    assert len({r["message_id"] for r in document["replies"]}) == len(document["replies"])
+
+    calls = document["tool_calls"]
+    assert set(calls[0]) == {"call_id", "uuid", "at", "name", "input", "result"}
+    assert any(c["name"] == "AskUserQuestion" for c in calls)
+    assert len({c["call_id"] for c in calls}) == len(calls)
+    resulted = [c["result"] for c in calls if c["result"]]
+    assert resulted and all(set(r) == {"uuid", "at", "text", "is_error"} for r in resulted)
+    assert all(set(s) == {"agent_id", "tool_call_uuid", "description", "agent_type"}
+               for s in document["subagents"])  # fmt: skip
+
+
+def test_a_cursor_returns_only_what_is_new(bed: Bed) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    seen_turns = {t["id"] for t in first["turns"]}
+
+    bed.append(rows[len(rows) // 2 :])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["reset"] is False
+    assert second["cursor"] != first["cursor"]
+    assert not (seen_turns & {t["id"] for t in second["turns"]})
+    assert second["turns"] or second["replies"] or second["tool_calls"]
+
+    third = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={second['cursor']}"))
+    assert third["cursor"] == second["cursor"]
+    assert (third["turns"], third["replies"], third["tool_calls"]) == ([], [], [])
+
+
+def test_a_tool_result_landing_later_redelivers_its_call(bed: Bed) -> None:
+    rows = bed.rows()
+    parsed = [json.loads(line) for line in rows]
+    with_call = next(
+        i
+        for i, row in enumerate(parsed)
+        if any(
+            isinstance(block, dict) and block.get("type") == "tool_use"
+            for block in (row.get("message") or {}).get("content", [])
+            if isinstance(row.get("message"), dict)
+            and isinstance((row.get("message") or {}).get("content"), list)
+        )
+    )
+    bed.write_transcript(rows[: with_call + 1])
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    pending = [c for c in first["tool_calls"] if c["result"] is None]
+    assert pending
+
+    bed.append(rows[with_call + 1 :])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    resolved = {c["call_id"]: c for c in second["tool_calls"]}
+    assert resolved[pending[0]["call_id"]]["result"] is not None
+
+
+def test_a_cursor_from_an_incremental_read_matches_a_read_from_the_start(bed: Bed) -> None:
+    """The sampler's position is built read by read and a route's from one read of the file."""
+    from kyosei.harness.claude_code_transcript import SessionTranscript
+
+    rows = bed.rows()
+    bed.write_transcript(rows[:20])
+    reader = SessionTranscript(bed.transcript)
+    incremental = serve_sessions._Position()
+    for chunk in (rows[20:40], rows[40:]):
+        incremental.feed(serve_sessions._lists(reader.read()))
+        bed.append(chunk)
+    incremental.feed(serve_sessions._lists(reader.read()))
+
+    whole = serve_sessions._Position()
+    whole.feed(serve_sessions._lists(SessionTranscript(bed.transcript).read()))
+    assert incremental.cursor == whole.cursor
+
+
+def test_a_rewritten_transcript_resets_the_cursor(bed: Bed) -> None:
+    rows = bed.rows()
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    # The same number of records, not the same records.
+    bed.write_transcript(bed.rows(source=NEW_FILE) + rows[: len(rows) // 2])
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor={first['cursor']}"))
+    assert second["reset"] is True
+    assert second["turns"], "a reset sends the whole session again"
+
+
+def test_a_cursor_past_the_end_resets(bed: Bed) -> None:
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns?cursor=999.999.999.999.abcdefabcdef"))
+    assert second["reset"] is True and second["turns"]
+
+
+def test_a_garbled_cursor_is_refused_and_dropping_it_clears_the_refusal(bed: Bed) -> None:
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/turns?cursor=nonsense")
+    assert status == 400 and "cursor" in body_json(body)["error"]
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["ok"] is True
+
+
+def test_a_query_key_the_session_routes_do_not_take_is_refused(bed: Bed) -> None:
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/turns?since=1")
+    assert status == 400 and "?cursor" in body_json(body)["error"]
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["ok"] is True
+
+
+def test_an_unknown_session_id_is_refused_by_name(bed: Bed) -> None:
+    status, _, body = bed.get(f"{SESSIONS}/55555555-5555-4555-8555-555555555555/turns")
+    assert status == 404 and "/sessions" in body_json(body)["error"]
+
+
+def test_a_session_of_another_project_is_not_served(bed: Bed) -> None:
+    """The layer finds a transcript by id alone; ``sessions.json`` is what scopes it."""
+    other = bed.transcripts / f"{ELSEWHERE}.jsonl"
+    shutil.copyfile(OLD_FILE, other)
+    for route in ("turns", "screen", "events"):
+        status, _, body = bed.get(f"{SESSIONS}/{ELSEWHERE}/{route}")
+        assert status == 404, route
+        assert "not recorded for this project" in body_json(body)["error"]
+
+
+# --------------------------------------------------------------- c3: the per-session stream
+
+
+def _wait_for(predicate, *, within: float = 10.0) -> None:
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    raise AssertionError("the condition did not become true in time")
+
+
+def _sampler_threads() -> int:
+    return sum(t.name == "kyo-serve-session-sampler" for t in threading.enumerate())
+
+
+def test_no_pane_is_read_while_no_client_is_subscribed(bed: Bed) -> None:
+    time.sleep(0.2)
+    assert bed.pane_reads() == 0
+    assert bed.server.session_hub.samplers() == []
+
+
+def test_two_subscribers_share_one_sampler_and_reads_stop_with_the_last(bed: Bed, stream) -> None:
+    # A long keepalive, so that only the check of the closed socket can end these streams.
+    bed.server.keepalive_seconds = 60
+    first, second = stream(), stream()
+    assert first.event("ready")["session_id"] == OLD
+    assert second.event("ready")["session_id"] == OLD
+
+    hub = bed.server.session_hub
+    samplers = hub.samplers()
+    assert len(samplers) == 1 and _sampler_threads() == 1
+    sampler = samplers[0]
+    _wait_for(lambda: sampler.ticks >= 8)
+
+    # One subscriber leaving keeps the sampler for the other.
+    first.close()
+    time.sleep(0.5)
+    assert hub.samplers() == [sampler] and not sampler.stop.is_set()
+    ticks_before = sampler.ticks
+    _wait_for(lambda: sampler.ticks > ticks_before + 2)
+
+    # The last one leaving stops it.
+    second.close()
+    _wait_for(lambda: hub.samplers() == [] and _sampler_threads() == 0)
+    reads = bed.pane_reads()
+    time.sleep(0.2)
+    assert bed.pane_reads() == reads, "a pane was read after the last client left"
+    # An idle screen is read once per sample and once for the baseline, with two clients.
+    assert reads == sampler.ticks + 1
+
+
+def test_a_new_subscriber_after_the_last_left_starts_a_new_sampler(bed: Bed, stream) -> None:
+    one = stream()
+    one.event("ready")
+    hub = bed.server.session_hub
+    first = hub.samplers()[0]
+    one.close()
+    _wait_for(lambda: hub.samplers() == [])
+
+    two = stream()
+    two.event("ready")
+    assert hub.samplers()[0] is not first
+
+
+def test_the_stream_delivers_new_transcript_objects(bed: Bed, stream) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    opened = stream()
+    ready = opened.event("ready")
+    assert ready["screen"]["state"] == "idle" and ready["pane"]["present"] is True
+    bed.append(rows[len(rows) // 2 :])
+    event = opened.event("transcript")
+    assert event["session_id"] == OLD and event["cursor"] != ready["cursor"]
+    assert event["turns"] or event["replies"] or event["tool_calls"]
+    assert_no_raw_row(event)
+
+
+def test_the_stream_delivers_the_reply_in_progress(bed: Bed, stream) -> None:
+    opened = stream()
+    opened.event("ready")
+    bed.show_frame("frame-05.txt")
+    reply = opened.event("reply")
+    assert reply["text"].startswith("Tides are the regular rise")
+    bed.show("idle.txt")
+    assert opened.event("reply")["text"] is None
+
+
+def test_the_stream_delivers_an_overlay_change(bed: Bed, stream) -> None:
+    opened = stream()
+    opened.event("ready")
+    bed.show("permission-bash.txt")
+    event = opened.event("screen")
+    assert event["screen"]["state"] == "permission-prompt"
+    assert event["screen"]["question"].startswith("Do you want")
+    assert [o["number"] for o in event["screen"]["options"]][:1] == [1]
+    bed.show("idle.txt")
+    assert opened.event("screen")["screen"]["state"] == "idle"
+
+
+def test_an_idle_stream_sends_a_keepalive(bed: Bed, stream) -> None:
+    opened = stream()
+    opened.event("ready")
+    assert opened.block() == [": keepalive"]
+
+
+def test_a_cursor_on_the_stream_catches_up_past_it(bed: Bed, stream) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    cursor = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["cursor"]
+    bed.append(rows[len(rows) // 2 :])
+
+    opened = stream(query=f"?cursor={cursor}")
+    caught = opened.event("transcript")
+    assert caught["reset"] is False and caught["cursor"] != cursor
+    assert caught["turns"] or caught["replies"] or caught["tool_calls"]
+
+
+def test_last_event_id_is_honoured_and_a_bad_one_ignored(bed: Bed, stream) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    cursor = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["cursor"]
+    bed.append(rows[len(rows) // 2 :])
+
+    resumed = stream(Last_Event_ID=cursor)
+    assert resumed.event("transcript")["cursor"] != cursor
+
+    fresh = stream(Last_Event_ID="not-a-cursor")
+    assert fresh.event("ready")["session_id"] == OLD
+
+
+def test_the_stream_follows_clear_and_a_subscriber_to_the_new_id_joins(bed: Bed, stream) -> None:
+    opened = stream()
+    opened.event("ready")
+    follows = bed.transcripts / f"{NEW}.jsonl"
+    shutil.copyfile(NEW_FILE, follows)
+    registry = bed.claude / "sessions" / f"{os.getpid()}.json"
+    registry.write_text(json.dumps({"pid": os.getpid(), "sessionId": NEW}), encoding="utf-8")
+
+    moved = opened.event("session")
+    assert moved["session_id"] == NEW and moved["previous_session_id"] == OLD
+    assert moved["followed_clear"] is True
+    assert opened.event("transcript")["session_id"] == NEW
+
+    entries = cmd_sessions.read_sessions(cmd_sessions.sessions_path(bed.project)).entries
+    entries.append(_entry(NEW, state="running", seen="2026-11-09T12:00:00.000Z"))
+    assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(bed.project), entries) is None
+    joined = stream(NEW)
+    assert joined.event("ready")["session_id"] == NEW
+    assert len(bed.server.session_hub.samplers()) == 1 and _sampler_threads() == 1
+
+
+def test_a_pane_that_closes_is_not_reported_as_an_unrecognised_screen(
+    bed: Bed, stream, store_home: Path
+) -> None:
+    """A gone pane captures as nothing; the layer looks it up again instead of logging it."""
+    opened = stream()
+    opened.event("ready")
+    bed.screen_file.write_text("", encoding="utf-8")
+    event = opened.event("screen")
+    assert event["screen"] is None
+    assert not (store_home / "pane-unrecognised").exists()
+
+
+# ------------------------------------------------------------------------- c4: the screen
+
+
+@pytest.mark.parametrize(
+    ("fixture", "state"),
+    [
+        ("idle.txt", "idle"),
+        ("permission-bash.txt", "permission-prompt"),
+        ("ask.txt", "ask-user-question"),
+        ("usage.txt", "usage-panel"),
+        ("trust-dialog.synthetic.txt", "trust-dialog"),
+        ("unrecognised-help.txt", "unrecognised"),
+    ],
+)
+def test_the_screen_route_returns_the_layers_classification(
+    bed: Bed, fixture: str, state: str
+) -> None:
+    bed.show(fixture)
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
+    assert document["session_id"] == OLD and document["screen"]["state"] == state
+    assert document["pane"]["present"] is True and document["pane"]["pane_id"] == "%1"
+    assert set(document["screen"]) == {"state", "question", "options", "input_text", "background"}
+    # A classification only: no text of the screen is carried.
+    assert "text" not in document["screen"] and "raw" not in document["screen"]
+
+
+def test_the_screen_route_for_a_session_with_no_pane(bed: Bed) -> None:
+    registry = bed.claude / "sessions" / f"{os.getpid()}.json"
+    registry.write_text(json.dumps({"pid": os.getpid(), "sessionId": ENDED}), encoding="utf-8")
+    document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
+    assert document["screen"] is None and document["work_running"] is None
+    assert document["pane"]["present"] is False and document["pane"]["why"]
+
+
+#: What would let a ``kyosei.serve*`` module send input to a session.
+FORBIDDEN_NAMES = {
+    "send_message", "send_slash_command", "clear_input", "_send_typed", "_send_paste",
+    "Tmux", "resolve_tmux", "tmux",
+}  # fmt: skip
+FORBIDDEN_STRINGS = ("send-keys", "paste-buffer", "load-buffer")
+FORBIDDEN_MODULES = ("claude_code_pane", "claude_code_transcript", "harness")
+FORBIDDEN_CALLS = {"__import__", "eval", "exec", "import_module"}
+
+
+def reaches_send(source: str, name: str) -> list[str]:
+    """What, in one module, could reach the session layer's sending half."""
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source, name)):
+        if isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_NAMES:
+            found.append(f"{node.lineno}: .{node.attr}")
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES | FORBIDDEN_CALLS:
+            found.append(f"{node.lineno}: {node.id}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and any(word in ast.dump(node.args[0]) for word in ("session_layer", "pane"))
+        ):
+            found.append(f"{node.lineno}: getattr on the session layer")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found += [f"{node.lineno}: {s!r}" for s in FORBIDDEN_STRINGS if s in node.value]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or "", *(alias.name for alias in node.names)]
+            if any(m in n for n in names for m in FORBIDDEN_MODULES) or any(
+                alias.name in FORBIDDEN_NAMES for alias in node.names
+            ):
+                found.append(f"{node.lineno}: from {node.module} import …")
+        elif isinstance(node, ast.Import) and any(
+            m in alias.name for alias in node.names for m in FORBIDDEN_MODULES
+        ):
+            found.append(f"{node.lineno}: import …")
+    return found
+
+
+def test_no_serve_module_can_reach_the_send_function() -> None:
+    package = Path(kyosei.__file__).parent
+    modules = sorted(package.glob("serve*.py"))
+    assert {"serve.py", "serve_events.py", "serve_files.py", "serve_sessions.py"} <= {
+        p.name for p in modules
+    }
+    offenders = {
+        path.name: found
+        for path in modules
+        if (found := reaches_send(path.read_text(encoding="utf-8"), path.name))
+    }
+    assert offenders == {}, (
+        "no kyosei.serve* module may reach the session layer's sending half until the send "
+        f"routes of chunk E4 exist, and those routes change this test on purpose: {offenders}"
+    )
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "from . import session_layer\nsession_layer.pane.send_message(None, '', [])\n",
+        "from .harness import claude_code_pane\n",
+        "from .cmd_controller import Tmux\n",
+        "live.tmux().run('send-keys')\n",
+        "getattr(session_layer.pane, 'send_' + 'message')\n",
+    ],
+)
+def test_the_send_check_catches_a_planted_reach(planted: str) -> None:
+    assert reaches_send(planted, "planted.py")
+
+
+def test_the_session_layer_itself_offers_no_send_function() -> None:
+    from kyosei import session_layer
+
+    public = {name for name in dir(session_layer) if not name.startswith("_")}
+    assert "send_message" not in public and "send_slash_command" not in public
+
+
+# ------------------------------------------------------------------- c5: the opt-in
+
+
+@pytest.fixture
+def unopted(project: Path, store_home: Path, tmp_path: Path, running) -> Client:
+    """The same routes in a project that never set ``read_transcripts``."""
+    register(store_home, project)
+    claude = tmp_path / "claude"
+    (claude / "projects" / "-work").mkdir(parents=True)
+    shutil.copyfile(OLD_FILE, claude / "projects" / "-work" / f"{OLD}.jsonl")
+    (claude / "sessions").mkdir(parents=True)
+    entries = [_entry(OLD, state="running", seen="2026-11-09T10:00:00.000Z")]
+    assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(project), entries) is None
+    client = running(environ={**os.environ, "CLAUDE_CONFIG_DIR": str(claude)})
+    client.server.session_sample_seconds = 0.03
+    return client
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_every_session_route_refuses_until_the_project_opts_in(
+    unopted: Client, project: Path, route: str
+) -> None:
+    status, _, body = unopted.get(route)
+    assert status == 403, body
+    document = body_json(body)
+    assert "read_transcripts: true" in document["error"]
+    assert "kyosei/config.yml" in document["error"]
+    assert document["setting"] == "read_transcripts"
+
+    opt_in_transcripts(project)  # the remedy the refusal names
+    if route.endswith("/events"):
+        conn = http.client.HTTPConnection("127.0.0.1", unopted.port, timeout=10)
+        conn.putrequest("GET", route, skip_host=True)
+        conn.putheader("Host", f"127.0.0.1:{unopted.port}")
+        conn.endheaders()
+        response = conn.getresponse()
+        assert response.status == 200
+        response.close()
+        conn.close()
+    else:
+        status, _, body = unopted.get(route)
+        assert status == 200, body
+
+
+def test_nothing_is_read_before_the_opt_in_refusal(
+    unopted: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(*args, **kwargs):
+        raise AssertionError("sessions.json was read before the opt-in check")
+
+    monkeypatch.setattr(serve_sessions, "read_sessions", explode)
+    assert unopted.get(SESSIONS)[0] == 403
+
+
+# ------------------------------------------------------------- c6: the checks, and the docs
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_session_route_refuses_a_host_it_does_not_know(bed: Bed, route: str) -> None:
+    status, _, body = bed.get(route, host="evil.example")
+    assert status == 403 and "--allow-host" in body_json(body)["error"]
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_session_route_refuses_a_foreign_origin(bed: Bed, route: str) -> None:
+    status, _, body = bed.get(route, headers={"Origin": "https://evil.example"})
+    assert status == 403 and "--allow-origin" in body_json(body)["error"]
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_session_route_answers_an_origin_given_with_allow_origin(
+    bed: Bed, running, route: str
+) -> None:
+    trusted = running(environ=bed.server.environ, allow_origins=("http://localhost:5173",))
+    trusted.server.session_sample_seconds = 0.03
+    conn = http.client.HTTPConnection("127.0.0.1", trusted.port, timeout=10)
+    conn.putrequest("GET", route, skip_host=True)
+    conn.putheader("Host", f"127.0.0.1:{trusted.port}")
+    conn.putheader("Origin", "http://localhost:5173")
+    conn.endheaders()
+    response = conn.getresponse()
+    assert response.status == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    response.close()
+    conn.close()
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+def test_a_session_route_answers_get_only(bed: Bed, route: str, method: str) -> None:
+    headers = {"Content-Type": "application/json"} if method == "POST" else {}
+    status, response_headers, _ = bed.client.request(route, method=method, headers=headers)
+    assert status == 405 and response_headers["Allow"] == "GET"
+
+
+def test_an_unknown_session_sub_route_is_refused(bed: Bed) -> None:
+    status, _, body = bed.get(f"{SESSIONS}/{OLD}/transcript")
+    assert status == 404 and "/turns" in body_json(body)["error"]
+
+
+def test_the_operating_reference_states_the_shapes() -> None:
+    reference = (
+        Path(__file__).parent.parent / "docs" / "reference" / "topics" / "serve-and-desktop.md"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "/sessions/<id>/turns",
+        "/sessions/<id>/events",
+        "/sessions/<id>/screen",
+        "`work_running`",
+        "`has_pane`",
+        "`cursor`",
+        "reset: true",
+        "`message_id`",
+        "`call_id`",
+        "record_uuids",
+        "`read_transcripts: true`",
+        "event: transcript",
+        "event: reply",
+        "event: screen",
+        "event: session",
+    ):
+        assert needle in reference, needle
