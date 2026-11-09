@@ -10,9 +10,11 @@ interface Delivery {
   sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
   status: string | null; summary: string | null;
 }
-interface Subagent { agent_id: string; description: string; agent_type: string }
+interface Subagent {
+  agent_id: string; description: string; agent_type: string; tool_call_uuid: string;
+}
 interface ToolCall {
-  call_id: string; at: string; name: string; input: Record<string, unknown> | null;
+  call_id: string; uuid: string; at: string; name: string; input: Record<string, unknown> | null;
   result: { text: string | null; is_error: boolean } | null;
 }
 interface CommandOutput { uuid: string; at: string; command: string; args: string; text: string }
@@ -212,7 +214,10 @@ function drawWorking(): void {
   });
 }
 
-setInterval(drawWorking, 1000);
+setInterval(() => {
+  drawWorking();
+  drawSide();
+}, 1000);
 
 // ---------------------------------------------------- tool-call runs and the edited-files card
 
@@ -536,34 +541,46 @@ function drawSide(): void {
 
   const agents = [...subagents.values()];
   const runningAgents = agents.filter((agent) => !agentFinished(agent));
-  sideList("side-agents", runningAgents.map(agentLabel));
+  sideList(
+    "side-agents",
+    runningAgents.map((agent) => ({
+      label: agent.description || agent.agent_type,
+      since: [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at,
+    })),
+  );
   setText("side-agents-finished", `${agents.length - runningAgents.length} finished`);
 
   const own = [...calls.values()].filter(isOwnBackgroundTask);
   const runningOwn = own.filter((call) => !callFinished(call));
   sideList(
     "side-tasks",
-    runningOwn.map((call) => String(call.input?.description ?? summary(call) ?? call.name)),
+    runningOwn.map((call) => ({
+      label: String(call.input?.description ?? summary(call) ?? call.name),
+      since: call.at,
+    })),
   );
   setText("side-finished", `${own.length - runningOwn.length} finished`);
 }
 
-function sideList(id: string, labels: string[]): void {
+function sideList(id: string, rows: { label: string; since?: string }[]): void {
   document.getElementById(id)!.replaceChildren(
-    ...labels.map((label) => {
+    ...rows.map(({ label, since }) => {
       const item = document.createElement("div");
       item.className = "side-task";
-      item.textContent = label;
-      item.title = label;
+      const name = document.createElement("span");
+      name.className = "side-task-name";
+      name.textContent = label;
+      name.title = label;
+      item.append(name);
+      if (since) {
+        const time = document.createElement("span");
+        time.className = "side-task-time";
+        time.textContent = elapsed(since);
+        item.append(time);
+      }
       return item;
     }),
   );
-}
-
-/** "KYO-692 Subagent", from the record the orchestrator named when it started the agent. */
-function agentLabel(agent: Subagent): string {
-  const record = agent.description.match(/\b[A-Z][A-Z0-9]*-\d+\b/);
-  return record ? `${record[0]} Subagent` : agent.description || agent.agent_type;
 }
 
 function agentFinished(agent: Subagent): boolean {
@@ -591,8 +608,40 @@ document.getElementById("side-toggle")!.addEventListener("click", () => {
   } catch {}
 });
 
+// The terminal's width is the running session's and is not ours to change, so its text is
+// scaled to fit the drawer rather than scrolled sideways.
+const terminalPane = document.getElementById("terminal")!;
+const TERMINAL_MAX_FONT = 13;
+const TERMINAL_PADDING = 32;
+let terminalColumns = 0;
+
+function characterWidth(): number {
+  const context = document.createElement("canvas").getContext("2d")!;
+  context.font = "100px ui-monospace, SFMono-Regular, Menlo, monospace";
+  return context.measureText("M").width / 100;
+}
+
+const CHARACTER_WIDTH = characterWidth();
+
+function fitTerminal(): void {
+  const width = terminalPane.clientWidth - TERMINAL_PADDING;
+  if (width <= 0 || !terminalColumns) return;
+  const size = Math.min(TERMINAL_MAX_FONT, width / (terminalColumns * CHARACTER_WIDTH));
+  terminalPane.style.fontSize = `${size.toFixed(2)}px`;
+}
+
+window.addEventListener("resize", fitTerminal);
+
+// Wheel movement over the drawer stays in the drawer, including when it has nothing to scroll.
+terminalPane.addEventListener("wheel", (event) => {
+  terminalPane.scrollTop += event.deltaY;
+  event.preventDefault();
+  event.stopPropagation();
+}, { passive: false });
+
 document.getElementById("terminal-toggle")!.addEventListener("click", () => {
   document.body.classList.toggle("terminal-open");
+  fitTerminal();
 });
 
 document.getElementById("sessions-more")!.addEventListener("click", () => {
@@ -649,6 +698,7 @@ const kyo = {
     subagents.clear();
     deliveries.length = 0;
     landedKeys.length = 0;
+    terminalColumns = 0;
     facts = null;
     latestAt = "";
     clearLive();
@@ -665,8 +715,10 @@ const kyo = {
 
   terminal(frame: { terminal?: { text: string; working_line: string | null } | null }): void {
     workingLine = frame.terminal?.working_line ?? null;
-    document.getElementById("terminal")!.textContent =
-      frame.terminal?.text ?? "This session has no terminal to show.";
+    const text = frame.terminal?.text ?? "This session has no terminal to show.";
+    terminalPane.textContent = text;
+    terminalColumns = Math.max(terminalColumns, ...text.split("\n").map((line) => line.length));
+    fitTerminal();
     drawWorking();
   },
 
