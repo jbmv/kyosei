@@ -80,11 +80,13 @@ own. Outside a Kyosei project every one of them exits silently.
 | A session starts | `kyo brief --compact --session-start` | Prints the brief into the new session. |
 | A session starts | `kyo sessions --hook` | Records which Claude Code sessions belong to this project. |
 | You send a prompt | `kyo check-build --hook` | Says so, in one line, when the installed `kyo` changed mid-session. |
+| You send a prompt | `kyo turns --hook` | Where [D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts) is yes, adds the prompt to the turn index, with no text and no output. |
 | An agent runs a shell command | `kyo check-push --pre-tool-use` | Refuses a `git push` that would publish a store kept inside the code repository, until someone accepts that. |
 | An agent runs a shell command | `kyo check-command --pre-tool-use` | Refuses a whole-suite command inside a worker's worktree, if the project lists such commands. |
 | A worker stops | `kyo check-clean --subagent-stop` | Refuses to let a worker stop with uncommitted work. |
 | A worker stops | `kyo check-branch --subagent-stop --against main` | Refuses a worker branch that changed anything under `kyosei/` or `ideas/`. `main` here means the project's trunk, whatever it is called. |
 | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. |
+| The session stops | `kyo turns --hook` | Where D14 is yes, confirms the turn index from the transcript and copies the transcript and its subagent transcripts to the local archive. Silent. |
 
 The two worker checks block a worker's first attempt to stop and name the remedy. If the
 worker stops again without fixing it, they report the finding without blocking, and the

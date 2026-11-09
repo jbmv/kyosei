@@ -32,6 +32,7 @@ from .commands import (
 from .config import (
     LAYOUT_IN_REPO,
     STORE_HOME_ENV,
+    TRANSCRIPT_ARCHIVE_DIRNAME,
     git_worktree_facts,
     store_home,
 )
@@ -365,10 +366,16 @@ def _home_dirs(home: Path) -> list[str] | None:
 
     Top level only: a store `kyo init` creates is ``<home>/<project>``, while the
     controller's own new dispatch worktrees land two levels down, under
-    ``<home>/<project>/dispatch worktrees/`` (KYO-70), and must not read as a leak.
+    ``<home>/<project>/dispatch worktrees/`` (KYO-70), and must not read as a leak. The
+    transcript archive (KYO-683) is created by an orchestrator's Stop hook, which can land
+    during any dispatch, and is left out for the same reason.
     """
     try:
-        return sorted(child.name for child in home.iterdir() if child.is_dir())
+        return sorted(
+            child.name
+            for child in home.iterdir()
+            if child.is_dir() and child.name != TRANSCRIPT_ARCHIVE_DIRNAME
+        )
     except FileNotFoundError:
         return []
     except OSError:

@@ -983,6 +983,9 @@ kyo brief --session-start                  # record this brief as a session star
 kyo check-build                            # has the `kyo` under this session changed since
                                             # its opening brief? read-only; `--hook` is the
                                             # UserPromptSubmit form (KYO-398)
+kyo turns                                  # the turn index of a project that opted in to
+                                            # reading transcripts: one line per prompt, no
+                                            # text; `--hook` is the form the hooks run (KYO-657)
 kyo show KYO-S19                           # read one shift note back by id, any time
 kyo note --shift --file thought.md         # append to the continuously-written shift log
 kyo where                                  # where is this project, and can THIS build open its

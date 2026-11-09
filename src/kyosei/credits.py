@@ -86,6 +86,7 @@ import yaml
 
 from . import commands, export, ids
 from .cmd_sessions import recorded_transcript_path
+from .cmd_turns import confirmed_paste_flags
 from .commands import Context, Output, _add_evidence, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, declared_people, person_label, transcripts_opted_in
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
@@ -424,6 +425,13 @@ def resolve(
     return credit
 
 
+def _archive(ctx: Context):
+    """This project's transcript archive, where the readers look once an original is gone."""
+    from .transcript_archive import archive_dir
+
+    return archive_dir(ctx.store().config, ctx.environ)
+
+
 def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str):
     try:
         result = transcript.check_quote(
@@ -432,6 +440,8 @@ def _check(ctx: Context, session: str, quote: str, turn: str | None, person: str
             turn=turn,
             recorded=recorded_transcript_path(ctx.root, session),
             environ=ctx.environ,
+            archive=_archive(ctx),
+            paste_flags=confirmed_paste_flags(ctx.root, session),
         )
     except ValueError as exc:
         raise UsageError(f"{exc}; --session takes the session's UUID") from exc
@@ -572,7 +582,10 @@ def _require_person_turn(ctx: Context, store, session: str, turn: str) -> None:
         return
     try:
         read = transcript.find_person_turns(
-            session, recorded=recorded_transcript_path(ctx.root, session), environ=ctx.environ
+            session,
+            recorded=recorded_transcript_path(ctx.root, session),
+            environ=ctx.environ,
+            archive=_archive(ctx),
         )
     except (ValueError, OSError):
         return
@@ -609,6 +622,7 @@ def _span(ctx: Context, store, args: Namespace, credit: Credit) -> tuple[dict, s
             last,
             recorded=recorded_transcript_path(ctx.root, session),
             environ=ctx.environ,
+            archive=_archive(ctx),
         )
     except ValueError as exc:
         raise UsageError(f"{exc}; --span-session takes the session's UUID") from exc

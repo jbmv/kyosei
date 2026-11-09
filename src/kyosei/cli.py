@@ -54,6 +54,7 @@ from . import (
     cmd_sessions,
     cmd_store,
     cmd_sweep,
+    cmd_turns,
     cmd_views,
     cmd_worktrees,
     commands,
@@ -264,6 +265,10 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # writes is local state beside `kyosei.db`, gitignored and rebuilt by the next
     # session, exactly as the database is.
     "sessions": (cmd_sessions.cmd_sessions, PROJECT_OPTIONAL),
+    # KYO-657: PROJECT_OPTIONAL on `sessions`' reasoning, and for its hook form on
+    # `check-build`'s: it runs on every prompt. Not in MUTATING_COMMANDS: the files it
+    # writes are gitignored local state beside `kyosei.db`, and no record or event.
+    "turns": (cmd_turns.cmd_turns, PROJECT_OPTIONAL),
     "install-hooks": (commands.cmd_install_hooks, PROJECT_REQUIRED),
     "install-skill": (commands.cmd_install_skill, PROJECT_REQUIRED),
     # KYO-212: the third of the "your copy, updated" commands, and the only one that
@@ -1918,6 +1923,22 @@ def build_parser() -> KyoseiParser:
         "record this session in the store's local sessions.json; how the packaged hook "
         "invokes this. Silent on success, and always exit 0 — a session that could not "
         "be recorded must still start, turn and end",
+    )
+
+    p_turns = sub.add_parser(
+        "turns",
+        parents=[common],
+        help="the turn index: one line per prompt, with no text, in a project that opted in "
+        "to reading transcripts (KYO-657)",
+    )
+    p_turns.add_argument("--session", help="only this session's lines")
+    p_turns.add_argument(
+        "--hook",
+        action="store_true",
+        help="read Claude Code's UserPromptSubmit, Stop or SessionEnd payload on stdin: add "
+        "this prompt to the index, or confirm the index from the transcript and copy the "
+        "transcript to the archive; how the packaged hooks invoke this. Prints nothing and "
+        "always exits 0",
     )
 
     p_install_hooks = sub.add_parser(

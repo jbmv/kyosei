@@ -235,14 +235,21 @@ Ask these together, in one message. Propose an answer for each from what you rea
   are yours, and to count the turns of a discussion a credit cites. **What is read:** the
   transcript of the session a credit names, and your prompt history
   (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
-  this machine, only when a credit is written or rechecked. **What is stored:** the check's
+  this machine, when a credit is written or rechecked; each time a session stops, its
+  transcript and subagent transcripts, to keep the turn index and archive below; and each
+  prompt, for the marker of pasted content. **What is stored:** the check's
   outcome, the matched record's id and timestamp, the form of the words (typed, mid-turn,
   a choice, an accepted suggestion), and for a cited discussion the counts of turns, the
   active seconds and the first and last timestamps. No text, path or hash of a transcript
   is stored; the words being credited are stored either way, because the credit holds
-  them. **What never leaves this machine:** the transcripts and the prompt history. Kyosei
-  sends neither anywhere and copies neither into the store; a store remote carries only
-  what is listed as stored. **Read either way:** the Remote Control session id in a session's
+  them. Beside the store and gitignored, `kyosei/turns.jsonl` holds one line per prompt:
+  session, prompt id, time, whose it was and whether it carried pasted content, and no
+  text. **What is copied locally:** the session's transcript and subagent transcripts, to
+  `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
+  is checked against when the original is absent. **What never leaves this
+  machine:** the transcripts, the archive and the prompt history. Kyosei sends none of them
+  anywhere and copies none of them into the store; a store remote carries only what is
+  listed as stored. **Read either way:** the Remote Control session id in a session's
   transcript, and the token totals of dispatched workers; neither reads your words. (Default:
   no.)" Write the answer as `read_transcripts: true` or `read_transcripts: false` in
   `kyosei/config.yml`. Without it none of the reading above happens, and a credit records its

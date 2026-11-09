@@ -29,6 +29,8 @@ from .config import (
     LAYOUT_IN_REPO,
     LAYOUT_SPLIT,
     SESSIONS_NAME,
+    TURNS_CURSOR_NAME,
+    TURNS_NAME,
     config_path_for,
     default_store_dir,
     read_raw_config,
@@ -94,6 +96,8 @@ def store_gitignore_text(
     db_name: str = DB_NAME,
     sessions_name: str = SESSIONS_NAME,
     report_name: str = DOCTOR_REPORT_NAME,
+    turns_name: str = TURNS_NAME,
+    turns_cursor_name: str = TURNS_CURSOR_NAME,
 ) -> str:
     """:data:`KYOSEI_GITIGNORE`'s content, as a function of the names it covers.
 
@@ -115,7 +119,10 @@ def store_gitignore_text(
         *(f"{db_name}{suffix}" for suffix in DB_SIDECAR_SUFFIXES),
         sessions_name,
         report_name,
+        turns_name,
+        turns_cursor_name,
         f"{sessions_name}.*.tmp",
+        f"{turns_name}.*.tmp",
         f"*{ATOMIC_TEMP_SUFFIX}",
     )
     return "".join(f"{name}\n" for name in names)
