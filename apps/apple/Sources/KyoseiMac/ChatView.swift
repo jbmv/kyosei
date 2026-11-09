@@ -64,7 +64,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "image")
         configuration.userContentController.add(context.coordinator, name: "agent")
         configuration.userContentController.add(context.coordinator, name: "strip")
-        for name in ["send", "retract", "interrupt", "saveDraft"] {
+        for name in ["send", "slash", "retract", "interrupt", "saveDraft"] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -119,6 +119,12 @@ struct ChatWebView: NSViewRepresentable {
                 let id = body["id"] as? String
             {
                 feed.retract(id: id)
+                return
+            }
+            if message.name == "slash", let body = message.body as? [String: Any],
+                let command = body["command"] as? String
+            {
+                feed.slash(command: command)
                 return
             }
             if message.name == "saveDraft", let body = message.body as? [String: Any] {

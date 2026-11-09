@@ -1154,6 +1154,11 @@ function attemptSend(): void {
     return;
   }
   composerNote.textContent = "Sending…";
+  const only = segments.length === 1 ? segments[0].text.trim() : "";
+  if (/^\/[a-z][\w:-]*(\s[^\n]*)?$/i.test(only)) {
+    post("slash", { command: only });
+    return;
+  }
   post("send", { segments });
 }
 
@@ -1180,8 +1185,15 @@ const INDENT = "  ";
 
 /** Replaces a range by the editing command, which keeps the box's undo history. */
 function replaceRange(area: HTMLTextAreaElement, from: number, to: number, text: string): void {
+  const before = area.value;
   area.setSelectionRange(from, to);
-  if (!document.execCommand("insertText", false, text)) area.setRangeText(text, from, to, "end");
+  const done = text
+    ? document.execCommand("insertText", false, text)
+    : document.execCommand("delete");
+  if (!done || area.value === before) {
+    area.setRangeText(text, from, to, "end");
+    area.dispatchEvent(new Event("input"));
+  }
 }
 
 /** Numbered and bulleted lists: Return continues one, and an empty item ends it. */
@@ -1207,9 +1219,9 @@ function listKeys(area: HTMLTextAreaElement, event: KeyboardEvent): void {
   if (event.key !== "Enter" || !item) return;
   const [, indent, number, bullet, content] = item;
   if (!content) {
-    // Return or Shift-Return on an empty item ends the list and starts a fresh line below it.
+    // Return or Shift-Return on an empty item ends the list, on that same line.
     event.preventDefault();
-    replaceRange(area, start, caret, "\n");
+    replaceRange(area, start, caret, "");
     return;
   }
   if (event.shiftKey) return;
