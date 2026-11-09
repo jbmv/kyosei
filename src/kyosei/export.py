@@ -564,7 +564,7 @@ def record_document(store: Store, record_id: str) -> dict:
 
 
 def person_note_document(store: Store, note_id: str) -> dict:
-    """KYO-705: one note a person wrote, as its ledger line and as ``kyo notes`` shows it.
+    """KYO-705: one note a person wrote, as ``kyo notes`` shows it, with its current tags.
 
     An anchor keeps only the keys its kind uses, and ``digest`` is the only thing about a
     transcript span the note carries: an anchor holds addresses, never the words.
@@ -592,7 +592,35 @@ def person_note_document(store: Store, note_id: str) -> dict:
             }
             for anchor in store.person_note_anchors(note_id)
         ],
+        "tag_changes": [
+            {
+                "id": change["id"],
+                "action": change["action"],
+                "tag": change["tag"],
+                "person": change["person"],
+                "author": change["author"],
+                "changed_at": change["changed_at"],
+            }
+            for change in store.person_note_tag_changes(note_id)
+        ],
     }
+
+
+def person_note_line(store: Store, note_id: str) -> dict:
+    """KYO-705.c5: the note's ledger line, which is the note as it was filed.
+
+    The line is never rewritten, so its ``tags`` are the filing's, found by undoing each
+    recorded change on the current set, and the changes are ledger lines of their own.
+    """
+    line = person_note_document(store, note_id)
+    filed = set(line["tags"])
+    for change in reversed(line.pop("tag_changes")):
+        if change["action"] == "add":
+            filed.discard(change["tag"])
+        else:
+            filed.add(change["tag"])
+    line["tags"] = sorted(filed)
+    return line
 
 
 def serialise(document: dict) -> str:

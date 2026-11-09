@@ -3,8 +3,13 @@
 A NOTE is the person's text, its anchors, its tags, the device, the time and how it was
 entered. It is a row of its own (``person_notes``) and not a kind in the registry, because a
 record carries a title, a status and a place on the board, and a person may write dozens of
-notes in one session. A note is never amended: its tags and anchors are fixed when it is
-written, and a person who wants to add to one writes another, anchored to it.
+notes in one session. Its text and anchors are fixed when it is filed, and a person who wants
+to add to it writes another note, anchored to it.
+
+ITS TAGS CAN CHANGE (KYO-705.c5). ``kyo notes tag`` adds and removes them, one row of
+``person_note_tag_changes`` and one ledger line for each tag that moved, naming who moved it
+and when. The note's own ledger line stays as it was filed, and finding notes by tag reads
+the current set.
 
 AN ANCHOR addresses a place and holds no words from it:
 
@@ -370,6 +375,10 @@ def note_lines(note: dict) -> list[str]:
     else:
         lines.extend(f"  | {line}" for line in note["text"].split("\n"))
     lines.extend(f"  on {anchor_label(anchor)}" for anchor in note["anchors"])
+    for change in note["tag_changes"]:
+        sign = "+" if change["action"] == "add" else "-"
+        who = change["person"] or change["author"]
+        lines.append(f"  tag {sign}{change['tag']} by {who} at {change['changed_at']}")
     return lines
 
 
@@ -452,6 +461,7 @@ def _add(ctx: Context, args: Namespace) -> Output:
             tags=tags,
         )
         document = export.person_note_document(store, note_id)
+        line = export.person_note_line(store, note_id)
         # Names the note and carries no text: its words live on its own ledger line
         # alone, which is the one place `kyo redact` then has to reach.
         event = store.record_event(
@@ -462,7 +472,7 @@ def _add(ctx: Context, args: Namespace) -> Output:
             after={"person_note_id": note_id},
         )
     events_ledger.append_events(store, [event])
-    ledgers.append_person_note(store, document)
+    ledgers.append_person_note(store, line)
     ledgers.write_allocations(store)
     lines = [f"wrote note {note_id}"]
     if text:
@@ -502,8 +512,95 @@ def _show(ctx: Context, args: Namespace) -> Output:
     return Output(note_lines(note), {"ok": True, "command": "notes show", "note": note})
 
 
+def _tag(ctx: Context, args: Namespace) -> Output:
+    if not args.id:
+        raise UsageError("kyo notes tag needs a note id (PREFIX-NN)")
+    fixed = [
+        flag
+        for flag, value in (
+            ("--file", args.file),
+            ("--on", args.on),
+            ("--anchors-file", args.anchors_file),
+            ("--tag", args.tag),
+            ("--device", args.device),
+            ("--entered", args.entered),
+            ("--anchored-to", args.anchored_to),
+        )
+        if value
+    ]
+    if fixed:
+        raise UsageError(
+            f"kyo notes tag takes --add, --remove and --person, not {', '.join(fixed)}. A "
+            f"filed note's text and anchors are fixed: to add to it, write another note on it "
+            f"with `kyo notes add --on {args.id} --entered typed --file FILE`"
+        )
+    add = {normalise_tag(tag) for tag in args.add or []}
+    remove = {normalise_tag(tag) for tag in args.remove or []}
+    if not add and not remove:
+        raise UsageError("kyo notes tag needs at least one --add TAG or --remove TAG")
+    both = sorted(add & remove)
+    if both:
+        raise UsageError(f"--add and --remove both name {', '.join(both)}: nothing was written")
+    store = ctx.store()
+    if store.person_note(args.id) is None:
+        raise NotFound(f"no note {args.id!r}: ids are printed when a note is added and listed")
+    with store.transaction():
+        person = _person(store, args.person)
+        rows = store.change_person_note_tags(
+            args.id, add=add, remove=remove, person=person, author=ctx.actor
+        )
+        document = export.person_note_document(store, args.id)
+        # Written only when a tag moved: a repeated request leaves no trace to explain.
+        event = (
+            store.record_event(
+                actor=ctx.actor,
+                command="notes tag",
+                record_id=None,
+                before=None,
+                after={
+                    "person_note_id": args.id,
+                    "person_note_tag_changes": [row["id"] for row in rows],
+                },
+            )
+            if rows
+            else None
+        )
+    if event is not None:
+        events_ledger.append_events(store, [event])
+        for row in rows:
+            ledgers.append_person_note_tag_change(store, row)
+        ledgers.write_allocations(store)
+    moved = {row["tag"] for row in rows}
+    unchanged = sorted((add | remove) - moved)
+    tags = ", ".join(document["tags"]) or "(none)"
+    if rows:
+        steps = ", ".join(("+" if r["action"] == "add" else "-") + r["tag"] for r in rows)
+        lines = [f"changed tags on {args.id}: {steps}", f"  tags: {tags}"]
+    else:
+        lines = [f"no tag changed on {args.id}", f"  tags: {tags}"]
+    if unchanged and rows:
+        lines.append(f"  already so: {', '.join(unchanged)}")
+    return Output(
+        lines,
+        {
+            "ok": True,
+            "command": "notes tag",
+            "note": document,
+            "changes": [dict(row) for row in rows],
+            "unchanged": unchanged,
+        },
+    )
+
+
 def cmd_notes(ctx: Context, args: Namespace) -> Output:
-    """``kyo notes add|list|show`` (module docstring)."""
+    """``kyo notes add|list|show|tag`` (module docstring)."""
+    if args.action != "tag" and (args.add or args.remove):
+        raise UsageError(
+            "--add and --remove change a filed note's tags, so they belong to the tag "
+            "action; filing a note takes --tag"
+        )
+    if args.action == "tag":
+        return _tag(ctx, args)
     if args.action == "add":
         return _add(ctx, args)
     if args.action == "show":

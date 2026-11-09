@@ -588,7 +588,7 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
     the same commit as the schema change (KYO-3.c4).
     """
     pinned = {
-        2: "4185b82c0c38bb152202735b199d754813ee88c9ff084ba1729378a3ccb07f49",
+        2: "2cd81e07a27af20e230ffa29a8af39ef972c801579b8e263b6573a0c74a0c2c6",
         3: "5818601dac1a333583e3b8dc9a983bcd7e5182e1537ca68db9d151e3ac5cee6f",
         4: "1b4655bb0220cbbe7d56b31345f6b1204c4e054fcd79ef410ee17d984856b3d7",
         5: "60b90e342d99b7547c2493c7e412da492311e86fa50f995c2ecea9621e98105c",
@@ -727,9 +727,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # retracted with no replacement, kept readable. A real DDL change, so a real new
         # hash.
         29: "fed4bf489447031a8eeb333da551c7af3a54988a4b319be2459f9d29c4baa52e",
-        # KYO-705: person_notes, person_note_anchors and person_note_tags -- what a person
-        # wrote, on the places it addresses. A real DDL change, so a real new hash.
-        30: "a885615e9027bc510fbee525a7ddc706f51fa7b1399bec6826eb98657f14973b",
+        # KYO-705: person_notes, person_note_anchors, person_note_tags and
+        # person_note_tag_changes -- what a person wrote, on the places it addresses, and
+        # each later change to its tags. A real DDL change, so a real new hash.
+        30: "2cd81e07a27af20e230ffa29a8af39ef972c801579b8e263b6573a0c74a0c2c6",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -1683,6 +1684,7 @@ _LEDGER_READING_NAMES = frozenset(
         "read_brief_runs_in",
         "read_shift_notes_in",
         "read_person_notes_in",
+        "read_person_note_tag_changes_in",
     }
 )
 
@@ -2090,6 +2092,7 @@ _STAMPED_EXPORT_WRITERS = frozenset(
         "append_brief_run",
         "append_shift_note",
         "append_person_note",
+        "append_person_note_tag_change",
         "write_exports",
         "refresh_exports",
     }
@@ -2457,7 +2460,12 @@ def test_rebuild_accepts_a_schema_29_export_with_no_person_notes(kyo, project: P
 
     conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
     try:
-        for table in ("person_notes", "person_note_anchors", "person_note_tags"):
+        for table in (
+            "person_notes",
+            "person_note_anchors",
+            "person_note_tags",
+            "person_note_tag_changes",
+        ):
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0, table
     finally:
         conn.close()

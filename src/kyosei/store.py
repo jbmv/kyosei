@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -50,6 +50,8 @@ SCOPE_SHIFT_NOTE = "shift_note"
 #: KYO-705: a note a person wrote. Project-wide like a shift note, because it belongs to no
 #: record: one note can address several, and a note can address none.
 SCOPE_PERSON_NOTE = "person_note"
+#: KYO-705.c5: one tag added to or removed from a filed note.
+SCOPE_PERSON_NOTE_TAG_CHANGE = "person_note_tag_change"
 
 
 def scope_for_child(record_id: str, child_kind: str) -> str:
@@ -869,6 +871,58 @@ class Store:
                 "SELECT tag FROM person_note_tags WHERE note_id = ? ORDER BY tag", (note_id,)
             )
         ]
+
+    def person_note_tag_changes(self, note_id: str) -> list[sqlite3.Row]:
+        """KYO-705.c5: every tag added to or removed from a note since it was filed, oldest
+        first."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM person_note_tag_changes WHERE note_id = ? ORDER BY seq", (note_id,)
+            )
+        )
+
+    def change_person_note_tags(
+        self,
+        note_id: str,
+        *,
+        add: Collection[str],
+        remove: Collection[str],
+        person: str | None,
+        author: str,
+    ) -> list[sqlite3.Row]:
+        """KYO-705.c5: the one writer of a tag change; call inside a transaction.
+
+        ``person_note_tags`` is the current set and each row written here is one step that
+        moved it. A tag the note already carries, or does not carry, is no step and writes
+        no row, so replaying the steps backwards gives the tags the note was filed with
+        (:func:`kyosei.export.person_note_line`). Returns the rows written.
+        """
+        current = set(self.person_note_tags(note_id))
+        steps = [("remove", tag) for tag in sorted(set(remove) & current)]
+        steps += [("add", tag) for tag in sorted(set(add) - current)]
+        written: list[sqlite3.Row] = []
+        for action, tag in steps:
+            if action == "add":
+                self.conn.execute(
+                    "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (note_id, tag)
+                )
+            else:
+                self.conn.execute(
+                    "DELETE FROM person_note_tags WHERE note_id = ? AND tag = ?", (note_id, tag)
+                )
+            seq = self.allocate(SCOPE_PERSON_NOTE_TAG_CHANGE)
+            change_id = ids.person_note_tag_change_id(self.prefix, seq)
+            self.conn.execute(
+                "INSERT INTO person_note_tag_changes (id, seq, note_id, action, tag, person,"
+                " author, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (change_id, seq, note_id, action, tag, person, author, now()),
+            )
+            written.append(
+                self.conn.execute(
+                    "SELECT * FROM person_note_tag_changes WHERE id = ?", (change_id,)
+                ).fetchone()
+            )
+        return written
 
     def add_person_note(
         self,

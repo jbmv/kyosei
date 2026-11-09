@@ -7,15 +7,16 @@ under a fake ``CLAUDE_CONFIG_DIR``, so no session is read.
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from kyosei import cmd_notes
 from kyosei.contracts import REDACTION_MARKER
-from kyosei.ledgers import PERSON_NOTES_FILENAME
+from kyosei.ledgers import PERSON_NOTE_TAG_CHANGES_FILENAME, PERSON_NOTES_FILENAME
 
-from .conftest import git_init, new_record, opt_in_transcripts
+from .conftest import declare_person, git_init, new_record, opt_in_transcripts
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 PROMPT = "22222222-2222-4222-8222-222222222222"
@@ -419,3 +420,212 @@ def test_nothing_matched_says_so(kyo, project: Path) -> None:
 def test_a_bad_tag_is_refused(kyo, project: Path) -> None:
     result = _add(kyo, "--tag", "two words")
     assert result.code != 0 and "no space" in result.err
+
+
+# ----------------------------------------------------- c5: tags after a note is filed
+
+
+def _changes(project: Path) -> list[dict]:
+    path = project / "kyosei" / "export" / PERSON_NOTE_TAG_CHANGES_FILENAME
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _retag(kyo, note: str, *flags: str):
+    return kyo("notes", "tag", note, "--json", *flags)
+
+
+def test_tags_are_added_and_removed_and_found_by_the_current_set(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "old", "--tag", "keep")
+    result = _retag(kyo, "TST-N1", "--add", "#New", "--remove", "old")
+    assert result.code == 0, result
+    assert result.json["note"]["tags"] == ["keep", "new"]
+    assert _ids(kyo("notes", "list", "--tag", "new", "--json")) == ["TST-N1"]
+    assert _ids(kyo("notes", "list", "--tag", "old", "--json")) == []
+    assert _ids(kyo("notes", "list", "--tag", "keep", "--json")) == ["TST-N1"]
+
+
+def test_each_change_is_kept_in_the_ledger_and_attributed(kyo, project: Path) -> None:
+    declare_person(project, "maintainer")
+    _add(kyo, "--tag", "old")
+    _retag(kyo, "TST-N1", "--add", "new", "--remove", "old")
+    lines = _changes(project)
+    assert [(line["id"], line["note_id"], line["action"], line["tag"]) for line in lines] == [
+        ("TST-T1", "TST-N1", "remove", "old"),
+        ("TST-T2", "TST-N1", "add", "new"),
+    ]
+    assert all(line["person"] == "maintainer" and line["author"] for line in lines)
+    assert all(line["changed_at"].endswith("Z") and line["schema_version"] for line in lines)
+    shown = kyo("notes", "show", "TST-N1")
+    assert "tag -old by maintainer" in shown.out and "tag +new by maintainer" in shown.out
+    history = kyo("notes", "show", "TST-N1", "--json").json["note"]["tag_changes"]
+    assert [(c["action"], c["tag"], c["person"]) for c in history] == [
+        ("remove", "old", "maintainer"),
+        ("add", "new", "maintainer"),
+    ]
+
+
+def test_a_tag_change_writes_an_event_naming_the_note(kyo, project: Path) -> None:
+    _add(kyo)
+    _retag(kyo, "TST-N1", "--add", "a")
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        row = conn.execute(
+            "SELECT after_json FROM events WHERE command = 'notes tag'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert json.loads(row[0]) == {
+        "person_note_id": "TST-N1",
+        "person_note_tag_changes": ["TST-T1"],
+    }
+
+
+def test_a_tag_change_leaves_the_text_anchors_and_filed_line_alone(kyo, project: Path) -> None:
+    record = new_record(kyo, criteria=["a"])
+    filed = _add(kyo, "--on", record, "--tag", "old", text="my words\n").json["note"]
+    ledger = project / "kyosei" / "export" / PERSON_NOTES_FILENAME
+    before = ledger.read_bytes()
+    after = _retag(kyo, "TST-N1", "--add", "new", "--remove", "old").json["note"]
+    assert ledger.read_bytes() == before, "the note's own line stays as filed"
+    assert after["text"] == filed["text"] == "my words"
+    assert after["anchors"] == filed["anchors"] == [{"kind": "record", "target": record}]
+    assert after["created_at"] == filed["created_at"]
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ("--file", "-"),
+        ("--on", "TST-1"),
+        ("--anchors-file", "-"),
+        ("--tag", "x"),
+        ("--device", "ipad"),
+        ("--entered", "typed"),
+    ],
+)
+def test_the_tag_command_refuses_anything_but_tags(kyo, project: Path, flags) -> None:
+    filed = _add(kyo).json["note"]
+    result = kyo("notes", "tag", "TST-N1", "--add", "a", *flags, stdin="other words\n")
+    assert result.code != 0
+    assert flags[0] in result.err and "fixed" in result.err
+    assert kyo("notes", "show", "TST-N1", "--json").json["note"] == filed
+
+
+def test_the_refusal_to_change_a_note_names_a_remedy_that_works(kyo, project: Path) -> None:
+    _add(kyo)
+    refused = kyo("notes", "tag", "TST-N1", "--on", "TST-N1", "--add", "a")
+    assert "kyo notes add --on TST-N1" in refused.err
+    cleared = _add(kyo, "--on", "TST-N1", text="more to say\n")
+    assert cleared.code == 0, cleared
+    assert cleared.json["note"]["anchors"] == [{"kind": "note", "target": "TST-N1"}]
+
+
+def test_a_tag_that_is_already_so_writes_nothing(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "here")
+    allocations = project / "kyosei" / "export" / "_allocations.json"
+    before = allocations.read_bytes()
+    result = _retag(kyo, "TST-N1", "--add", "here", "--remove", "absent")
+    assert result.code == 0, result
+    assert result.json["changes"] == []
+    assert result.json["unchanged"] == ["absent", "here"]
+    assert not (project / "kyosei" / "export" / PERSON_NOTE_TAG_CHANGES_FILENAME).exists()
+    assert allocations.read_bytes() == before
+
+
+def test_a_partly_repeated_request_records_only_what_moved(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "here")
+    result = _retag(kyo, "TST-N1", "--add", "here", "--add", "new")
+    assert [change["tag"] for change in result.json["changes"]] == ["new"]
+    assert result.json["unchanged"] == ["here"]
+    assert len(_changes(project)) == 1
+
+
+def test_a_note_may_lose_its_last_tag(kyo, project: Path) -> None:
+    """The refusal of a contentless note is about filing; a person can undo a mark."""
+    _add(kyo, "--tag", "look-here", text=None)
+    result = _retag(kyo, "TST-N1", "--remove", "look-here")
+    assert result.code == 0, result
+    assert result.json["note"]["tags"] == []
+    assert _ids(kyo("notes", "list", "--tag", "look-here", "--json")) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "words"),
+    [
+        (("notes", "tag", "--add", "a"), "needs a note id"),
+        (("notes", "tag", "TST-N1"), "at least one"),
+        (("notes", "tag", "TST-N1", "--add", "a", "--remove", "A"), "both name"),
+        (("notes", "tag", "TST-N1", "--add", "two words"), "no space"),
+        (("notes", "tag", "TST-N9", "--add", "a"), "no note"),
+        (("notes", "list", "--add", "a"), "the tag action"),
+    ],
+)
+def test_a_malformed_tag_change_is_refused(kyo, project: Path, args, words: str) -> None:
+    _add(kyo)
+    result = kyo(*args)
+    assert result.code != 0
+    assert words in result.err
+    assert not (project / "kyosei" / "export" / PERSON_NOTE_TAG_CHANGES_FILENAME).exists()
+
+
+def test_tag_changes_rebuild_from_export_alone(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "old", "--tag", "keep")
+    _retag(kyo, "TST-N1", "--add", "new", "--remove", "old")
+    _retag(kyo, "TST-N1", "--add", "old")
+    _retag(kyo, "TST-N1", "--remove", "new")
+    shown = kyo("notes", "show", "TST-N1", "--json").json["note"]
+    assert shown["tags"] == ["keep", "old"]
+    (project / "kyosei" / "kyosei.db").unlink()
+    rebuilt = kyo("rebuild")
+    assert rebuilt.code == 0, rebuilt
+    assert kyo("notes", "show", "TST-N1", "--json").json["note"] == shown
+    assert _ids(kyo("notes", "list", "--tag", "new", "--json")) == []
+    next_change = _retag(kyo, "TST-N1", "--add", "later")
+    assert next_change.json["changes"][0]["id"] == "TST-T5", "the counter survived"
+    doctor = kyo("doctor")
+    assert doctor.code == 0, doctor
+
+
+def test_a_lost_note_line_is_repaired_with_the_tags_it_was_filed_with(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "old")
+    _retag(kyo, "TST-N1", "--add", "new", "--remove", "old")
+    ledger = project / "kyosei" / "export" / PERSON_NOTES_FILENAME
+    ledger.write_text("", encoding="utf-8")
+    assert kyo("export", "--refresh").code == 0
+    assert _ledger(project)[0]["tags"] == ["old"]
+    assert "tag_changes" not in _ledger(project)[0]
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert kyo("notes", "show", "TST-N1", "--json").json["note"]["tags"] == ["new"]
+
+
+def test_a_lost_tag_change_is_repaired_from_the_database(kyo, project: Path) -> None:
+    _add(kyo)
+    _retag(kyo, "TST-N1", "--add", "a")
+    path = project / "kyosei" / "export" / PERSON_NOTE_TAG_CHANGES_FILENAME
+    path.write_text("", encoding="utf-8")
+    assert kyo("export", "--refresh").code == 0
+    assert [line["id"] for line in _changes(project)] == ["TST-T1"]
+
+
+def test_a_rebuild_replays_changes_by_seq_not_ledger_order(kyo, project: Path) -> None:
+    _add(kyo)
+    _retag(kyo, "TST-N1", "--add", "a")
+    _retag(kyo, "TST-N1", "--remove", "a")
+    path = project / "kyosei" / "export" / PERSON_NOTE_TAG_CHANGES_FILENAME
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(reversed(lines)) + "\n", encoding="utf-8")
+    (project / "kyosei" / "kyosei.db").unlink()
+    rebuilt = kyo("rebuild")
+    assert rebuilt.code == 0, rebuilt
+    assert kyo("notes", "show", "TST-N1", "--json").json["note"]["tags"] == []
+
+
+def test_a_redacted_notes_tags_can_still_change(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "a", text="a secret I typed\n")
+    assert kyo("redact", "TST-N1", "--why", "typed a secret").code == 0
+    result = _retag(kyo, "TST-N1", "--add", "b")
+    assert result.code == 0, result
+    assert result.json["note"]["text"] == REDACTION_MARKER
+    ledger = project / "kyosei" / "export" / PERSON_NOTES_FILENAME
+    assert "a secret I typed" not in ledger.read_text(encoding="utf-8")

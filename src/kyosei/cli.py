@@ -381,7 +381,7 @@ MUTATING_COMMANDS = (
     "flag",
     "brief",
     "note",
-    # KYO-705: `kyo notes add` writes a note and an events row; `list` and `show` are pure
+    # KYO-705: `kyo notes add` and `tag` write rows and an event; `list` and `show` are pure
     # reads, on `docs`' reasoning below: the entry names the command.
     "notes",
     # KYO-137: `kyo docs settle` writes the verdict that clears a docs obligation, and
@@ -2849,8 +2849,8 @@ def build_parser() -> KyoseiParser:
         help="what a person wrote, on the places it addresses: add one, or find notes by "
         "tag and by what they are on (KYO-705); the shift log is `kyo note --shift`",
     )
-    p_notes.add_argument("action", choices=["add", "list", "show"], help="what to do")
-    p_notes.add_argument("id", nargs="?", help="show: the note, PREFIX-NN")
+    p_notes.add_argument("action", choices=["add", "list", "show", "tag"], help="what to do")
+    p_notes.add_argument("id", nargs="?", help="show and tag: the note, PREFIX-NN")
     p_notes.add_argument(
         "--file", metavar="FILE", help="add: the note's text from a file, or '-' for stdin (law 5)"
     )
@@ -2883,7 +2883,8 @@ def build_parser() -> KyoseiParser:
         "--person",
         metavar="KEY",
         help="add: who wrote it, a key under people: in kyosei/config.yml (default: the only "
-        "person declared). list: only that person's notes",
+        "person declared). list: only that person's notes. tag: who is changing the tags, "
+        "with the same default",
     )
     p_notes.add_argument(
         "--device",
@@ -2900,6 +2901,19 @@ def build_parser() -> KyoseiParser:
         choices=sorted(cmd_notes.ANCHORED_TO),
         help="list: only notes on this kind of place; prompt is a person's turn and output "
         "an agent's",
+    )
+    p_notes.add_argument(
+        "--add",
+        action="append",
+        metavar="TAG",
+        help="tag: a tag to add to this filed note, repeatable. Each change is kept and "
+        "attributed; a note's text and anchors stay as filed",
+    )
+    p_notes.add_argument(
+        "--remove",
+        action="append",
+        metavar="TAG",
+        help="tag: a tag to remove from this filed note, repeatable",
     )
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and
