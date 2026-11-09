@@ -1721,6 +1721,7 @@ class SessionTranscript:
         self._outputs: dict[str, CommandOutput] = {}
         self._deliveries: dict[str, Delivery] = {}
         self._latest_facts: ReplyFacts | None = None
+        self._permission_mode: str | None = None
 
     @property
     def turns(self) -> list[Turn]:
@@ -1750,6 +1751,15 @@ class SessionTranscript:
     def latest_facts(self) -> ReplyFacts | None:
         """What the latest reply recorded; a reply Claude Code wrote itself does not count."""
         return self._latest_facts
+
+    @property
+    def latest_permission_mode(self) -> str | None:
+        """The permission mode the transcript last recorded; None when it records none (KYO-698).
+
+        A ``permission-mode`` row and a person's row both carry it. Such a row can follow the
+        latest reply, so this is kept apart from what that reply recorded.
+        """
+        return self._permission_mode
 
     @property
     def readable(self) -> bool:
@@ -1803,6 +1813,9 @@ class SessionTranscript:
             self.has_origin = True
         uuid, stamp = record.get("uuid"), record.get("timestamp")
         left_out = record.get("isSidechain") and not self.sidechain
+        if not left_out:
+            # Before the check below: a ``permission-mode`` row has neither uuid nor timestamp.
+            self._permission_mode = _text_field(record, "permissionMode") or self._permission_mode
         if left_out or not isinstance(uuid, str) or not isinstance(stamp, str):
             return
         if kind == "assistant":
