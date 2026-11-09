@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import contracts, ledger_scrub, links
@@ -507,9 +508,10 @@ def uncredited_rows(store: Store) -> list[dict]:
     names, each with the ``schema_version`` its writing event's ledger line is stamped with.
 
     A row is ``{"record": id, "type": "verdict"|"gate"|"decision", "id": row id,
-    "schema": int}``. A gate cleared as ``withdrawn`` says plainly that nobody answered and
-    is not counted, and neither is a verdict a later agent-observed verdict on the same
-    criterion restates: that is the remedy the legacy notice names (KYO-667). The writing
+    "schema": int, "withdrawn": bool, "written_at": its timestamp}``. A gate cleared as
+    ``withdrawn`` says plainly that nobody answered and is not counted, and neither is a
+    verdict a later agent-observed verdict on the same criterion restates: that is the
+    remedy the legacy notice names (KYO-667). The writing
     event is the record's first event at or after the row's own timestamp (an event is
     stamped just after its row); a row with no such event, or whose line is not in the
     ledger, counts as written before credits, because the ledger-gap check is what names
@@ -583,6 +585,7 @@ def uncredited_rows(store: Store) -> list[dict]:
             "id": row_id,
             "schema": schema_of(record, written_at),
             "withdrawn": row_id in withdrawn,
+            "written_at": written_at,
         }
         for kind, record, row_id, written_at in found
     ]
@@ -592,6 +595,74 @@ def _legacy(row: dict) -> bool:
     """Whether an uncredited row is the legacy notice's: written before credits existed,
     or uncredited by `kyo credit --withdraw` (KYO-670), a command and so no bypass."""
     return row["schema"] < CREDITS_SINCE_SCHEMA or row["withdrawn"]
+
+
+def _declares_someone(text: str | None, path: Path) -> bool:
+    """Whether a config.yml's text declares a person, by the rule the store itself loads
+    ``people:`` with. Text that does not parse declares nobody."""
+    import yaml
+
+    from .config import PEOPLE_KEY, parse_people
+
+    if text is None:
+        return False
+    try:
+        raw = yaml.safe_load(text)
+        return isinstance(raw, dict) and bool(parse_people(raw.get(PEOPLE_KEY), path))
+    except (yaml.YAMLError, KyoseiError):
+        return False
+
+
+def _row_stamp(seconds: float) -> str:
+    """An instant in the fixed-width format of a row's timestamp, so the two compare as
+    strings (:data:`kyosei.clock.TIMESTAMP_FORMAT`, to the millisecond)."""
+    stamp = datetime.fromtimestamp(seconds, UTC)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
+
+
+def first_person_declared_at(store: Store) -> str:
+    """KYO-684: when this project's ``people:`` first declared someone, as a row timestamp.
+
+    The store records no such time, so it is read from the history of ``config.yml``: the
+    author date of the oldest commit whose copy declares a person. The author date, because
+    a rebase or a history rewrite moves the committer date and leaves this one alone.
+
+    Where no commit holds a declaration, the declaration is an edit not yet committed, or
+    the store has no history to ask; the file's modification time then bounds it from
+    above, and is the moment of the edit unless the file was edited again since. A later
+    edit can only move a bypass into the notice, never a pre-declaration row into the
+    problem. The caller has already found ``people:`` non-empty, so the file exists.
+    """
+    from .git_queries import _git_file_at, run_git
+
+    path = store.config.config_path
+    try:
+        log = run_git(path.parent, "log", "--reverse", "--format=%H %at", "--", path.name)
+    except OSError:
+        log = None
+    if log is not None and log.returncode == 0:
+        for line in log.stdout.splitlines():
+            sha, _, author_time = line.partition(" ")
+            if _declares_someone(_git_file_at(path.parent, sha, f"./{path.name}"), path):
+                return _row_stamp(int(author_time))
+    return _row_stamp(path.stat().st_mtime)
+
+
+def _since_credits_by_declaration(store: Store) -> tuple[list[dict], list[dict], str]:
+    """Rows uncredited since credits existed, as (written before the first person was
+    declared, written at or after it, that instant).
+
+    Git is asked only when such a row exists, so a store with none never pays for it.
+    """
+    rows = [r for r in uncredited_rows(store) if not _legacy(r)]
+    if not rows:
+        return [], [], ""
+    declared_at = first_person_declared_at(store)
+    return (
+        [r for r in rows if r["written_at"] < declared_at],
+        [r for r in rows if r["written_at"] >= declared_at],
+        declared_at,
+    )
 
 
 def _open_first(store: Store, records: set[str]) -> list[str]:
@@ -672,25 +743,53 @@ def check_credit_coverage(store: Store) -> list[str]:
     """KYO-646.c2: a row that needs a credit, written at schema 28 or later, has none.
 
     A PROBLEM: enforcement (``kyo verify``, ``kyo confirm``, ``kyo ungate``, ``kyo new`` of
-    a kind that requires a credit) refuses to write such a row, so one in the store means
-    the enforcement was bypassed, for example by a ledger merged from an older ``kyo``, or
-    the row was written before this project declared anyone. A project still declaring
-    nobody is not enforced at all (KYO-656), so this asks nothing of it.
+    a kind that requires a credit) refuses to write such a row, so one in the store written
+    after the project first declared someone means the enforcement was bypassed, for
+    example by a ledger merged from an older ``kyo``. A row written before that is
+    :func:`check_credit_coverage_before_people`'s, and a project still declaring nobody is
+    not enforced at all (KYO-656), so this asks nothing of it.
     """
     if not store.config.people:
         return []
-    rows = [r for r in uncredited_rows(store) if not _legacy(r)]
+    _, rows, declared_at = _since_credits_by_declaration(store)
     if not rows:
         return []
     from .currency import some_of
 
     return [
         f"{len(rows)} human-observed verdict(s), human-gate clearing(s) or decision record(s) "
-        f"written at schema_version {CREDITS_SINCE_SCHEMA} or later credit no person "
-        f"({some_of([r['id'] for r in rows])}): the commands refuse that once `people:` "
-        "declares someone, so each was written before anyone was declared or the enforcement "
-        "was bypassed, for example by a ledger merged from an older `kyo`. "
-        "`kyo credit` names the person who observed or decided it (KYO-646)"
+        f"written at schema_version {CREDITS_SINCE_SCHEMA} or later, after `people:` first "
+        f"declared someone ({declared_at[:10]}), credit no person "
+        f"({some_of([r['id'] for r in rows])}): the commands refuse that while someone is "
+        "declared, so the enforcement was bypassed, for example by a ledger merged from an "
+        "older `kyo`. `kyo credit` names the person who observed or decided it (KYO-646)"
+    ]
+
+
+def check_credit_coverage_before_people(store: Store) -> list[str]:
+    """KYO-684.c1: a row that needs a credit was written before anyone was declared.
+
+    A NOTICE, and it argues the two things :data:`kyosei.doctor.NOTICE_CHECKS` asks. The
+    condition is EXPECTED: until a project declares someone nothing is enforced (KYO-656),
+    so these rows were correct when written, and every one of them appears the moment the
+    first person is declared. And failing would cost more than the finding is worth: exit
+    3 from the Stop hook for adopting credits, over rows no command had refused, would
+    make declaring a person the act that breaks the project's stops.
+    """
+    if not store.config.people:
+        return []
+    rows, _, declared_at = _since_credits_by_declaration(store)
+    if not rows:
+        return []
+    from .currency import some_of
+
+    return [
+        f"{len(rows)} human-observed verdict(s), human-gate clearing(s) or decision record(s) "
+        f"were written before `people:` first declared someone ({declared_at[:10]}), when "
+        "credits were not enforced here, and credit no person "
+        f"({some_of([r['id'] for r in rows])}): `kyo credit` adds a reconstructed credit, and "
+        "a verdict that was an agent's own observation is restated with "
+        "`kyo verify --method agent-observed` (KYO-684)"
     ]
 
 
