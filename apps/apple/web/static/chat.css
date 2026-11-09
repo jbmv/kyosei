@@ -5,6 +5,8 @@
   --text: #24231f;
   --muted: #76746c;
   --line: #e2e0d9;
+  --apple-red: #ff3b30;
+  --pastel-blue: #6f9fd8;
   --soft-line: #ecebe6;
   --panel: #f0eee8;
   --failed: #b3362b;
@@ -17,6 +19,8 @@
     --text: #e8e6df;
     --muted: #9c9a92;
     --line: #403f3b;
+    --apple-red: #ff453a;
+    --pastel-blue: #8fb8e8;
     --soft-line: #383734;
     --panel: #32312e;
     --failed: #e8796e;
@@ -206,8 +210,12 @@ a { color: var(--link); }
 .draft-row small { color: var(--muted); margin-left: 6px; }
 .draft-save { width: 100%; margin-bottom: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: none; color: var(--text); text-align: left; font-size: 13px; }
 .draft-empty { padding: 4px 8px; color: var(--muted); }
-#composer-actions #clear { color: #fff; background: #c2413a; border-color: #c2413a; }
-#composer-actions #drafts { color: #fff; background: var(--link); border-color: var(--link); }
+#composer-actions #clear { padding: 5px 16px; border: 0; border-radius: 999px; color: #fff; background: var(--apple-red); font-weight: 500; }
+#composer-actions #drafts { padding: 5px 4px; border: 0; background: none; color: var(--pastel-blue); font-weight: 500; }
+#held { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; background: var(--line); font-size: 13.5px; }
+#held[hidden] { display: none; }
+#held-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#held-edit { padding: 3px 12px; border: 1px solid var(--muted); border-radius: 7px; background: none; color: var(--text); font-size: 12.5px; }
 
 .box {
   display: flex;

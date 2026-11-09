@@ -64,6 +64,9 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "image")
         configuration.userContentController.add(context.coordinator, name: "agent")
         configuration.userContentController.add(context.coordinator, name: "strip")
+        for name in ["send", "retract", "interrupt", "saveDraft"] {
+            configuration.userContentController.add(context.coordinator, name: name)
+        }
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
@@ -106,6 +109,24 @@ struct ChatWebView: NSViewRepresentable {
                 let session = body["session"] as? String
             {
                 feed.select(session: session)
+                return
+            }
+            if message.name == "send", let body = message.body as? [String: Any] {
+                feed.sendMessage(body: body)
+                return
+            }
+            if message.name == "retract", let body = message.body as? [String: Any],
+                let id = body["id"] as? String
+            {
+                feed.retract(id: id)
+                return
+            }
+            if message.name == "saveDraft", let body = message.body as? [String: Any] {
+                feed.saveDraft(body: body)
+                return
+            }
+            if message.name == "interrupt" {
+                feed.interrupt()
                 return
             }
             if message.name == "strip", let body = message.body as? [String: Any],

@@ -959,9 +959,50 @@ const kyo = {
   ready(frame: ScreenFrame & { reply_in_progress?: string | { text: string } | null }): void {
     const value = frame.reply_in_progress;
     kyo.live({ text: typeof value === "string" ? value : value?.text ?? null });
+    showHeld((frame as { held?: { id: string } | null }).held?.id ?? null);
     kyo.facts(frame as { facts?: Facts | null });
     kyo.terminal(frame as { terminal?: { text: string; working_line: string | null } | null });
     kyo.screen(frame);
+  },
+
+  /** A held message's state: `{"outcome": "held" | "delivered" | "retracted", "id"}`. */
+  held(frame: { outcome?: string; id?: string }): void {
+    showHeld(frame.outcome === "held" ? frame.id ?? null : null);
+    if (frame.outcome === "delivered") composerNote.textContent = "";
+  },
+
+  /** The server took a message: `held` is its id, or an error to show. */
+  sent(frame: { id?: string; error?: string }): void {
+    if (frame.error) {
+      composerNote.textContent = frame.error;
+      return;
+    }
+    composerNote.textContent = "";
+    showHeld(frame.id ?? null);
+    showTexts([]);
+  },
+
+  /** A held message taken back, to edit. */
+  retracted(frame: { text: string }): void {
+    showHeld(null);
+    showTexts(currentTexts().length ? [frame.text, ...currentTexts()] : [frame.text]);
+  },
+
+  /** The server's draft for a session just opened: none yet is `etag: null`. */
+  draft(frame: { boxes: { text: string }[]; etag: string | null }): void {
+    if (frame.etag === null) {
+      // Nothing saved for this session: what is in the boxes becomes its draft.
+      remember();
+      return;
+    }
+    loadingDraft = true;
+    showTexts(frame.boxes.map((box) => box.text).filter(Boolean));
+    loadingDraft = false;
+    store(CURRENT_KEY, currentTexts());
+  },
+
+  note(frame: { text: string }): void {
+    composerNote.textContent = frame.text;
   },
 
   screen(frame: ScreenFrame): void {
@@ -970,6 +1011,8 @@ const kyo = {
     screenState = state;
     background = frame.screen?.background ?? null;
     if (changed) keepingPlace(arrange);
+    document.getElementById("interrupt")!.hidden = state !== "working";
+    if (heldId) showHeld(heldId);
     drawWorking();
     drawSide();
   },
@@ -977,6 +1020,7 @@ const kyo = {
 
 // ------------------------------------------------------------------------------ the composer
 
+const pasted = new WeakMap<HTMLTextAreaElement, string[]>();
 const boxes = document.getElementById("boxes")!;
 const composerNote = document.getElementById("composer-note")!;
 
@@ -1002,6 +1046,11 @@ function addBox(text = ""): HTMLTextAreaElement {
   area.rows = 1;
   area.placeholder = "Reply…";
   area.value = text;
+  area.addEventListener("keydown", (event) => listKeys(area, event));
+  area.addEventListener("paste", (event) => {
+    const text = event.clipboardData?.getData("text/plain");
+    if (text) pasted.set(area, [...(pasted.get(area) ?? []), text]);
+  });
   area.addEventListener("input", () => {
     fitBox(area);
     const areas = textAreas();
@@ -1044,8 +1093,19 @@ function currentTexts(): string[] {
   return textAreas().map((area) => area.value).filter(Boolean);
 }
 
+const DRAFT_SAVE_DELAY_MS = 700;
+let draftSave: number | undefined;
+let loadingDraft = false;
+
+/** Keeps the boxes in this window's storage at once, and on the server after a pause. */
 function remember(): void {
+  if (loadingDraft) return;
   store(CURRENT_KEY, currentTexts());
+  if (draftSave !== undefined) clearTimeout(draftSave);
+  draftSave = window.setTimeout(() => {
+    draftSave = undefined;
+    post("saveDraft", { boxes: currentTexts().map((text) => ({ text })) });
+  }, DRAFT_SAVE_DELAY_MS);
 }
 
 function showTexts(texts: string[]): void {
@@ -1055,8 +1115,107 @@ function showTexts(texts: string[]): void {
   remember();
 }
 
+function post(name: string, body: unknown): void {
+  (window as any).webkit?.messageHandlers?.[name]?.postMessage(body);
+}
+
+/** Each box's text in order, split at what was pasted, since a paste is sent as a paste. */
+function messageSegments(): { kind: string; text: string }[] {
+  const segments: { kind: string; text: string }[] = [];
+  const add = (kind: string, text: string) => {
+    const last = segments[segments.length - 1];
+    if (!text) return;
+    if (last?.kind === kind) last.text += text;
+    else segments.push({ kind, text });
+  };
+  let first = true;
+  for (const area of textAreas()) {
+    if (!area.value) continue;
+    if (!first) add("typed", "\n\n");
+    first = false;
+    let rest = area.value;
+    for (const piece of pasted.get(area) ?? []) {
+      const at = rest.indexOf(piece);
+      if (at < 0) continue;
+      add("typed", rest.slice(0, at));
+      add("pasted", piece);
+      rest = rest.slice(at + piece.length);
+    }
+    add("typed", rest);
+  }
+  return segments;
+}
+
 function attemptSend(): void {
-  composerNote.textContent = "Sending is not on yet.";
+  const segments = messageSegments();
+  if (!segments.length) return;
+  if (heldId) {
+    composerNote.textContent = "One message is already waiting. Edit it first.";
+    return;
+  }
+  composerNote.textContent = "Sending…";
+  post("send", { segments });
+}
+
+const heldBox = document.getElementById("held")!;
+const heldText = document.getElementById("held-text")!;
+let heldId: string | null = null;
+
+function showHeld(id: string | null): void {
+  heldId = id;
+  heldBox.hidden = !id;
+  heldText.textContent = screenState === "working"
+    ? "Waiting for the turn to finish"
+    : "Sending…";
+}
+
+document.getElementById("held-edit")!.addEventListener("click", () => {
+  if (heldId) post("retract", { id: heldId });
+});
+
+document.getElementById("interrupt")!.addEventListener("click", () => post("interrupt", {}));
+
+const LIST_ITEM = /^(\s*)(?:(\d+)\.|([-*]))\s(.*)$/;
+const INDENT = "  ";
+
+/** Replaces a range by the editing command, which keeps the box's undo history. */
+function replaceRange(area: HTMLTextAreaElement, from: number, to: number, text: string): void {
+  area.setSelectionRange(from, to);
+  if (!document.execCommand("insertText", false, text)) area.setRangeText(text, from, to, "end");
+}
+
+/** Numbered and bulleted lists: Return continues one, and an empty item ends it. */
+function listKeys(area: HTMLTextAreaElement, event: KeyboardEvent): void {
+  if (event.metaKey || area.selectionStart !== area.selectionEnd) return;
+  const caret = area.selectionStart;
+  const start = area.value.lastIndexOf("\n", caret - 1) + 1;
+  const line = area.value.slice(start, caret);
+  const item = line.match(LIST_ITEM);
+  if (event.key === "Tab" && item) {
+    event.preventDefault();
+    const nextEnd = area.value.indexOf("\n", caret);
+    const end = nextEnd < 0 ? area.value.length : nextEnd;
+    const whole = area.value.slice(start, end);
+    if (event.shiftKey) {
+      if (whole.startsWith(INDENT)) replaceRange(area, start, end, whole.slice(INDENT.length));
+    } else {
+      const renumbered = item[2] ? whole.replace(/\d+\./, "1.") : whole;
+      replaceRange(area, start, end, INDENT + renumbered);
+    }
+    return;
+  }
+  if (event.key !== "Enter" || !item) return;
+  const [, indent, number, bullet, content] = item;
+  if (!content) {
+    // Return or Shift-Return on an empty item ends the list and starts a fresh line below it.
+    event.preventDefault();
+    replaceRange(area, start, caret, "\n");
+    return;
+  }
+  if (event.shiftKey) return;
+  event.preventDefault();
+  const marker = number ? `${Number(number) + 1}.` : bullet;
+  replaceRange(area, caret, caret, `\n${indent}${marker} `);
 }
 
 const clearButton = document.getElementById("clear") as HTMLButtonElement;

@@ -21,6 +21,9 @@ final class SessionFeed {
     private(set) var facts: SessionFacts?
     private(set) var remote: String?
     var runningSubagents = 0
+    private var draftSession: String?
+    private var draftEtag: String?
+    private var draftTask: Task<Void, Never>?
 
     init(client: ServeClient, project: String) {
         self.client = client
@@ -53,6 +56,136 @@ final class SessionFeed {
         status = "connecting"
         task?.cancel()
         task = Task { await run() }
+    }
+
+    /// The device token, read through the system's own `security` tool, which created it.
+    private static func deviceToken() -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password", "-s", "dev.kyosei.device-token", "-a", "studio-mac", "-w",
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sessionPath(_ session: String, _ route: String) -> String {
+        "v1/projects/\(project)/sessions/\(session)/\(route)"
+    }
+
+    private func refusal(_ data: Data) -> String {
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return object?["error"] as? String ?? "The server refused that."
+    }
+
+    /// Hands a message to the server, which holds it until the turn has ended.
+    func sendMessage(body: [String: Any]) {
+        guard let session = current, let token = Self.deviceToken(),
+            let data = try? JSONSerialization.data(withJSONObject: body)
+        else {
+            send("sent", #"{"error": "No session or device token to send with."}"#)
+            return
+        }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "POST", sessionPath(session, "held"), token: token, body: data)
+            else {
+                send("sent", #"{"error": "The server could not be reached."}"#)
+                return
+            }
+            let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+            if reply.status == 200 || reply.status == 201 {
+                let held = object?["held"] as? [String: Any] ?? object
+                send("sent", #"{"id": \#(quoted(held?["id"] as? String))}"#)
+            } else {
+                send("sent", #"{"error": \#(quoted(refusal(reply.data)))}"#)
+            }
+        }
+    }
+
+    /// Brings a session's saved draft into the composer, once for each session opened.
+    private func loadDraft(session: String) {
+        guard draftSession != session, let token = Self.deviceToken() else { return }
+        draftSession = session
+        draftEtag = nil
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "GET", sessionPath(session, "draft"), token: token),
+                reply.status == 200, session == current
+            else { return }
+            draftEtag = etag(in: reply.data)
+            send("draft", String(decoding: reply.data, as: UTF8.self))
+        }
+    }
+
+    private func etag(in data: Data) -> String? {
+        (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["etag"] as? String
+    }
+
+    /// Replaces the session's draft. Saves run one at a time, so each uses the last etag.
+    func saveDraft(body: [String: Any]) {
+        guard let session = current, session == draftSession, let token = Self.deviceToken(),
+            let data = try? JSONSerialization.data(withJSONObject: body)
+        else { return }
+        let previous = draftTask
+        draftTask = Task {
+            await previous?.value
+            let etag = draftEtag
+            guard
+                let reply = try? await client.authorised(
+                    "PUT", sessionPath(session, "draft"), token: token, body: data, ifMatch: etag,
+                    ifNoneMatch: etag == nil ? "*" : nil)
+            else { return }
+            if reply.status == 200 || reply.status == 201 {
+                draftEtag = self.etag(in: reply.data)
+            } else if reply.status == 412 {
+                // Another device saved first. Keep this text, and let the next edit replace it.
+                draftEtag = self.etag(in: reply.data)
+                send("note", #"{"text": "This draft also changed on another device."}"#)
+            }
+        }
+    }
+
+    /// Takes a held message back, returning its text to the composer.
+    func retract(id: String) {
+        guard let session = current, let token = Self.deviceToken() else { return }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "DELETE", sessionPath(session, "held"), token: token, ifMatch: id),
+                reply.status == 200
+            else {
+                send("note", #"{"text": "It could not be taken back; it may have been sent."}"#)
+                return
+            }
+            let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+            let held = object?["held"] as? [String: Any] ?? object ?? [:]
+            let segments = held["segments"] as? [[String: Any]] ?? []
+            let text = segments.compactMap { $0["text"] as? String }.joined()
+            send("retracted", #"{"text": \#(quoted(text))}"#)
+        }
+    }
+
+    func interrupt() {
+        guard let session = current, let token = Self.deviceToken() else { return }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "POST", sessionPath(session, "interrupt"), token: token, body: Data("{}".utf8)),
+                reply.status == 200
+            else {
+                send("note", #"{"text": "The interrupt was refused."}"#)
+                return
+            }
+        }
     }
 
     /// Fetches one of the person's images for the page, which may load only its own files.
@@ -141,6 +274,7 @@ final class SessionFeed {
                 send("clear", "null")
                 send("apply", String(decoding: turns, as: UTF8.self))
                 takeFacts(from: turns)
+                loadDraft(session: row.session_id)
                 status = "connected"
                 await sendMenu()
                 guard row.live else {
@@ -182,6 +316,8 @@ final class SessionFeed {
                 send("screen", event.data)
             case "terminal":
                 send("terminal", event.data)
+            case "held":
+                send("held", event.data)
             case "reset", "session":
                 return  // Read the session again from the top.
             default:
