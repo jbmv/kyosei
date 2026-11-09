@@ -45,8 +45,7 @@ _SCROLLBACK_LINES = 2000
 
 NOT_OPTED_IN = (
     "this project has not opted in to reading transcripts, so the session layer will not open "
-    f"one; to opt in, set `{READ_TRANSCRIPTS_KEY}: true` in kyosei/config.yml (`kyo init` asks "
-    "the same question as --read-transcripts yes)"
+    f"one; to opt in, set `{READ_TRANSCRIPTS_KEY}: true` in kyosei/config.yml"
 )
 
 
