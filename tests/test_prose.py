@@ -206,6 +206,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # KYO-647: `kyo list --person` and `--decided-by` are keys under `people:` in the
         # config, refused unless declared; they narrow a read and store nothing.
         "--decided-by",
+        # KYO-669: `kyo check-push --pre-push` is the git remote's name, which the hook
+        # passes on; it is compared and printed and never stored.
+        "--pre-push",
     }
     assert value_flags <= text_bearing | file_bearing | structural, value_flags
 
