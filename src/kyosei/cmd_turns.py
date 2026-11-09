@@ -15,13 +15,16 @@ written since its last run and rewrites the line with the transcript's own ``ori
 and with the transcript's answer about pastes.
 
 WHAT THE STOP HOOK ADDS. A prompt the transcript holds and the index does not, for any
-reason UserPromptSubmit did not fire, gains a line, ``source: transcript``. This covers
-messages sent while the agent is mid-turn, which Claude Code records as a
-``queued_command`` attachment with no ``promptId``: their line has ``prompt_id`` null and
-is keyed by the record's ``uuid`` in ``turn``. Whether UserPromptSubmit fires for those
-messages at all is not yet observed; if it does, such a message has both a hook line that
-stays unconfirmed and this line. A prompt the hook indexed that never appears in the
-transcript keeps ``origin: unconfirmed``.
+reason UserPromptSubmit did not fire, gains a line, ``source: transcript``. A prompt the
+hook indexed that never appears in the transcript keeps ``origin: unconfirmed``.
+
+A MESSAGE SENT MID-TURN. UserPromptSubmit fires for it, and the payload repeats the prompt
+id of the turn it arrived in (observed under KYO-657.c2 and KYO-687). The transcript has no
+row carrying that id for the message, only a ``queued_command`` attachment with no
+``promptId``. So the hook appends nothing when the session's index already holds the prompt
+id, which leaves the enclosing prompt its own line and time, and the Stop hook adds the
+message's one line from the attachment, with ``prompt_id`` null and the record's ``uuid``
+in ``turn``.
 
 THE LOCK. Every write holds an advisory lock on ``turns-cursor.json``, the sidecar
 recording how far each session's transcript has been read, because a Stop hook rewriting
@@ -139,11 +142,6 @@ def confirmed_paste_flags(store_root: Path | str, session_id: str) -> dict[str, 
     return flags
 
 
-def _append(store_root: Path | str, line: dict) -> None:
-    with _locked(store_root), turns_path(store_root).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(line, sort_keys=True) + "\n")
-
-
 def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
     path = turns_path(store_root)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -154,23 +152,33 @@ def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
 
 
 def index_prompt(store_root: Path | str, payload: dict) -> None:
-    """UserPromptSubmit: one line for this prompt, or nothing if it carries no prompt id."""
+    """UserPromptSubmit: one line for this prompt.
+
+    Nothing is written for a payload with no prompt id, or for a prompt id this session's
+    index already holds, which is what a message sent mid-turn repeats. The check and the
+    append hold one lock, so two payloads with one id cannot both find it absent.
+    """
     session = payload.get("session_id")
     prompt_id = payload.get("prompt_id")
     if not isinstance(session, str) or not isinstance(prompt_id, str) or not prompt_id:
         return
     prompt = payload.get("prompt")
-    _append(
-        store_root,
-        {
-            "session": session,
-            "prompt_id": prompt_id,
-            "at": _now(),
-            "pasted": _PASTED_ELEMENT_OPEN in prompt if isinstance(prompt, str) else None,
-            "origin": UNCONFIRMED,
-            "source": SOURCE_HOOK,
-        },
-    )
+    line = {
+        "session": session,
+        "prompt_id": prompt_id,
+        "at": _now(),
+        "pasted": _PASTED_ELEMENT_OPEN in prompt if isinstance(prompt, str) else None,
+        "origin": UNCONFIRMED,
+        "source": SOURCE_HOOK,
+    }
+    with _locked(store_root):
+        if any(
+            held.get("session") == session and held.get("prompt_id") == prompt_id
+            for held in read_lines(store_root)
+        ):
+            return
+        with turns_path(store_root).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(line, sort_keys=True) + "\n")
 
 
 def _read_cursor(fd: int) -> dict[str, int]:
