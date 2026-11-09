@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-691` (task) — Session API: effort, branch, context use, and slash-command output
 - **2026-11-09** — `KYO-689` (task) — kyo serve session API, read half: list sessions, read turns, live events, overlays
 - **2026-11-09** — `KYO-686` (task) — Creating a project requires an answer to the transcript question
 - **2026-11-09** — `KYO-679` (bug) — The installer replaces a whole pre-push hook that a person has added to
