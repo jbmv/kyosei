@@ -588,7 +588,7 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 
 `<words>` is the first six words of the span, read from the transcript or the commit when the
 message is made, and a `...` follows if the span goes on. When the words cannot be read, or a
-turn span no longer matches the digest stored with its anchor, the line ends `(words
+turn span does not match the digest stored with its anchor, the line ends `(words
 unavailable)` instead. Nothing longer is quoted, since the agent already has the conversation
 and the store holds no transcript text. After the `on` lines the person's text follows
 unchanged, so a transcript check still finds it. A note whose text holds a tab, or that was
