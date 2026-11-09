@@ -1,0 +1,40 @@
+
+
+✻ Sautéed for 1s · done 9:06 AM
+
+❯ Use the Read tool on note.txt, then run the Bash command: sleep 6; echo finished. Then say done.
+
+  Read 1 file, ran 1 shell command
+
+❯ Also, mid-turn message: end your final reply with the word purple.
+
+⏺ Done. The file note.txt contains "alpha" and "beta" on lines 1 and 2, with an empty line 3. The
+  sleep and echo command printed "finished".
+
+  purple
+
+✻ Churned for 11s · done 9:07 AM
+
+❯ Run this exact Bash command and nothing else: touch created-by-agent.txt
+
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Brewed for 1s · done 9:08 AM
+
+❯ Use the AskUserQuestion tool to ask me which colour I prefer, with options Red and Blue. Do
+  nothing else.
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which colour do you prefer?
+
+❯ 1. Red
+     Choose red.
+  2. Blue
+     Choose blue.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

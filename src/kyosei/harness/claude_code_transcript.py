@@ -115,6 +115,15 @@ the matched record's id, its own timestamp, the outcome and the form of the matc
 (KYO-644), and nothing else: not the turn's text, not its neighbours, not the transcript
 path, not a hash.
 
+THE SESSION VIEW (KYO-688). :class:`SessionTranscript` reads a transcript incrementally
+from a byte offset and returns the session as Kyosei objects: the person's turns, replies
+(one per assistant message, with its usage), tool calls with their results, and subagent
+references, each addressed by the uuid of its transcript record. :func:`clear_successor`
+finds the transcript a session continued in after ``/clear``. Nothing outside this module
+reads a row's fields; :mod:`kyosei.session_layer` composes these objects with the pane
+adapter's. The samples these shapes are tested against are recorded from throwaway
+sessions and live in ``tests/fixtures/session_layer/``.
+
 A DISCUSSION SPAN (KYO-640.n1, KYO-644). A decided credit may cite the discussion that led
 to it by its first and last record. :func:`measure_span` reads the records between them and
 returns counts and times only: the person's turns, the agent's turns, the active seconds
@@ -378,6 +387,85 @@ def _parse_lines(path: Path) -> Iterable[dict]:
                 yield record
 
 
+def _questions_asked(record: dict) -> set[str]:
+    """The ids of the ``AskUserQuestion`` calls in an assistant record."""
+    found: set[str] = set()
+    content = (record.get("message") or {}).get("content")
+    for block in content if isinstance(content, list) else []:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == "AskUserQuestion"
+            and isinstance(block.get("id"), str)
+        ):
+            found.add(block["id"])
+    return found
+
+
+def _is_queued_command(record: dict) -> bool:
+    attachment = record.get("attachment")
+    return isinstance(attachment, dict) and attachment.get("type") == "queued_command"
+
+
+def _person_turn(record: dict, asked: set[str]) -> Turn | None:
+    """The person's message in one non-sidechain record with a uuid and a timestamp, or None.
+
+    ``asked`` holds the ``AskUserQuestion`` call ids seen so far in the same file. A
+    ``queued_command`` from anyone but the person, such as a peer's message delivered
+    while the agent was mid-turn, is not the person's and yields None.
+    """
+    uuid, stamp, kind = record["uuid"], record["timestamp"], record.get("type")
+    if kind == "attachment":
+        if not _is_queued_command(record):
+            return None
+        attachment = record["attachment"]
+        if (
+            not _is_human(attachment.get("origin"))
+            or attachment.get("commandMode") != "prompt"
+            or attachment.get("isMeta")
+        ):
+            return None
+        text = _text_of(attachment.get("prompt"))
+        words = _typed_words(text) if text is not None else None
+        if words is None:
+            return None
+        segments, known = _segments_of(words)
+        return Turn(uuid, stamp, FORM_MID_TURN, SOURCE_TRANSCRIPT, segments, known, words)
+    if kind != "user":
+        return None
+    content = (record.get("message") or {}).get("content")
+    result = record.get("toolUseResult")
+    if result is not None:
+        answers = _answers(record, content, result, asked)
+        if not answers:
+            return None
+        joined = "\n".join(answers)
+        return Turn(uuid, stamp, FORM_ANSWER, SOURCE_TRANSCRIPT, answers, True, joined)
+    if record.get("isMeta") or not _is_human(record.get("origin")):
+        return None
+    text = _text_of(content)
+    words = _typed_words(text) if text is not None else None
+    if words is None:
+        return None
+    form = (
+        FORM_ACCEPTED_SUGGESTION
+        if record.get("promptSource") == SUGGESTION_PROMPT_SOURCE
+        else FORM_TYPED
+    )
+    segments, known = _segments_of(words)
+    prompt_id = record.get("promptId")
+    return Turn(
+        uuid,
+        stamp,
+        form,
+        SOURCE_TRANSCRIPT,
+        segments,
+        known,
+        words,
+        prompt_id if isinstance(prompt_id, str) else None,
+    )
+
+
 def read_transcripts(paths: list[Path]) -> TranscriptRead:
     """The person's turns in a session's transcript files.
 
@@ -394,74 +482,22 @@ def read_transcripts(paths: list[Path]) -> TranscriptRead:
                 has_origin = True
             if record.get("isSidechain"):
                 continue
-            uuid = record.get("uuid")
-            stamp = record.get("timestamp")
             if kind == "assistant":
-                for block in (record.get("message") or {}).get("content") or []:
-                    if (
-                        isinstance(block, dict)
-                        and block.get("type") == "tool_use"
-                        and block.get("name") == "AskUserQuestion"
-                        and isinstance(block.get("id"), str)
-                    ):
-                        asked.add(block["id"])
+                asked |= _questions_asked(record)
                 continue
-            if not isinstance(uuid, str) or not isinstance(stamp, str):
+            if not isinstance(record.get("uuid"), str) or not isinstance(
+                record.get("timestamp"), str
+            ):
                 continue
-            if kind == "attachment":
-                attachment = record.get("attachment") or {}
-                if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-                    continue
-                if "origin" in attachment:
-                    has_origin = True
-                if (
-                    not _is_human(attachment.get("origin"))
-                    or attachment.get("commandMode") != "prompt"
-                    or attachment.get("isMeta")
-                ):
-                    continue
-                text = _text_of(attachment.get("prompt"))
-                words = _typed_words(text) if text is not None else None
-                if words is not None:
-                    segments, known = _segments_of(words)
-                    turns[uuid] = Turn(
-                        uuid, stamp, FORM_MID_TURN, SOURCE_TRANSCRIPT, segments, known, words
-                    )
-                continue
-            if kind != "user":
-                continue
-            content = (record.get("message") or {}).get("content")
-            result = record.get("toolUseResult")
-            if result is not None:
-                answers = _answers(record, content, result, asked)
-                if answers:
-                    joined = "\n".join(answers)
-                    turns[uuid] = Turn(
-                        uuid, stamp, FORM_ANSWER, SOURCE_TRANSCRIPT, answers, True, joined
-                    )
-                continue
-            if record.get("isMeta") or not _is_human(record.get("origin")):
-                continue
-            text = _text_of(content)
-            words = _typed_words(text) if text is not None else None
-            if words is not None:
-                form = (
-                    FORM_ACCEPTED_SUGGESTION
-                    if record.get("promptSource") == SUGGESTION_PROMPT_SOURCE
-                    else FORM_TYPED
-                )
-                segments, known = _segments_of(words)
-                prompt_id = record.get("promptId")
-                turns[uuid] = Turn(
-                    uuid,
-                    stamp,
-                    form,
-                    SOURCE_TRANSCRIPT,
-                    segments,
-                    known,
-                    words,
-                    prompt_id if isinstance(prompt_id, str) else None,
-                )
+            if (
+                kind == "attachment"
+                and _is_queued_command(record)
+                and "origin" in (record.get("attachment") or {})
+            ):
+                has_origin = True
+            turn = _person_turn(record, asked)
+            if turn is not None:
+                turns[turn.id] = turn
     ordered = sorted(turns.values(), key=lambda t: t.timestamp)
     if not has_origin:
         return TranscriptRead(
@@ -1137,3 +1173,359 @@ def read_turn_facts(path: Path, offset: int) -> tuple[list[TurnFact], int]:
             TurnFact(prompt_id, uuid, stamp, _origin_kind(record.get("origin")), _pasted(content))
         )
     return facts, offset + end
+
+
+# ---------------------------------------------------------------- the session view
+
+
+#: The tool name a subagent is started with.
+AGENT_TOOL = "Agent"
+
+#: How far into a sibling file :func:`clear_successor` looks for the record naming the
+#: session it continues. In the recorded pair the link is in the first 42 records, within
+#: 90 kilobytes; 512 kilobytes allows for a large instructions attachment before it.
+_CLEAR_LINK_WINDOW_BYTES = 512 * 1024
+
+#: The command row at the head of a transcript started by ``/clear``.
+_CLEAR_COMMAND = "<command-name>/clear</command-name>"
+
+
+@dataclass(frozen=True)
+class Usage:
+    """Token usage of one assistant message, in Kyosei's names."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+
+
+@dataclass(frozen=True)
+class Reply:
+    """One assistant message. Claude Code writes one record per content block.
+
+    ``uuid`` is the record of its first text block, or the first record when the message
+    is tool calls only, which is the address a note anchors to.
+    ``record_uuids`` holds every record the message spans, and ``text`` the joined text
+    blocks, thinking left out; ``usage`` is on every record of a message, and the last
+    record's is kept.
+    """
+
+    uuid: str
+    at: str
+    message_id: str
+    text: str
+    usage: Usage | None
+    model: str | None
+    record_uuids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    """A tool call's result: the record it arrived in and its text."""
+
+    uuid: str
+    at: str
+    text: str
+    is_error: bool
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One tool call, addressed by the record that made it. ``result`` is None until it lands."""
+
+    uuid: str
+    at: str
+    call_id: str
+    name: str
+    input: Mapping[str, object]
+    result: ToolResult | None = None
+
+
+@dataclass(frozen=True)
+class SubagentRef:
+    """A subagent the session started, with the tool call that started it."""
+
+    agent_id: str
+    tool_call_uuid: str
+    description: str
+    agent_type: str | None
+
+
+@dataclass
+class TranscriptDelta:
+    """What one :meth:`SessionTranscript.read` found or changed; a tool call reappears
+    here when its result lands, and a reply when a later record of it lands."""
+
+    turns: list[Turn] = field(default_factory=list)
+    replies: list[Reply] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    subagents: list[SubagentRef] = field(default_factory=list)
+
+
+@dataclass
+class _Message:
+    uuid: str
+    at: str
+    message_id: str
+    text_parts: list[str]
+    usage: Usage | None
+    model: str | None
+    record_uuids: list[str]
+    has_text: bool
+
+    def reply(self) -> Reply:
+        return Reply(
+            self.uuid,
+            self.at,
+            self.message_id,
+            "\n\n".join(self.text_parts),
+            self.usage,
+            self.model,
+            tuple(self.record_uuids),
+        )
+
+
+def _usage_of(raw: object) -> Usage | None:
+    if not isinstance(raw, dict):
+        return None
+    names = (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    )
+    values = [raw.get(name) for name in names]
+    if not all(isinstance(value, int) for value in values):
+        return None
+    return Usage(*values)
+
+
+def _result_text(content: object) -> str:
+    """A tool result's text: a string, or its ``text`` blocks. Images are left out."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    )
+
+
+class SessionTranscript:
+    """A session's transcript as Kyosei objects, read incrementally from a byte offset.
+
+    :meth:`read` consumes whole lines past the offset and leaves a partial last line for
+    the next call, so a file being written is never mis-parsed and no record is read
+    twice. A file shorter than the offset has been rewritten, and is read again from the
+    start. Sidechain records are left out: a subagent's transcript is its own file, which
+    :class:`SubagentRef` points at.
+    """
+
+    def __init__(self, path: Path, offset: int = 0) -> None:
+        self.path = path
+        self.offset = offset
+        self._reset()
+
+    def _reset(self) -> None:
+        self.has_origin = False
+        self.why = "nothing read yet"
+        self._turns: dict[str, Turn] = {}
+        self._messages: dict[str, _Message] = {}
+        self._calls: dict[str, ToolCall] = {}
+        self._call_ids: dict[str, str] = {}
+        self._subagents: dict[str, SubagentRef] = {}
+        self._asked: set[str] = set()
+
+    @property
+    def turns(self) -> list[Turn]:
+        return sorted(self._turns.values(), key=lambda t: t.timestamp)
+
+    @property
+    def replies(self) -> list[Reply]:
+        return [m.reply() for m in sorted(self._messages.values(), key=lambda m: m.at)]
+
+    @property
+    def tool_calls(self) -> list[ToolCall]:
+        return sorted(self._calls.values(), key=lambda c: c.at)
+
+    @property
+    def subagents(self) -> list[SubagentRef]:
+        return list(self._subagents.values())
+
+    @property
+    def readable(self) -> bool:
+        """False when no record carries ``origin``: the format is not one this reader knows."""
+        return self.has_origin
+
+    def read(self) -> TranscriptDelta:
+        """Read past the offset. Raises :class:`OSError` when the file cannot be opened."""
+        delta = TranscriptDelta()
+        if self.offset and self.path.stat().st_size < self.offset:
+            self.offset = 0
+            self._reset()  # the file was rewritten, so nothing held still stands
+        with self.path.open("rb") as handle:
+            handle.seek(self.offset)
+            data = handle.read()
+        end = data.rfind(b"\n") + 1
+        if end == 0:
+            return delta
+        for raw in data[:end].split(b"\n"):
+            if not raw.strip():
+                continue
+            try:
+                record = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(record, dict):
+                self._take(record, delta)
+        self.offset += end
+        self.why = (
+            f"{len(self._turns)} turns and {len(self._messages)} replies read"
+            if self.has_origin
+            else "no record in the transcript carries `origin`, so its format is not one this "
+            "reader knows"
+        )
+        return delta
+
+    def _take(self, record: dict, delta: TranscriptDelta) -> None:
+        kind = record.get("type")
+        if "origin" in record or (
+            kind == "attachment"
+            and _is_queued_command(record)
+            and "origin" in (record.get("attachment") or {})
+        ):
+            self.has_origin = True
+        uuid, stamp = record.get("uuid"), record.get("timestamp")
+        if record.get("isSidechain") or not isinstance(uuid, str) or not isinstance(stamp, str):
+            return
+        if kind == "assistant":
+            self._asked |= _questions_asked(record)
+            self._take_assistant(record, uuid, stamp, delta)
+            return
+        turn = _person_turn(record, self._asked)
+        if turn is not None:
+            self._turns[turn.id] = turn
+            delta.turns.append(turn)
+        if kind == "user":
+            self._take_results(record, uuid, stamp, delta)
+
+    def _take_assistant(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
+        message = record.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("id"), str):
+            return
+        message_id = message["id"]
+        content = message.get("content")
+        blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+        held = self._messages.get(message_id)
+        if held is None:
+            held = _Message(uuid, stamp, message_id, [], None, message.get("model"), [], False)
+            self._messages[message_id] = held
+        held.record_uuids.append(uuid)
+        usage = _usage_of(message.get("usage"))
+        if usage is not None:
+            held.usage = usage
+        for block in blocks:
+            if block.get("type") == "text" and isinstance(block.get("text"), str):
+                if not held.has_text:
+                    held.uuid, held.at, held.has_text = uuid, stamp, True
+                held.text_parts.append(block["text"])
+            elif block.get("type") == "tool_use":
+                self._take_tool_use(block, uuid, stamp, delta)
+        delta.replies.append(held.reply())
+
+    def _take_tool_use(self, block: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
+        call_id, name = block.get("id"), block.get("name")
+        tool_input = block.get("input")
+        if not isinstance(call_id, str) or not isinstance(name, str):
+            return
+        given = tool_input if isinstance(tool_input, dict) else {}
+        call = ToolCall(uuid, stamp, call_id, name, given)
+        self._calls[uuid] = call
+        self._call_ids[call_id] = uuid
+        delta.tool_calls.append(call)
+
+    def _take_results(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
+        content = (record.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            call_uuid = self._call_ids.get(block.get("tool_use_id"))
+            call = self._calls.get(call_uuid) if call_uuid else None
+            if call is None:
+                continue
+            is_error = bool(block.get("is_error"))
+            result = ToolResult(uuid, stamp, _result_text(block.get("content")), is_error)
+            call = replace(call, result=result)
+            self._calls[call.uuid] = call
+            delta.tool_calls.append(call)
+            self._take_subagent(call, record.get("toolUseResult"), delta)
+
+    def _take_subagent(self, call: ToolCall, result: object, delta: TranscriptDelta) -> None:
+        if call.name != AGENT_TOOL or not isinstance(result, dict):
+            return
+        agent_id = result.get("agentId")
+        if not isinstance(agent_id, str):
+            return
+        description = call.input.get("description")
+        agent_type = call.input.get("subagent_type")
+        ref = SubagentRef(
+            agent_id,
+            call.uuid,
+            description if isinstance(description, str) else "",
+            agent_type if isinstance(agent_type, str) else None,
+        )
+        self._subagents[agent_id] = ref
+        delta.subagents.append(ref)
+
+
+@dataclass(frozen=True)
+class ClearLink:
+    """The transcript a session continued in after ``/clear``."""
+
+    session_id: str
+    path: Path
+
+
+def clear_successor(path: Path) -> ClearLink | None:
+    """The transcript that continued ``path``'s session after ``/clear``, or None.
+
+    ``/clear`` starts a new transcript under a new session id in the same project
+    directory. The new file's head holds the ``/clear`` command record and attachment
+    records that still name the old session in ``session_id``; both are required, so a
+    file that merely mentions the old id is not taken for its continuation. The attachment
+    records are written with the first prompt after ``/clear``, so a session just cleared
+    has no link yet; while its process is alive, the session registry (the pane adapter)
+    gives the new id at once.
+    """
+    old = path.stem
+    siblings = sorted(p for p in path.parent.glob("*.jsonl") if p != path)
+    for candidate in siblings:
+        head = _head_records(candidate)
+        names_old = any(
+            record.get("session_id") == old and record.get("sessionId") != old for record in head
+        )
+        if names_old and any(_is_clear_command(record) for record in head):
+            return ClearLink(candidate.stem, candidate)
+    return None
+
+
+def _head_records(path: Path) -> list[dict]:
+    with path.open("rb") as handle:
+        data = handle.read(_CLEAR_LINK_WINDOW_BYTES)
+    records = []
+    for raw in data[: data.rfind(b"\n") + 1].split(b"\n"):
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def _is_clear_command(record: dict) -> bool:
+    content = (record.get("message") or {}).get("content")
+    return isinstance(content, str) and _CLEAR_COMMAND in content

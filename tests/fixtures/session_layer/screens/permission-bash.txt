@@ -1,0 +1,40 @@
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+⏺ ok
+
+✻ Sautéed for 1s · done 9:06 AM
+
+❯ Use the Read tool on note.txt, then run the Bash command: sleep 6; echo finished. Then say done.
+
+  Read 1 file, ran 1 shell command
+
+❯ Also, mid-turn message: end your final reply with the word purple.
+
+⏺ Done. The file note.txt contains "alpha" and "beta" on lines 1 and 2, with an empty line 3. The
+  sleep and echo command printed "finished".
+
+  purple
+
+✻ Churned for 11s · done 9:07 AM
+
+❯ Run this exact Bash command and nothing else: touch created-by-agent.txt
+
+⏺ Creating empty file created-by-agent.txt
+  ⎿  $ touch created-by-agent.txt
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Create empty file created-by-agent.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ touch created-by-agent.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /work/sample from this
+      project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

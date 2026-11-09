@@ -1,0 +1,40 @@
+  prompt: Run the Bash command sleep 25 and then reply with the single word finished. Third, reply
+  with the word started and stop.
+
+  Ran 1 shell command
+
+⏺ Agent(Run sleep and reply finished)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ started
+
+✻ Waiting for 1 background agent to finish
+
+› Message from @general-purpose (ctrl+o to expand)
+
+⏺ The subagent's report says it has not finished. Its foreground sleep 25 was blocked, so it moved
+  the sleep to a background task and is waiting for that task to complete. It has not yet replied
+  "finished."
+
+  Two other things from the last turn:
+
+  - The Agent tool's schema has no run_in_background parameter, so I did not set it. The agent still
+    launched asynchronously and reported back through a notification.
+  - My background sleep 40; echo bg-done has not sent a completion notification yet. I'll report its
+    result when it arrives.
+
+⏺ Agent "Run sleep and reply finished" is waiting on its own background work · 7s
+
+⏺ The subagent has stopped, but its own background sleep 25 is still running, so it may send a final
+  "finished" report later. Its earlier message is the only report so far. My background sleep 40;
+  echo bg-done has not reported completion yet. I'll report both when they finish.
+
+✻ Cogitated for 15s · done 9:08 AM · 2 shells still running
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 2 shells · ↓ to manage
+
+  ⏺ main
+  ◯ general-purpose  Run sleep and reply finished                              7s · ↓ 33.5k tokens
