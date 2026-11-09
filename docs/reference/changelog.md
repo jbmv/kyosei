@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-695` (task) — Session API: a finished subagent's token use and its branch's line counts
 - **2026-11-09** — `KYO-693` (task) — Session API: session titles, a subagent's tool calls, and uncommitted changes
 - **2026-11-09** — `KYO-692` (task) — Session API: subagent messages, the person's images, thinking text and the terminal's text
 - **2026-11-09** — `KYO-691` (task) — Session API: effort, branch, context use, and slash-command output
