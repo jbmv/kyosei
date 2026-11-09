@@ -1436,6 +1436,100 @@ def test_a_repositorys_fsmonitor_setting_runs_nothing_from_here(repo: Path, tmp_
     assert not marker.exists()
 
 
+# ------------------------------------------------- KYO-700: the repository's remote
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://github.com/owner/name.git", "owner/name"),
+        ("https://github.com/owner/name", "owner/name"),
+        ("https://github.com/owner/name/", "owner/name"),
+        ("https://github.com/owner/name.dots.git", "owner/name.dots"),
+        ("http://example.com:8080/owner/name.git", "owner/name"),
+        ("git@github.com:owner/name.git", "owner/name"),
+        ("git@github.com:owner/name", "owner/name"),
+        ("github.com:owner/name.git", "owner/name"),
+        ("ssh://git@github.com/owner/name.git", "owner/name"),
+        ("ssh://git@example.com:2222/owner/name.git", "owner/name"),
+        ("git://example.com/owner/name.git", "owner/name"),
+        ("https://gitlab.com/group/sub/name.git", "group/sub/name"),
+    ],
+)
+def test_the_origin_is_stated_as_owner_and_name(repo: Path, url: str, expected: str) -> None:
+    run_git(repo, "remote", "add", "origin", url)
+    assert changes(repo).remote == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://SECRET@github.com/owner/name.git",
+        "https://user:SECRET@github.com/owner/name.git",
+        "https://x-access-token:SECRET@github.com/owner/name",
+        "ssh://user:SECRET@example.com/owner/name.git",
+        "https://github.com/owner/name.git?token=SECRET",
+        "https://github.com/owner/name.git#SECRET",
+    ],
+)
+def test_a_credential_in_the_url_does_not_reach_the_remote(repo: Path, url: str) -> None:
+    run_git(repo, "remote", "add", "origin", url)
+    found = changes(repo)
+    assert found.remote == "owner/name"
+    assert "SECRET" not in repr(found)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # git reads the first as host "user:pa", the second as host "user".
+        "https://user:pa/SECRET@github.com/owner/name.git",
+        "user:SECRET@github.com:owner/name.git",
+        "/srv/git/owner/name.git",
+        "../owner/name.git",
+        "file:///srv/git/owner/name.git",
+        "https://github.com/name.git",
+        "https://github.com/owner/.git",
+        "https://github.com/../name",
+        "https://github.com",
+    ],
+)
+def test_an_origin_naming_no_repository_on_a_host_gives_none(repo: Path, url: str) -> None:
+    run_git(repo, "remote", "add", "origin", url)
+    found = changes(repo)
+    assert found.remote is None and found.why is None
+    assert "SECRET" not in repr(found)
+
+
+def test_a_repository_without_an_origin_has_no_remote(repo: Path) -> None:
+    run_git(repo, "remote", "add", "upstream", "https://github.com/owner/name.git")
+    found = changes(repo)
+    assert found.remote is None and found.why is None
+
+
+def test_the_remote_is_read_from_a_subdirectory_and_before_the_first_commit(
+    tmp_path: Path,
+) -> None:
+    fresh = tmp_path / "fresh"
+    (fresh / "sub").mkdir(parents=True)
+    run_git(fresh, "init", "-q")
+    run_git(fresh, "remote", "add", "origin", "git@github.com:owner/name.git")
+    assert changes(fresh / "sub").remote == "owner/name"
+
+
+def test_the_remote_follows_git_s_own_url_rewriting(repo: Path) -> None:
+    run_git(repo, "config", "url.https://github.com/.insteadOf", "hub:")
+    run_git(repo, "remote", "add", "origin", "hub:owner/name.git")
+    assert changes(repo).remote == "owner/name"
+
+
+def test_reading_the_remote_leaves_the_config_alone(repo: Path) -> None:
+    run_git(repo, "remote", "add", "origin", "https://SECRET@github.com/owner/name.git")
+    before = (repo / ".git" / "config").read_bytes()
+    changes(repo)
+    assert (repo / ".git" / "config").read_bytes() == before
+
+
 # ------------------------------------------------ KYO-698: the session's permission mode
 #
 # ``permission-mode.synthetic.jsonl`` is synthetic: each row has the keys measured on a real

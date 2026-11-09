@@ -12,7 +12,7 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/subagents/{agent}`` -- one subagent's tool calls, from its own
   transcript (KYO-693), and for a dispatched worker its dispatch and branch lines (KYO-695);
 - ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
-  commit does (KYO-693);
+  commit does (KYO-693), and the repository's ``origin`` remote (KYO-700);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
   objects, the reply in progress and changes to the screen and the terminal's text;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
@@ -179,6 +179,7 @@ def _changes_json(changes: Any) -> dict:
     return {
         "cwd": changes.cwd,
         "root": changes.root,
+        "remote": changes.remote,
         "why": changes.why,
         "added": changes.added,
         "removed": changes.removed,

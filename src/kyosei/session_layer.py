@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from stat import S_ISREG
+from urllib.parse import urlsplit
 
 from .cmd_controller import Tmux, controller_env, find_tmux
 from .cmd_sessions import recorded_transcript_path
@@ -172,7 +173,7 @@ class UncommittedChanges:
 
     ``added`` and ``removed`` are git's own count of tracked files against ``HEAD``, staged
     or not. ``root`` is None when the directory cannot be read as a repository, and ``why``
-    then says so.
+    then says so. ``remote`` is the ``origin`` remote as ``owner/name`` (KYO-700).
     """
 
     cwd: str | None
@@ -183,6 +184,8 @@ class UncommittedChanges:
     #: Tracked files that differ, binary ones included.
     files: int = 0
     untracked: UntrackedFiles = UntrackedFiles(0, 0, 0)
+    #: None without an ``origin``, or with one that names no repository on a host.
+    remote: str | None = None
 
 
 class LiveSession:
@@ -511,6 +514,12 @@ _GIT_LOCATION_VARIABLES = (
 )
 
 
+#: The URL schemes of a repository on another machine.
+_REMOTE_SCHEMES = frozenset({"http", "https", "ssh", "git", "git+ssh", "ssh+git"})
+
+_REMOTE_SEGMENT = re.compile(r"[\w.-]+")
+
+
 def _git_environment(environ: Mapping[str, str] | None) -> dict[str, str]:
     source = os.environ if environ is None else environ
     return {key: value for key, value in source.items() if key not in _GIT_LOCATION_VARIABLES}
@@ -544,7 +553,7 @@ def uncommitted_changes(
     index when it takes a lock it could skip, ``diff.autoRefreshIndex`` is off because ``git
     diff`` refreshes the index regardless of that flag, and ``core.fsmonitor`` is off so a
     repository's configuration cannot start a program from here. A failure to read a diff
-    raises :class:`KyoseiError`.
+    raises :class:`KyoseiError`; a remote that cannot be read is only absent.
     """
     env = _git_environment(environ)
     if not cwd:
@@ -571,9 +580,51 @@ def uncommitted_changes(
             said = result.stderr.decode("utf-8", errors="replace").strip()
             raise KyoseiError(f"git could not read {root}: {said}")
     added, removed, files = _numstat(diff.stdout)
+    origin = git(root, "remote", "get-url", "origin")
     return UncommittedChanges(
-        cwd, str(root), None, added, removed, files, _untracked(root, listed.stdout)
+        cwd,
+        str(root),
+        None,
+        added,
+        removed,
+        files,
+        _untracked(root, listed.stdout),
+        repository_name(origin.stdout.decode("utf-8", errors="replace").strip())
+        if origin.returncode == 0
+        else None,
     )
+
+
+def repository_name(url: str) -> str | None:
+    """The ``owner/name`` a git remote URL points at, or None when it states no such thing.
+
+    Only the path of the URL can reach the result, so the user and password of
+    ``https://token@host/owner/name.git`` and any query or fragment are dropped. A password
+    holding a ``/`` ends git's reading of the host early and leaves the rest in the path,
+    which is why a segment of anything but word characters, dots and hyphens gives None
+    rather than being passed on. A host's nested groups stay, as ``group/sub/name``. A local
+    path or ``file://`` URL has no owner to state.
+    """
+    if "://" in url:
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return None
+        if parts.scheme not in _REMOTE_SCHEMES or not parts.netloc:
+            return None
+        path = parts.path
+    else:
+        # git reads a colon before any slash as the scp-like form, host:path.
+        host, colon, path = url.partition(":")
+        if not colon or not host or "/" in host:
+            return None
+    segments = path.strip("/").split("/")
+    if len(segments) < 2:
+        return None
+    segments[-1] = segments[-1].removesuffix(".git")
+    if not all(_REMOTE_SEGMENT.fullmatch(s) and s.strip(".") for s in segments):
+        return None
+    return "/".join(segments)
 
 
 def branch_lines(
