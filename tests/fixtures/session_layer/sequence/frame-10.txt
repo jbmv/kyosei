@@ -1,0 +1,40 @@
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m/work/sample · [38;5;114m]8;id=13u2dqv;https://claude.ai/code/session_01Mgr35kAZ2EEGvkoFdjS8ib?from=cli\/rc[39m]8;;\
+
+
+[38;5;246m[48;5;237m❯[39m [38;5;231m/clear[39m
+[49m
+[38;5;246m[48;5;237m❯ [38;5;231mAfter clear: reply with the word yes.[39m
+
+[38;5;231m[49m⏺[39m yes
+
+[38;5;246m✻[39m [38;5;246mCooked for 0s · done 9:11 AM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mUse Bash to run echo prelude. Then write one paragraph of about 110 words on how tides work, then[39m
+  [38;5;231ma blank line, then a numbered list of two items, then a short fenced code block. Use no further [39m
+  [38;5;231mtools.[39m
+
+[49m  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m⏺[39m Tides are the regular rise and fall of sea levels, driven mainly by the gravitational pull of the
+  Moon and, to a lesser extent, the Sun. The Moon's gravity pulls water on the near side of Earth
+  toward it, and the inertia of water on the far side produces a second bulge on the opposite side.
+  As Earth rotates through these two bulges, most coastlines pass through two high tides and two low
+  tides in roughly a day, about 24 hours and 50 minutes. The height of each tide varies with the
+  alignment of the Sun and Moon. At new and full moon, their combined pull produces higher high
+  tides and lower low tides, called spring tides. At the quarter moons, the forces partly cancel,
+  producing smaller ranges called neap tides. Local factors such as basin shape, water depth, and
+  coastline geometry also strongly influence the size of tides at any given place.
+
+  1. Gravitational tides: the Moon and Sun pull on ocean water, creating bulges on opposite sides of
+     Earth.
+  2. Tidal range: the difference between high and low water, which depends on the Sun–Moon alignment
+     and local geography.
+
+  high tide -> low tide -> high tide -> low tide
+
+[38;5;246m✻[39m [38;5;246mBaked for 4s · done 9:12 AM[39m
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ 
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle)[39m

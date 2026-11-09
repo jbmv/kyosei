@@ -1,0 +1,40 @@
+
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude Code[0m [38;5;246mv2.1.319[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku 5.5 · Claude Ultra[39m
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m/work/sample · [38;5;114m]8;id=13u2dqv;https://claude.ai/code/session_01Mgr35kAZ2EEGvkoFdjS8ib?from=cli\/rc[39m]8;;\
+
+
+[38;5;246m[48;5;237m❯[39m [38;5;231m/clear[39m
+[49m
+[38;5;246m[48;5;237m❯ [38;5;231mAfter clear: reply with the word yes.[39m
+
+[38;5;231m[49m⏺[39m yes
+
+[38;5;246m✻[39m [38;5;246mCooked for 0s · done 9:11 AM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mUse Bash to run echo prelude. Then write one paragraph of about 110 words on how tides work, then[39m
+  [38;5;231ma blank line, then a numbered list of two items, then a short fenced code block. Use no further [39m
+  [38;5;231mtools.[39m
+
+[49m  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m⏺[39m Tides are the regular rise and fall of sea levels, driven mainly by the gravitational pull of the
+  Moon and, to a lesser extent, the Sun. The Moon's gravity pulls water on the near side of Earth
+  toward it, and the inertia of water on the far side produces a second bulge on the opposite side.
+
+
+
+
+
+
+
+
+
+
+
+[38;5;174m✶[39m [38;5;174mThin[38;5;216mkin[38;5;174mg… [38;5;246m(2s · ↓[39m [38;5;246m90 tokens)[39m
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;246m❯ [39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle) · esc to interrupt[39m

@@ -1,0 +1,40 @@
+
+✻ Brewed for 1s · done 9:09 AM
+
+⏺ Background command "Wait 40 seconds then print bg-done" completed (exit code 0)
+
+⏺ The background command sleep 40; echo bg-done has completed with exit code 0. The notification
+  does not include its output, so I have not confirmed that it printed "bg-done". I can read the
+  output file if you want that verified.
+
+✻ Cooked for 1s · done 9:09 AM
+
+❯ Do these in order. First, call the Agent tool with run_in_background true, subagent_type
+  general-purpose, and the prompt: Reply with the single word pong and do nothing else. Second, in
+  the same reply, call the Agent tool in the foreground (run_in_background false), subagent_type
+  general-purpose, with the prompt: Run the Bash command echo hi, then use Bash to run echo bye,
+  then reply with the word hello. Third, call Bash in the foreground with: sleep 12; echo x.
+  Fourth, reply with the word done and stop.
+
+⏺ 2 background agents launched (↓ to manage)
+   ├ Reply pong
+   └ Run echo commands and reply hello
+
+  Ran 1 shell command
+
+› Message from @general-purpose (ctrl+o to expand)
+
+⏺ Agent "Reply pong" finished · 1s
+
+› Message from @general-purpose (ctrl+o to expand)
+
+⏺ Agent "Run echo commands and reply hello" finished · 4s
+
+⏺ done
+
+✻ Crunched for 16s · done 9:10 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · /tasks to see subagents

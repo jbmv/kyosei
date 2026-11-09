@@ -1260,6 +1260,8 @@ ERROR_CLASS_NAMES = frozenset(
         # carries the class name; its remedy is run end to end, per file and per
         # command, by `tests/test_atomic_writes.py`.
         "ExportFileUnreadable",
+        "PaneNotReady",
+        "SessionNotFound",
         # KYO-187: `kyo check-branch`/`check-clean`/`check-push`, and `kyo doctor`/
         # `docs check`. Those five refusals carry the command's own `--json` envelope,
         # and until KYO-187 each of them built the error, assigned `.data` to a local
@@ -4316,6 +4318,12 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-688: the session layer's opt-in refusal; its remedy is the project's own
+    # `read_transcripts: true`, proved by clearing it in tests/test_session_layer.py.
+    "session_layer.py:open_session#0": (
+        "setting `read_transcripts: true` in kyosei/config.yml; proved by "
+        "test_the_refusal_names_the_remedy_and_the_remedy_clears_it"
+    ),
     # KYO-644: the credit refusals whose remedy is the refused command again with what the
     # credit lacked -- the person's words in a file, a turn uuid, a declared person, a
     # supersede id -- which only the caller can supply. Each is run, from the refused

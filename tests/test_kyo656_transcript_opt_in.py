@@ -145,6 +145,7 @@ def test_every_module_that_imports_the_reader_asks_the_one_question() -> None:
         "credits.py",
         "doctor_install.py",
         "doctor_records.py",
+        "session_layer.py",
     }
     for path in readers:
         assert "transcripts_opted_in(" in path.read_text(encoding="utf-8"), path

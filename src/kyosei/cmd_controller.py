@@ -223,7 +223,7 @@ class Tmux:
         """How a message spells this server for a reader to type."""
         return shlex.join(["tmux", *self.socket_args])
 
-    def run(self, *args: str) -> subprocess.CompletedProcess:
+    def run(self, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(  # noqa: S603 - a resolved binary, argv built here
             [self.binary, *self.socket_args, *args],
             env=self.env,
@@ -231,6 +231,7 @@ class Tmux:
             text=True,
             timeout=TMUX_TIMEOUT_SECONDS,
             check=False,
+            input=input,
         )
 
 
