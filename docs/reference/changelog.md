@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-686` (task) — Creating a project requires an answer to the transcript question
 - **2026-11-09** — `KYO-679` (bug) — The installer replaces a whole pre-push hook that a person has added to
 - **2026-11-09** — `KYO-669` (task) — kyo check-push scans the messages and authors of the commits being pushed for private terms
 - **2026-10-14** — `KYO-635` (bug) — kyo init --adopt links a store recording a different code repository but never re-records the identity
