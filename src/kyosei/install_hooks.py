@@ -812,9 +812,9 @@ def install_hooks_refusal(root: Path) -> str | None:
 
 # -------------------------------------------- KYO-60: the human half, in git itself
 
-#: The marker line that identifies a ``pre-push`` hook as this tool's. Presence is
-#: how :func:`install_git_pre_push_hook` tells "already installed" from "the
-#: consumer has a pre-push hook of their own", which it never overwrites.
+#: The marker line that identifies a ``pre-push`` hook as having begun as this tool's.
+#: On its own it does not make the file replaceable: a person may have added to it, so
+#: :func:`install_git_pre_push_hook` also asks :func:`_pre_push_is_all_generated` (KYO-679).
 PRE_PUSH_MARKER = "# installed by `kyo install-hooks` (KYO-60)"
 
 #: Warns about a published store and exits 0, and refuses a push only for a private term
@@ -846,6 +846,28 @@ kyo check-push --pre-push "$1"
 [ "$?" -eq {EXIT_PRIVATE_TERM} ] && exit 1
 exit 0
 """
+
+
+#: Every executable line any version of :data:`PRE_PUSH_SCRIPT` has held. A new version
+#: that changes one adds it here and keeps the old one, or hooks written by the old
+#: version stop being recognised as ours and stop being updated.
+_GENERATED_PRE_PUSH_LINES = frozenset(
+    {
+        "command -v kyo >/dev/null 2>&1 || exit 0",
+        "kyo check-push --advisory || true",
+        'kyo check-push --pre-push "$1"',
+        f'[ "$?" -eq {EXIT_PRIVATE_TERM} ] && exit 1',
+        "exit 0",
+    }
+)
+
+
+def _pre_push_is_all_generated(script: str) -> bool:
+    """Is every executable line of this hook one Kyosei generated? Comments do not count,
+    so a reworded comment still updates; any other command is a person's, and replacing
+    the file would silently remove it (KYO-679)."""
+    lines = (line.strip() for line in script.splitlines())
+    return all(line in _GENERATED_PRE_PUSH_LINES for line in lines if line and line[0] != "#")
 
 
 def git_hooks_dir(code_root: Path) -> Path | None:
@@ -943,6 +965,12 @@ def install_git_pre_push_hook(
         ]
     if target.is_file():
         existing = target.read_text(encoding="utf-8", errors="replace")
+        if PRE_PUSH_MARKER in existing and not _pre_push_is_all_generated(existing):
+            return [], [
+                f"git pre-push: {target} began as Kyosei's but has lines of its own, so it "
+                "was left alone — to get this check before a push, replace any "
+                f"`kyo check-push` line in it with: {PRE_PUSH_MANUAL_LINE}"
+            ]
         if PRE_PUSH_MARKER in existing:
             if existing == PRE_PUSH_SCRIPT:
                 return [], []

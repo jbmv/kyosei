@@ -410,6 +410,25 @@ def test_an_operators_own_pre_push_hook_is_kept_and_the_line_to_add_is_named(
     assert f"! {notes[0]}" in text.out
 
 
+def test_a_marked_hook_with_a_line_of_its_own_is_kept_by_harness_install(
+    tmp_path: Path, store_home: Path, stub_claude: Path
+) -> None:
+    """KYO-679: the marker says the hook began as ours, not that all of it still is."""
+    from kyosei.install_hooks import PRE_PUSH_MANUAL_LINE, PRE_PUSH_MARKER
+
+    root = git_project(tmp_path)
+    hook = root / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    mine = f'#!/bin/sh\n/usr/local/bin/my-guard "$@" || exit 1\n{PRE_PUSH_MARKER}\nexit 0\n'
+    hook.write_text(mine, encoding="utf-8")
+    result = install(root, "--json")
+    assert result.code == 0, result
+    assert hook.read_text(encoding="utf-8") == mine
+    notes = result.json["pre_push"]["notes"]
+    assert len(notes) == 1 and "left alone" in notes[0]
+    assert PRE_PUSH_MANUAL_LINE in notes[0]
+
+
 def test_without_claude_the_pre_push_hook_is_still_written(
     tmp_path: Path, store_home: Path, monkeypatch
 ) -> None:

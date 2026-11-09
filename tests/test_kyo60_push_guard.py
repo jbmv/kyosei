@@ -528,6 +528,40 @@ def test_a_consumers_own_pre_push_hook_is_never_overwritten(kyo, project: Path) 
     assert any("left alone" in note for note in result.json["notes"])
 
 
+def test_a_marked_hook_with_a_line_of_its_own_is_never_overwritten(kyo, project: Path) -> None:
+    """KYO-679: the marker says the hook began as ours, not that all of it still is."""
+    git_init(project)
+    hook = project / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    mine = (
+        '#!/bin/sh\n/usr/local/bin/my-guard "$@" || exit 1\n'
+        f"{install_hooks.PRE_PUSH_MARKER}\nkyo check-push --advisory || true\nexit 0\n"
+    )
+    hook.write_text(mine, encoding="utf-8")
+    result = kyo("install-hooks", "--copies", "--json")
+    assert result.code == 0
+    assert hook.read_text(encoding="utf-8") == mine
+    notes = [note for note in result.json["notes"] if "left alone" in note]
+    assert len(notes) == 1 and install_hooks.PRE_PUSH_MANUAL_LINE in notes[0]
+
+
+def test_a_hook_from_an_earlier_generation_is_still_updated(kyo, project: Path) -> None:
+    """KYO-679.c2: the check above must not strand a hook that is wholly ours."""
+    git_init(project)
+    hook = project / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(
+        f"#!/bin/sh\n{install_hooks.PRE_PUSH_MARKER}\n#\n# Advisory only.\n"
+        "command -v kyo >/dev/null 2>&1 || exit 0\n"
+        "kyo check-push --advisory || true\nexit 0\n",
+        encoding="utf-8",
+    )
+    result = kyo("install-hooks", "--copies", "--json")
+    assert result.code == 0
+    assert hook.read_text(encoding="utf-8") == install_hooks.PRE_PUSH_SCRIPT
+    assert f"git pre-push: updated {hook}" in result.json["changes"]
+
+
 def test_install_hooks_stays_idempotent_with_the_pre_push_hook(kyo, project: Path) -> None:
     git_init(project)
     assert kyo("install-hooks", "--copies", "--json").json["changes"]

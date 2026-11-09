@@ -217,6 +217,20 @@ def test_the_claude_md_section_is_removed_and_nothing_else(text: str, expected) 
     )
 
 
+def test_a_marked_hook_with_a_line_of_its_own_is_kept_by_migrate(
+    tmp_path: Path, store_home: Path, stub_claude: Path
+) -> None:
+    """KYO-679: the marker says the hook began as ours, not that all of it still is."""
+    root = on_the_copies(tmp_path)
+    pre_push = root / ".git" / "hooks" / "pre-push"
+    mine = f'#!/bin/sh\n/usr/local/bin/my-guard "$@" || exit 1\n{PRE_PUSH_MARKER}\nexit 0\n'
+    pre_push.write_text(mine, encoding="utf-8")
+    result = migrate(root, "--json")
+    assert result.code == 0, result
+    assert pre_push.read_text(encoding="utf-8") == mine
+    assert any("left alone" in note for note in result.json["pre_push"]["notes"])
+
+
 def test_migrate_writes_the_pre_push_hook_a_copies_project_lacked(
     tmp_path: Path, store_home: Path, stub_claude: Path
 ) -> None:
