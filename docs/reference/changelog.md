@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-693` (task) — Session API: session titles, a subagent's tool calls, and uncommitted changes
 - **2026-11-09** — `KYO-692` (task) — Session API: subagent messages, the person's images, thinking text and the terminal's text
 - **2026-11-09** — `KYO-691` (task) — Session API: effort, branch, context use, and slash-command output
 - **2026-11-09** — `KYO-689` (task) — kyo serve session API, read half: list sessions, read turns, live events, overlays
@@ -407,6 +408,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-09** — `KYO-694` (bug) — The reply in progress alternates with nothing on every sample while a tool runs, and holds tool output
 - **2026-11-09** — `KYO-688` (task) — Session layer: one adapter for the transcript, one for the pane, in Kyosei's terms
 - **2026-11-09** — `KYO-687` (bug) — A message sent mid-turn leaves the turn index with a duplicate line and the enclosing prompt unconfirmed
 - **2026-11-09** — `KYO-684` (bug) — Declaring a first person turns earlier uncredited rows into doctor problems
