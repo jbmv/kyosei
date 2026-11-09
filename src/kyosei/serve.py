@@ -46,10 +46,11 @@ nothing else (:func:`kyosei.serve_files.document_target`).
 file-writing function.
 
 THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (GET),
-``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events) and
-``sessions/{id}/screen``, all read-only and in a project that has opted in to reading
-transcripts. This module only routes them; :mod:`kyosei.serve_sessions` holds the rest, and
-no ``kyosei.serve*`` module can reach the session layer's sending half.
+``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events),
+``sessions/{id}/screen`` and ``sessions/{id}/images/{turn}/{index}``, all read-only and in a
+project that has opted in to reading transcripts. This module only routes them;
+:mod:`kyosei.serve_sessions` holds the rest, and no ``kyosei.serve*`` module can reach the
+session layer's sending half.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
@@ -254,6 +255,13 @@ _PATH_ROUTES = ("ideas", "docs")
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
 SESSION_ROUTES = ("turns", "events", "screen")
+
+#: KYO-692: ``sessions/{id}/images/{turn}/{index}``, one image the person sent.
+SESSION_IMAGE_ROUTE = "images"
+
+#: An image at one turn and index never changes. It is the person's, so only their browser
+#: may keep it, and a client that re-renders a chat need not read the transcript again.
+_IMAGE_CACHE = "private, max-age=86400"
 
 #: The one query key a session route takes.
 _SESSION_QUERY_KEY = "cursor"
@@ -639,7 +647,11 @@ class ServeHandler(BaseHTTPRequestHandler):
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
-            if not (len(rest) == 3 or (len(rest) == 5 and rest[4] in SESSION_ROUTES)):
+            if not (
+                len(rest) == 3
+                or (len(rest) == 5 and rest[4] in SESSION_ROUTES)
+                or (len(rest) == 7 and rest[4] == SESSION_IMAGE_ROUTE)
+            ):
                 raise _no_route(method, split.path)
             allowed = ("GET",)
         else:
@@ -779,7 +791,9 @@ class ServeHandler(BaseHTTPRequestHandler):
         cursor = _session_cursor(query)
         if not rest:
             return 200, _json_bytes(project.list_sessions())
-        session_id, route = rest
+        session_id, route, *tail = rest
+        if route == SESSION_IMAGE_ROUTE:
+            return self._session_image(project, session_id, *tail)
         if route == "turns":
             return 200, _json_bytes(
                 project.turns(session_id, serve_sessions.parse_cursor(cursor))
@@ -793,6 +807,17 @@ class ServeHandler(BaseHTTPRequestHandler):
         )
         self._session_events(project, session_id, given)
         return None
+
+    def _session_image(self, project, session_id: str, turn: str, index: str) -> tuple:
+        if not (index.isascii() and index.isdigit()):
+            raise _no_route("GET", f".../images/{turn}/{index}")
+        media_type, data = project.image(session_id, turn, int(index))
+        return (
+            200,
+            data,
+            media_type,
+            {"Cache-Control": _IMAGE_CACHE, "X-Content-Type-Options": "nosniff"},
+        )
 
     def _session_events(self, project, session_id: str, given) -> None:
         """A ``text/event-stream`` on one session, from the sampler it shares with any other
@@ -1048,7 +1073,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f"GET/PUT/DELETE {project}/ideas/{{relpath}}, POST {project}/ideas-move and "
         f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
         f"GET {project}/events, GET {project}/sessions and GET "
-        f"{project}/sessions/{{id}}/turns, .../events or .../screen",
+        f"{project}/sessions/{{id}}/turns, .../events, .../screen or "
+        f".../images/{{turn}}/{{index}}",
     )
 
 

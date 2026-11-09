@@ -194,7 +194,8 @@ because that format is not a published interface and changes between releases.
 |---|---|
 | `GET /v1/projects/<name>/sessions` | the recent sessions, newest first and live sessions first |
 | `GET /v1/projects/<name>/sessions/<id>/turns[?cursor=...]` | the session's transcript objects |
-| `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now |
+| `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now, classified and as text |
+| `GET /v1/projects/<name>/sessions/<id>/images/<turn>/<index>` | one image the person sent, as its own bytes |
 | `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
 
 **The list.** `{"ok", "sessions": [...], "problem"}`, one row per session that
@@ -216,18 +217,21 @@ why. `background` is `{"running", "shells", "agents": [{"type", "description"}]}
 a pane only for a session marked running, once each per request.
 
 **Turns.** `{"ok", "session_id", "cursor", "reset", "readable", "why", "facts", "turns",
-"replies", "tool_calls", "subagents", "command_outputs"}`. Each list holds one entry per
+"replies", "tool_calls", "subagents", "command_outputs", "deliveries"}`. Each list holds one entry per
 object, at its latest version:
 
 ```
 turn:      id, at, form ("typed" | "mid-turn" | "answer" | "accepted-suggestion"), text,
-           typed, paste_known, prompt_id
-reply:     message_id, uuid, at, text, model, usage, record_uuids
+           typed, paste_known, prompt_id, images
+           images: index, media_type, size
+reply:     message_id, uuid, at, text, thinking, thinking_omitted, model, usage, record_uuids
            usage: input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 tool call: call_id, uuid, at, name, input, result
            result: uuid, at, text, is_error (null until the result lands)
 subagent:  agent_id, tool_call_uuid, description, agent_type
 command output: uuid, at, command, args, text
+delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, status,
+           summary
 ```
 
 `typed` is the person's own words (the text between any pastes), and `text` is the whole
@@ -246,6 +250,29 @@ session is one response holding all of it.
 time order on the same clock as the other lists' `at`. `text` has the output's terminal
 styling removed. `command` and `args` are `null` when the command's own row is not in the
 transcript, and a command that printed nothing has no entry.
+
+`deliveries` holds, in time order, the messages delivered to the session by anything other
+than the person, none of which appears in `turns`. `kind` is what the transcript calls the
+sender: `peer` for a subagent and `task-notification` for a task's notification, and any
+other kind the transcript names is passed on. `text` is the message without the harness's
+wrapper: a hand-back's report, a peer's own words, or a notification's result or else its
+summary. `sender`, `sender_id` and `handback` describe a peer, and `task_id`, `call_id` (the
+`call_id` of the tool call it answers), `status` and `summary` describe a notification; each is `null`, or false for `handback`,
+where it does not apply.
+
+A person's message can hold images. `images` lists them without their bytes, and
+`GET .../sessions/<id>/images/<turn>/<index>` returns one, where `<turn>` is the turn's
+`id` and `<index>` an entry's `index`. A message that is images alone is a turn whose
+`text` is empty. The route takes the same opt-in and the same Host and Origin checks as the
+others, refuses with 404 an image that is not the person's or whose data cannot be decoded,
+and serves only PNG, JPEG, GIF and WebP. `index` keeps its position in the message, so
+an image the route cannot serve leaves a gap.
+
+`thinking` is the text the transcript records for a reply's thinking, or `null` when it
+records none, and `thinking_omitted` counts the thinking blocks that record only a
+signature. Claude Code writes most thinking blocks that way, so a reply usually has `null`
+here, and a value is a short progress note rather than the whole of the model's reasoning.
+Nothing is reconstructed for an omitted block.
 
 `facts` is the session as of its latest reply, whatever the cursor, and `null` before the
 first reply:
@@ -266,8 +293,8 @@ environment setting that changes one session's window, such as
 `CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
 
 **The screen.** `{"ok", "session_id", "pane": {"present", "why", "pane_id",
-"tmux_session"}, "screen", "work_running"}`. `screen` is the session layer's classification,
-and carries no text of the screen itself:
+"tmux_session"}, "screen", "terminal", "work_running"}`. `screen` is the session layer's
+classification, and carries no text of the screen itself:
 
 ```
 screen: state, question, options, input_text, background
@@ -276,7 +303,12 @@ screen: state, question, options, input_text, background
         options: number, label, selected, description
 ```
 
-`screen` and `work_running` are `null` when the session has no pane. A screen matching no
+`terminal` is `{"text", "working_line"}`. `text` is the screen as the terminal draws it, with
+its styling removed. `working_line` is the words of the terminal's working line while a turn
+runs, such as `Thinking… (12s · ↓ 2.9k tokens)`, without the spinner's glyph. It is `null`
+on any other screen, and also during a turn that has drawn its reply over that line.
+
+`screen`, `terminal` and `work_running` are `null` when the session has no pane. A screen matching no
 known state is `unrecognised`, and the session layer also keeps a copy of it under
 `$KYOSEI_HOME/pane-unrecognised/` for cataloguing, outside any repository. A person
 answers an overlay in the session itself.
@@ -286,11 +318,12 @@ naming one of:
 
 | Frame | `data` |
 |---|---|
-| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `reply_in_progress`, `facts`: the state when the stream opened |
-| `event: transcript` | `session_id`, `cursor`, and the five lists above, new or changed objects only |
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`: the state when the stream opened |
+| `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
 | `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply changes them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
+| `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |
 | `event: session` | `session_id`, `previous_session_id`, `followed_clear`: the session moved to a new id on `/clear`; its objects continue under the new id |
 | `event: reset` | `session_id`: the transcript does not match the stream's position; read `/turns` again |
 | `event: error` | `error`: the session could not be sampled; sampling continues |

@@ -5,11 +5,14 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions`` -- the project's recent sessions, each with whether it has a pane and
   whether work is running;
 - ``GET sessions/{id}/turns[?cursor=]`` -- the session's turns, replies, tool calls,
-  subagents and slash-command output, its facts as of the latest reply (KYO-691), and a
-  cursor to ask for what is new;
+  subagents, slash-command output and messages delivered by anything other than the person,
+  its facts as of the latest reply (KYO-691), and a cursor to ask for what is new;
+- ``GET sessions/{id}/images/{turn}/{index}`` -- one image the person sent (KYO-692), whose
+  bytes are carried by no other route;
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
-  objects, the reply in progress and changes to the screen;
-- ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it.
+  objects, the reply in progress and changes to the screen and the terminal's text;
+- ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
+  and its text.
 
 The shapes are in ``docs/reference/topics/serve-and-desktop.md``.
 
@@ -85,10 +88,10 @@ OPENING = b"retry: 1000\n: kyo serve session events\n\n"
 
 _SAMPLER_THREAD = "kyo-serve-session-sampler"
 
-_CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([0-9a-f]{12})$")
+_CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([0-9a-f]{12})$")
 
 #: The lists of a delta, in the order a cursor counts them.
-_LISTS = ("turns", "replies", "tool_calls", "subagents", "command_outputs")
+_LISTS = ("turns", "replies", "tool_calls", "subagents", "command_outputs", "deliveries")
 
 
 # ------------------------------------------------------------------- the objects as JSON
@@ -103,6 +106,10 @@ def _turn_json(turn: Any) -> dict:
         "typed": list(turn.segments),
         "paste_known": turn.paste_known,
         "prompt_id": turn.prompt_id,
+        "images": [
+            {"index": image.index, "media_type": image.media_type, "size": image.size}
+            for image in turn.images
+        ],
     }
 
 
@@ -123,6 +130,8 @@ def _reply_json(reply: Any) -> dict:
         "uuid": reply.uuid,
         "at": reply.at,
         "text": reply.text,
+        "thinking": reply.thinking,
+        "thinking_omitted": reply.thinking_omitted,
         "model": reply.model,
         "usage": _usage_json(reply.usage),
         "record_uuids": list(reply.record_uuids),
@@ -170,6 +179,22 @@ def _command_output_json(output: Any) -> dict:
     }
 
 
+def _delivery_json(delivery: Any) -> dict:
+    return {
+        "uuid": delivery.uuid,
+        "at": delivery.at,
+        "kind": delivery.kind,
+        "text": delivery.text,
+        "sender": delivery.sender,
+        "sender_id": delivery.sender_id,
+        "handback": delivery.handback,
+        "task_id": delivery.task_id,
+        "call_id": delivery.call_id,
+        "status": delivery.status,
+        "summary": delivery.summary,
+    }
+
+
 def _facts_json(facts: Any) -> dict | None:
     if facts is None:
         return None
@@ -196,8 +221,15 @@ def _background_json(work: Any) -> dict | None:
     }
 
 
+def _terminal_json(words: Any) -> dict | None:
+    """The pane's words, carried apart from the classification, which changes less often."""
+    if words is None:
+        return None
+    return {"text": words.text, "working_line": words.working_line}
+
+
 def _screen_json(screen: Any) -> dict | None:
-    """The layer's classification of a screen. No text of the screen is carried."""
+    """The layer's classification of a screen. Its text is :func:`_terminal_json`'s."""
     if screen is None:
         return None
     return {
@@ -230,8 +262,15 @@ def _pane_json(lookup: Any) -> dict:
 # ----------------------------------------------------------------------------- the cursor
 
 
-def _lists(delta: Any) -> tuple[list, list, list, list, list]:
-    return (delta.turns, delta.replies, delta.tool_calls, delta.subagents, delta.command_outputs)
+def _lists(delta: Any) -> tuple[list, list, list, list, list, list]:
+    return (
+        delta.turns,
+        delta.replies,
+        delta.tool_calls,
+        delta.subagents,
+        delta.command_outputs,
+        delta.deliveries,
+    )
 
 
 def _identity(index: int, item: Any) -> str:
@@ -300,13 +339,14 @@ def parse_cursor(text: str | None, *, refuse: bool = True) -> Cursor | None:
 
 def objects_json(lists: Iterable[list]) -> dict[str, list]:
     """The lists as JSON, each object once at its latest version and in first-seen order."""
-    turns, replies, calls, subagents, outputs = lists
+    turns, replies, calls, subagents, outputs, deliveries = lists
     return {
         "turns": [_turn_json(item) for item in _latest(turns, lambda t: t.id)],
         "replies": [_reply_json(item) for item in _latest(replies, lambda r: r.message_id)],
         "tool_calls": [_tool_call_json(item) for item in _latest(calls, lambda c: c.call_id)],
         "subagents": [_subagent_json(item) for item in _latest(subagents, lambda s: s.agent_id)],
         "command_outputs": [_command_output_json(item) for item in outputs],
+        "deliveries": [_delivery_json(item) for item in sorted(deliveries, key=lambda d: d.at)],
     }
 
 
@@ -434,20 +474,39 @@ class ProjectSessions:
             **objects_json(lists),
         }
 
+    def image(self, session_id: str, turn_id: str, index: int) -> tuple[str, bytes]:
+        """The media type and bytes of one image the person sent."""
+        self.require(session_id)
+        live = self.open_live(session_id)
+        try:
+            found = live.image(turn_id, index)
+        except OSError as exc:
+            raise _unreadable(session_id, exc) from exc
+        if found is None:
+            raise Refusal(
+                404,
+                f"session {session_id} holds no image {index} on a turn {turn_id}; the `images` "
+                f"of a turn from GET {API_PREFIX}/projects/{{project}}/sessions/{session_id}/turns "
+                "name those it holds",
+            )
+        return found.media_type, found.data
+
     def screen(self, session_id: str) -> dict:
         self.require(session_id)
         live = self.open_live(session_id)
         try:
-            screen = live.screen()
+            view = live.view()
         except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
             raise Refusal(
                 502, f"the pane of session {session_id} could not be read: {exc}"
             ) from exc
+        screen = None if view is None else view.screen
         return {
             "ok": True,
             "session_id": session_id,
             "pane": _pane_json(live.pane_lookup),
             "screen": _screen_json(screen),
+            "terminal": _terminal_json(None if view is None else view.terminal),
             "work_running": None if screen is None else session_layer.is_working(screen),
         }
 
@@ -501,6 +560,7 @@ class _Sampler:
         self._live: session_layer.LiveSession | None = None
         self._position = _Position()
         self._screen: dict | None = None
+        self._terminal: dict | None = None
         self._reply: str | None = None
         self._facts: dict | None = None
         self._next_follow = 0.0
@@ -525,6 +585,7 @@ class _Sampler:
             self.session_id = update.session_id
             self._position.feed(_lists(update.delta))
             self._screen = _screen_json(update.screen)
+            self._terminal = _terminal_json(update.terminal)
             self._reply = update.reply_in_progress
             self._facts = _facts_json(self._live.facts())
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
@@ -547,6 +608,7 @@ class _Sampler:
                 "cursor": self._position.cursor,
                 "pane": _pane_json(live.pane_lookup),
                 "screen": self._screen,
+                "terminal": self._terminal,
                 "reply_in_progress": self._reply,
                 "facts": self._facts,
             },
@@ -580,14 +642,21 @@ class _Sampler:
         if live.pane is not None or time.monotonic() >= self._next_follow:
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
             update = live.refresh()
-            lists, screen, reply, followed = (
+            lists, screen, words, reply, followed = (
                 _lists(update.delta),
                 update.screen,
+                update.terminal,
                 update.reply_in_progress,
                 update.followed_clear,
             )
         else:
-            lists, screen, reply, followed = _lists(live.transcript.read()), None, None, False
+            lists, screen, words, reply, followed = (
+                _lists(live.transcript.read()),
+                None,
+                None,
+                None,
+                False,
+            )
         self.session_id = live.session_id
         if followed:
             self._position = _Position()
@@ -624,6 +693,12 @@ class _Sampler:
         if now_screen != self._screen:
             self._screen = now_screen
             self._broadcast(frame("screen", {"session_id": self.session_id, "screen": now_screen}))
+        now_terminal = _terminal_json(words)
+        if now_terminal != self._terminal:
+            self._terminal = now_terminal
+            self._broadcast(
+                frame("terminal", {"session_id": self.session_id, "terminal": now_terminal})
+            )
         if reply != self._reply:
             self._reply = reply
             self._broadcast(frame("reply", {"session_id": self.session_id, "text": reply}))

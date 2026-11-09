@@ -124,6 +124,17 @@ reads a row's fields; :mod:`kyosei.session_layer` composes these objects with th
 adapter's. The samples these shapes are tested against are recorded from throwaway
 sessions and live in ``tests/fixtures/session_layer/``.
 
+WHAT ELSE THE SESSION HOLDS (KYO-692). A message delivered by anything other than the person
+is a :class:`Delivery`: a ``user`` record or a ``queued_command`` attachment whose ``origin``
+is present and not ``human``, and an older ``queued_command`` of mode ``task-notification``
+with no ``origin``. Each delivery was found recorded one way only across this project's
+transcripts, so nothing here pairs a ``user`` record with an attachment. An image the person
+sent stays in the transcript: :attr:`Turn.images` lists what its record holds, and
+:meth:`SessionTranscript.image` reads one image's bytes back when it is asked for, so a read
+of the session never holds them. A reply's :attr:`Reply.thinking` is the text the
+transcript's thinking blocks record. Most such blocks record only a signature, which
+:attr:`Reply.thinking_omitted` counts, and which no text is made up for.
+
 A DISCUSSION SPAN (KYO-640.n1, KYO-644). A decided credit may cite the discussion that led
 to it by its first and last record. :func:`measure_span` reads the records between them and
 returns counts and times only: the person's turns, the agent's turns, the active seconds
@@ -133,6 +144,7 @@ and the first and last timestamps. No text from the span leaves the module.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -292,6 +304,27 @@ def candidate_transcripts(
 
 
 @dataclass(frozen=True)
+class ImageRef:
+    """An image in a person's turn, without its bytes (KYO-692).
+
+    ``index`` counts the record's image blocks, so a block that cannot be served leaves a
+    gap rather than renumbering the others. ``size`` is the decoded length in bytes.
+    """
+
+    index: int
+    media_type: str
+    size: int
+
+
+@dataclass(frozen=True)
+class SessionImage:
+    """One image's bytes, read back from the transcript."""
+
+    media_type: str
+    data: bytes
+
+
+@dataclass(frozen=True)
 class Turn:
     """One message of the person's, as far as this reader can tell.
 
@@ -311,6 +344,8 @@ class Turn:
     #: The record's ``promptId``, which the turn index is keyed on; absent on a mid-turn
     #: message and on a history line.
     prompt_id: str | None = field(default=None, compare=False)
+    #: The images the turn's record holds. Set by :class:`SessionTranscript` only.
+    images: tuple[ImageRef, ...] = field(default=(), compare=False)
 
 
 @dataclass
@@ -1216,6 +1251,15 @@ _WINDOW_NEEDS_SUFFIX = frozenset({"claude-opus-4-6", "claude-sonnet-4-6"})
 
 _LONG_CONTEXT_SUFFIX = "[1m]"
 
+#: The ``commandMode`` of a queued notification, and the kind of a delivery recorded so.
+_TASK_NOTIFICATION = "task-notification"
+
+_PEER = "peer"
+
+#: What an image may be served as: the four types the Messages API accepts. A transcript is
+#: not trusted to name a Content-Type, since ``image/svg+xml`` would run as a page.
+_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
 
 @dataclass(frozen=True)
 class Usage:
@@ -1245,6 +1289,10 @@ class Reply:
     usage: Usage | None
     model: str | None
     record_uuids: tuple[str, ...]
+    #: The text of the message's thinking blocks, or None when no block records any.
+    thinking: str | None = None
+    #: How many of its thinking blocks record no text, only a signature.
+    thinking_omitted: int = 0
 
 
 @dataclass(frozen=True)
@@ -1296,6 +1344,30 @@ class CommandOutput:
 
 
 @dataclass(frozen=True)
+class Delivery:
+    """A message delivered to the session by anything other than the person (KYO-692).
+
+    ``kind`` is the transcript's ``origin.kind``, such as ``peer`` for a subagent's message
+    or ``task-notification``, and is passed on when it is one this reader has not met.
+    ``text`` is the message without the harness's wrapper. The other fields are None where
+    the kind does not carry them.
+    """
+
+    uuid: str
+    at: str
+    kind: str
+    text: str
+    sender: str | None = None
+    sender_id: str | None = None
+    handback: bool = False
+    task_id: str | None = None
+    #: The id of the tool call the notification answers (the ``call_id`` of a :class:`ToolCall`).
+    call_id: str | None = None
+    status: str | None = None
+    summary: str | None = None
+
+
+@dataclass(frozen=True)
 class ReplyFacts:
     """What Claude Code recorded about the session on one reply (KYO-691).
 
@@ -1322,6 +1394,7 @@ class TranscriptDelta:
     tool_calls: list[ToolCall] = field(default_factory=list)
     subagents: list[SubagentRef] = field(default_factory=list)
     command_outputs: list[CommandOutput] = field(default_factory=list)
+    deliveries: list[Delivery] = field(default_factory=list)
 
 
 @dataclass
@@ -1334,6 +1407,8 @@ class _Message:
     model: str | None
     record_uuids: list[str]
     has_text: bool
+    thinking_parts: list[str] = field(default_factory=list)
+    thinking_omitted: int = 0
 
     def reply(self) -> Reply:
         return Reply(
@@ -1344,6 +1419,8 @@ class _Message:
             self.usage,
             self.model,
             tuple(self.record_uuids),
+            "\n\n".join(self.thinking_parts) or None,
+            self.thinking_omitted,
         )
 
 
@@ -1445,6 +1522,139 @@ def _result_text(content: object) -> str:
     )
 
 
+def _person_content(record: dict) -> object:
+    """A record's content when it is a message the person sent, otherwise None."""
+    if record.get("type") == "attachment":
+        if not _is_queued_command(record):
+            return None
+        attachment = record["attachment"]
+        if (
+            not _is_human(attachment.get("origin"))
+            or attachment.get("commandMode") != "prompt"
+            or attachment.get("isMeta")
+        ):
+            return None
+        return attachment.get("prompt")
+    if record.get("type") != "user" or record.get("toolUseResult") is not None:
+        return None
+    if record.get("isMeta") or not _is_human(record.get("origin")):
+        return None
+    return (record.get("message") or {}).get("content")
+
+
+def _image_blocks(content: object) -> list[dict]:
+    if not isinstance(content, list):
+        return []
+    return [b for b in content if isinstance(b, dict) and b.get("type") == "image"]
+
+
+def _servable(block: dict) -> tuple[str, str] | None:
+    """An image block's media type and base64 data, or None when it cannot be served."""
+    source = block.get("source")
+    if not isinstance(source, dict) or source.get("type") != "base64":
+        return None
+    media_type, data = source.get("media_type"), source.get("data")
+    if not isinstance(media_type, str) or media_type not in _IMAGE_TYPES:
+        return None
+    return (media_type, data) if isinstance(data, str) else None
+
+
+def _image_refs(blocks: list[dict]) -> tuple[ImageRef, ...]:
+    refs: list[ImageRef] = []
+    for index, block in enumerate(blocks):
+        found = _servable(block)
+        if found is not None:
+            refs.append(ImageRef(index, found[0], len(found[1].rstrip("=")) * 3 // 4))
+    return tuple(refs)
+
+
+def _is_images_only(record: dict, blocks: list[dict]) -> bool:
+    return isinstance(content := _person_content(record), list) and len(content) == len(blocks)
+
+
+def _decoded(blocks: list[dict], index: int) -> SessionImage | None:
+    """Block ``index``'s image, or None when there is none or its data is not base64."""
+    found = _servable(blocks[index]) if 0 <= index < len(blocks) else None
+    if found is None:
+        return None
+    try:
+        return SessionImage(found[0], base64.b64decode(found[1], validate=True))
+    except ValueError:  # binascii.Error is one
+        return None
+
+
+def _image_only_turn(record: dict, uuid: str, stamp: str) -> Turn:
+    """The turn of a message that is images alone, which holds none of the person's words."""
+    form = FORM_MID_TURN if record.get("type") == "attachment" else FORM_TYPED
+    prompt_id = record.get("promptId")
+    return Turn(
+        uuid,
+        stamp,
+        form,
+        SOURCE_TRANSCRIPT,
+        (),
+        True,
+        "",
+        prompt_id if isinstance(prompt_id, str) else None,
+    )
+
+
+def _element(text: str, name: str) -> str | None:
+    """The contents of ``<name>`` in a notification, or None. Greedy: a result is free text."""
+    found = re.search(rf"<{name}>(.*)</{name}>", text, re.S)
+    return found.group(1).strip() if found else None
+
+
+def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
+    """The message another party delivered in this record, or None."""
+    if record.get("type") == "attachment":
+        if not _is_queued_command(record):
+            return None
+        attachment = record["attachment"]
+        origin, content = attachment.get("origin"), attachment.get("prompt")
+        kind = _origin_kind(origin)
+        if kind is None and attachment.get("commandMode") == _TASK_NOTIFICATION:
+            kind = _TASK_NOTIFICATION
+    elif record.get("type") == "user" and record.get("toolUseResult") is None:
+        origin, content = record.get("origin"), (record.get("message") or {}).get("content")
+        kind = _origin_kind(origin)
+    else:
+        return None
+    if kind is None or kind == "human":
+        return None
+    delivered = _result_text(content)
+    if kind == _PEER and isinstance(origin, dict):
+        return _peer_delivery(uuid, stamp, origin, delivered)
+    if kind == _TASK_NOTIFICATION:
+        summary = _element(delivered, "summary")
+        return Delivery(
+            uuid,
+            stamp,
+            kind,
+            _element(delivered, "result") or summary or delivered,
+            task_id=_element(delivered, "task-id"),
+            call_id=_element(delivered, "tool-use-id"),
+            status=_element(delivered, "status"),
+            summary=summary,
+        )
+    return Delivery(uuid, stamp, kind, delivered)
+
+
+def _peer_delivery(uuid: str, stamp: str, origin: dict, delivered: str) -> Delivery:
+    """A subagent's message. A hand-back's ``body`` holds the harness's preamble, its report not."""
+    handback = origin.get("handback") is True
+    report, body = _text_field(origin, "handbackReportText"), _text_field(origin, "body")
+    return Delivery(
+        uuid,
+        stamp,
+        _PEER,
+        (report if handback else None) or body or delivered,
+        sender=_text_field(origin, "name"),
+        sender_id=_text_field(origin, "from"),
+        handback=handback,
+    )
+
+
 class SessionTranscript:
     """A session's transcript as Kyosei objects, read incrementally from a byte offset.
 
@@ -1471,6 +1681,7 @@ class SessionTranscript:
         self._asked: set[str] = set()
         self._commands: dict[str, tuple[str, str]] = {}
         self._outputs: dict[str, CommandOutput] = {}
+        self._deliveries: dict[str, Delivery] = {}
         self._latest_facts: ReplyFacts | None = None
 
     @property
@@ -1492,6 +1703,10 @@ class SessionTranscript:
     @property
     def command_outputs(self) -> list[CommandOutput]:
         return sorted(self._outputs.values(), key=lambda o: o.at)
+
+    @property
+    def deliveries(self) -> list[Delivery]:
+        return sorted(self._deliveries.values(), key=lambda d: d.at)
 
     @property
     def latest_facts(self) -> ReplyFacts | None:
@@ -1549,12 +1764,49 @@ class SessionTranscript:
             self._take_assistant(record, uuid, stamp, delta)
             return
         self._take_command(record, uuid, stamp, delta)
+        self._take_delivery(record, uuid, stamp, delta)
         turn = _person_turn(record, self._asked)
+        blocks = _image_blocks(_person_content(record))
+        images = _image_refs(blocks)
+        if turn is None and images and _is_images_only(record, blocks):
+            turn = _image_only_turn(record, uuid, stamp)
         if turn is not None:
+            turn = replace(turn, images=images) if images else turn
             self._turns[turn.id] = turn
             delta.turns.append(turn)
         if kind == "user":
             self._take_results(record, uuid, stamp, delta)
+
+    def _take_delivery(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
+        found = _delivery(record, uuid, stamp)
+        if found is not None:
+            self._deliveries[uuid] = found
+            delta.deliveries.append(found)
+
+    def image(self, turn_id: str, index: int) -> SessionImage | None:
+        """Image ``index`` of the person's turn ``turn_id``, or None when it holds no such image.
+
+        The record is found by reading the file again, so a read of the session keeps no
+        image in memory. Only a record that is the person's message is looked at, so this
+        cannot return an image that reached the session in a tool's result. Raises
+        :class:`OSError` when the file cannot be opened.
+        """
+        needle = turn_id.encode("utf-8", errors="replace")
+        with self.path.open("rb") as handle:
+            for raw in handle:
+                if needle not in raw:
+                    continue
+                try:
+                    record = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if (
+                    isinstance(record, dict)
+                    and record.get("uuid") == turn_id
+                    and not record.get("isSidechain")
+                ):
+                    return _decoded(_image_blocks(_person_content(record)), index)
+        return None
 
     def _take_assistant(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:
         message = record.get("message")
@@ -1588,6 +1840,12 @@ class SessionTranscript:
                 held.text_parts.append(block["text"])
             elif block.get("type") == "tool_use":
                 self._take_tool_use(block, uuid, stamp, delta)
+            elif block.get("type") in ("thinking", "redacted_thinking"):
+                said = block.get("thinking")
+                if isinstance(said, str) and said.strip():
+                    held.thinking_parts.append(said)
+                else:
+                    held.thinking_omitted += 1
         delta.replies.append(held.reply())
 
     def _take_command(self, record: dict, uuid: str, stamp: str, delta: TranscriptDelta) -> None:

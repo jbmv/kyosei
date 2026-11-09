@@ -130,6 +130,16 @@ class SessionUpdate:
     background: pane.BackgroundWork | None
     #: True when the session moved to a new transcript and id (``/clear``) in this refresh.
     followed_clear: bool
+    #: The pane's words, or None without a pane.
+    terminal: pane.Terminal | None = None
+
+
+@dataclass(frozen=True)
+class PaneView:
+    """One capture of the pane, classified and as text."""
+
+    screen: pane.Screen
+    terminal: pane.Terminal
 
 
 class LiveSession:
@@ -211,24 +221,37 @@ class LiveSession:
         delta = self.transcript.read()
         for reply in delta.replies:
             self.live_reply.observe_record(reply.text)
-        screen, background, in_progress = None, None, None
+        screen, background, in_progress, words = None, None, None, None
         raw = self._capture()
         if raw is not None:
             screen = pane.classify(raw, log_unrecognised_screen=self._unrecognised)
+            words = pane.terminal(raw, screen)
             background = screen.background
             if screen.state == pane.WORKING:
                 raw = self._scrollback(raw)
                 in_progress = self.live_reply.observe_screen(raw)
             else:
                 self.live_reply.text = None
-        return SessionUpdate(self.session_id, delta, screen, in_progress, background, followed)
+        return SessionUpdate(
+            self.session_id, delta, screen, in_progress, background, followed, words
+        )
 
     def screen(self) -> pane.Screen | None:
         """What the pane shows now, without reading the transcript; None with no pane."""
+        view = self.view()
+        return None if view is None else view.screen
+
+    def view(self) -> PaneView | None:
+        """What the pane shows now, classified and as text; None with no pane."""
         raw = self._capture()
         if raw is None:
             return None
-        return pane.classify(raw, log_unrecognised_screen=self._unrecognised)
+        screen = pane.classify(raw, log_unrecognised_screen=self._unrecognised)
+        return PaneView(screen, pane.terminal(raw, screen))
+
+    def image(self, turn_id: str, index: int) -> transcript.SessionImage | None:
+        """Image ``index`` of the person's turn ``turn_id``, or None when it holds no such image."""
+        return self.transcript.image(turn_id, index)
 
     def _capture(self) -> str | None:
         """The pane's screen, or None when there is no pane to read.
