@@ -67,10 +67,13 @@ The checks, and the law each one keeps honest:
                               expected, and the remedy is one `kyo gate` line
 ``check_criterion_verification_agreement``  law 3/KYO-4.c5 — state agrees with the latest verdict
 ``check_credit_coverage``     KYO-646 — a human-observed verdict, human-gate clearing
-                              or decision record written at schema 28 or later credits
-                              no person (enforcement bypassed). Its two NOTICE siblings,
-                              ``credit_coverage_legacy`` (the same rows written earlier)
-                              and ``credit_transcripts_appeared``, name `kyo credit`;
+                              or decision record written at schema 28 or later, after
+                              `people:` first declared someone, credits no person
+                              (enforcement bypassed). Its NOTICE siblings,
+                              ``credit_coverage_legacy`` (the same rows written before
+                              credits existed), ``credit_coverage_before_people``
+                              (KYO-684, written before anyone was declared) and
+                              ``credit_transcripts_appeared``, name `kyo credit`;
                               ``credit_people_undeclared`` (KYO-656) replaces them where
                               `people:` declares nobody
 ``check_completed_with_unmet_criteria``  KYO-415 — a record at its complete-role status
@@ -182,6 +185,7 @@ from .doctor_install import (
 from .doctor_records import (
     check_completed_with_unmet_criteria,
     check_credit_coverage,
+    check_credit_coverage_before_people,
     check_credit_coverage_legacy,
     check_credit_people_undeclared,
     check_credit_transcripts_appeared,
@@ -321,10 +325,11 @@ CHECK_ORDER = (
     # carries, here on a document rather than on a person.
     "open_standing_obligations",
     # KYO-646: after the criterion checks, because it reads verdicts; a problem for a row
-    # written at schema 28 or later, then two notices (rows from before credits, and
-    # credits whose transcript has since appeared).
+    # written at schema 28 or later, then three notices (rows from before credits, rows
+    # from before anyone was declared, and credits whose transcript has since appeared).
     "credit_coverage",
     "credit_coverage_legacy",
+    "credit_coverage_before_people",
     "credit_transcripts_appeared",
     # KYO-656: in place of the two coverage checks where nobody is declared.
     "credit_people_undeclared",
@@ -398,6 +403,7 @@ CHECKS = {
     "open_standing_obligations": check_open_standing_obligations,
     "credit_coverage": check_credit_coverage,
     "credit_coverage_legacy": check_credit_coverage_legacy,
+    "credit_coverage_before_people": check_credit_coverage_before_people,
     "credit_transcripts_appeared": check_credit_transcripts_appeared,
     "credit_people_undeclared": check_credit_people_undeclared,
     "redactions": check_redactions,
@@ -448,6 +454,9 @@ TIER_NOTICE = "notice"
 #: * ``credit_coverage_legacy`` (KYO-646): every verdict, gate clearing and decision made
 #:   before credits existed is in it, nothing is rewritten, and it falls as reconstructed
 #:   credits are approved in batches; exit 3 would paint every stop red until the last.
+#: * ``credit_coverage_before_people`` (KYO-684): nothing is enforced until someone is
+#:   declared, so these rows were correct when written and every one appears the moment the
+#:   first person is; exit 3 would make declaring someone the act that breaks the stops.
 #: * ``credit_transcripts_appeared`` (KYO-646): the credit is valid as written; a transcript
 #:   arriving later only makes a stronger check possible.
 #: * ``credit_people_undeclared`` (KYO-656): credits apply only where someone is declared,
@@ -509,6 +518,7 @@ NOTICE_CHECKS = frozenset(
         "kind_policy_missing",
         "open_standing_obligations",
         "credit_coverage_legacy",
+        "credit_coverage_before_people",
         "credit_transcripts_appeared",
         "credit_people_undeclared",
         "transcript_retention",
