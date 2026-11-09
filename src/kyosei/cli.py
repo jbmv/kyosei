@@ -46,6 +46,7 @@ from . import (
     cmd_install_agents,
     cmd_links,
     cmd_next,
+    cmd_notes,
     cmd_onboard,
     cmd_projects,
     cmd_publish,
@@ -215,6 +216,8 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     "next": (cmd_next.cmd_next, PROJECT_REQUIRED),
     "brief": (cmd_brief.cmd_brief, PROJECT_REQUIRED),
     "note": (cmd_brief.cmd_note, PROJECT_REQUIRED),
+    # KYO-705: what a person wrote, on the places it addresses. `kyo note` is the shift log.
+    "notes": (cmd_notes.cmd_notes, PROJECT_REQUIRED),
     "docs": (cmd_views.cmd_docs, PROJECT_REQUIRED),
     # KYO-138.c1: the command-and-option reference, generated from the parser below
     # rather than written. PROJECT_NONE on `report-schema`'s reasoning exactly: this
@@ -378,6 +381,9 @@ MUTATING_COMMANDS = (
     "flag",
     "brief",
     "note",
+    # KYO-705: `kyo notes add` and `tag` write rows and an event; `list` and `show` are pure
+    # reads, on `docs`' reasoning below: the entry names the command.
+    "notes",
     # KYO-137: `kyo docs settle` writes the verdict that clears a docs obligation, and
     # writes an events row and a fresh export like every other mutation. The command's
     # other actions (`check`, `obligations`, `preview`) are pure reads, which is why this
@@ -2835,6 +2841,79 @@ def build_parser() -> KyoseiParser:
         "--file",
         metavar="FILE",
         help="the shift note's text from a file, or '-' for stdin (law 5)",
+    )
+
+    p_notes = sub.add_parser(
+        "notes",
+        parents=[common],
+        help="what a person wrote, on the places it addresses: add one, or find notes by "
+        "tag and by what they are on (KYO-705); the shift log is `kyo note --shift`",
+    )
+    p_notes.add_argument("action", choices=["add", "list", "show", "tag"], help="what to do")
+    p_notes.add_argument("id", nargs="?", help="show and tag: the note, PREFIX-NN")
+    p_notes.add_argument(
+        "--file", metavar="FILE", help="add: the note's text from a file, or '-' for stdin (law 5)"
+    )
+    p_notes.add_argument(
+        "--on",
+        action="append",
+        metavar="TARGET",
+        help="add: a record, criterion, gate or note id this note is on, repeatable. list: "
+        "the notes on this target, a record id also matching its criteria and gates; a "
+        "transcript session or record uuid, or a path, also serves here",
+    )
+    p_notes.add_argument(
+        "--anchors-file",
+        metavar="FILE",
+        help="add: a JSON array of anchors, for turns, documents and files. Each is "
+        '{"kind": "turn", "session", "uuid", "start", "end", "digest", "role"}, '
+        '{"kind": "document" or "file", "path", "commit", "lines": [first, last] or (document) '
+        '"chars": [first, last]}, or {"kind": "record" or "note", "id"}. An anchor holds no '
+        "words from what it addresses; a turn's digest is computed from the transcript where "
+        "the project may read it, otherwise it and the role must be given. '-' reads stdin",
+    )
+    p_notes.add_argument(
+        "--tag",
+        action="append",
+        metavar="TAG",
+        help="add: a tag on the note, repeatable, lower-cased and without a leading #. "
+        "list: only notes carrying this tag, repeatable (all of them)",
+    )
+    p_notes.add_argument(
+        "--person",
+        metavar="KEY",
+        help="add: who wrote it, a key under people: in kyosei/config.yml (default: the only "
+        "person declared). list: only that person's notes. tag: who is changing the tags, "
+        "with the same default",
+    )
+    p_notes.add_argument(
+        "--device",
+        metavar="NAME",
+        help="add: the device it was written on (default: this machine's name)",
+    )
+    p_notes.add_argument(
+        "--entered",
+        choices=cmd_notes.ENTERED,
+        help="add: how the text reached kyo; required, because only the caller knows",
+    )
+    p_notes.add_argument(
+        "--anchored-to",
+        choices=sorted(cmd_notes.ANCHORED_TO),
+        help="list: only notes on this kind of place; prompt is a person's turn and output "
+        "an agent's",
+    )
+    p_notes.add_argument(
+        "--add",
+        action="append",
+        metavar="TAG",
+        help="tag: a tag to add to this filed note, repeatable. Each change is kept and "
+        "attributed; a note's text and anchors stay as filed",
+    )
+    p_notes.add_argument(
+        "--remove",
+        action="append",
+        metavar="TAG",
+        help="tag: a tag to remove from this filed note, repeatable",
     )
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and

@@ -563,6 +563,66 @@ def record_document(store: Store, record_id: str) -> dict:
     }
 
 
+def person_note_document(store: Store, note_id: str) -> dict:
+    """KYO-705: one note a person wrote, as ``kyo notes`` shows it, with its current tags.
+
+    An anchor keeps only the keys its kind uses, and ``digest`` is the only thing about a
+    transcript span the note carries: an anchor holds addresses, never the words.
+    """
+    row = store.person_note(note_id)
+    if row is None:
+        raise KyoseiError(f"no note {note_id!r}")
+    return {
+        "id": row["id"],
+        "seq": row["seq"],
+        "text": row["text"],
+        "person": row["person"],
+        "author": row["author"],
+        "device": row["device"],
+        "entered": row["entered"],
+        "created_at": row["created_at"],
+        "redacted_at": row["redacted_at"],
+        "redacted_why": row["redacted_why"],
+        "tags": store.person_note_tags(note_id),
+        "anchors": [
+            {
+                key: anchor[key]
+                for key in anchor.keys()  # noqa: SIM118 - sqlite3.Row has no other key view
+                if key not in ("note_id", "seq") and anchor[key] is not None
+            }
+            for anchor in store.person_note_anchors(note_id)
+        ],
+        "tag_changes": [
+            {
+                "id": change["id"],
+                "action": change["action"],
+                "tag": change["tag"],
+                "person": change["person"],
+                "author": change["author"],
+                "changed_at": change["changed_at"],
+            }
+            for change in store.person_note_tag_changes(note_id)
+        ],
+    }
+
+
+def person_note_line(store: Store, note_id: str) -> dict:
+    """KYO-705.c5: the note's ledger line, which is the note as it was filed.
+
+    The line is never rewritten, so its ``tags`` are the filing's, found by undoing each
+    recorded change on the current set, and the changes are ledger lines of their own.
+    """
+    line = person_note_document(store, note_id)
+    filed = set(line["tags"])
+    for change in reversed(line.pop("tag_changes")):
+        if change["action"] == "add":
+            filed.discard(change["tag"])
+        else:
+            filed.add(change["tag"])
+    line["tags"] = sorted(filed)
+    return line
+
+
 def serialise(document: dict) -> str:
     """Render a document to its one canonical byte sequence."""
     return json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
@@ -703,7 +763,7 @@ def stamp_ledger_row(row: dict) -> dict:
     data it is not attached to, going stale on its own.
 
     Called at APPEND time only. Deliberately not inside :func:`event_line` or the
-    ``json.dumps`` in :func:`_scrub_shift_notes`: those re-serialise lines that already
+    ``json.dumps`` in :func:`_scrub_note_ledger`: those re-serialise lines that already
     exist (``kyo redact`` rewrites the ledgers, the one place the append-only rule is
     knowingly broken), and re-stamping there would relabel a historical row with the
     version of the build that happened to redact it — the row would then claim a format

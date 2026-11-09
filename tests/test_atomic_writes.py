@@ -53,7 +53,7 @@ _WHOLE_FILE_WRITERS = {
     ledger_scrub_module: (
         "_scrub_one_event_file",
         "scrub_text_from_ledgers",
-        "_scrub_shift_notes",
+        "_scrub_note_ledger",
     ),
     docs_numbered: ("apply_assembly",),
 }

@@ -2444,6 +2444,15 @@ def _redacting_something_that_is_not_redactable(at: Path) -> Provocation:
     return Provocation(root, ("redact", record, "--why", "a secret slipped in"))
 
 
+def _changing_a_filed_notes_text(at: Path) -> Provocation:
+    root, _record = _project_with_a_record(at)
+    first = at / "note.txt"
+    first.write_text("my words\n")
+    runner = _runner(root)
+    assert runner("notes", "add", "--entered", "typed", "--file", str(first)).code == 0
+    return Provocation(root, ("notes", "tag", "TST-N1", "--file", str(first), "--add", "x"))
+
+
 def _redacting_again_with_a_different_reason(at: Path) -> Provocation:
     """KYO-405: a rerun of `kyo redact` is a retry only under the reason already
     recorded; a new reason is refused, and the refusal names the retry."""
@@ -3505,7 +3514,16 @@ PROVOKED: dict[str, Expectation] = {
                 "the caller is redacting an id, not creating a note"
             ),
             "kyo note --shift": "named as what writes a PREFIX-SN, not as a fix for this id",
+            "kyo notes add": "named as what writes a PREFIX-NN, not as a fix for this id",
         },
+    ),
+    # KYO-705.c5: asking `kyo notes tag` to change anything but tags. A wrong invocation,
+    # so the check is that the further note it offers can be written.
+    "cmd_notes.py:_tag#1": Expectation(
+        _changing_a_filed_notes_text,
+        clears_by_rerun=False,
+        bindings={"FILE": "{scratch}/more.txt"},
+        scratch_files={"more.txt": "more to say\n"},
     ),
     # KYO-405: the refusal of a redaction rerun under a different reason names the rerun
     # that IS accepted — the recorded reason, from a file. About the invocation: the
@@ -4355,6 +4373,13 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-705: a turn anchor with nothing to read; its remedies are supplying the digest and
+    # role in the anchor, or the project's own opt-in, both run in tests/test_kyo_notes.py.
+    "cmd_notes.py:_turn_anchor#4": (
+        "setting read_transcripts: true, or giving 'digest' and 'role' in the anchor; proved "
+        "by test_a_turn_anchor_with_nothing_to_read_is_cleared_by_opting_in and "
+        "test_a_turn_anchor_with_nothing_to_read_names_its_remedy"
+    ),
     # KYO-688: the session layer's opt-in refusal; its remedy is the project's own
     # `read_transcripts: true`, proved by clearing it in tests/test_session_layer.py.
     "session_layer.py:_transcripts_of#0": (

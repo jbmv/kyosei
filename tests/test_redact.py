@@ -373,6 +373,10 @@ def test_every_redactable_store_is_reachable_from_the_cli(kyo, project: Path, wr
         "shift-note": kyo(
             "note", "--shift", "--file", write_file("s2.txt", "shift text"), "--json"
         ).json["shift_note_id"],
+        "person-note": kyo(
+            "notes", "add", "--file", write_file("p2.txt", "my words"), "--entered", "typed",
+            "--json",
+        ).json["note"]["id"],
     }
     kyo("edit", record, "--note-file", write_file("n2.txt", "note text"))
     made["note"] = kyo("show", record, "--json").json["notes"][0]["id"]
@@ -414,6 +418,7 @@ def test_the_redaction_vocabulary_names_the_command_that_writes_each_shape(
     result = kyo("redact", record, "--why", "a record is not one field")
     assert result.code != 0
     for shape, writer in (
+        ("PREFIX-NN", "kyo notes add"),
         ("RECORD.eN", "kyo attach"),
         ("RECORD.mN", "kyo claim"),
         ("RECORD.nN", "kyo edit --note-file"),

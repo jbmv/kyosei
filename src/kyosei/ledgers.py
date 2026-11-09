@@ -27,6 +27,13 @@ ALLOCATIONS_FILENAME = "_allocations.json"
 SWEEPS_FILENAME = "_sweeps.jsonl"
 BRIEFS_FILENAME = "_briefs.jsonl"
 SHIFT_NOTES_FILENAME = "_shift_notes.jsonl"
+#: KYO-705: the notes a person wrote. A ledger rather than one file per note because a
+#: note's line is never amended, which is the shape a ledger holds and what the rebuild,
+#: doctor and redaction machinery already covers.
+PERSON_NOTES_FILENAME = "_person_notes.jsonl"
+#: KYO-705.c5: each tag added to or removed from a filed note, which is what lets the note's
+#: own line stay as it was filed.
+PERSON_NOTE_TAG_CHANGES_FILENAME = "_person_note_tag_changes.jsonl"
 
 
 # --------------------------------------------------------------- allocation snapshot
@@ -185,6 +192,37 @@ def read_shift_notes_in(directory: Path) -> list[dict]:
     return _read_ledger_lines(shift_notes_path_in(directory))
 
 
+def person_notes_path_in(directory: Path) -> Path:
+    return directory / PERSON_NOTES_FILENAME
+
+
+def person_notes_path(store: Store) -> Path:
+    return person_notes_path_in(export_dir(store))
+
+
+def append_person_note(store: Store, document: dict) -> None:
+    """KYO-705: the note, its anchors and its tags as one line
+    (:func:`kyosei.export.person_note_document`)."""
+    _append_ledger_line(person_notes_path(store), document)
+
+
+def read_person_notes_in(directory: Path) -> list[dict]:
+    return _read_ledger_lines(person_notes_path_in(directory))
+
+
+def person_note_tag_changes_path_in(directory: Path) -> Path:
+    return directory / PERSON_NOTE_TAG_CHANGES_FILENAME
+
+
+def append_person_note_tag_change(store: Store, row: sqlite3.Row) -> None:
+    """KYO-705.c5: one change to a filed note's tags, as one line."""
+    _append_ledger_line(person_note_tag_changes_path_in(export_dir(store)), _row_to_dict(row))
+
+
+def read_person_note_tag_changes_in(directory: Path) -> list[dict]:
+    return _read_ledger_lines(person_note_tag_changes_path_in(directory))
+
+
 #: Every append-only JSONL ledger in the export, mapped to the function that reads it
 #: back. KYO-181: declared as a table so ``kyo rebuild``'s version guard iterates the
 #: ledgers rather than naming four of them, which is what makes a FIFTH ledger guarded
@@ -199,10 +237,12 @@ def read_shift_notes_in(directory: Path) -> list[dict]:
 #: version nothing that is not already versioned, because THIS FILE CANNOT BE WRITTEN
 #: ALONE:
 #:
-#: Every one of the seven functions in this package that calls :func:`write_allocations`
+#: Every function in this package that calls :func:`write_allocations`
 #: also, in the same function and the same command, writes an artifact that carries this
 #: build's ``schema_version`` — an event or ledger line (``append_events``,
-#: ``append_sweep_run``, ``append_brief_run``, ``append_shift_note``) or a record document
+#: ``append_sweep_run``, ``append_brief_run``, ``append_shift_note``, ``append_person_note``,
+#: ``append_person_note_tag_change``)
+#: or a record document
 #: (``write_exports``, ``refresh_exports``). That is structural rather than incidental: the
 #: snapshot exists to record that an id was handed out, and handing one out is a mutation,
 #: and a mutation writes an event. So an export whose counters were written by a later
@@ -234,4 +274,6 @@ LEDGER_READERS = {
     SWEEPS_FILENAME: read_sweep_runs_in,
     BRIEFS_FILENAME: read_brief_runs_in,
     SHIFT_NOTES_FILENAME: read_shift_notes_in,
+    PERSON_NOTES_FILENAME: read_person_notes_in,
+    PERSON_NOTE_TAG_CHANGES_FILENAME: read_person_note_tag_changes_in,
 }

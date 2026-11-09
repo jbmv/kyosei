@@ -77,6 +77,8 @@ from .store import (
     SCOPE_BRIEF,
     SCOPE_EVENT,
     SCOPE_LINK,
+    SCOPE_PERSON_NOTE,
+    SCOPE_PERSON_NOTE_TAG_CHANGE,
     SCOPE_RECORD,
     SCOPE_SHIFT_NOTE,
     SCOPE_SWEEP,
@@ -545,6 +547,8 @@ ALLOCATED_PROJECT_TABLES: tuple[tuple[str, str], ...] = (
     ("sweep_runs", SCOPE_SWEEP),
     ("brief_runs", SCOPE_BRIEF),
     ("shift_notes", SCOPE_SHIFT_NOTE),
+    ("person_notes", SCOPE_PERSON_NOTE),
+    ("person_note_tag_changes", SCOPE_PERSON_NOTE_TAG_CHANGE),
 )
 ALLOCATED_CHILD_TABLES: tuple[tuple[str, str], ...] = (
     ("criteria", "criterion"),
@@ -1107,6 +1111,80 @@ def _load(
                     row.get("redacted_why"),
                 ),
             )
+        # KYO-705: a prior export has no such ledger, which reads as no lines. A note's
+        # anchors and tags travel on its own line, each anchor with the keys its kind uses.
+        for row in ledgers[ledgers_module.PERSON_NOTES_FILENAME]:
+            conn.execute(
+                "INSERT INTO person_notes (id, seq, text, person, author, device, entered,"
+                " created_at, redacted_at, redacted_why) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["seq"],
+                    row["text"],
+                    row["person"],
+                    row["author"],
+                    row["device"],
+                    row["entered"],
+                    row["created_at"],
+                    row["redacted_at"],
+                    row["redacted_why"],
+                ),
+            )
+            for position, anchor in enumerate(row["anchors"], start=1):
+                conn.execute(
+                    "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
+                    " char_start, char_end, digest, digest_check, commit_sha, line_start,"
+                    " line_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        row["id"],
+                        position,
+                        anchor["kind"],
+                        anchor["target"],
+                        anchor.get("session"),
+                        anchor.get("role"),
+                        anchor.get("char_start"),
+                        anchor.get("char_end"),
+                        anchor.get("digest"),
+                        anchor.get("digest_check"),
+                        anchor.get("commit_sha"),
+                        anchor.get("line_start"),
+                        anchor.get("line_end"),
+                    ),
+                )
+            for tag in row["tags"]:
+                conn.execute(
+                    "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (row["id"], tag)
+                )
+        # KYO-705.c5: a note's line holds the tags it was filed with; replaying the changes
+        # in the order they were made gives the tags it has now. By seq, because a repair
+        # may have appended a line out of order.
+        for row in sorted(
+            ledgers[ledgers_module.PERSON_NOTE_TAG_CHANGES_FILENAME], key=lambda r: r["seq"]
+        ):
+            conn.execute(
+                "INSERT INTO person_note_tag_changes (id, seq, note_id, action, tag, person,"
+                " author, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["seq"],
+                    row["note_id"],
+                    row["action"],
+                    row["tag"],
+                    row["person"],
+                    row["author"],
+                    row["changed_at"],
+                ),
+            )
+            if row["action"] == "add":
+                conn.execute(
+                    "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)",
+                    (row["note_id"], row["tag"]),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM person_note_tags WHERE note_id = ? AND tag = ?",
+                    (row["note_id"], row["tag"]),
+                )
 
         # KYO-414: each counter is seeded at max(snapshot, highest
         # loaded seq + 1). The snapshot still decides every scope it holds higher --

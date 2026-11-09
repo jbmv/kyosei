@@ -588,7 +588,7 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
     the same commit as the schema change (KYO-3.c4).
     """
     pinned = {
-        2: "4185b82c0c38bb152202735b199d754813ee88c9ff084ba1729378a3ccb07f49",
+        2: "2cd81e07a27af20e230ffa29a8af39ef972c801579b8e263b6573a0c74a0c2c6",
         3: "5818601dac1a333583e3b8dc9a983bcd7e5182e1537ca68db9d151e3ac5cee6f",
         4: "1b4655bb0220cbbe7d56b31345f6b1204c4e054fcd79ef410ee17d984856b3d7",
         5: "60b90e342d99b7547c2493c7e412da492311e86fa50f995c2ecea9621e98105c",
@@ -727,6 +727,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # retracted with no replacement, kept readable. A real DDL change, so a real new
         # hash.
         29: "fed4bf489447031a8eeb333da551c7af3a54988a4b319be2459f9d29c4baa52e",
+        # KYO-705: person_notes, person_note_anchors, person_note_tags and
+        # person_note_tag_changes -- what a person wrote, on the places it addresses, and
+        # each later change to its tags. A real DDL change, so a real new hash.
+        30: "2cd81e07a27af20e230ffa29a8af39ef972c801579b8e263b6573a0c74a0c2c6",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -1679,6 +1683,8 @@ _LEDGER_READING_NAMES = frozenset(
         "read_sweep_runs_in",
         "read_brief_runs_in",
         "read_shift_notes_in",
+        "read_person_notes_in",
+        "read_person_note_tag_changes_in",
     }
 )
 
@@ -2085,6 +2091,8 @@ _STAMPED_EXPORT_WRITERS = frozenset(
         "append_sweep_run",
         "append_brief_run",
         "append_shift_note",
+        "append_person_note",
+        "append_person_note_tag_change",
         "write_exports",
         "refresh_exports",
     }
@@ -2431,6 +2439,38 @@ def test_rebuild_accepts_a_schema_27_export_with_no_credits(kyo, project: Path) 
         conn.close()
     rebuilt = kyo("show", record, "--json").json
     assert rebuilt["credits"] == [] and rebuilt["gates"][0]["cleared_as"] is None
+
+
+def test_rebuild_accepts_a_schema_29_export_with_no_person_notes(kyo, project: Path) -> None:
+    """The notes ledger arrived at schema_version 30, as a new file. An export written at
+    29 has no such file, and that must rebuild as no notes, with nothing refused."""
+    from kyosei import ledgers as ledgers_module
+
+    record = new_record(kyo, criteria=["a"])
+    export_directory = project / "kyosei" / "export"
+    assert not (export_directory / ledgers_module.PERSON_NOTES_FILENAME).exists()
+    export_path = export_directory / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    doc["schema_version"] = 29
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        for table in (
+            "person_notes",
+            "person_note_anchors",
+            "person_note_tags",
+            "person_note_tag_changes",
+        ):
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0, table
+    finally:
+        conn.close()
+    assert kyo("notes", "list", "--json").json["notes"] == []
+    assert kyo("show", record, "--json").json["id"] == record
 
 
 def test_a_credit_round_trips_through_export_and_rebuild(kyo, project: Path) -> None:

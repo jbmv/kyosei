@@ -257,7 +257,7 @@ def _residue_places(residue: ledger_scrub.RedactionResidue) -> str:
         f"{count} {where}"
         for count, where in (
             (residue.ledger_lines, "line(s) in kyosei/export/_events/"),
-            (residue.shift_note_lines, "line(s) in the shift-note ledger"),
+            (residue.shift_note_lines, "line(s) in the note's own ledger"),
             (residue.event_rows, "row(s) of the database's `events` table"),
         )
         if count

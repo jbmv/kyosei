@@ -21,6 +21,8 @@ event         ``KYO-E41``          ``event``
 sweep run     ``KYO-W3``           ``sweep``
 brief run     ``KYO-B9``           ``brief``
 shift note    ``KYO-S12``          ``shift_note``
+person note   ``KYO-N41``          ``person_note``
+tag change    ``KYO-T7``           ``person_note_tag_change``
 ============  ===================  =========================================
 
 The ``c``/``n``/``g`` numbers are *allocation counters*, not positions: voiding
@@ -38,6 +40,8 @@ LINK_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-L([1-9][0-9]*)$")
 SWEEP_RUN_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-W([1-9][0-9]*)$")
 BRIEF_RUN_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-B([1-9][0-9]*)$")
 SHIFT_NOTE_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-S([1-9][0-9]*)$")
+PERSON_NOTE_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-N([1-9][0-9]*)$")
+PERSON_NOTE_TAG_CHANGE_RE = re.compile(r"^([A-Z][A-Z0-9]{1,15})-T([1-9][0-9]*)$")
 
 #: ``c``/``n``/``g``/``t`` are milestones 1-3; milestone 4 (provenance) adds
 #: ``m`` (claim — ``c`` was already taken by criterion), ``v`` (verification),
@@ -110,6 +114,14 @@ def shift_note_id(prefix: str, seq: int) -> str:
     return f"{prefix}-S{seq}"
 
 
+def person_note_id(prefix: str, seq: int) -> str:
+    return f"{prefix}-N{seq}"
+
+
+def person_note_tag_change_id(prefix: str, seq: int) -> str:
+    return f"{prefix}-T{seq}"
+
+
 def is_record_id(value: str) -> bool:
     return bool(RECORD_RE.match(value))
 
@@ -126,7 +138,15 @@ def child_kind(value: str) -> str | None:
 
 
 def prefix_of(value: str) -> str | None:
-    for pattern in (RECORD_RE, LINK_RE, SWEEP_RUN_RE, BRIEF_RUN_RE, SHIFT_NOTE_RE):
+    for pattern in (
+        RECORD_RE,
+        LINK_RE,
+        SWEEP_RUN_RE,
+        BRIEF_RUN_RE,
+        SHIFT_NOTE_RE,
+        PERSON_NOTE_RE,
+        PERSON_NOTE_TAG_CHANGE_RE,
+    ):
         match = pattern.match(value)
         if match:
             return match.group(1)

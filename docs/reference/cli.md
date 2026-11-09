@@ -60,6 +60,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo new`](#kyo-new) | yes | yes | create a record |
 | [`kyo next`](#kyo-next) | yes | no | ready work: dispatchable, ungated, disjoint from running dispatches (M6) |
 | [`kyo note`](#kyo-note) | yes | yes | append to the continuously-written shift log (M6); for a note ON a record see `kyo edit --note-file` |
+| [`kyo notes`](#kyo-notes) | yes | yes | what a person wrote, on the places it addresses: add one, or find notes by tag and by what they are on (KYO-705); the shift log is `kyo note --shift` |
 | [`kyo onboard`](#kyo-onboard) | no | no | guided project setup, where a new project starts: prints this build's setup steps for an agent to follow in a new or existing project, or with --check reads a project back against the same checklist and writes nothing (KYO-514) |
 | [`kyo orchestrator`](#kyo-orchestrator) | no | no | start, stop, attach to or list detached claude Remote Control sessions, one per project, on this machine's `tmux -L kyosei` server -- safe to run over SSH; --install the LaunchAgent that keeps that server running from login (KYO-458, KYO-474) (also accepted as `kyo controller`) |
 | [`kyo pre-tool-use`](#kyo-pre-tool-use) | optional | no | both PreToolUse guards (`kyo check-push --pre-tool-use` and `kyo check-command --pre-tool-use`) against ONE read of the payload on stdin, in one interpreter: exits 2 if either refuses, with both refusals when both do, and is silent otherwise. Opt-in: `kyo install-hooks` still wires the two commands (KYO-422) |
@@ -1027,6 +1028,36 @@ Usage: `kyo note [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 
 - `--shift` — optional. the only note kind v1 ships
 - `--file FILE` — optional. the shift note's text from a file, or '-' for stdin (law 5)
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo notes`
+
+what a person wrote, on the places it addresses: add one, or find notes by tag and by what they are on (KYO-705); the shift log is `kyo note --shift`
+
+Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
+
+Writes to the store: **yes** — an events row and a fresh export.
+
+Usage: `kyo notes [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--file FILE] [--on TARGET] [--anchors-file FILE] [--tag TAG] [--person KEY] [--device NAME] [--entered {typed,pasted,dictated,drawn}] [--anchored-to {document,file,note,output,prompt,record,turn}] [--add TAG] [--remove TAG] {add,list,show,tag} [id]`
+
+### Positional arguments
+
+- `{add,list,show,tag}` — **required**. what to do
+- `[ID]` — optional. show and tag: the note, PREFIX-NN
+
+### Options
+
+- `--file FILE` — optional. add: the note's text from a file, or '-' for stdin (law 5)
+- `--on TARGET` — optional. add: a record, criterion, gate or note id this note is on, repeatable. list: the notes on this target, a record id also matching its criteria and gates; a transcript session or record uuid, or a path, also serves here
+- `--anchors-file FILE` — optional. add: a JSON array of anchors, for turns, documents and files. Each is {"kind": "turn", "session", "uuid", "start", "end", "digest", "role"}, {"kind": "document" or "file", "path", "commit", "lines": [first, last] or (document) "chars": [first, last]}, or {"kind": "record" or "note", "id"}. An anchor holds no words from what it addresses; a turn's digest is computed from the transcript where the project may read it, otherwise it and the role must be given. '-' reads stdin
+- `--tag TAG` — optional. add: a tag on the note, repeatable, lower-cased and without a leading #. list: only notes carrying this tag, repeatable (all of them)
+- `--person KEY` — optional. add: who wrote it, a key under people: in kyosei/config.yml (default: the only person declared). list: only that person's notes. tag: who is changing the tags, with the same default
+- `--device NAME` — optional. add: the device it was written on (default: this machine's name)
+- `--entered {typed,pasted,dictated,drawn}` — optional. add: how the text reached kyo; required, because only the caller knows
+- `--anchored-to {document,file,note,output,prompt,record,turn}` — optional. list: only notes on this kind of place; prompt is a person's turn and output an agent's
+- `--add TAG` — optional. tag: a tag to add to this filed note, repeatable. Each change is kept and attributed; a note's text and anchors stay as filed
+- `--remove TAG` — optional. tag: a tag to remove from this filed note, repeatable
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,6 +47,11 @@ SCOPE_EVENT = "event"
 SCOPE_SWEEP = "sweep"
 SCOPE_BRIEF = "brief"
 SCOPE_SHIFT_NOTE = "shift_note"
+#: KYO-705: a note a person wrote. Project-wide like a shift note, because it belongs to no
+#: record: one note can address several, and a note can address none.
+SCOPE_PERSON_NOTE = "person_note"
+#: KYO-705.c5: one tag added to or removed from a filed note.
+SCOPE_PERSON_NOTE_TAG_CHANGE = "person_note_tag_change"
 
 
 def scope_for_child(record_id: str, child_kind: str) -> str:
@@ -219,6 +224,10 @@ class Store:
         return ids.shift_note_id(self.prefix, seq), seq
 
     # -------------------------------------------------------------------- reads
+
+    def new_person_note_id(self) -> tuple[str, int]:
+        seq = self.allocate(SCOPE_PERSON_NOTE)
+        return ids.person_note_id(self.prefix, seq), seq
 
     def get_meta(self, key: str) -> str | None:
         row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
@@ -840,6 +849,126 @@ class Store:
         return list(self.conn.execute("SELECT * FROM shift_notes ORDER BY seq"))
 
     # ------------------------------------------------------------------- events
+
+    def person_note(self, note_id: str) -> sqlite3.Row | None:
+        """KYO-705: one note a person wrote, or None. ``KYO-N41``, not a record's ``.n2``."""
+        row: sqlite3.Row | None = self.conn.execute(
+            "SELECT * FROM person_notes WHERE id = ?", (note_id,)
+        ).fetchone()
+        return row
+
+    def person_note_anchors(self, note_id: str) -> list[sqlite3.Row]:
+        return list(
+            self.conn.execute(
+                "SELECT * FROM person_note_anchors WHERE note_id = ? ORDER BY seq", (note_id,)
+            )
+        )
+
+    def person_note_tags(self, note_id: str) -> list[str]:
+        return [
+            row["tag"]
+            for row in self.conn.execute(
+                "SELECT tag FROM person_note_tags WHERE note_id = ? ORDER BY tag", (note_id,)
+            )
+        ]
+
+    def person_note_tag_changes(self, note_id: str) -> list[sqlite3.Row]:
+        """KYO-705.c5: every tag added to or removed from a note since it was filed, oldest
+        first."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM person_note_tag_changes WHERE note_id = ? ORDER BY seq", (note_id,)
+            )
+        )
+
+    def change_person_note_tags(
+        self,
+        note_id: str,
+        *,
+        add: Collection[str],
+        remove: Collection[str],
+        person: str | None,
+        author: str,
+    ) -> list[sqlite3.Row]:
+        """KYO-705.c5: the one writer of a tag change; call inside a transaction.
+
+        ``person_note_tags`` is the current set and each row written here is one step that
+        moved it. A tag the note already carries, or does not carry, is no step and writes
+        no row, so replaying the steps backwards gives the tags the note was filed with
+        (:func:`kyosei.export.person_note_line`). Returns the rows written.
+        """
+        current = set(self.person_note_tags(note_id))
+        steps = [("remove", tag) for tag in sorted(set(remove) & current)]
+        steps += [("add", tag) for tag in sorted(set(add) - current)]
+        written: list[sqlite3.Row] = []
+        for action, tag in steps:
+            if action == "add":
+                self.conn.execute(
+                    "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (note_id, tag)
+                )
+            else:
+                self.conn.execute(
+                    "DELETE FROM person_note_tags WHERE note_id = ? AND tag = ?", (note_id, tag)
+                )
+            seq = self.allocate(SCOPE_PERSON_NOTE_TAG_CHANGE)
+            change_id = ids.person_note_tag_change_id(self.prefix, seq)
+            self.conn.execute(
+                "INSERT INTO person_note_tag_changes (id, seq, note_id, action, tag, person,"
+                " author, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (change_id, seq, note_id, action, tag, person, author, now()),
+            )
+            written.append(
+                self.conn.execute(
+                    "SELECT * FROM person_note_tag_changes WHERE id = ?", (change_id,)
+                ).fetchone()
+            )
+        return written
+
+    def add_person_note(
+        self,
+        *,
+        text: str,
+        person: str | None,
+        author: str,
+        device: str,
+        entered: str,
+        anchors: Sequence[Mapping[str, object]],
+        tags: Sequence[str],
+    ) -> str:
+        """KYO-705: the one writer of a note, its anchors and its tags. Call inside a
+        transaction; ``anchors`` are rows already validated by :mod:`kyosei.cmd_notes`."""
+        note_id, seq = self.new_person_note_id()
+        self.conn.execute(
+            "INSERT INTO person_notes (id, seq, text, person, author, device, entered,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (note_id, seq, text, person, author, device, entered, now()),
+        )
+        for position, anchor in enumerate(anchors, start=1):
+            self.conn.execute(
+                "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
+                " char_start, char_end, digest, digest_check, commit_sha, line_start, line_end)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    note_id,
+                    position,
+                    anchor["kind"],
+                    anchor["target"],
+                    anchor.get("session"),
+                    anchor.get("role"),
+                    anchor.get("char_start"),
+                    anchor.get("char_end"),
+                    anchor.get("digest"),
+                    anchor.get("digest_check"),
+                    anchor.get("commit_sha"),
+                    anchor.get("line_start"),
+                    anchor.get("line_end"),
+                ),
+            )
+        for tag in tags:
+            self.conn.execute(
+                "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (note_id, tag)
+            )
+        return note_id
 
     def record_event(
         self,

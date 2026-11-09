@@ -53,6 +53,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
     # single-line enforced; the words themselves come from --quote-file/--evidence-file.
     text_bearing = {
         "--title", "--why", "--do", "--method", "--quote", "--enforced-by", "--source-other",
+        "--device",  # KYO-705: one line naming where a note was written
     }  # fmt: skip
     file_bearing = {f for f in value_flags if f.endswith("-file")}
     structural = {
@@ -76,6 +77,11 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--withdraw",  # a credit id (KYO-670)
         "--batch",  # a file path to read credit lines from, not prose (KYO-653)
         "--role",  # observed | decided | authorized (KYO-644)
+        "--on",  # a record, gate or note id `kyo notes` anchors to (KYO-705)
+        "--entered",  # typed | pasted | dictated | drawn (KYO-705)
+        "--anchored-to",  # a kind of anchor (KYO-705)
+        "--add",  # a tag for `kyo notes tag`, checked by normalise_tag (KYO-705.c5)
+        "--remove",  # a tag for `kyo notes tag`, checked by normalise_tag (KYO-705.c5)
         "--permission",  # a name from device_tokens.PERMISSIONS, not prose (KYO-699)
         "--kind",
         "--status",

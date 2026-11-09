@@ -479,6 +479,18 @@ governs: src/kyosei/schema.py
   A settled row is an assertion with provenance (law 9), which is what makes it different from a
   timestamp; an open one is `verdict IS NULL`, so there is no state where a row claims to have been
   settled by nobody.
+- **person_notes**, **person_note_anchors**, **person_note_tags** and
+  **person_note_tag_changes** (schema_version 30, KYO-705, decided by KYO-681 D2): what a person
+  wrote, as a row of its own and not a registry kind, since a record carries a title, a status
+  and a place on the board and a person writes many notes in a session. A note's text and
+  anchors are fixed when it is filed, and it may address nothing or several places. Its tags can
+  be added and removed later: `person_note_tags` is the current set and each change is a row
+  naming who made it, exported to `_person_note_tag_changes.jsonl` so that the note's own ledger
+  line stays as filed.
+  An anchor is an address (a transcript record and character range with a digest, a record,
+  criterion or gate id, a document or file at a commit, or another note) and holds no transcript
+  text, so the words stay out of git while a reader with the transcript can confirm the span.
+  Exported to the `_person_notes.jsonl` ledger.
 - **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a
   verification, a gate clearing or a decision record rests on, as a row of its own rather than
   columns on the rows it credits, so crediting a historical verdict updates nothing already
@@ -554,6 +566,7 @@ kyo report <dispatch-id> --file .kyosei-report.json   # structured ingest; absen
                                   #   worker commits its work without committing its report;
                                   #   `--check` runs the same checks and writes nothing (KYO-477)
 kyo note --shift                  # append to the current shift log (stdin/file; continuous, never at closeout)
+kyo notes add|list|show|tag       # what a person wrote, on what it addresses; found by tag or anchor (KYO-705)
 kyo next                          # ready work: dispatchable, ungated, disjoint from running work
                                     # (undeclared touches = its own counted class, never "disjoint")
 kyo brief [--compact]             # session briefing: counts (actionable kinds only), ready list,

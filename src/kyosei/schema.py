@@ -312,7 +312,19 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: NULL. A record document written at 28 carries no withdrawal keys on its credits
 #: (:data:`CREDIT_FIELD_DEFAULTS` [29]); NULL is what was true of it, since no credit could
 #: be withdrawn. A real DDL change, so a real new hash.
-SCHEMA_VERSION = 29
+#: Bumped to 30 for KYO-705 (notes in the store, decided by KYO-681 D2): the ``person_notes``,
+#: ``person_note_anchors`` and ``person_note_tags`` tables and the ``_person_notes.jsonl``
+#: ledger. A note is what the person wrote, on the places it addresses, at a recorded time.
+#: A table beside the records rather than a kind in the registry: a record carries a title,
+#: a status and a place on the board, and a person may write dozens of notes in a session.
+#: Its tags can change after filing (``person_note_tag_changes`` and its ledger,
+#: KYO-705.c5); its text and anchors cannot.
+#: The ``notes`` table was already taken by a record's own notes (``KYO-12.n2``), hence the
+#: name. There is deliberately no entry in :data:`EXPORT_FIELD_DEFAULTS`: no record document
+#: changes, and a prior export simply has no ledger file, which reads as no notes
+#: (``ledgers.read_person_notes_in``) and is what was true of it. A real DDL change, so a
+#: real new hash.
+SCHEMA_VERSION = 30
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -918,6 +930,79 @@ CREATE TABLE docs_obligations (
     UNIQUE (record_id, seq)
 );
 
+-- KYO-705 (KYO-681 D2): what a person wrote, as a project-wide append-only log. Not the
+-- `notes` table above, which holds notes on one record (`KYO-12.n2`). A note here is
+-- `KYO-N41` and belongs to no record. Its text and anchors are fixed when it is filed: a
+-- person who wants to add to one writes another, anchored to it. Its tags can change.
+--
+-- `text` may be empty only for a note that carries a tag: the person tagged a place and
+-- wrote nothing. `person` is a key under `people:` in kyosei/config.yml, or NULL where the
+-- project declares nobody; `author` is the actor that ran the write. `device` names the
+-- machine it was written on, and `entered` is typed, pasted, dictated or drawn.
+CREATE TABLE person_notes (
+    id           TEXT PRIMARY KEY,
+    seq          INTEGER NOT NULL UNIQUE,
+    text         TEXT NOT NULL,
+    person       TEXT,
+    author       TEXT NOT NULL,
+    device       TEXT NOT NULL,
+    entered      TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    redacted_at  TEXT,
+    redacted_why TEXT
+);
+
+-- KYO-705.c2: the places one note addresses, in the order given, each by address alone.
+-- No column here holds transcript words. `kind` says how to read the row:
+--   turn      `target` is the transcript record's uuid, in `session`; `role` is person or
+--             agent; `char_start`/`char_end` are code points into the record's text;
+--             `digest` confirms the span (cmd_notes.span_digest) and `digest_check` says
+--             whether kyo read the transcript to get it (computed) or took it from the
+--             caller (given).
+--   record    `target` is a record, criterion or gate id.
+--   document  `target` is a path, at `commit_sha`, with `line_*` or `char_*`.
+--   file      `target` is a path, at `commit_sha`, with `line_*`.
+--   note      `target` is another note's id.
+CREATE TABLE person_note_anchors (
+    note_id      TEXT NOT NULL REFERENCES person_notes(id),
+    seq          INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    target       TEXT NOT NULL,
+    session      TEXT,
+    role         TEXT,
+    char_start   INTEGER,
+    char_end     INTEGER,
+    digest       TEXT,
+    digest_check TEXT,
+    commit_sha   TEXT,
+    line_start   INTEGER,
+    line_end     INTEGER,
+    PRIMARY KEY (note_id, seq)
+);
+
+-- KYO-705.c3: free-form labels, lower-cased when written. No registry: a tag is typed
+-- while reading, and structure appears at promotion (law 13). These are the note's tags now;
+-- every later step that moved them is a row of person_note_tag_changes.
+CREATE TABLE person_note_tags (
+    note_id TEXT NOT NULL REFERENCES person_notes(id),
+    tag     TEXT NOT NULL,
+    PRIMARY KEY (note_id, tag)
+);
+
+-- KYO-705.c5: one tag added to or removed from a filed note (`KYO-T7`), by whom and when.
+-- Append-only, and written only when the tag set actually moved. `person` is a key under
+-- `people:` or NULL, and `author` the actor that ran the write, as on person_notes.
+CREATE TABLE person_note_tag_changes (
+    id         TEXT PRIMARY KEY,
+    seq        INTEGER NOT NULL UNIQUE,
+    note_id    TEXT NOT NULL REFERENCES person_notes(id),
+    action     TEXT NOT NULL CHECK (action IN ('add', 'remove')),
+    tag        TEXT NOT NULL,
+    person     TEXT,
+    author     TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
 CREATE INDEX idx_criteria_record       ON criteria(record_id);
 CREATE INDEX idx_notes_record          ON notes(record_id);
 CREATE INDEX idx_gates_record          ON gates(record_id);
@@ -958,6 +1043,10 @@ CREATE INDEX idx_credit_subjects_subject ON credit_subjects(subject_id);
 CREATE INDEX idx_docs_obl_record       ON docs_obligations(record_id);
 CREATE INDEX idx_docs_obl_dispatch     ON docs_obligations(dispatch_id);
 CREATE INDEX idx_docs_obl_verdict      ON docs_obligations(verdict);
+CREATE INDEX idx_note_anchors_target   ON person_note_anchors(kind, target);
+CREATE INDEX idx_note_anchors_session  ON person_note_anchors(session);
+CREATE INDEX idx_note_tags_tag         ON person_note_tags(tag);
+CREATE INDEX idx_note_tag_changes_note ON person_note_tag_changes(note_id);
 """
 
 
@@ -1697,6 +1786,55 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     # Milestone 6 (KYO-8.c7): `kyo note --shift`'s continuously-written shift log.
+    "person_notes": {
+        "id": ("ledgers.append_person_note", "rebuild.rebuild_from_export", "cmd_notes.cmd_notes"),
+        "seq": ("doctor_exports.check_allocations", "ledgers.append_person_note"),
+        "text": ("export.person_note_document", "cmd_notes.note_lines"),
+        "person": ("export.person_note_document", "cmd_notes.note_lines"),
+        "author": ("export.person_note_document", "cmd_notes.note_lines"),
+        "device": ("export.person_note_document", "cmd_notes.note_lines"),
+        "entered": ("export.person_note_document", "cmd_notes.note_lines"),
+        "created_at": ("export.person_note_document", "cmd_notes.note_lines"),
+        "redacted_at": (
+            "export.person_note_document",
+            "cmd_redact.cmd_redact",
+            "doctor_records.check_redactions",
+        ),
+        "redacted_why": (
+            "export.person_note_document",
+            "cmd_redact.cmd_redact",
+            "doctor_records.check_redactions",
+        ),
+    },
+    "person_note_anchors": {
+        "note_id": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "seq": ("export.person_note_document",),
+        "kind": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "target": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "session": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "role": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "char_start": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "char_end": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "digest": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "digest_check": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "commit_sha": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "line_start": ("export.person_note_document", "cmd_notes.anchor_label"),
+        "line_end": ("export.person_note_document", "cmd_notes.anchor_label"),
+    },
+    "person_note_tags": {
+        "note_id": ("export.person_note_document", "cmd_notes.find_note_ids"),
+        "tag": ("export.person_note_document", "cmd_notes.find_note_ids"),
+    },
+    "person_note_tag_changes": {
+        "id": ("ledgers.append_person_note_tag_change", "rebuild.rebuild_from_export"),
+        "seq": ("doctor_exports.check_allocations", "store.Store.person_note_tag_changes"),
+        "note_id": ("store.Store.person_note_tag_changes", "rebuild.rebuild_from_export"),
+        "action": ("export.person_note_line", "cmd_notes.note_lines"),
+        "tag": ("export.person_note_line", "cmd_notes.note_lines"),
+        "person": ("export.person_note_document", "cmd_notes.note_lines"),
+        "author": ("export.person_note_document", "cmd_notes.note_lines"),
+        "changed_at": ("export.person_note_document", "cmd_notes.note_lines"),
+    },
     "shift_notes": {
         "id": ("ledgers.append_shift_note", "rebuild.rebuild_from_export"),
         "seq": ("doctor_exports.check_allocations", "ledgers.append_shift_note"),

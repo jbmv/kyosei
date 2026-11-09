@@ -30,6 +30,8 @@ from .store import (
     SCOPE_BRIEF,
     SCOPE_EVENT,
     SCOPE_LINK,
+    SCOPE_PERSON_NOTE,
+    SCOPE_PERSON_NOTE_TAG_CHANGE,
     SCOPE_RECORD,
     SCOPE_SHIFT_NOTE,
     SCOPE_SWEEP,
@@ -371,6 +373,8 @@ LEDGER_TABLES = {
     ledgers_module.SWEEPS_FILENAME: "sweep_runs",
     ledgers_module.BRIEFS_FILENAME: "brief_runs",
     ledgers_module.SHIFT_NOTES_FILENAME: "shift_notes",
+    ledgers_module.PERSON_NOTES_FILENAME: "person_notes",
+    ledgers_module.PERSON_NOTE_TAG_CHANGES_FILENAME: "person_note_tag_changes",
 }
 
 #: How the hook form satisfied ``export_roundtrip``, reported under ``hook_forms`` in
@@ -817,6 +821,8 @@ def check_allocations(store: Store) -> list[str]:
             SCOPE_SWEEP,
             SCOPE_BRIEF,
             SCOPE_SHIFT_NOTE,
+            SCOPE_PERSON_NOTE,
+            SCOPE_PERSON_NOTE_TAG_CHANGE,
         ):
             failures.append(f"allocation scope {scope!r} is not a scope this build allocates")
     return failures
