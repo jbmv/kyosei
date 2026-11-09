@@ -107,7 +107,8 @@ project it creates, and `kyo projects add|remove` edits the list. A viewer can r
 everything the CLI's `--json` reads. It can write exactly two things in each project:
 files under its `ideas/`, and its session scratchpad. Nothing else is writable: no
 record, no promotion, no export, and the server starts no process. One
-module holds that line, `src/kyosei/serve_files.py`. Beside the command reads, it serves
+module holds that line, `src/kyosei/serve_files.py`. The exception is sending input to a live
+session, which is off by default (see "Sending input" below). Beside the command reads, it serves
 one more thing read-only: a governed document's text, at
 `/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
 (KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
@@ -384,6 +385,68 @@ no client is subscribed. The sampler reads the session twice a second. Under the
 agent, tmux is found on the installing shell's `PATH` or in the Homebrew locations, and the
 sockets are the machine's defaults, since no `TMUX_TMPDIR` is carried. Claude Code's
 directory is `~/.claude`; a `CLAUDE_CONFIG_DIR` set only in a shell does not reach the agent.
+
+### Sending input: the send routes (KYO-699)
+
+`kyo serve` can type into a session's terminal, which drives an agent that can run commands.
+It is off until you turn it on, and each request needs a token issued to one device.
+
+To enable it, add one line to `$KYOSEI_HOME/settings.yml` (`~/kyosei/settings.yml` by default).
+The file is read on every request, so a change needs no restart. It is a setting of the
+machine rather than of a project, because a project's `config.yml` arrives with a clone.
+
+```yaml
+serve_send: true
+```
+
+A device's token is issued and revoked on the machine itself:
+
+```
+kyo devices issue my-ipad --permission send   # prints the token, once
+kyo devices list                              # names, permissions, dates; never a token
+kyo devices revoke my-ipad                    # refused from the next request on
+```
+
+The file `$KYOSEI_HOME/device-tokens.json` holds each token's SHA-256 digest and never the
+token. A token is sent as `Authorization: Bearer <token>`; a route refuses a query string, so
+that a token cannot reach the server's request log. A token applies to every project this
+server serves. Revoking and issuing again is how a permission is changed.
+
+Each route is a POST with a JSON body, under `/v1/projects/<name>/sessions/<id>/`. The project
+must have opted in to reading transcripts and must record the session, as for the read routes.
+
+| Route | Body | Screen it may reach |
+|---|---|---|
+| `send` | `{"segments": [{"kind": "typed" or "pasted", "text": ...}, ...]}` | idle or working |
+| `slash` | `{"command": "/usage"}` | idle |
+| `interrupt` | `{}` | working |
+
+Any of the three may also carry `"automatic": true`, for a send nobody typed; tmux input
+reaches the transcript as the person's own, so the send log is what keeps it apart.
+
+- A `typed` segment goes as keystrokes, a `pasted` one as a bracketed paste, in the order
+  given, after the input box is cleared. Claude Code marks only a paste of four or more lines
+  or over 800 characters as pasted, so the send log is the only full record.
+- A line break in a segment is a bare newline. Any other control character is refused, because
+  it would act as a key; a tab is accepted only in a `pasted` segment.
+- A `send` whose first word Claude Code would run as a command, such as `/usage`, is refused;
+  it goes to `slash`. A first word holding a second `/`, such as a file path, is an ordinary
+  message.
+- A prompt, a question, a panel or any screen not recognised is left to the person: the route
+  refuses with 409 and sends nothing. So does a session with no tmux pane.
+
+A success is `{"ok": true, "session_id", "action", "at", "device", "segments", "automatic"}`.
+A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
+`send-disabled` (also carrying `setting`), `no-token`, `unknown-token`, `revoked-token`,
+`no-send-permission`, `bad-request`, `message-is-a-command`, `no-pane`, `screen-not-ready`,
+`send-failed` (keys may have reached the pane), `settings-unreadable`, `tokens-unreadable` and
+`send-log-unusable`.
+
+Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl`, private to your account: its time,
+action, project, session, device, each segment's kind, length in characters and SHA-256
+digest, whether it was automatic, and its outcome (`sent`, `refused`, `failed`) with status
+and reason. It never holds a segment's text. If the log cannot be written, or would lie inside
+a git repository, the send is refused before any key is sent.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 

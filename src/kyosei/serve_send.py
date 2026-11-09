@@ -1,0 +1,444 @@
+"""``kyo serve``'s send routes: the send half of chunk E4 (KYO-699, decision KYO-681 D1).
+
+Under ``/v1/projects/{project}/sessions/{id}/``, each answering POST with a JSON body:
+
+- ``send`` -- a message, ``{"segments": [{"kind": "typed"|"pasted", "text": ...}, ...]}``,
+  to a session whose screen is idle or working;
+- ``slash`` -- ``{"command": "/usage"}``, on an idle screen only, because a panel a command
+  opens is modal;
+- ``interrupt`` -- ``{}``, on a working screen only, because Escape on any other screen
+  cancels a prompt or opens a menu.
+
+Each may also carry ``"automatic": true``, which is written to the log. Tmux input reaches
+the transcript as the person's own, so the log is what keeps an automatic send from being
+credited to them.
+
+THE ONLY ROUTE TO THE SENDING HALF. This is the one ``kyosei.serve*`` module that calls the
+session layer's sending methods, and it reaches them only through :mod:`kyosei.session_layer`.
+``tests/test_kyo_serve_send.py`` fails if another module reaches them.
+
+WHAT STANDS IN FRONT OF A SEND, in order, each refused by a sentence naming its remedy:
+
+1. the machine's owner has set ``serve_send: true`` in ``$KYOSEI_HOME/settings.yml``, read
+   afresh on every request, so that clearing it takes effect without a restart. It is a
+   machine setting rather than a project's, because a project's ``config.yml`` arrives with
+   a clone and could otherwise switch this on;
+2. a token held by a device, with the ``send`` permission (:mod:`kyosei.serve_tokens`);
+3. a body that parses and holds no control character that would act as a key;
+4. the project's opt-in to reading transcripts, and its ``sessions.json`` recording the
+   session, both as the read routes ask (:class:`kyosei.serve_sessions.ProjectSessions`);
+5. a pane, and a screen the action may be sent to.
+
+THE LOG. ``$KYOSEI_HOME/send-log.jsonl``, one JSON object per attempt, created private to
+this account and refused if it would lie inside a git repository. Claude Code marks only
+long pastes in its transcript (KYO-688.d1), so this is the only record of which segments of
+a message were pasted. A row holds the time, the device, the project and session, each
+segment's kind, length in characters and digest, whether the send was automatic, and the
+outcome (``sent``, ``refused`` or ``failed``) with a reason code. It never holds a
+segment's text. The file is opened before anything else, so a send that could not be
+recorded does not happen, and a refused attempt is logged like any other. A request whose
+token names no device has no device in its row, and a body is parsed only once its token has
+been accepted, so a refused token's row has no segments.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import re
+import subprocess
+import threading
+import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from . import clock, home_settings, serve_tokens, session_layer
+from .config import store_home
+from .errors import KyoseiError
+from .serve import Refusal
+from .serve_sessions import ProjectSessions
+from .transcript_archive import enclosing_git_repository
+
+#: The log's name under ``$KYOSEI_HOME``: a file, so it is not taken for a project there.
+LOG_FILE = "send-log.jsonl"
+
+MESSAGE = "send"
+SLASH = "slash"
+INTERRUPT = "interrupt"
+
+#: What follows ``sessions/{id}/``. Each answers POST only.
+ROUTES = (MESSAGE, SLASH, INTERRUPT)
+
+TYPED = "typed"
+PASTED = "pasted"
+#: How a slash command's one segment is marked in the log.
+COMMAND = "command"
+
+#: The log stores a request's session id as given, and an unauthenticated request chooses it.
+_LOGGED_ID_LIMIT = 200
+
+#: One session's keys must not interleave with another send's, and one server sends to few
+#: panes, so a single lock is enough. A long message costs seconds at most (KYO-688.d1).
+_SEND_LOCK = threading.Lock()
+
+#: A first word that Claude Code would take as a command: a file path has a second slash.
+_COMMAND_SHAPED = re.compile(r"/[^\s/]+(?:\s|$)")
+
+
+def log_path(environ: dict[str, str]) -> Path:
+    return store_home(environ) / LOG_FILE
+
+
+@dataclass
+class _Attempt:
+    """One attempt, as its log row will read."""
+
+    action: str
+    project: str
+    session_id: str
+    at: str = field(default_factory=clock.now)
+    device: dict | None = None
+    segments: list[dict] | None = None
+    automatic: bool = False
+    outcome: str = "failed"
+    status: int = 500
+    reason: str | None = None
+
+    def row(self) -> dict:
+        return {
+            "at": self.at,
+            "action": self.action,
+            "project": self.project[:_LOGGED_ID_LIMIT],
+            "session_id": self.session_id[:_LOGGED_ID_LIMIT],
+            "device": self.device,
+            "segments": self.segments,
+            "automatic": self.automatic,
+            "outcome": self.outcome,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+class _Body:
+    """The request's body, read at most once.
+
+    A body that is refused unread is still read and discarded, because closing a socket with
+    data waiting resets the connection, and the client may then lose the refusal.
+    """
+
+    def __init__(self, read: Callable[[], bytes]) -> None:
+        self._read = read
+        self._done = False
+
+    def read(self) -> bytes:
+        self._done = True
+        return self._read()
+
+    def drain(self) -> None:
+        if self._done:
+            return
+        with contextlib.suppress(Refusal):
+            self.read()
+
+
+@dataclass(frozen=True)
+class _Segment:
+    kind: str
+    text: str
+
+    def logged(self) -> dict:
+        digest = hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+        return {"kind": self.kind, "length": len(self.text), "digest": f"sha256:{digest}"}
+
+
+# ------------------------------------------------------------------------------- the log
+
+
+def _open_log(environ: dict[str, str]) -> int:
+    """The log, open to append. Raises the refusal that stops the send when it cannot be."""
+    path = log_path(environ)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        repository = enclosing_git_repository(path.parent)
+        if repository is not None:
+            raise _log_refusal(
+                path,
+                f"it would lie inside the git repository at {repository}, where it could be "
+                "committed; point $KYOSEI_HOME at a directory outside every git repository",
+            )
+        return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise _log_refusal(path, str(exc)) from exc
+
+
+def _log_refusal(path: Path, why: str) -> Refusal:
+    return Refusal(
+        500,
+        f"nothing was sent, because the send log {path} cannot be used: {why}. A send is only "
+        "made when it can be recorded",
+        reason="send-log-unusable",
+    )
+
+
+def _append(descriptor: int, attempt: _Attempt) -> None:
+    os.write(descriptor, (json.dumps(attempt.row(), ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+# ------------------------------------------------------------------------- what is allowed
+
+
+def _require_enabled(environ: dict[str, str]) -> None:
+    try:
+        settings = home_settings.load(environ)
+    except KyoseiError as exc:
+        raise Refusal(
+            500,
+            f"sending is refused because this machine's settings could not be read: {exc}",
+            reason="settings-unreadable",
+        ) from exc
+    if not settings.serve_send:
+        key = home_settings.SERVE_SEND_KEY
+        raise Refusal(
+            403,
+            f"sending input to a session is off on this machine, and stays off until its owner "
+            f"sets `{key}: true` in {settings.path}; nothing was sent",
+            reason="send-disabled",
+            setting=key,
+        )
+
+
+def _unauthorized(message: str, reason: str) -> Refusal:
+    return Refusal(401, message, reason=reason, headers={"WWW-Authenticate": "Bearer"})
+
+
+_ISSUE_ONE = f"`kyo devices issue <name> --permission {serve_tokens.PERMISSION_SEND}`"
+
+
+def _device_presented(environ: dict[str, str], authorization: str | None) -> serve_tokens.Device:
+    """The device this request's token was issued to, or a refusal."""
+    scheme, _, presented = (authorization or "").strip().partition(" ")
+    if scheme.lower() != "bearer" or not presented.strip():
+        raise _unauthorized(
+            "a send needs the header `Authorization: Bearer <token>`; a token is issued on "
+            f"this machine by {_ISSUE_ONE}",
+            "no-token",
+        )
+    try:
+        devices = serve_tokens.read_devices(serve_tokens.tokens_path(environ))
+    except KyoseiError as exc:
+        raise Refusal(500, str(exc), reason="tokens-unreadable") from exc
+    device = serve_tokens.holder_of(presented.strip(), devices)
+    if device is None:
+        raise _unauthorized(
+            f"this token is not one this machine issued; issue one on it with {_ISSUE_ONE}",
+            "unknown-token",
+        )
+    return device
+
+
+def _require_may_send(device: serve_tokens.Device) -> None:
+    if device.revoked_at is not None:
+        raise _unauthorized(
+            f"the token of device {device.name} was revoked at {device.revoked_at}; issue a "
+            f"new one with {_ISSUE_ONE}",
+            "revoked-token",
+        )
+    if serve_tokens.PERMISSION_SEND not in device.permissions:
+        raise Refusal(
+            403,
+            f"the token of device {device.name} does not carry the "
+            f"{serve_tokens.PERMISSION_SEND} permission; revoke it (`kyo devices revoke "
+            f"{device.name}`) and issue another with {_ISSUE_ONE}",
+            reason="no-send-permission",
+        )
+
+
+def _bad_request(message: str) -> Refusal:
+    return Refusal(400, message, reason="bad-request")
+
+
+def _document(raw: bytes) -> dict:
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _bad_request(f"the body is not JSON: {exc}") from exc
+    if not isinstance(document, dict):
+        raise _bad_request("the body must be a JSON object")
+    return document
+
+
+def _refuse_controls(text: str, allowed: str, what: str) -> None:
+    """Refuse a control character, by its code point: sent to a pane it would act as a key."""
+    for character in text:
+        if character not in allowed and unicodedata.category(character) == "Cc":
+            raise _bad_request(
+                f"{what} holds the control character U+{ord(character):04X}, which would act "
+                "as a key in the pane. Remove it; a line break is a newline alone, and a tab "
+                "can only be sent in a pasted segment"
+            )
+
+
+def _message_segments(document: dict) -> list[_Segment]:
+    raw = document.get("segments")
+    if not isinstance(raw, list) or not raw:
+        raise _bad_request(
+            'the body needs "segments": a list of {"kind": "typed" or "pasted", "text": ...}'
+        )
+    segments: list[_Segment] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or item.get("kind") not in (TYPED, PASTED):
+            raise _bad_request(f'segments[{index}] needs a "kind" of "typed" or "pasted"')
+        text = item.get("text")
+        if not isinstance(text, str) or not text:
+            raise _bad_request(f'segments[{index}] needs a non-empty "text"')
+        kind = item["kind"]
+        _refuse_controls(text, "\n" if kind == TYPED else "\n\t", f"segments[{index}]")
+        segments.append(_Segment(kind, text))
+    whole = "".join(segment.text for segment in segments).lstrip()
+    if not whole:
+        raise _bad_request("the segments hold only white space, so there is no message to send")
+    if _COMMAND_SHAPED.match(whole):
+        raise Refusal(
+            400,
+            "this message begins with what Claude Code would run as a slash command, and the "
+            "message route sends on a working screen where a command's panel must not open; "
+            'POST it to the slash route as {"command": ...}, or begin the message with other '
+            "words",
+            reason="message-is-a-command",
+        )
+    return segments
+
+
+def _command_segment(document: dict) -> _Segment:
+    command = document.get("command")
+    if not isinstance(command, str) or not command.startswith("/"):
+        raise _bad_request('the body needs "command": one line beginning with /')
+    _refuse_controls(command, "", '"command"')
+    return _Segment(COMMAND, command)
+
+
+def _parsed(action: str, document: dict) -> tuple[list[_Segment], bool]:
+    automatic = document.get("automatic", False)
+    if not isinstance(automatic, bool):
+        raise _bad_request('"automatic" must be true or false')
+    if action == MESSAGE:
+        return _message_segments(document), automatic
+    if action == SLASH:
+        return [_command_segment(document)], automatic
+    return [], automatic
+
+
+# ------------------------------------------------------------------------------- sending
+
+
+def _deliver(live: session_layer.LiveSession, action: str, segments: list[_Segment]) -> None:
+    """Hand the keys to the session layer, one send at a time."""
+    with _SEND_LOCK:
+        if action == MESSAGE:
+            live.send_message(
+                [
+                    session_layer.Typed(s.text) if s.kind == TYPED else session_layer.Pasted(s.text)
+                    for s in segments
+                ]
+            )
+        elif action == SLASH:
+            live.send_slash_command(segments[0].text)
+        else:
+            live.send_interrupt()
+
+
+def _attempt(
+    environ: dict[str, str],
+    root_of: Callable[[], str],
+    session_id: str,
+    action: str,
+    authorization: str | None,
+    body: _Body,
+    attempt: _Attempt,
+) -> None:
+    """Everything that stands in front of a send, then the send. Fills in ``attempt``."""
+    _require_enabled(environ)
+    device = _device_presented(environ, authorization)
+    attempt.device = {"id": device.id, "name": device.name}
+    _require_may_send(device)
+    segments, attempt.automatic = _parsed(action, _document(body.read()))
+    attempt.segments = [segment.logged() for segment in segments]
+    project = ProjectSessions(root_of(), environ)
+    project.require(session_id)
+    live = project.open_live(session_id)
+    if live.pane is None:
+        raise Refusal(
+            409,
+            f"session {session_id} has no pane to send to ({live.pane_lookup.why}); it must be "
+            "running in tmux on this machine",
+            reason="no-pane",
+        )
+    try:
+        _deliver(live, action, segments)
+    except session_layer.PaneNotReady as exc:
+        raise Refusal(409, str(exc), reason="screen-not-ready") from exc
+    except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+        raise Refusal(
+            502,
+            f"sending to session {session_id} did not finish, and keys may have reached the "
+            f"pane: {exc}",
+            reason="send-failed",
+        ) from exc
+
+
+def perform(
+    environ: dict[str, str],
+    project_name: str,
+    root_of: Callable[[], str],
+    session_id: str,
+    action: str,
+    authorization: str | None,
+    read_body: Callable[[], bytes],
+) -> dict[str, Any]:
+    """Carry out one send route and log it; returns the response document or raises."""
+    body = _Body(read_body)
+    attempt = _Attempt(action, project_name, session_id)
+    try:
+        descriptor = _open_log(environ)
+    except Refusal:
+        body.drain()
+        raise
+    try:
+        try:
+            _attempt(environ, root_of, session_id, action, authorization, body, attempt)
+        except Refusal as refusal:
+            body.drain()
+            attempt.status = refusal.status
+            attempt.reason = refusal.extra.get("reason", "session-route")
+            attempt.outcome = "failed" if attempt.reason == "send-failed" else "refused"
+            raise
+        except BaseException:
+            attempt.reason = "server-error"
+            raise
+        attempt.outcome, attempt.status = "sent", 200
+    finally:
+        try:
+            _append(descriptor, attempt)
+        except OSError as exc:
+            if attempt.outcome == "sent":
+                raise Refusal(
+                    500,
+                    f"the keys were sent, but the send log {log_path(environ)} could not be "
+                    f"written: {exc}",
+                    reason="send-log-unusable",
+                ) from exc
+        finally:
+            os.close(descriptor)
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "action": action,
+        "at": attempt.at,
+        "device": attempt.device,
+        "segments": attempt.segments,
+        "automatic": attempt.automatic,
+    }

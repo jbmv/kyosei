@@ -25,11 +25,11 @@ speaks to :mod:`kyosei.session_layer` and turns that layer's objects into JSON f
 field, so a field added to an object is exposed only by adding it here, and a client never
 parses a Claude Code transcript row.
 
-READ ONLY, AND NEVER THE SENDING HALF. These routes change no session. The layer's adapter
-holds the functions that send keys; no ``kyosei.serve*`` module may reach them
-(``tests/test_kyo_serve_sessions.py`` fails if one does), and sending arrives with the later
-half of E4. The one thing these routes can cause to be written is the layer's own log of an
-uncatalogued screen under ``$KYOSEI_HOME/pane-unrecognised``, outside any repository.
+READ ONLY, AND NEVER THE SENDING HALF. These routes change no session. Only
+:mod:`kyosei.serve_send` calls the layer's sending methods (``tests/test_kyo_serve_send.py``
+fails if another ``kyosei.serve*`` module reaches them). The one thing these routes can cause
+to be written is the layer's own log of an uncatalogued screen under
+``$KYOSEI_HOME/pane-unrecognised``, outside any repository.
 
 OPT-IN (KYO-656). Every route refuses, naming ``read_transcripts``, in a project that has not
 opted in. The check is made first, before ``sessions.json`` is read. A session is also

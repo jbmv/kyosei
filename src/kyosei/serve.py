@@ -50,8 +50,13 @@ THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (G
 ``sessions/{id}/screen``, ``sessions/{id}/changes``, ``sessions/{id}/images/{turn}/{index}``
 and ``sessions/{id}/subagents/{agent}``, all read-only and in a project that has opted in to
 reading transcripts. This module only routes them;
-:mod:`kyosei.serve_sessions` holds the rest, and no ``kyosei.serve*`` module can reach the
-session layer's sending half.
+:mod:`kyosei.serve_sessions` holds the rest.
+
+THE SEND ROUTES (KYO-699). ``sessions/{id}/send``, ``.../slash`` and ``.../interrupt`` (POST)
+are the only routes that change a session. They are off until the machine's owner sets
+``serve_send: true`` in ``$KYOSEI_HOME/settings.yml``, need a device token holding the send
+permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is the one
+``kyosei.serve*`` module that can reach the session layer's sending half.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
@@ -228,6 +233,8 @@ NOT_SERVED: dict[str, str] = {
     "onboard": "it prints a setup prompt and audits this machine's projects for a terminal",
     # KYO-594: links and registers a harness plugin on this machine.
     "harness": "it writes a link in this machine's Kyosei home and runs `claude`",
+    # KYO-699: a device must not be able to issue itself a token.
+    "devices": "it issues and revokes the tokens this server checks, on this machine only",
 }
 
 #: Query keys refused by name: the server sets `--root` from `{project}`, runs as
@@ -262,6 +269,10 @@ SESSION_IMAGE_ROUTE = "images"
 
 #: KYO-693: ``sessions/{id}/subagents/{agent}``, one subagent's tool calls.
 SESSION_SUBAGENT_ROUTE = "subagents"
+
+#: KYO-699: what follows ``sessions/{id}/`` on the routes that send input (POST only).
+#: :data:`kyosei.serve_send.ROUTES`, spelled here because that module imports this one.
+SESSION_SEND_ROUTES = ("send", "slash", "interrupt")
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -650,6 +661,13 @@ class ServeHandler(BaseHTTPRequestHandler):
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
+        elif (
+            len(rest) == 5
+            and rest[0] == "projects"
+            and rest[2] == "sessions"
+            and rest[4] in SESSION_SEND_ROUTES
+        ):
+            allowed = ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
             if not (
                 len(rest) == 3
@@ -675,6 +693,8 @@ class ServeHandler(BaseHTTPRequestHandler):
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
         if rest[2] == "sessions":
+            if len(rest) == 5 and rest[4] in SESSION_SEND_ROUTES:
+                return self._session_send(rest[1], rest[3], rest[4], split.query)
             return self._session_route(rest[1], rest[3:], split.query)
         return self._file_route(method, rest[1], rest[2], "/".join(rest[3:]))
 
@@ -816,6 +836,28 @@ class ServeHandler(BaseHTTPRequestHandler):
         )
         self._session_events(project, session_id, given)
         return None
+
+    def _session_send(self, name: str, session_id: str, action: str, query: str) -> tuple:
+        """One send route. Everything it decides is :mod:`kyosei.serve_send`'s."""
+        from . import serve_send
+
+        if query:
+            # A token in a query string would be written to this server's request log.
+            raise Refusal(
+                400,
+                "a send route takes no query string; send the token as "
+                "`Authorization: Bearer <token>` and everything else in the JSON body",
+            )
+        document = serve_send.perform(
+            self.server.environ,
+            name,
+            lambda: self.server.project(name).root,
+            session_id,
+            action,
+            self.headers.get("Authorization"),
+            self._body,
+        )
+        return 200, _json_bytes(document)
 
     def _session_image(self, project, session_id: str, turn: str, index: str) -> tuple:
         if not (index.isascii() and index.isdigit()):
@@ -1083,7 +1125,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
         f"GET {project}/events, GET {project}/sessions and GET "
         f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
-        f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}",
+        f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, and POST "
+        f"{project}/sessions/{{id}}/send, .../slash or .../interrupt",
     )
 
 

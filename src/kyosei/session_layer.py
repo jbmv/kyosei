@@ -6,8 +6,9 @@ and background work. It reads no transcript row and no screen line itself, so a 
 Claude Code release is repaired in the adapter it concerns.
 
 ``kyo serve`` reaches this layer through :mod:`kyosei.serve_sessions` (KYO-689, the read
-half of chunk E4). The layer's sending half is the pane adapter's and is not reachable
-from any ``kyosei.serve*`` module; ``tests/test_kyo_serve_sessions.py`` fails if one reaches it.
+half of chunk E4). The layer's sending half is three methods of :class:`LiveSession`, and
+:mod:`kyosei.serve_send` (KYO-699) is the one ``kyosei.serve*`` module that may call them;
+``tests/test_kyo_serve_send.py`` fails if another reaches them.
 
 During a turn the layer reads both sources, because a reply reaches the transcript as one
 row when it finishes while the screen changes throughout (spike S4). :class:`LiveReply`
@@ -56,6 +57,13 @@ NOT_OPTED_IN = (
 
 class SessionNotFound(KyoseiError):
     """No transcript exists for the session id given."""
+
+
+#: The adapter's segment types and its refusal, so that a caller of the sending methods
+#: below need not name the adapter.
+Typed = pane.Typed
+Pasted = pane.Pasted
+PaneNotReady = pane.PaneNotReady
 
 
 @dataclass
@@ -250,6 +258,30 @@ class LiveSession:
 
     def _unrecognised(self, screen: str) -> None:
         pane.log_unrecognised(screen, self.log_dir)
+
+    def _pane_id(self) -> str:
+        ref = self.pane
+        if ref is None:
+            raise KyoseiError(f"session {self.session_id} has no tmux pane to send to")
+        return ref.pane_id
+
+    def send_message(self, segments: list[pane.Typed | pane.Pasted]) -> None:
+        """Send a message to this session's pane; refused on a screen not idle or working."""
+        pane.send_message(
+            self.tmux(), self._pane_id(), segments, log_unrecognised_screen=self._unrecognised
+        )
+
+    def send_slash_command(self, command: str) -> None:
+        """Send a slash command to this session's pane; refused on a screen not idle."""
+        pane.send_slash_command(
+            self.tmux(), self._pane_id(), command, log_unrecognised_screen=self._unrecognised
+        )
+
+    def send_interrupt(self) -> None:
+        """Interrupt this session's running turn; refused on a screen not working."""
+        pane.send_interrupt(
+            self.tmux(), self._pane_id(), log_unrecognised_screen=self._unrecognised
+        )
 
     def refresh(self) -> SessionUpdate:
         """Follow any ``/clear``, read new transcript rows, then read the screen."""

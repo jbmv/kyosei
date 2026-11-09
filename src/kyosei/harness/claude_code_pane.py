@@ -11,8 +11,8 @@ record of a live process: its ``sessionId``, which changes in place on ``/clear`
 panes on the default socket and on ``-L kyosei`` (``list-panes`` only) for one whose
 process is that process or an ancestor of it. A session that is not in tmux has none,
 which :attr:`PaneLookup.why` states. Commands that read run on those sockets; nothing here
-writes to one, and only :func:`send_message` and :func:`send_slash_command` send keys, to
-the pane they are given.
+writes to one, and only :func:`send_message`, :func:`send_slash_command` and
+:func:`send_interrupt` send keys, to the pane they are given.
 
 WHAT IS ON THE SCREEN. The bottom of a captured pane is the input box (two ``─`` rules with a
 ``❯`` line between them) and a footer. When the box is present the session is idle or, if
@@ -44,7 +44,7 @@ Code into a ``[Pasted text #n]`` placeholder and reaches the transcript as a
 plain text with no marker, indistinguishable from typing. Clearing uses ``C-u``, which
 deletes to the start of the line and at a line's start deletes the line break, so it
 repeats until the box reads empty. ``Escape`` is never used to clear, since it would
-interrupt a running turn.
+interrupt a running turn; it is what :func:`send_interrupt` presses.
 """
 
 from __future__ import annotations
@@ -713,3 +713,14 @@ def send_slash_command(
     clear_input(tmux, pane_id, sleep=sleep)
     tmux.run("send-keys", "-t", pane_id, "-l", "--", command)
     tmux.run("send-keys", "-t", pane_id, "Enter")
+
+
+def send_interrupt(
+    tmux: _Tmux,
+    pane_id: str,
+    *,
+    log_unrecognised_screen: Callable[[str], None] | None = None,
+) -> None:
+    """Press Escape, only on a working screen: on any other it cancels or opens something."""
+    _ready_screen(tmux, pane_id, allow=(WORKING,), log_unrecognised_screen=log_unrecognised_screen)
+    tmux.run("send-keys", "-t", pane_id, "Escape")

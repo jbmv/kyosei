@@ -1,13 +1,15 @@
 """``$KYOSEI_HOME/settings.yml`` — settings that belong to the MACHINE, not to a project
 (KYO-462).
 
-The first and only key is ``orchestrator_command``: the argument list ``kyo orchestrator
-start`` runs in an orchestrator session (KYO-458), where the literal ``{prefix}`` is
-replaced by the project's prefix wherever it appears in an argument. A missing file, or
-a file without the key, means ``["claude"]`` — claude with no arguments, what a new
-install runs. An example value is::
+``orchestrator_command`` is the argument list ``kyo orchestrator start`` runs in an
+orchestrator session (KYO-458), where the literal ``{prefix}`` is replaced by the project's
+prefix wherever it appears in an argument. A missing file, or a file without the key, means
+``["claude"]`` — claude with no arguments, what a new install runs. An example value is::
 
     orchestrator_command: ["claude", "--chrome", "--remote-control", "{prefix}"]
+
+``serve_send: true`` lets ``kyo serve`` accept the send routes (KYO-699); anything else,
+including an absent key, leaves them refusing. It is read on every request.
 
 KYO-519 (from KYO-513): before the controller -> orchestrator rename the key was spelled
 ``controller_command``, and that spelling is read permanently. Both present with different
@@ -55,8 +57,11 @@ DEFAULT_CONTROLLER_COMMAND: tuple[str, ...] = ("claude",)
 #: The placeholder replaced by the project's prefix, wherever it appears in an argument.
 PREFIX_PLACEHOLDER = "{prefix}"
 
+#: KYO-699: whether ``kyo serve`` may send input to a session on this machine.
+SERVE_SEND_KEY = "serve_send"
+
 #: Every key this build knows. Anything else is refused by name.
-KNOWN_KEYS: tuple[str, ...] = (ORCHESTRATOR_COMMAND_KEY, CONTROLLER_COMMAND_KEY)
+KNOWN_KEYS: tuple[str, ...] = (ORCHESTRATOR_COMMAND_KEY, CONTROLLER_COMMAND_KEY, SERVE_SEND_KEY)
 
 #: The value a refusal offers as working: the default, spelled as the file would hold it.
 _EXAMPLE = f'{ORCHESTRATOR_COMMAND_KEY}: ["claude", "--remote-control", "{PREFIX_PLACEHOLDER}"]'
@@ -70,6 +75,8 @@ class HomeSettings:
     controller_command: tuple[str, ...]
     #: ``"file"`` when the command came from the file, ``"default"`` otherwise.
     source: str
+    #: KYO-699: only an explicit ``serve_send: true`` is True.
+    serve_send: bool = False
 
     def controller_argv(self, prefix: str) -> list[str]:
         """The command for one project: ``{prefix}`` replaced in every argument."""
@@ -115,9 +122,16 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
             f"has a key this build does not know ({', '.join(unknown)}; it knows "
             f"{', '.join(KNOWN_KEYS)})",
         )
+    serve_send = raw.get(SERVE_SEND_KEY, False)
+    if not isinstance(serve_send, bool):
+        raise KyoseiError(
+            f"{path} gives {SERVE_SEND_KEY} as {serve_send!r}; write `{SERVE_SEND_KEY}: true` "
+            f"to let kyo serve send input to sessions, or `{SERVE_SEND_KEY}: false` or nothing "
+            "to refuse it"
+        )
     present = [key for key in (ORCHESTRATOR_COMMAND_KEY, CONTROLLER_COMMAND_KEY) if key in raw]
     if not present:
-        return HomeSettings(path, DEFAULT_CONTROLLER_COMMAND, "default")
+        return HomeSettings(path, DEFAULT_CONTROLLER_COMMAND, "default", serve_send)
     if len(present) == 2 and raw[ORCHESTRATOR_COMMAND_KEY] != raw[CONTROLLER_COMMAND_KEY]:
         raise KyoseiError(
             f"{path} gives both {ORCHESTRATOR_COMMAND_KEY} and {CONTROLLER_COMMAND_KEY}, "
@@ -137,4 +151,4 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
             f"gives {key} as {value!r}, which is not a non-empty list "
             "of non-empty strings",
         )
-    return HomeSettings(path, tuple(value), "file")
+    return HomeSettings(path, tuple(value), "file", serve_send)
