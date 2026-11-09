@@ -294,8 +294,9 @@ body.side-closed #side { display: none; }
 .pill { display: block; box-sizing: border-box; width: 38px; height: 16px; padding: 4px; border-radius: 8px; background: var(--soft-line); }
 #context-fill { display: block; height: 100%; min-width: 8px; border-radius: 4px; background: var(--link); }
 #side section .side-task { display: flex; gap: 8px; margin: 6px 0; }
-#side section .agent-meta { margin: -3px 0 10px; color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+#side section .agent-meta { margin: -3px 0 10px; color: var(--muted); font-size: 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .agent-meta .added { margin-right: 5px; }
+.stamp { margin: 10px 0 2px; color: var(--muted); font-size: 12.5px; }
 .clickable { cursor: default; }
 .clickable:hover { opacity: 0.7; }
 #side .agent-calls { margin: 2px 0 8px 10px; padding-left: 8px; border-left: 2px solid var(--line); color: var(--muted); font-size: 12px; }

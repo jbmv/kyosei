@@ -8,7 +8,8 @@ interface Reply { message_id: string; at: string; text: string; thinking?: strin
 interface Delivery {
   uuid: string; at: string; kind: string; text: string | null; sender: string | null;
   sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
-  status: string | null; summary: string | null; usage?: { total_tokens: number | null } | null;
+  status: string | null; summary: string | null;
+  usage?: { total_tokens: number | null; duration_ms: number | null } | null;
 }
 interface Subagent {
   agent_id: string; description: string; agent_type: string; tool_call_uuid: string;
@@ -23,7 +24,10 @@ interface Batch {
   command_outputs?: CommandOutput[]; subagents?: Subagent[]; deliveries?: Delivery[];
   facts?: Facts | null;
 }
-interface Facts { git_branch: string | null; context: { percent: number | null } | null }
+interface Facts {
+  git_branch: string | null;
+  context: { percent: number | null; tokens: number | null; window: number | null } | null;
+}
 interface SessionRow {
   session_id: string; title: string | null; live: boolean; first_seen: string;
   remote_control_url: string | null;
@@ -176,9 +180,13 @@ const TOOL_VERBS: Record<string, string> = {
   WebFetch: "Fetching a page", WebSearch: "Searching the web", Skill: "Loading a skill",
 };
 
-function elapsed(since: string): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
+function duration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function elapsed(since: string): string {
+  return duration(Date.now() - Date.parse(since));
 }
 
 /** The tool being run, when the last call the session made has no result yet. */
@@ -455,9 +463,42 @@ function addFilesCard(after: HTMLElement, edits: ToolCall[]): void {
   after.after(card);
 }
 
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+function stampWords(at: string): string {
+  const age = Date.now() - Date.parse(at);
+  const when = new Date(at);
+  if (age < MINUTE_MS) return "just now";
+  if (age < HOUR_MS) {
+    const minutes = Math.floor(age / MINUTE_MS);
+    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  }
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return age < DAY_MS ? time : `${when.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+/** When a turn of work ended, under its last element. */
+function addStamp(after: HTMLElement): void {
+  const stamp = document.createElement("div");
+  stamp.className = "stamp";
+  stamp.dataset.at = after.dataset.at;
+  stamp.dataset.stamp = after.dataset.at;
+  stamp.textContent = stampWords(after.dataset.at!);
+  stamp.title = new Date(after.dataset.at!).toLocaleString();
+  after.after(stamp);
+}
+
+setInterval(() => {
+  document.querySelectorAll<HTMLElement>("[data-stamp]").forEach((stamp) => {
+    stamp.textContent = stampWords(stamp.dataset.stamp!);
+  });
+}, 30_000);
+
 /** Lays the generated rows over the objects: nothing here is an object of the session. */
 function arrange(): void {
-  chat.querySelectorAll(".group-head, .files").forEach((node) => node.remove());
+  chat.querySelectorAll(".group-head, .files, .stamp").forEach((node) => node.remove());
   const children = Array.from(chat.children) as HTMLElement[];
   let run: HTMLElement[] = [];
   let edits: ToolCall[] = [];
@@ -467,6 +508,7 @@ function arrange(): void {
     run = [];
   };
   const endTurn = (finished: boolean) => {
+    if (finished && last && !last.classList.contains("turn")) addStamp(last);
     if (finished && last && edits.length) addFilesCard(last, edits);
     edits = [];
   };
@@ -477,7 +519,8 @@ function arrange(): void {
       if (call && changeOf(call)) edits.push(call);
     } else {
       endRun();
-      if (child.classList.contains("turn")) endTurn(true);
+      // A subagent's message wakes the session, which starts a new turn of work.
+      if (child.classList.contains("turn") || child.classList.contains("delivery")) endTurn(true);
     }
     last = child;
   }
@@ -495,6 +538,7 @@ const agentCalls = new Map<string, ToolCall[]>();
 const agentDispatches = new Map<string, { added: number; removed: number }>();
 const requestedAgents = new Set<string>();
 let showFinishedAgents = false;
+let showFinishedTasks = false;
 const deliveries: Delivery[] = [];
 let facts: Facts | null = null;
 let menu: Menu | null = null;
@@ -543,7 +587,8 @@ function setText(id: string, text: string): void {
 }
 
 function drawSide(): void {
-  setText("top-title", menu?.project ?? "");
+  const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
+  setText("top-title", session?.title ?? menu?.project ?? "");
   setText("side-project", menu?.project ?? "");
   setText("side-branch", facts?.git_branch ?? "");
 
@@ -563,14 +608,21 @@ function drawSide(): void {
 
   const own = [...calls.values()].filter(isOwnBackgroundTask);
   const runningOwn = own.filter((call) => !callFinished(call));
+  const ownLabel = (call: ToolCall) => String(call.input?.description ?? summary(call) ?? call.name);
+  sideList("side-tasks", runningOwn.map((call) => ({ label: ownLabel(call), since: call.at })));
+  const finishedOwn = own.filter(callFinished).reverse();
   sideList(
-    "side-tasks",
-    runningOwn.map((call) => ({
-      label: String(call.input?.description ?? summary(call) ?? call.name),
-      since: call.at,
-    })),
+    "side-tasks-done",
+    showFinishedTasks
+      ? finishedOwn.map((call) => ({ label: ownLabel(call), took: tookWords(call) }))
+      : [],
   );
-  setText("side-finished", `${own.length - runningOwn.length} finished`);
+  setText("side-finished", `${finishedOwn.length} finished ${showFinishedTasks ? "⌄" : "›"}`);
+}
+
+function tookWords(call: ToolCall): string | undefined {
+  const done = deliveries.find((delivery) => delivery.call_id === call.call_id);
+  return done ? duration(Date.parse(done.at) - Date.parse(call.at)) : undefined;
 }
 
 function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
@@ -607,9 +659,9 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
     if (words) {
       const meta = document.createElement("div");
       meta.className = "agent-meta";
-      meta.append(words.tokens ?? "");
+      meta.append([words.tokens, words.took].filter(Boolean).join("  ·  "));
       if (words.lines) {
-        if (words.tokens) meta.append("  ·  ");
+        if (words.tokens || words.took) meta.append("  ·  ");
         meta.append(...words.lines);
       }
       rows.push(meta);
@@ -632,19 +684,22 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
 }
 
 function tokenWords(total: number): string {
-  if (total < 1000) return `${total} tokens`;
+  if (total < 1000) return String(total);
   return total < 1_000_000
-    ? `${Math.round(total / 1000)}k tokens`
-    : `${(total / 1_000_000).toFixed(1)}M tokens`;
+    ? `${Math.round(total / 1000)}k`
+    : `${(total / 1_000_000).toFixed(1)}M`;
 }
 
-function agentMeta(agent: Subagent): { tokens: string | null; lines: HTMLElement[] | null } | null {
-  const total = deliveries.find((delivery) =>
-    delivery.task_id === agent.agent_id && delivery.usage?.total_tokens)?.usage?.total_tokens;
+function agentMeta(
+  agent: Subagent,
+): { tokens: string | null; took: string | null; lines: HTMLElement[] | null } | null {
+  const usage = deliveries.find((delivery) =>
+    delivery.task_id === agent.agent_id && delivery.usage)?.usage;
   const dispatch = agentDispatches.get(agent.agent_id);
-  if (!total && !dispatch) return null;
+  if (!usage?.total_tokens && !usage?.duration_ms && !dispatch) return null;
   return {
-    tokens: total ? tokenWords(total) : null,
+    tokens: usage?.total_tokens ? tokenWords(usage.total_tokens) : null,
+    took: usage?.duration_ms ? duration(usage.duration_ms) : null,
     lines: dispatch ? counts(dispatch.added, dispatch.removed) : null,
   };
 }
@@ -655,18 +710,20 @@ function drawAgents(): void {
   const finished = agents.filter(agentFinished).reverse();
   document.getElementById("side-agents")!.replaceChildren(
     ...running.flatMap((agent) => drawAgentRow(agent, true)),
+  );
+  document.getElementById("side-agents-done")!.replaceChildren(
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
-  setText("side-agents-finished", `${finished.length} finished`);
+  setText("side-agents-finished", `${finished.length} finished ${showFinishedAgents ? "⌄" : "›"}`);
 }
 
 function requestAgent(agent: string): void {
   (window as any).webkit?.messageHandlers?.agent?.postMessage({ agent });
 }
 
-function sideList(id: string, rows: { label: string; since?: string }[]): void {
+function sideList(id: string, rows: { label: string; since?: string; took?: string }[]): void {
   document.getElementById(id)!.replaceChildren(
-    ...rows.map(({ label, since }) => {
+    ...rows.map(({ label, since, took }) => {
       const item = document.createElement("div");
       item.className = "side-task";
       const name = document.createElement("span");
@@ -679,6 +736,11 @@ function sideList(id: string, rows: { label: string; since?: string }[]): void {
         time.className = "side-task-time";
         time.dataset.since = since;
         time.textContent = elapsed(since);
+        item.append(time);
+      } else if (took) {
+        const time = document.createElement("span");
+        time.className = "side-task-time";
+        time.textContent = took;
         item.append(time);
       }
       return item;
@@ -741,6 +803,11 @@ terminalPane.addEventListener("wheel", (event) => {
   event.preventDefault();
   event.stopPropagation();
 }, { passive: false });
+
+document.getElementById("side-finished")!.addEventListener("click", () => {
+  showFinishedTasks = !showFinishedTasks;
+  drawSide();
+});
 
 document.getElementById("side-agents-finished")!.addEventListener("click", () => {
   showFinishedAgents = !showFinishedAgents;

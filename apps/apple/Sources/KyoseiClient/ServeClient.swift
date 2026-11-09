@@ -65,6 +65,7 @@ public struct SessionFacts: Decodable, Equatable, Sendable {
     public let effort: String?
     public let git_branch: String?
     public let context: Context?
+    public let permission_mode: String?
 }
 
 /// Any response or frame carrying `facts`.

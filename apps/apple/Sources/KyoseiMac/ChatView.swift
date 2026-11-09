@@ -10,16 +10,17 @@ struct ChatView: View {
             ChatWebView(feed: feed)
             Divider()
             HStack(spacing: 14) {
+                Text(feed.project).fontWeight(.semibold).foregroundStyle(.primary)
                 if let facts = feed.facts {
                     Text(facts.model ?? "model unknown")
                     if let effort = facts.effort { Text("effort \(effort)") }
                     if let percent = facts.context?.percent {
                         Text("context \(percent)%").monospacedDigit()
                     }
+                    if let mode = facts.permission_mode { Text(mode) }
                 }
                 Spacer()
                 if feed.status != "connected" { Text(feed.status) }
-                Text(feed.project)
                 if let branch = feed.facts?.git_branch { Text(branch) }
             }
             .font(.system(size: 11))
