@@ -156,8 +156,7 @@ a { color: var(--link); }
   font-size: 14px;
 }
 
-#page { margin-right: 270px; padding-top: 46px; }
-body.side-closed #page { margin-right: 0; }
+#page { padding-top: 46px; }
 
 #menu-icon, #side-toggle {
   position: fixed;
@@ -175,11 +174,10 @@ body.side-closed #page { margin-right: 0; }
 }
 
 #menu-icon { left: 10px; }
-#side-toggle { right: 12px; }
 #terminal-toggle {
   position: fixed;
   top: 10px;
-  right: 46px;
+  right: 12px;
   z-index: 3;
   width: 30px;
   height: 26px;
@@ -192,7 +190,7 @@ body.side-closed #page { margin-right: 0; }
   color: var(--muted);
 }
 
-#side-toggle:hover, #terminal-toggle:hover, #menu:hover #menu-icon { background: var(--panel); }
+#terminal-toggle:hover, #menu:hover #menu-icon { background: var(--panel); }
 body.terminal-open #terminal-toggle { background: var(--line); }
 
 #terminal {
@@ -227,7 +225,7 @@ body.terminal-open #terminal { display: block; }
   top: 0;
   bottom: 0;
   left: 0;
-  width: 270px;
+  width: 300px;
   padding: 48px 8px 12px;
   overflow-y: auto;
   background: var(--background);
@@ -263,22 +261,10 @@ body.terminal-open #terminal { display: block; }
 .session.current { background: var(--line); }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f8f4e; }
 
-#side {
-  position: fixed;
-  top: 46px;
-  right: 0;
-  bottom: 0;
-  width: 270px;
-  padding: 10px 24px 20px;
-  overflow-y: auto;
-  border-left: 1px solid var(--line);
-  font-size: 14px;
-  line-height: 1.45;
-}
+#side { margin-top: 12px; padding: 0 10px; border-top: 1px solid var(--soft-line); font-size: 14px; line-height: 1.45; }
 
 #side-changes[hidden] { display: none; }
 
-body.side-closed #side { display: none; }
 #side section { padding: 20px 0; border-bottom: 1px solid var(--soft-line); }
 #side section:last-child { border-bottom: 0; }
 #side h4 { margin: 0; font-size: 14px; font-weight: 400; }
@@ -306,12 +292,6 @@ body.side-closed #side { display: none; }
 #side-untracked:empty { display: none; }
 .side-task-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-task-time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-
-@media (max-width: 800px) {
-  #page { margin-right: 0; }
-  #side { display: none; }
-  #side-toggle { display: none; }
-}
 
 .group-head {
   display: flex;

@@ -531,7 +531,6 @@ function arrange(): void {
 
 // ------------------------------------------------------------- the menu and the side panel
 
-const SIDE_CLOSED_KEY = "side-closed";
 const subagents = new Map<string, Subagent>();
 const openAgents = new Set<string>();
 const agentCalls = new Map<string, ToolCall[]>();
@@ -589,13 +588,6 @@ function setText(id: string, text: string): void {
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
   setText("top-title", session?.title ?? menu?.project ?? "");
-  setText("side-project", menu?.project ?? "");
-  setText("side-branch", facts?.git_branch ?? "");
-
-  const percent = facts?.context?.percent ?? null;
-  setText("side-context", percent === null ? "unknown" : `${percent}%`);
-  (document.getElementById("context-fill") as HTMLElement).style.width = `${percent ?? 0}%`;
-
   const changes = menu?.changes;
   // A clean tree has nothing to report, so the section is left out, as claude.ai does.
   document.getElementById("side-changes")!.hidden =
@@ -715,6 +707,7 @@ function drawAgents(): void {
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
   setText("side-agents-finished", `${finished.length} finished ${showFinishedAgents ? "⌄" : "›"}`);
+  (window as any).webkit?.messageHandlers?.strip?.postMessage({ subagents: running.length });
 }
 
 function requestAgent(agent: string): void {
@@ -761,17 +754,6 @@ function callFinished(call: ToolCall): boolean {
 function isOwnBackgroundTask(call: ToolCall): boolean {
   return call.name === "Monitor" || (call.name === "Bash" && call.input?.run_in_background === true);
 }
-
-try {
-  document.body.classList.toggle("side-closed", localStorage.getItem(SIDE_CLOSED_KEY) === "1");
-} catch {}
-
-document.getElementById("side-toggle")!.addEventListener("click", () => {
-  const closed = document.body.classList.toggle("side-closed");
-  try {
-    localStorage.setItem(SIDE_CLOSED_KEY, closed ? "1" : "0");
-  } catch {}
-});
 
 // The terminal's width is the running session's and is not ours to change, so its text is
 // scaled to fit the drawer rather than scrolled sideways.

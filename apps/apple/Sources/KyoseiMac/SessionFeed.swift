@@ -19,6 +19,8 @@ final class SessionFeed {
     let project: String
     private(set) var status = "connecting"
     private(set) var facts: SessionFacts?
+    private(set) var remote: String?
+    var runningSubagents = 0
 
     init(client: ServeClient, project: String) {
         self.client = client
@@ -83,6 +85,7 @@ final class SessionFeed {
         guard let sessions = try? await client.sessionsData(project: project) else { return }
         var changes: Data?
         if let current { changes = try? await client.changes(project: project, session: current) }
+        takeRemote(from: changes)
         let json =
             #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "changes": "#
             + (changes.map { String(decoding: $0, as: UTF8.self) } ?? "null")
@@ -101,6 +104,15 @@ final class SessionFeed {
             else { return }
             send("agent", String(decoding: data, as: UTF8.self))
         }
+    }
+
+    /// The remote's name, or "No Remote" for a repository the server says has none.
+    private func takeRemote(from json: Data?) {
+        guard let json,
+            let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+            object.keys.contains("remote"), object["root"] is String
+        else { return }
+        remote = object["remote"] as? String ?? "No Remote"
     }
 
     private func takeFacts(from json: Data) {

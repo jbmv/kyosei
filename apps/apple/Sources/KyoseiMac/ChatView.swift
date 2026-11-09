@@ -17,11 +17,21 @@ struct ChatView: View {
                     if let percent = facts.context?.percent {
                         Text("context \(percent)%").monospacedDigit()
                     }
-                    if let mode = facts.permission_mode { Text(mode) }
                 }
+                Text(
+                    "\(feed.runningSubagents) subagent\(feed.runningSubagents == 1 ? "" : "s") running"
+                )
+                .monospacedDigit()
+                if let mode = feed.facts?.permission_mode { Text(mode) }
                 Spacer()
                 if feed.status != "connected" { Text(feed.status) }
-                if let branch = feed.facts?.git_branch { Text(branch) }
+                if let remote = feed.remote { Text(remote) }
+                if let branch = feed.facts?.git_branch {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.branch")
+                        Text(branch)
+                    }
+                }
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -46,6 +56,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "select")
         configuration.userContentController.add(context.coordinator, name: "image")
         configuration.userContentController.add(context.coordinator, name: "agent")
+        configuration.userContentController.add(context.coordinator, name: "strip")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
@@ -88,6 +99,12 @@ struct ChatWebView: NSViewRepresentable {
                 let session = body["session"] as? String
             {
                 feed.select(session: session)
+                return
+            }
+            if message.name == "strip", let body = message.body as? [String: Any],
+                let running = body["subagents"] as? Int
+            {
+                feed.runningSubagents = running
                 return
             }
             if message.name == "agent", let body = message.body as? [String: Any],
