@@ -317,6 +317,9 @@ SURFACE_COUNTERS: dict[str, Callable[[Path, Path], int]] = {
     "shift_notes": lambda store, exports: _count_lines(
         ledgers_module.shift_notes_path_in(exports)
     ),
+    "person_notes": lambda store, exports: _count_lines(
+        ledgers_module.person_notes_path_in(exports)
+    ),
     "briefs": lambda store, exports: _count_lines(ledgers_module.briefs_path_in(exports)),
     # KYO-268.c2: the events ledger is a directory of bounded shards, so its count comes
     # from the reader that knows which files it is made of, not from one path.

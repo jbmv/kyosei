@@ -727,6 +727,9 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # retracted with no replacement, kept readable. A real DDL change, so a real new
         # hash.
         29: "fed4bf489447031a8eeb333da551c7af3a54988a4b319be2459f9d29c4baa52e",
+        # KYO-705: person_notes, person_note_anchors and person_note_tags -- what a person
+        # wrote, on the places it addresses. A real DDL change, so a real new hash.
+        30: "a885615e9027bc510fbee525a7ddc706f51fa7b1399bec6826eb98657f14973b",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -1679,6 +1682,7 @@ _LEDGER_READING_NAMES = frozenset(
         "read_sweep_runs_in",
         "read_brief_runs_in",
         "read_shift_notes_in",
+        "read_person_notes_in",
     }
 )
 
@@ -2085,6 +2089,7 @@ _STAMPED_EXPORT_WRITERS = frozenset(
         "append_sweep_run",
         "append_brief_run",
         "append_shift_note",
+        "append_person_note",
         "write_exports",
         "refresh_exports",
     }
@@ -2431,6 +2436,33 @@ def test_rebuild_accepts_a_schema_27_export_with_no_credits(kyo, project: Path) 
         conn.close()
     rebuilt = kyo("show", record, "--json").json
     assert rebuilt["credits"] == [] and rebuilt["gates"][0]["cleared_as"] is None
+
+
+def test_rebuild_accepts_a_schema_29_export_with_no_person_notes(kyo, project: Path) -> None:
+    """The notes ledger arrived at schema_version 30, as a new file. An export written at
+    29 has no such file, and that must rebuild as no notes, with nothing refused."""
+    from kyosei import ledgers as ledgers_module
+
+    record = new_record(kyo, criteria=["a"])
+    export_directory = project / "kyosei" / "export"
+    assert not (export_directory / ledgers_module.PERSON_NOTES_FILENAME).exists()
+    export_path = export_directory / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    doc["schema_version"] = 29
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        for table in ("person_notes", "person_note_anchors", "person_note_tags"):
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0, table
+    finally:
+        conn.close()
+    assert kyo("notes", "list", "--json").json["notes"] == []
+    assert kyo("show", record, "--json").json["id"] == record
 
 
 def test_a_credit_round_trips_through_export_and_rebuild(kyo, project: Path) -> None:

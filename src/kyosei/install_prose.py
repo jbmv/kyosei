@@ -13,7 +13,7 @@ from .config import (
     worktree_home,
 )
 from .events_ledger import EVENTS_DIRNAME
-from .ledgers import BRIEFS_FILENAME, SHIFT_NOTES_FILENAME
+from .ledgers import BRIEFS_FILENAME, PERSON_NOTES_FILENAME, SHIFT_NOTES_FILENAME
 
 
 #: Exactly what becomes git-committed prose when a store is committed to the code
@@ -68,6 +68,12 @@ COMMITTED_PROSE_SURFACES: tuple[ProseSurface, ...] = (
         f"{KYOSEI_DIR}/export/{SHIFT_NOTES_FILENAME}",
         "shift note",
         "shift notes: what an orchestrator suspects, and what it thinks is going wrong",
+    ),
+    ProseSurface(
+        "person_notes",
+        f"{KYOSEI_DIR}/export/{PERSON_NOTES_FILENAME}",
+        "person note",
+        "the notes a person wrote, in their own words, on what they were reading",
     ),
     ProseSurface(
         "briefs",

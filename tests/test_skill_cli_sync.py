@@ -759,6 +759,10 @@ def _prose_write_paths() -> list[tuple[str, str]]:
     sub = next(a for a in parser._actions if a.choices)
     paths: list[tuple[str, str]] = []
     for command, subparser in sorted(sub.choices.items()):
+        # KYO-705: a person's own notes, written through the app's composer. Not a path a
+        # controller writes prose by, so it is not one this document has to teach.
+        if command == "notes":
+            continue
         options = _flags_for(subparser)
         for flag in sorted(options):
             if flag != "--file" and not flag.endswith("-file"):
@@ -1003,6 +1007,11 @@ def test_the_skill_s_report_section_names_verify_from_report(path: Path) -> None
 #: Disagree with one of these by deleting its entry and writing the sentence in the skill
 #: — that is the whole intended workflow for this dict.
 LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
+    "notes": (
+        "what a person writes from the composer (KYO-705), through the app; an orchestrator "
+        "reads them when the composer delivers one, and the workflow tier is at its byte "
+        "ceiling, so the verbs live in the reference until that surface ships (U4)"
+    ),
     "turns": (
         "the turn index a hook keeps (KYO-657); an orchestrator never runs it to do its "
         "work, and `kyo sessions` is its nearest sibling"

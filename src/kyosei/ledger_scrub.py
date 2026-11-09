@@ -31,7 +31,7 @@ from .export import (
     ledger_lock,
     parse_ledger_line,
 )
-from .ledgers import _read_ledger_lines, shift_notes_path
+from .ledgers import _read_ledger_lines, person_notes_path, shift_notes_path
 from .prose import replace_phrase
 from .store import Store
 
@@ -54,6 +54,9 @@ def scrub_redacted_from_ledgers(store: Store, target_id: str, kind: str, marker:
     shift-note    ``shift_notes.text``                ``_shift_notes.jsonl``
                                                       *and* its own event's
                                                       ``after.text``
+    person-note   ``person_notes.text``               ``_person_notes.jsonl``
+                                                      (its event names the id and
+                                                      carries no text; KYO-705)
     ============  ==================================  ==========================
 
     A record document goes into ``_events.jsonl`` on every mutation of that
@@ -68,7 +71,9 @@ def scrub_redacted_from_ledgers(store: Store, target_id: str, kind: str, marker:
     changed = 0
     changed += _scrub_events(store, target_id, kind, marker)
     if kind == "shift-note":
-        changed += _scrub_shift_notes(store, target_id, marker)
+        changed += _scrub_note_ledger(shift_notes_path(store), target_id, marker)
+    elif kind == "person-note":
+        changed += _scrub_note_ledger(person_notes_path(store), target_id, marker)
     return changed
 
 
@@ -130,6 +135,8 @@ def _scrub_event(event: dict, target_id: str, kind: str, marker: str) -> bool:
             after["text"] = marker
             touched = True
         return touched
+    if kind == "person-note":
+        return False
     collection, field = _DOCUMENT_FIELD[kind]
     # KYO-418.c4: `changed` too. It holds the PRIOR value of every key a mutation
     # moved -- a record document's lists included -- so it is the one place a
@@ -174,6 +181,8 @@ def _residue_texts(event: dict, target_id: str, kind: str, marker: str) -> set[s
             text = after.get("text")
             if isinstance(text, str) and text != marker:
                 found.add(text)
+        return found
+    if kind == "person-note":
         return found
     collection, field = _DOCUMENT_FIELD[kind]
     for side, _column in EVENT_SNAPSHOT_SIDES:
@@ -338,8 +347,9 @@ def redaction_residue(
             if _scrub_event(event, target_id, kind, marker):
                 ledger_lines += 1
     shift_note_lines = 0
-    if kind == "shift-note":
-        for row in _read_ledger_lines(shift_notes_path(store)):
+    if kind in ("shift-note", "person-note"):
+        path = shift_notes_path(store) if kind == "shift-note" else person_notes_path(store)
+        for row in _read_ledger_lines(path):
             if row.get("id") == target_id and row.get("text") != marker:
                 shift_note_lines += 1
                 if isinstance(row.get("text"), str):
@@ -806,8 +816,8 @@ def scrub_text_from_ledgers(store: Store, original: str, marker: str) -> int:
     return changed
 
 
-def _scrub_shift_notes(store: Store, target_id: str, marker: str) -> int:
-    path = shift_notes_path(store)
+def _scrub_note_ledger(path: Path, target_id: str, marker: str) -> int:
+    """The note ledgers hold a note's text on its own line, keyed by id."""
     if not path.is_file():
         return 0
     changed = 0

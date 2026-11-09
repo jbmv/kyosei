@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,6 +47,9 @@ SCOPE_EVENT = "event"
 SCOPE_SWEEP = "sweep"
 SCOPE_BRIEF = "brief"
 SCOPE_SHIFT_NOTE = "shift_note"
+#: KYO-705: a note a person wrote. Project-wide like a shift note, because it belongs to no
+#: record: one note can address several, and a note can address none.
+SCOPE_PERSON_NOTE = "person_note"
 
 
 def scope_for_child(record_id: str, child_kind: str) -> str:
@@ -219,6 +222,10 @@ class Store:
         return ids.shift_note_id(self.prefix, seq), seq
 
     # -------------------------------------------------------------------- reads
+
+    def new_person_note_id(self) -> tuple[str, int]:
+        seq = self.allocate(SCOPE_PERSON_NOTE)
+        return ids.person_note_id(self.prefix, seq), seq
 
     def get_meta(self, key: str) -> str | None:
         row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
@@ -840,6 +847,74 @@ class Store:
         return list(self.conn.execute("SELECT * FROM shift_notes ORDER BY seq"))
 
     # ------------------------------------------------------------------- events
+
+    def person_note(self, note_id: str) -> sqlite3.Row | None:
+        """KYO-705: one note a person wrote, or None. ``KYO-N41``, not a record's ``.n2``."""
+        row: sqlite3.Row | None = self.conn.execute(
+            "SELECT * FROM person_notes WHERE id = ?", (note_id,)
+        ).fetchone()
+        return row
+
+    def person_note_anchors(self, note_id: str) -> list[sqlite3.Row]:
+        return list(
+            self.conn.execute(
+                "SELECT * FROM person_note_anchors WHERE note_id = ? ORDER BY seq", (note_id,)
+            )
+        )
+
+    def person_note_tags(self, note_id: str) -> list[str]:
+        return [
+            row["tag"]
+            for row in self.conn.execute(
+                "SELECT tag FROM person_note_tags WHERE note_id = ? ORDER BY tag", (note_id,)
+            )
+        ]
+
+    def add_person_note(
+        self,
+        *,
+        text: str,
+        person: str | None,
+        author: str,
+        device: str,
+        entered: str,
+        anchors: Sequence[Mapping[str, object]],
+        tags: Sequence[str],
+    ) -> str:
+        """KYO-705: the one writer of a note, its anchors and its tags. Call inside a
+        transaction; ``anchors`` are rows already validated by :mod:`kyosei.cmd_notes`."""
+        note_id, seq = self.new_person_note_id()
+        self.conn.execute(
+            "INSERT INTO person_notes (id, seq, text, person, author, device, entered,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (note_id, seq, text, person, author, device, entered, now()),
+        )
+        for position, anchor in enumerate(anchors, start=1):
+            self.conn.execute(
+                "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
+                " char_start, char_end, digest, digest_check, commit_sha, line_start, line_end)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    note_id,
+                    position,
+                    anchor["kind"],
+                    anchor["target"],
+                    anchor.get("session"),
+                    anchor.get("role"),
+                    anchor.get("char_start"),
+                    anchor.get("char_end"),
+                    anchor.get("digest"),
+                    anchor.get("digest_check"),
+                    anchor.get("commit_sha"),
+                    anchor.get("line_start"),
+                    anchor.get("line_end"),
+                ),
+            )
+        for tag in tags:
+            self.conn.execute(
+                "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (note_id, tag)
+            )
+        return note_id
 
     def record_event(
         self,

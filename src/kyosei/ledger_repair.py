@@ -18,10 +18,11 @@ from .events_ledger import (
     append_events,
     events_files_in,
 )
-from .export import export_dir, parse_ledger_line
+from .export import export_dir, parse_ledger_line, person_note_document
 from .ledger_scrub import _scrub_event
 from .ledgers import (
     BRIEFS_FILENAME,
+    PERSON_NOTES_FILENAME,
     SHIFT_NOTES_FILENAME,
     SWEEPS_FILENAME,
     _append_ledger_line,
@@ -46,6 +47,7 @@ LEDGER_TABLES: dict[str, str] = {
     SWEEPS_FILENAME: "sweep_runs",
     BRIEFS_FILENAME: "brief_runs",
     SHIFT_NOTES_FILENAME: "shift_notes",
+    PERSON_NOTES_FILENAME: "person_notes",
 }
 
 #: The last keys of an event line as :func:`event_line` writes it (``sort_keys=True``):
@@ -225,6 +227,13 @@ def repair_ledgers(store: Store) -> dict[str, int]:
         else:
             path = export_dir(store) / gap.ledger
             for row in rows:
-                _append_ledger_line(path, _row_to_dict(row))
+                # KYO-705: a note's line also carries its anchors and tags, from their
+                # own tables, so it is the document rather than the row.
+                line = (
+                    person_note_document(store, row["id"])
+                    if gap.ledger == PERSON_NOTES_FILENAME
+                    else _row_to_dict(row)
+                )
+                _append_ledger_line(path, line)
         appended[gap.table] = len(rows)
     return appended

@@ -378,6 +378,7 @@ def test_the_remedy_on_a_complete_store_appends_nothing_and_says_so(
         "sweep_runs": 0,
         "brief_runs": 0,
         "shift_notes": 0,
+            "person_notes": 0,
     }
     assert "re-appended 0 ledger row(s)" in kyo("export", "--refresh").out
     assert {p: p.read_bytes() for p in _export(project).rglob("*.jsonl")} == before

@@ -36,6 +36,8 @@ def _redaction_target(target_id: str) -> str:
     """Which redactable kind an id names, by its own shape (law 6: ids are typed)."""
     if ids.SHIFT_NOTE_RE.match(target_id):
         return "shift-note"
+    if ids.PERSON_NOTE_RE.match(target_id):
+        return "person-note"
     kind = ids.child_kind(target_id)
     if kind in REDACTABLE:
         return kind
@@ -43,7 +45,8 @@ def _redaction_target(target_id: str) -> str:
         f"{target_id!r} does not name anything redactable. `kyo redact` takes an evidence "
         "artifact (RECORD.eN, written by `kyo attach`), a claim (RECORD.mN, by "
         "`kyo claim`), a note (RECORD.nN, by `kyo edit --note-file`) or a shift note "
-        "(PREFIX-SN, by `kyo note --shift`) — the four places this store holds verbatim "
+        "(PREFIX-SN, by `kyo note --shift`) or a person's note (PREFIX-NN, by "
+        "`kyo notes add`) — the places this store holds verbatim "
         "prose — or a record's own title, description or criterion (RECORD.title, "
         "RECORD.description, RECORD.cN; KYO-426). Ids appear in `kyo show <record>` and, "
         "for shift notes, in `kyo brief` "
@@ -615,6 +618,7 @@ RESIDUE_COLUMNS: tuple[tuple[str, str, str | None], ...] = (
     ("claims", "statement", "record_id"),
     ("evidence_artifacts", "text", "record_id"),
     ("shift_notes", "text", None),
+    ("person_notes", "text", None),
     ("gates", "detail", "record_id"),
     ("gates", "cleared_why", "record_id"),
     ("verifications", "reason", "record_id"),

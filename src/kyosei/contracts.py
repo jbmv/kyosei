@@ -1268,6 +1268,7 @@ REDACTABLE: dict[str, tuple[str, str, str | None]] = {
     "claim": ("claims", "statement", "record_id"),
     "note": ("notes", "text", "record_id"),
     "shift-note": ("shift_notes", "text", None),
+    "person-note": ("person_notes", "text", None),
 }
 
 #: KYO-29: the surfaces that hold a COPY of prose authored elsewhere, as opposed to

@@ -141,6 +141,7 @@ def test_every_module_that_imports_the_reader_asks_the_one_question() -> None:
             if any("claude_code_transcript" in name for name in names):
                 readers.append(path)
     assert {p.name for p in readers} == {
+        "cmd_notes.py",
         "cmd_turns.py",
         "credits.py",
         "doctor_install.py",
