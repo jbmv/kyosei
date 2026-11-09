@@ -130,6 +130,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-09** — `KYO-706` (task) — kyo serve note API: create, find, tag and send notes
 - **2026-11-09** — `KYO-703` (task) — kyo serve: saved composer drafts, and messages held until the turn ends
 - **2026-11-09** — `KYO-701` (task) — Session API: total lines added and removed, the session and its subagents together
 - **2026-11-09** — `KYO-700` (task) — Session API: the repository's remote
