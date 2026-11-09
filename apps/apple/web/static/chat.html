@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- A transcript can quote anything, so the page loads only its own files. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; font-src file:; img-src data:"
+    />
+    <link rel="stylesheet" href="katex.min.css" />
+    <link rel="stylesheet" href="hljs-light.css" media="(prefers-color-scheme: light)" />
+    <link rel="stylesheet" href="hljs-dark.css" media="(prefers-color-scheme: dark)" />
+    <link rel="stylesheet" href="chat.css" />
+  </head>
+  <body>
+    <main>
+      <div id="chat"></div>
+      <article id="live" class="reply"></article>
+      <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
+    </main>
+    <script src="chat.js"></script>
+  </body>
+</html>

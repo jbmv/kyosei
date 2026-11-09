@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+# The renderer is built from web/ by `npm run build`.
+Sources/KyoseiMac/Resources/renderer/
