@@ -54,11 +54,6 @@
       <section>
         <h4>Environment</h4>
         <div class="env">
-          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
-          <span class="env-text">Remote Control</span>
-          <a id="remote" hidden>Open on claude.ai</a>
-        </div>
-        <div class="env">
           <svg viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg>
           <span class="env-text" id="side-project"></span>
         </div>
@@ -76,9 +71,10 @@
           </span>
         </div>
       </section>
-      <section>
-        <div class="side-row">
-          <h4>Changes</h4>
+      <section id="side-changes" hidden>
+        <h4>Changes</h4>
+        <div class="env">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><line x1="12" y1="7" x2="12" y2="13" /><line x1="9" y1="10" x2="15" y2="10" /><line x1="9" y1="17" x2="15" y2="17" /></svg>
           <span><span id="side-added" class="added"></span> <span id="side-removed" class="removed"></span></span>
         </div>
         <div id="side-untracked" class="finished"></div>

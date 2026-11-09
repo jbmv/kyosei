@@ -8,7 +8,7 @@ interface Reply { message_id: string; at: string; text: string; thinking?: strin
 interface Delivery {
   uuid: string; at: string; kind: string; text: string | null; sender: string | null;
   sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
-  status: string | null; summary: string | null;
+  status: string | null; summary: string | null; usage?: { total_tokens: number | null } | null;
 }
 interface Subagent {
   agent_id: string; description: string; agent_type: string; tool_call_uuid: string;
@@ -492,6 +492,8 @@ const SIDE_CLOSED_KEY = "side-closed";
 const subagents = new Map<string, Subagent>();
 const openAgents = new Set<string>();
 const agentCalls = new Map<string, ToolCall[]>();
+const agentDispatches = new Map<string, { added: number; removed: number }>();
+const requestedAgents = new Set<string>();
 let showFinishedAgents = false;
 const deliveries: Delivery[] = [];
 let facts: Facts | null = null;
@@ -541,10 +543,6 @@ function setText(id: string, text: string): void {
 }
 
 function drawSide(): void {
-  const row = menu?.sessions.sessions.find((item) => item.session_id === menu?.current);
-  const link = document.getElementById("remote") as HTMLAnchorElement;
-  link.hidden = !row?.remote_control_url;
-  link.href = row?.remote_control_url ?? "";
   setText("top-title", menu?.project ?? "");
   setText("side-project", menu?.project ?? "");
   setText("side-branch", facts?.git_branch ?? "");
@@ -554,6 +552,9 @@ function drawSide(): void {
   (document.getElementById("context-fill") as HTMLElement).style.width = `${percent ?? 0}%`;
 
   const changes = menu?.changes;
+  // A clean tree has nothing to report, so the section is left out, as claude.ai does.
+  document.getElementById("side-changes")!.hidden =
+    !changes || !(changes.added || changes.removed || changes.untracked.files);
   setText("side-added", `+${changes?.added ?? 0}`);
   setText("side-removed", `−${changes?.removed ?? 0}`);
   setText("side-untracked", changes?.untracked.files ? `${plural(changes.untracked.files, "new file")}` : "");
@@ -596,7 +597,25 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
     }
     drawAgents();
   });
-  if (!openAgents.has(agent.agent_id)) return [row];
+  const rows: HTMLElement[] = [row];
+  if (!running) {
+    if (!agentCalls.has(agent.agent_id) && !requestedAgents.has(agent.agent_id)) {
+      requestedAgents.add(agent.agent_id);
+      requestAgent(agent.agent_id);
+    }
+    const words = agentMeta(agent);
+    if (words) {
+      const meta = document.createElement("div");
+      meta.className = "agent-meta";
+      meta.append(words.tokens ?? "");
+      if (words.lines) {
+        if (words.tokens) meta.append("  ·  ");
+        meta.append(...words.lines);
+      }
+      rows.push(meta);
+    }
+  }
+  if (!openAgents.has(agent.agent_id)) return rows;
   const list = document.createElement("div");
   list.className = "agent-calls";
   const toolCalls = agentCalls.get(agent.agent_id);
@@ -609,7 +628,25 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
     if (call.result?.is_error) line.className = "failed";
     list.append(line);
   }
-  return [row, list];
+  return [...rows, list];
+}
+
+function tokenWords(total: number): string {
+  if (total < 1000) return `${total} tokens`;
+  return total < 1_000_000
+    ? `${Math.round(total / 1000)}k tokens`
+    : `${(total / 1_000_000).toFixed(1)}M tokens`;
+}
+
+function agentMeta(agent: Subagent): { tokens: string | null; lines: HTMLElement[] | null } | null {
+  const total = deliveries.find((delivery) =>
+    delivery.task_id === agent.agent_id && delivery.usage?.total_tokens)?.usage?.total_tokens;
+  const dispatch = agentDispatches.get(agent.agent_id);
+  if (!total && !dispatch) return null;
+  return {
+    tokens: total ? tokenWords(total) : null,
+    lines: dispatch ? counts(dispatch.added, dispatch.removed) : null,
+  };
 }
 
 function drawAgents(): void {
@@ -769,6 +806,8 @@ const kyo = {
     subagents.clear();
     openAgents.clear();
     agentCalls.clear();
+    agentDispatches.clear();
+    requestedAgents.clear();
     deliveries.length = 0;
     landedKeys.length = 0;
     terminalColumns = 0;
@@ -811,8 +850,12 @@ const kyo = {
     }
   },
 
-  agent(data: { agent_id: string; tool_calls: ToolCall[] }): void {
+  agent(data: {
+    agent_id: string; tool_calls: ToolCall[];
+    dispatch?: { added: number; removed: number } | null;
+  }): void {
     agentCalls.set(data.agent_id, data.tool_calls);
+    if (data.dispatch) agentDispatches.set(data.agent_id, data.dispatch);
     drawAgents();
   },
 
