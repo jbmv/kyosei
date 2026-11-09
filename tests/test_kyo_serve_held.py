@@ -668,53 +668,54 @@ def test_a_retraction_during_a_delivery_waits_and_finds_it_delivered(
     assert keys_sent(bed)  # delivered, and the retraction found it so
 
 
+def _race_round(bed: Bed, on: str, round_number: int) -> str:
+    """One hold, then a retraction and a delivery at once; which one happened."""
+    held_messages = bed.server.held_messages
+    bed.show(IDLE)
+    held = hold(bed, on)
+    held_messages._idle_once.add(OLD)
+    before = len(keys_sent(bed))
+    barrier = threading.Barrier(2)
+    results: list[tuple[int, dict]] = []
+    # In turn each side starts first, by a varying lead that covers the moment the other takes
+    # the lock, so both outcomes occur and most rounds are genuine races.
+    lead = 0.003 * (round_number % 10)
+    retract_after, deliver_after = (lead, 0.0) if round_number % 2 else (0.0, lead)
+
+    def retract() -> None:
+        barrier.wait()
+        time.sleep(retract_after)
+        results.append(retract_of(bed, on, held))
+
+    def deliver() -> None:
+        barrier.wait()
+        time.sleep(deliver_after)
+        held_messages.attend(OLD)
+
+    threads = [threading.Thread(target=retract), threading.Thread(target=deliver)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=WITHIN)
+        assert not thread.is_alive()
+
+    status, document = results[0]
+    sent = len(keys_sent(bed)) > before
+    assert held_now(bed, on) is None
+    if status == 200:
+        assert not sent, "retracted and also delivered"
+        assert document["segments"] == [{"kind": "typed", "text": SECRET}]
+        return "retracted"
+    assert status == 404 and document["reason"] == "not-held", document
+    assert sent, "neither retracted nor delivered"
+    return "delivered"
+
+
 def test_a_retraction_racing_a_delivery_has_exactly_one_outcome(
     bed: Bed, monkeypatch: pytest.MonkeyPatch, store_home: Path, on: str
 ) -> None:
-    held_messages = bed.server.held_messages
-    monkeypatch.setattr(held_messages, "_ensure_watching", lambda: None)
-    outcomes: list[str] = []
-    for round_number in range(40):
-        bed.show(IDLE)
-        held = hold(bed, on)
-        held_messages._idle_once.add(OLD)
-        before = len(keys_sent(bed))
-        barrier = threading.Barrier(2)
-        results: list[tuple[int, dict]] = []
-
-        # In turn each side starts first, by a varying lead that covers the moment the other
-        # takes the lock, so both outcomes occur and most rounds are genuine races.
-        lead = 0.003 * (round_number % 10)
-        retract_after, deliver_after = (lead, 0.0) if round_number % 2 else (0.0, lead)
-
-        def retract() -> None:
-            barrier.wait()
-            time.sleep(retract_after)
-            results.append(retract_of(bed, on, held))
-
-        def deliver() -> None:
-            barrier.wait()
-            time.sleep(deliver_after)
-            held_messages.attend(OLD)
-
-        threads = [threading.Thread(target=retract), threading.Thread(target=deliver)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=WITHIN)
-            assert not thread.is_alive()
-
-        status, document = results[0]
-        sent = len(keys_sent(bed)) > before
-        assert held_now(bed, on) is None
-        if status == 200:
-            assert not sent, "retracted and also delivered"
-            assert document["segments"] == [{"kind": "typed", "text": SECRET}]
-            outcomes.append("retracted")
-        else:
-            assert status == 404 and document["reason"] == "not-held", document
-            assert sent, "neither retracted nor delivered"
-            outcomes.append("delivered")
+    monkeypatch.setattr(bed.server.held_messages, "_ensure_watching", lambda: None)
+    outcomes = [_race_round(bed, on, number) for number in range(40)]
     actions = [row["action"] for row in log_rows(store_home)]
     assert actions.count("retract") == outcomes.count("retracted")
     assert actions.count("held-delivery") == outcomes.count("delivered")
