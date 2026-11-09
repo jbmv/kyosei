@@ -1,4 +1,4 @@
-"""Per-device tokens for ``kyo serve``, and ``kyo devices`` that manages them (KYO-699).
+"""Per-device tokens, and ``kyo devices`` that manages them (KYO-699).
 
 A route that can change something on this machine, the session send routes first and the
 note routes of chunk E5 next, is reached with a token issued to one device. Nothing here

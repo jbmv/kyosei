@@ -76,7 +76,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--withdraw",  # a credit id (KYO-670)
         "--batch",  # a file path to read credit lines from, not prose (KYO-653)
         "--role",  # observed | decided | authorized (KYO-644)
-        "--permission",  # a name from serve_tokens.PERMISSIONS, not prose (KYO-699)
+        "--permission",  # a name from device_tokens.PERMISSIONS, not prose (KYO-699)
         "--kind",
         "--status",
         "--level",

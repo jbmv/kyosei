@@ -23,7 +23,7 @@ WHAT STANDS IN FRONT OF A SEND, in order, each refused by a sentence naming its 
    afresh on every request, so that clearing it takes effect without a restart. It is a
    machine setting rather than a project's, because a project's ``config.yml`` arrives with
    a clone and could otherwise switch this on;
-2. a token held by a device, with the ``send`` permission (:mod:`kyosei.serve_tokens`);
+2. a token held by a device, with the ``send`` permission (:mod:`kyosei.device_tokens`);
 3. a body that parses and holds no control character that would act as a key;
 4. the project's opt-in to reading transcripts, and its ``sessions.json`` recording the
    session, both as the read routes ask (:class:`kyosei.serve_sessions.ProjectSessions`);
@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import clock, home_settings, serve_tokens, session_layer
+from . import clock, device_tokens, home_settings, serve_files, session_layer
 from .config import store_home
 from .errors import KyoseiError
 from .serve import Refusal
@@ -162,7 +162,7 @@ def _open_log(environ: dict[str, str]) -> int:
     """The log, open to append. Raises the refusal that stops the send when it cannot be."""
     path = log_path(environ)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        serve_files.make_private_directory(path.parent)
         repository = enclosing_git_repository(path.parent)
         if repository is not None:
             raise _log_refusal(
@@ -170,7 +170,7 @@ def _open_log(environ: dict[str, str]) -> int:
                 f"it would lie inside the git repository at {repository}, where it could be "
                 "committed; point $KYOSEI_HOME at a directory outside every git repository",
             )
-        return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        return serve_files.open_private_log(path)
     except OSError as exc:
         raise _log_refusal(path, str(exc)) from exc
 
@@ -215,10 +215,10 @@ def _unauthorized(message: str, reason: str) -> Refusal:
     return Refusal(401, message, reason=reason, headers={"WWW-Authenticate": "Bearer"})
 
 
-_ISSUE_ONE = f"`kyo devices issue <name> --permission {serve_tokens.PERMISSION_SEND}`"
+_ISSUE_ONE = f"`kyo devices issue <name> --permission {device_tokens.PERMISSION_SEND}`"
 
 
-def _device_presented(environ: dict[str, str], authorization: str | None) -> serve_tokens.Device:
+def _device_presented(environ: dict[str, str], authorization: str | None) -> device_tokens.Device:
     """The device this request's token was issued to, or a refusal."""
     scheme, _, presented = (authorization or "").strip().partition(" ")
     if scheme.lower() != "bearer" or not presented.strip():
@@ -228,10 +228,10 @@ def _device_presented(environ: dict[str, str], authorization: str | None) -> ser
             "no-token",
         )
     try:
-        devices = serve_tokens.read_devices(serve_tokens.tokens_path(environ))
+        devices = device_tokens.read_devices(device_tokens.tokens_path(environ))
     except KyoseiError as exc:
         raise Refusal(500, str(exc), reason="tokens-unreadable") from exc
-    device = serve_tokens.holder_of(presented.strip(), devices)
+    device = device_tokens.holder_of(presented.strip(), devices)
     if device is None:
         raise _unauthorized(
             f"this token is not one this machine issued; issue one on it with {_ISSUE_ONE}",
@@ -240,18 +240,18 @@ def _device_presented(environ: dict[str, str], authorization: str | None) -> ser
     return device
 
 
-def _require_may_send(device: serve_tokens.Device) -> None:
+def _require_may_send(device: device_tokens.Device) -> None:
     if device.revoked_at is not None:
         raise _unauthorized(
             f"the token of device {device.name} was revoked at {device.revoked_at}; issue a "
             f"new one with {_ISSUE_ONE}",
             "revoked-token",
         )
-    if serve_tokens.PERMISSION_SEND not in device.permissions:
+    if device_tokens.PERMISSION_SEND not in device.permissions:
         raise Refusal(
             403,
             f"the token of device {device.name} does not carry the "
-            f"{serve_tokens.PERMISSION_SEND} permission; revoke it (`kyo devices revoke "
+            f"{device_tokens.PERMISSION_SEND} permission; revoke it (`kyo devices revoke "
             f"{device.name}`) and issue another with {_ISSUE_ONE}",
             reason="no-send-permission",
         )

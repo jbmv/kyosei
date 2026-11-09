@@ -59,12 +59,12 @@ from . import (
     cmd_worktrees,
     commands,
     credits,
+    device_tokens,
     events_ledger,
     explanations,
     prior_art,
     query,
     report_ingest,
-    serve_tokens,
     touch_drift,
 )
 from . import serve as serve_module
@@ -315,7 +315,7 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # KYO-699: the tokens a device presents to kyo serve. PROJECT_NONE and not in
     # MUTATING_COMMANDS for `projects`'s reason: it writes $KYOSEI_HOME/device-tokens.json
     # and no store.
-    "devices": (serve_tokens.cmd_devices, PROJECT_NONE),
+    "devices": (device_tokens.cmd_devices, PROJECT_NONE),
     # KYO-514: the build's own agent setup prompt, and `--check`, the same checklist read
     # back against existing projects. PROJECT_NONE: the prompt needs no project, and
     # `--check` resolves the project here (or every registered one) itself, reporting an
@@ -2255,7 +2255,7 @@ def build_parser() -> KyoseiParser:
         "--permission",
         action="append",
         default=[],
-        choices=serve_tokens.PERMISSIONS,
+        choices=device_tokens.PERMISSIONS,
         help="with issue: a permission the token carries (repeatable). `send` lets it use the "
         "send routes; a token issued without it is refused there",
     )

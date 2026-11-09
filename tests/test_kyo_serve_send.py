@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 import kyosei
-from kyosei import home_settings, serve_send, serve_tokens
+from kyosei import device_tokens, home_settings, serve_send
 
 from .conftest import invoke
 from .test_kyo_serve import body_json
@@ -96,7 +96,7 @@ def empty_box(request: pytest.FixtureRequest) -> None:
 
 @pytest.fixture
 def token(store_home: Path) -> str:
-    return issue("ipad", serve_tokens.PERMISSION_SEND)
+    return issue("ipad", device_tokens.PERMISSION_SEND)
 
 
 @pytest.fixture
@@ -181,12 +181,12 @@ def test_a_token_is_printed_once_and_only_its_digest_is_stored(store_home: Path)
     assert made.code == 0, made
     document = json.loads(made.out)
     token = document["token"]
-    assert token.startswith(serve_tokens.TOKEN_PREFIX) and "digest" not in document["device"]
+    assert token.startswith(device_tokens.TOKEN_PREFIX) and "digest" not in document["device"]
 
-    path = store_home / serve_tokens.TOKENS_FILE
+    path = store_home / device_tokens.TOKENS_FILE
     text = path.read_text(encoding="utf-8")
     assert token not in text
-    assert serve_tokens.token_digest(token) in text
+    assert device_tokens.token_digest(token) in text
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     listed = invoke(["devices", "list", "--json"])
@@ -199,7 +199,7 @@ def test_a_token_is_printed_once_and_only_its_digest_is_stored(store_home: Path)
 
 def test_the_shape_is_a_list_of_permissions_and_a_token_may_hold_none(store_home: Path) -> None:
     issue("reader")
-    (device,) = serve_tokens.read_devices(store_home / serve_tokens.TOKENS_FILE)
+    (device,) = device_tokens.read_devices(store_home / device_tokens.TOKENS_FILE)
     assert device.permissions == ()
     assert isinstance(device.stored()["permissions"], list)
 
@@ -273,7 +273,7 @@ def test_a_token_without_send_permission_is_refused_and_the_remedy_clears_it(
 def test_an_unreadable_token_file_refuses_every_token_and_replacing_it_clears_it(
     bed: Bed, store_home: Path, on: str
 ) -> None:
-    path = store_home / serve_tokens.TOKENS_FILE
+    path = store_home / device_tokens.TOKENS_FILE
     good = path.read_text(encoding="utf-8")
     path.write_text("not json", encoding="utf-8")
     status, refused = post(bed, SEND, MESSAGE, on)
@@ -665,7 +665,7 @@ def test_only_the_send_module_can_reach_the_sending_functions() -> None:
         "serve_files.py",
         "serve_sessions.py",
         "serve_send.py",
-        "serve_tokens.py",
+        "device_tokens.py",
     } <= {p.name for p in modules}
     offenders = {
         path.name: found

@@ -4027,37 +4027,37 @@ UNREACHED: dict[str, str] = {
         "two_modes_are_refused_and_naming_one_clears_it"
     ),
     # KYO-699: `kyo devices`'s refusals, each proved in tests/test_kyo_serve_send.py.
-    "serve_tokens.py:issue#0": (
+    "device_tokens.py:issue#0": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_a_bad_device_name_is_refused_and_a_valid_one_clears_it"
     ),
-    "serve_tokens.py:issue#1": (
+    "device_tokens.py:issue#1": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_a_second_live_device_of_one_name_is_refused_and_revoking_clears_it"
     ),
-    "serve_tokens.py:revoke#0": (
+    "device_tokens.py:revoke#0": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_revoking_what_is_not_there_names_the_listing"
     ),
-    "serve_tokens.py:cmd_devices#0": (
+    "device_tokens.py:cmd_devices#0": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_list_takes_no_argument_and_the_bare_form_clears_it"
     ),
-    "serve_tokens.py:cmd_devices#1": (
+    "device_tokens.py:cmd_devices#1": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_issue_and_revoke_need_a_device_and_naming_one_clears_it"
     ),
-    "serve_tokens.py:cmd_devices#2": (
+    "device_tokens.py:cmd_devices#2": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "

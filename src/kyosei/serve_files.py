@@ -591,3 +591,16 @@ def make_dir(path: Path, shown: str) -> tuple[int, dict]:
             raise Refusal(409, f"{shown} exists and is not a folder", path=shown)
         path.mkdir(parents=True)
     return 201, {"ok": True, "path": shown, "created": True}
+
+
+# ----------------------------------------------------------------- the send log (KYO-699)
+
+
+def make_private_directory(path: Path) -> None:
+    """The directory holding one of this machine's logs, created if it is absent."""
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def open_private_log(path: Path) -> int:
+    """A log of this machine's, open to append and readable by this account alone."""
+    return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
