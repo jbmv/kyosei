@@ -297,6 +297,20 @@ def test_a_second_live_device_of_one_name_is_refused_and_revoking_clears_it(
 def test_revoking_what_is_not_there_names_the_listing(store_home: Path) -> None:
     missing = invoke(["devices", "revoke", "phone"])
     assert missing.code != 0 and "kyo devices list" in missing.err
+    assert invoke(["devices", "list"]).code == 0
+
+
+def test_list_takes_no_argument_and_the_bare_form_clears_it(store_home: Path) -> None:
+    refused = invoke(["devices", "list", "extra"])
+    assert refused.code != 0 and "kyo devices list" in refused.err
+    assert invoke(["devices", "list"]).code == 0
+
+
+def test_revoke_takes_no_permission_and_the_bare_form_clears_it(store_home: Path) -> None:
+    issue("ipad", "send")
+    refused = invoke(["devices", "revoke", "ipad", "--permission", "send"])
+    assert refused.code != 0 and "kyo devices revoke" in refused.err
+    assert invoke(["devices", "revoke", "ipad"]).code == 0
 
 
 def test_a_bad_device_name_is_refused_and_a_valid_one_clears_it(store_home: Path) -> None:
@@ -305,10 +319,12 @@ def test_a_bad_device_name_is_refused_and_a_valid_one_clears_it(store_home: Path
     assert invoke(["devices", "issue", "my-ipad"]).code == 0
 
 
-def test_issue_and_revoke_need_a_device(store_home: Path) -> None:
+def test_issue_and_revoke_need_a_device_and_naming_one_clears_it(store_home: Path) -> None:
     for action in ("issue", "revoke"):
         missing = invoke(["devices", action])
         assert missing.code != 0 and f"kyo devices {action}" in missing.err
+    assert invoke(["devices", "issue", "my-ipad", "--permission", "send"]).code == 0
+    assert invoke(["devices", "revoke", "my-ipad"]).code == 0
 
 
 def test_the_command_is_not_served(bed: Bed, on: str) -> None:

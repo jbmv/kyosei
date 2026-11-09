@@ -638,7 +638,8 @@ def _ready_screen(
     screen = classify(capture(tmux, pane_id), log_unrecognised_screen=log_unrecognised_screen)
     if screen.state not in allow:
         raise PaneNotReady(
-            f"pane {pane_id} is showing {screen.state}, which is left to the person to answer; "
+            f"pane {pane_id} is showing {screen.state}, and this is sent only to "
+            f"{' or '.join(allow)}; a prompt or dialog is left to the person to answer, and "
             "nothing was sent to it"
         )
     return screen

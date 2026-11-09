@@ -81,8 +81,8 @@ COMMAND = "command"
 #: The log stores a request's session id as given, and an unauthenticated request chooses it.
 _LOGGED_ID_LIMIT = 200
 
-#: One session's keys must not interleave with another send's, and one server sends to few
-#: panes, so a single lock is enough. A long message costs seconds at most (KYO-688.d1).
+#: One message's keys must not interleave with another's. A send is a handful of tmux calls
+#: per line, and one server sends to few panes, so a single lock is enough.
 _SEND_LOCK = threading.Lock()
 
 #: A first word that Claude Code would take as a command: a file path has a second slash.

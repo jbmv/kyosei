@@ -433,7 +433,8 @@ reaches the transcript as the person's own, so the send log is what keeps it apa
   it goes to `slash`. A first word holding a second `/`, such as a file path, is an ordinary
   message.
 - A prompt, a question, a panel or any screen not recognised is left to the person: the route
-  refuses with 409 and sends nothing. So does a session with no tmux pane.
+  refuses with 409 and sends nothing. So does a session with no tmux pane. A session that has
+  not yet had a first turn has no transcript, and is refused with 404 as on the read routes.
 
 A success is `{"ok": true, "session_id", "action", "at", "device", "segments", "automatic"}`.
 A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
