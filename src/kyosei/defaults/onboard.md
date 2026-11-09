@@ -101,6 +101,35 @@ Ask these together, in one message.
   `.claude/settings.json` and the skill into `.claude/skills/kyosei/`, tracked in the
   repository, for cloud sessions or a Claude Code without plugins.)" This needs the
   operator's yes; never run either without it.
+- **[D14] Reading transcripts.** Ask, giving the disclosure in full: "May Kyosei read your
+  Claude Code transcripts for this project? It is used to check that words credited to you
+  are yours, and to count the turns of a discussion a credit cites. **What is read:** the
+  transcript of the session a credit names, and your prompt history
+  (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
+  this machine, when a credit is written or rechecked; each time a session stops, its
+  transcript and subagent transcripts, to keep the turn index and archive below; and each
+  prompt, for the marker of pasted content. **What is stored:** the check's
+  outcome, the matched record's id and timestamp, the form of the words (typed, mid-turn,
+  a choice, an accepted suggestion), and for a cited discussion the counts of turns, the
+  active seconds and the first and last timestamps. No text, path or hash of a transcript
+  is stored; the words being credited are stored either way, because the credit holds
+  them. Beside the store and gitignored, `kyosei/turns.jsonl` holds one line per prompt:
+  session, prompt id, time, whose it was and whether it carried pasted content, and no
+  text. **What is copied locally:** the session's transcript and subagent transcripts, to
+  `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
+  is checked against when the original is absent. **What never leaves this
+  machine:** the transcripts, the archive and the prompt history. Kyosei sends none of them
+  anywhere and copies none of them into the store; a store remote carries only what is
+  listed as stored. **Read either way:** the Remote Control session id in a session's
+  transcript, and the token totals of dispatched workers; neither reads your words." This
+  question has no default: propose no answer, and do not record it as declined or deferred
+  under `onboarding:`, because `kyo init` refuses to create a store without it. Pass the
+  answer to `kyo init` as `--read-transcripts yes` or `--read-transcripts no` (Step 4), which
+  writes `read_transcripts: true` or `read_transcripts: false` in `kyosei/config.yml`; in a
+  project whose store already exists, write that line yourself. Asked here because a
+  project's first sessions often hold its most important planning. With `false` none of the
+  reading above happens, and a credit records its check as `not-applicable`.
+
 Do not ask these; do them or state them:
 
 - **[C2] Skill and procedures.** Do not ask: they are always installed, whatever **[C1]**
@@ -125,9 +154,11 @@ Run, using the answers from round one:
    the operator wants committed first. In a folder that is not a repository, `kyo init`
    below makes the repository and its first commit itself. If **[A1]** was no in such a
    folder, pass `--no-git-init` to `kyo init`.
-2. `kyo init --defaults --prefix <PREFIX>` if **[B1]** chose the default (a store of its
-   own), or `kyo init --in-repo --prefix <PREFIX>` if it chose in-repo. Bare `kyo init`
-   in a folder with no store writes nothing and only names these routes. It creates the
+2. `kyo init --defaults --prefix <PREFIX> --read-transcripts <yes|no>` if **[B1]** chose
+   the default (a store of its own), or `kyo init --in-repo --prefix <PREFIX>
+   --read-transcripts <yes|no>` if it chose in-repo, with the answer to **[D14]**. Bare
+   `kyo init` in a folder with no store writes nothing and only names these routes, and
+   either route without `--read-transcripts` writes nothing and asks for it. It creates the
    store, commits the scaffold in a split store, registers the project in
    `$KYOSEI_HOME/projects.json`, and prints what it did. It ends with the items still
    missing, which the steps below install. Read its output.
@@ -230,30 +261,6 @@ Ask these together, in one message. Propose an answer for each from what you rea
   optional `name`. With nobody declared, nothing is refused for lacking a credit and
   `kyo doctor` prints one notice saying so; a no is recorded as `D13: declined` under
   `onboarding:`, which ends the notice.
-- **[D14] Reading transcripts.** Ask, giving the disclosure in full: "May Kyosei read your
-  Claude Code transcripts for this project? It is used to check that words credited to you
-  are yours, and to count the turns of a discussion a credit cites. **What is read:** the
-  transcript of the session a credit names, and your prompt history
-  (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
-  this machine, when a credit is written or rechecked; each time a session stops, its
-  transcript and subagent transcripts, to keep the turn index and archive below; and each
-  prompt, for the marker of pasted content. **What is stored:** the check's
-  outcome, the matched record's id and timestamp, the form of the words (typed, mid-turn,
-  a choice, an accepted suggestion), and for a cited discussion the counts of turns, the
-  active seconds and the first and last timestamps. No text, path or hash of a transcript
-  is stored; the words being credited are stored either way, because the credit holds
-  them. Beside the store and gitignored, `kyosei/turns.jsonl` holds one line per prompt:
-  session, prompt id, time, whose it was and whether it carried pasted content, and no
-  text. **What is copied locally:** the session's transcript and subagent transcripts, to
-  `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
-  is checked against when the original is absent. **What never leaves this
-  machine:** the transcripts, the archive and the prompt history. Kyosei sends none of them
-  anywhere and copies none of them into the store; a store remote carries only what is
-  listed as stored. **Read either way:** the Remote Control session id in a session's
-  transcript, and the token totals of dispatched workers; neither reads your words. (Default:
-  no.)" Write the answer as `read_transcripts: true` or `read_transcripts: false` in
-  `kyosei/config.yml`. Without it none of the reading above happens, and a credit records its
-  check as `not-applicable`.
 - **[E1] Machine layout.** Ask: "CLI only on this machine (default), this machine with the
   desktop app, or a dev box you reach from a laptop?"
 - **[E3] `kyo serve`.** Ask only if **[E1]** is not CLI only: "May I run
@@ -295,7 +302,8 @@ add a line to CLAUDE.md, outside the Kyosei markers, saying which type the orche
 dispatches which work to. With no types, write nothing: the orchestrator dispatches to the
 general-purpose subagent.
 
-Write every decision the operator declined or deferred, from either round, into the
+Write every decision the operator declined or deferred, from either round (never
+**[D14]**, which has only a yes or a no), into the
 `onboarding:` map in `kyosei/config.yml`, keyed by its id: a bare `B2: declined`, or a
 mapping with the operator's reason, `D4: {status: deferred, reason: no code yet}`. A
 decision answered no or later leaves no setting behind, so without this entry

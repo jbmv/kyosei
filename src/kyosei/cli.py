@@ -674,8 +674,8 @@ def build_parser() -> KyoseiParser:
         "prefix, hooks, the skill and worker models, with `kyo init` as one of its steps. "
         "In a project with no store yet, `kyo init` needs a layout choice -- --defaults, "
         "--in-repo, --store or --adopt -- and without one it writes nothing and names the "
-        "routes, the same on a terminal and off one. --explain describes the layouts and "
-        "writes nothing.",
+        "routes, the same on a terminal and off one. Creating a store also needs "
+        "--read-transcripts yes or no. --explain describes the layouts and writes nothing.",
     )
     p_init.add_argument("directory", nargs="?", help="project root (default: here)")
     p_init.add_argument("--prefix", help="project id prefix, e.g. KYO (default: from dir name)")
@@ -720,6 +720,15 @@ def build_parser() -> KyoseiParser:
         "that merely shares its directory name",
     )
 
+    p_init.add_argument(
+        "--read-transcripts",
+        choices=("yes", "no"),
+        help="required to create a store, and has no default: whether Kyosei may read this "
+        "project's Claude Code transcripts and prompt history, on this machine, to check "
+        "that words credited to a person are theirs, and keep a local archive of them. "
+        "Written as read_transcripts: in kyosei/config.yml; setup decision D14 in "
+        "`kyo onboard` gives the full disclosure (KYO-686)",
+    )
     p_init.add_argument(
         "--no-git-init",
         action="store_true",

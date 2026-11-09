@@ -76,8 +76,29 @@ def refuse_the_real_store_home() -> None:
     )
 
 
-def invoke(args: list[str], stdin: str | None = None) -> Run:
+#: The flags that choose a store layout: `kyo init` without one refuses first, and that
+#: refusal's text is itself under test, so only these get the transcript answer.
+_INIT_LAYOUT_FLAGS = frozenset({"--defaults", "--in-repo", "--store", "--adopt"})
+
+
+def invoke(
+    args: list[str], stdin: str | None = None, *, transcript_answer: str | None = "no"
+) -> Run:
+    """Run the CLI in-process.
+
+    KYO-686: a `kyo init` that chooses a layout is given ``--read-transcripts no`` unless
+    it answers for itself, because the suite's hundreds of fixtures are about what a store
+    does and creating one now requires the answer. A test of the refusal itself passes
+    ``transcript_answer=None``.
+    """
     refuse_the_real_store_home()
+    if (
+        transcript_answer is not None
+        and args[:1] == ["init"]
+        and "--read-transcripts" not in args
+        and _INIT_LAYOUT_FLAGS.intersection(args)
+    ):
+        args = [*args, "--read-transcripts", transcript_answer]
     out, err = io.StringIO(), io.StringIO()
     real_stdin = sys.stdin
     if stdin is not None:

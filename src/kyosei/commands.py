@@ -1290,17 +1290,23 @@ def _init_routes_text(target: Path, args: Namespace, environ) -> str:
     if args.directory:
         carried.append(str(target))
     tail = "".join(f" {shlex.quote(word)}" for word in carried)
+    # KYO-686: the answer given to this run is carried like the flags above. With none
+    # given the command shows the choice and answers nothing for the person.
+    answer = f" --read-transcripts {getattr(args, 'read_transcripts', None) or '<yes|no>'}"
     here = f" {shlex.quote(str(target))}" if args.directory else ""
     explain = f"kyo init --explain{here}"
     onboard = f"cd{here} && kyo onboard" if args.directory else "kyo onboard"
     prefix = ids.normalise_prefix(args.prefix or target.name)
     planned = scaffold_module.planned_store_root(target, environ=environ)
     if config_path_for(planned).is_file():
+        # Linking a store that exists creates none, so that route needs no answer.
+        defaults_answer = ""
         defaults_what = (
             f"link the store that already exists at {planned} (a second checkout's case; "
             "kyo init checks it was made for this repository)"
         )
     else:
+        defaults_answer = answer
         defaults_what = (
             f"take every default: the store in its own git repository at {planned}, "
             f"record ids {ids.record_id(prefix, 1)}, {ids.record_id(prefix, 2)}, ..."
@@ -1314,11 +1320,15 @@ def _init_routes_text(target: Path, args: Namespace, environ) -> str:
             "      guided setup (recommended): prints the steps for your agent to follow. "
             "They ask where the store lives, the record id prefix and whether to install "
             "hooks, then run `kyo init` and the install commands",
-            f"  `kyo init --defaults{tail}`",
+            f"  `kyo init --defaults{defaults_answer}{tail}`",
             f"      {defaults_what}",
-            f"  `kyo init --in-repo{tail}`",
+            f"  `kyo init --in-repo{answer}{tail}`",
             "      put the store inside this repository instead: kyosei/ and ideas/ are "
             "committed beside the code, so pushing this repository publishes them",
+            "`--read-transcripts` answers whether Kyosei may read this project's Claude Code "
+            "transcripts, on this machine, to check words credited to a person (setup "
+            "decision D14). Creating a store requires yes or no, and `kyo onboard` gives the "
+            "full disclosure.",
             f"`{explain}` describes both layouts and writes nothing.",
         ]
     )
@@ -1425,6 +1435,7 @@ def cmd_init(ctx: Context, args: Namespace) -> Output:
     # A verifier's hand-run `kyo init` once left a store under the real ~/kyosei that
     # nothing in the output had said it would create, or how to have put it elsewhere.
     lead = _init_store_location_line(target, args, ctx.environ)
+    read_transcripts = {"yes": True, "no": False}.get(getattr(args, "read_transcripts", None))
     result = scaffold_module.init_layout(
         target,
         prefix=args.prefix,
@@ -1434,6 +1445,18 @@ def cmd_init(ctx: Context, args: Namespace) -> Output:
         git_init=not getattr(args, "no_git_init", False),
         environ=ctx.environ,
         claude_md=True,
+        read_transcripts=read_transcripts,
+    )
+    # KYO-686: the flag answers for a store being created. One that already exists keeps
+    # its own answer, and saying so beats a flag that silently did nothing.
+    answer_not_applied = (
+        [
+            "--read-transcripts was not applied: this store already exists, so its "
+            f"`read_transcripts:` stays as it is in "
+            f"{config_module.config_path_for(result.store_root)}"
+        ]
+        if read_transcripts is not None and (result.rerun or result.adopted)
+        else []
     )
     if result.rerun:
         # KYO-559.c4: a re-run on a store that already exists says what it changed and
@@ -1443,6 +1466,7 @@ def cmd_init(ctx: Context, args: Namespace) -> Output:
                 f"kyo init: {result.code_root} already links to the store at "
                 f"{result.store_root}; this run changed:",
                 *[f"  {note}" for note in result.git_notes],
+                *answer_not_applied,
             ],
             {
                 "ok": True,
@@ -1484,6 +1508,7 @@ def cmd_init(ctx: Context, args: Namespace) -> Output:
             "is incomplete and naming `kyo onboard --check`; `kyo install-skill` replaces it)"
         )
     lines += [f"  {note}" for note in result.git_notes]
+    lines += answer_not_applied
     lines.append("record ids will look like " + ids.record_id(result.prefix, 1))
     # KYO-455: the project init made is one this machine serves. Never
     # fails the init -- a registry that refuses it says so, with its remedy.

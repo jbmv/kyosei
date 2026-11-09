@@ -3757,6 +3757,9 @@ PROVOKED: dict[str, Expectation] = {
     # afterwards no longer reaches this refusal (it meets the existing store instead).
     "commands.py:cmd_init#0": Expectation(
         _init_in_a_new_project_with_no_layout_chosen,
+        # KYO-686: the question has no default, so the command shows the choice; either
+        # answer clears this refusal, and the check runs it with one.
+        bindings={"<yes|no>": "no"},
         descriptive={
             "kyo init": "names the command being refused, and the step the guided "
             "setup runs",
@@ -5074,6 +5077,13 @@ RECORDED: dict[str, str] = {
     "scaffold.py:init_layout#3": (
         "a read and a hand deletion: read .kyosei-store to see which store it names, "
         "and delete it if that store is gone. Deciding it is gone is the judgment"
+    ),
+    # KYO-686.c1: the helper every `invoke` of a layout-choosing `kyo init` answers for,
+    # so this walk cannot reach the refusal.
+    "scaffold.py:_require_transcript_answer#0": (
+        "re-invocation with --read-transcripts yes or no, the answer being the operator's; "
+        "tests/test_kyo686_required_transcript_answer.py provokes the refusal on every "
+        "route and proves the flag clears it"
     ),
     # KYO-416.c2: `--prefix` contradicting a store being adopted. The remedy is a
     # re-invocation with the caller's own arguments changed (drop --prefix, give the

@@ -46,7 +46,10 @@ three ways to start: `kyo onboard` (recommended), `kyo init --defaults` with the
 and prefix it would use, and `kyo init --in-repo`. It prints the same text on a terminal
 and off one, so an agent told to "run kyo init" sees the same choice you would. Where the
 store lives is the one decision that is hard to undo, so `kyo init` leaves it to you.
-`kyo init --defaults` takes every default, and is what a script or CI passes.
+`kyo init --defaults` takes every default, and is what a script or CI passes. Whatever the
+layout, creating a store requires `--read-transcripts yes` or `no`, which has no default
+([D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts)); without it
+`kyo init` writes nothing.
 `kyo init --explain` prints what each layout keeps in or out of the code repository, and
 writes nothing. Running `kyo init` again where a store already exists behaves as before.
 

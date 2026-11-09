@@ -713,7 +713,8 @@ def _read_transcripts_item(raw: dict, config_path: Path) -> Item:
             "missing",
             "no answer recorded, so no transcript is read and a credit records its check as "
             "not-applicable",
-            f"ask setup decision D14, then write `{key}: true` or `{key}: false` in {config_path}",
+            f"ask setup decision D14, then write `{key}: true` or `{key}: false` in "
+            f"{config_path}; it has no default and cannot be declined or deferred",
         )
     if not isinstance(answer, bool):
         return Item(key, "unreadable", f"{key} is {answer!r}; it is true or false")
@@ -729,7 +730,9 @@ def _read_transcripts_item(raw: dict, config_path: Path) -> Item:
 #: KYO-560: which setup decision each project item is the trace of, so an answer
 #: recorded under ``onboarding:`` can stand in for the setting it explains the absence
 #: of. Only decisions whose answer is otherwise invisible are here; C2 and C3 are never
-#: asked, and the machine items (E3, E5) are not a project's to record.
+#: asked, and the machine items (E3, E5) are not a project's to record. D14 is absent
+#: on purpose: it has no "no answer" (KYO-686.c3), so an entry for it never stands in
+#: for ``read_transcripts:``.
 DECISION_OF_LABEL: dict[str, str] = {
     "store remote": "B2",
     "harness": "C1",
@@ -740,7 +743,6 @@ DECISION_OF_LABEL: dict[str, str] = {
     "orchestrator_only_commands": "D5",
     "scopes": "D7",
     "documents": "D8",
-    "read_transcripts": "D14",
 }
 
 

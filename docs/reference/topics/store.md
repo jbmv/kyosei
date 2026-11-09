@@ -12,7 +12,9 @@ bare `kyo init` does not answer it for you (KYO-558). It writes nothing, exits
 nonzero, and names the routes, the same on a terminal and off one: `kyo onboard`
 (the guided setup, recommended), `kyo init --defaults` with the store path and
 prefix it would use, and `kyo init --in-repo`. `--store DIR` and `--adopt` choose
-too. `kyo init --explain` prints, for the folder it is run in, what each layout keeps
+too. Any route that creates a store also requires `--read-transcripts yes` or `no`,
+written as `read_transcripts:` in `kyosei/config.yml`, and refuses without it; linking
+a store that exists does not ask (KYO-686). `kyo init --explain` prints, for the folder it is run in, what each layout keeps
 in or out of the code repository and where dispatch worktrees go, and writes
 nothing; that explanation is no longer printed after a scaffold, where it came after
 the choice. A `kyo init` that makes or links a store ends with the items
