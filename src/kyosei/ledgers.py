@@ -221,10 +221,11 @@ def read_person_notes_in(directory: Path) -> list[dict]:
 #: version nothing that is not already versioned, because THIS FILE CANNOT BE WRITTEN
 #: ALONE:
 #:
-#: Every one of the seven functions in this package that calls :func:`write_allocations`
+#: Every function in this package that calls :func:`write_allocations`
 #: also, in the same function and the same command, writes an artifact that carries this
 #: build's ``schema_version`` — an event or ledger line (``append_events``,
-#: ``append_sweep_run``, ``append_brief_run``, ``append_shift_note``) or a record document
+#: ``append_sweep_run``, ``append_brief_run``, ``append_shift_note``, ``append_person_note``)
+#: or a record document
 #: (``write_exports``, ``refresh_exports``). That is structural rather than incidental: the
 #: snapshot exists to record that an id was handed out, and handing one out is a mutation,
 #: and a mutation writes an event. So an export whose counters were written by a later
