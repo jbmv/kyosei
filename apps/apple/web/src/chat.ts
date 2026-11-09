@@ -975,4 +975,188 @@ const kyo = {
   },
 };
 
+// ------------------------------------------------------------------------------ the composer
+
+const boxes = document.getElementById("boxes")!;
+const composerNote = document.getElementById("composer-note")!;
+
+function fitBox(area: HTMLTextAreaElement): void {
+  area.style.height = "auto";
+  area.style.height = `${area.scrollHeight}px`;
+}
+
+function textAreas(): HTMLTextAreaElement[] {
+  return Array.from(boxes.querySelectorAll("textarea"));
+}
+
+/** A box for one note. The last box is always empty, ready for the next. */
+function addBox(text = ""): HTMLTextAreaElement {
+  const box = document.createElement("div");
+  box.className = "box";
+  const link = document.createElement("button");
+  link.className = "box-link";
+  link.textContent = "+";
+  link.title = "Linking to the chat comes with tagging";
+  link.disabled = true;
+  const area = document.createElement("textarea");
+  area.rows = 1;
+  area.placeholder = "Reply…";
+  area.value = text;
+  area.addEventListener("input", () => {
+    fitBox(area);
+    const areas = textAreas();
+    if (area === areas[areas.length - 1] && area.value) addBox();
+    remember();
+  });
+  // An emptied box closes up when you leave it, unless it is the last.
+  area.addEventListener("blur", () => {
+    const areas = textAreas();
+    if (!area.value && area !== areas[areas.length - 1]) box.remove();
+  });
+  box.append(link, area);
+  boxes.append(box);
+  fitBox(area);
+  return area;
+}
+
+// Until the server's draft routes are wired in, drafts are kept in this window's storage.
+const CURRENT_KEY = "composer-current";
+const SHELF_KEY = "composer-shelf";
+const WIDTH_KEY = "composer-width";
+interface Shelved { at: string; texts: string[] }
+
+function stored<T>(key: string, fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : (JSON.parse(value) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function currentTexts(): string[] {
+  return textAreas().map((area) => area.value).filter(Boolean);
+}
+
+function remember(): void {
+  store(CURRENT_KEY, currentTexts());
+}
+
+function showTexts(texts: string[]): void {
+  boxes.replaceChildren();
+  for (const text of texts) addBox(text);
+  addBox();
+  remember();
+}
+
+function attemptSend(): void {
+  composerNote.textContent = "Sending is not on yet.";
+}
+
+const clearButton = document.getElementById("clear") as HTMLButtonElement;
+let clearArmed: number | undefined;
+
+function disarmClear(): void {
+  if (clearArmed !== undefined) clearTimeout(clearArmed);
+  clearArmed = undefined;
+  clearButton.textContent = "Clear";
+}
+
+clearButton.addEventListener("click", () => {
+  if (clearArmed === undefined) {
+    if (!currentTexts().length) return;
+    clearButton.textContent = "Clear all?";
+    clearArmed = window.setTimeout(disarmClear, 3000);
+    return;
+  }
+  disarmClear();
+  showTexts([]);
+});
+
+const draftsPanel = document.getElementById("drafts-panel")!;
+
+function drawDrafts(): void {
+  const shelf = stored<Shelved[]>(SHELF_KEY, []);
+  const save = document.createElement("button");
+  save.className = "draft-save";
+  save.textContent = "Save this prompt to drafts and start blank";
+  save.disabled = !currentTexts().length;
+  save.addEventListener("click", () => {
+    store(SHELF_KEY, [{ at: new Date().toISOString(), texts: currentTexts() }, ...shelf]);
+    showTexts([]);
+    drawDrafts();
+  });
+  const rows = shelf.map((draft, index) => {
+    const row = document.createElement("div");
+    row.className = "draft-row";
+    row.append(draft.texts[0].split("\n")[0]);
+    const when = document.createElement("small");
+    when.textContent = stampWords(draft.at);
+    row.append(when);
+    // Loading a draft shelves what is in the window, so nothing is lost.
+    row.addEventListener("click", () => {
+      const rest = shelf.filter((_, position) => position !== index);
+      const current = currentTexts();
+      store(SHELF_KEY, current.length ? [{ at: new Date().toISOString(), texts: current }, ...rest] : rest);
+      showTexts(draft.texts);
+      draftsPanel.hidden = true;
+    });
+    return row;
+  });
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "draft-empty";
+    empty.textContent = "No saved drafts";
+    rows.push(empty);
+  }
+  draftsPanel.replaceChildren(save, ...rows);
+}
+
+document.getElementById("drafts")!.addEventListener("click", () => {
+  draftsPanel.hidden = !draftsPanel.hidden;
+  if (!draftsPanel.hidden) drawDrafts();
+});
+
+const COMPOSER_MIN = 300;
+const CHAT_MIN = 420;
+const band = document.getElementById("band")!;
+
+function setComposerWidth(width: number): void {
+  const clamped = Math.max(COMPOSER_MIN, Math.min(width, window.innerWidth - CHAT_MIN));
+  document.documentElement.style.setProperty("--composer-width", `${clamped}px`);
+  store(WIDTH_KEY, clamped);
+  fitTerminal();
+}
+
+band.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  const move = (moved: MouseEvent) => setComposerWidth(window.innerWidth - moved.clientX);
+  const up = () => {
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+    document.body.style.userSelect = "";
+  };
+  document.body.style.userSelect = "none";
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+});
+
+const savedWidth = stored<number | null>(WIDTH_KEY, null);
+if (savedWidth !== null) setComposerWidth(savedWidth);
+
+showTexts(stored<string[]>(CURRENT_KEY, []));
+document.getElementById("send")!.addEventListener("click", attemptSend);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.metaKey) {
+    event.preventDefault();
+    attemptSend();
+  }
+});
+
 (window as any).kyo = kyo;
