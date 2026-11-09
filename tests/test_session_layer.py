@@ -514,6 +514,100 @@ def test_unwrapping(first: str, second: str, joined: bool) -> None:
     assert (out.count("\n") == 0) == joined
 
 
+# ---------------------------------------- KYO-694: a running tool's blinking bullet
+
+
+TOOL_REPLY = "The build finished without errors."
+
+
+def _tool_frames() -> list[str]:
+    """A landed reply above a running tool, as captured every 0.6 s while its bullet blinks.
+
+    Claude Code draws a space in the bullet's cell on every other beat; frame 3 has the
+    space carrying the bullet's colour, which is how a styled cell can reach a capture.
+    """
+    files = sorted((FIXTURES / "tool-running").glob("frame-*.txt"))
+    assert len(files) == 6
+    return [file.read_text(encoding="utf-8") for file in files]
+
+
+def _with_rows(rows: str) -> str:
+    """The bullet-off frame with the tool's two rows replaced by ``rows``."""
+    frame = _tool_frames()[1]
+    lines = frame.split("\n")
+    return "\n".join([*lines[:4], *rows.split("\n"), *lines[6:]])
+
+
+def test_the_tool_frames_show_the_bullet_on_and_off() -> None:
+    assert ["⏺" in frame.split("\n")[4] for frame in _tool_frames()] == [
+        True,
+        False,
+        True,
+        False,
+        True,
+        False,
+    ]
+    assert all(pane.classify(frame).state == pane.WORKING for frame in _tool_frames())
+
+
+def test_a_landed_reply_is_not_offered_again_on_any_beat_of_a_running_tool() -> None:
+    live = session_layer.LiveReply()
+    live.observe_record(TOOL_REPLY)
+    assert [live.observe_screen(frame) for frame in _tool_frames()] == [None] * 6
+
+
+@pytest.mark.parametrize("index", range(6))
+def test_a_reply_in_progress_never_holds_a_running_tools_lines(index: int) -> None:
+    # No record has landed here, so nothing but the reading of the screen can keep them out.
+    found = pane.reply_in_progress(_tool_frames()[index])
+    assert found is None
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "  Reading 1 file… (ctrl+o to expand)",
+        "  Running \x1b[1m3\x1b[0m agents… (ctrl+o to expand)",
+        "  \x1b[38;5;246mRan \x1b[1m1\x1b[0m\x1b[38;5;246m shell command \x1b[39m",
+        "  \x1b[1mTaskList\x1b[0m",
+        "  \x1b[1mBash\x1b[0m(a command that wraps\n       onto a second row)",
+        '  \x1b[1mfiles - read (MCP)\x1b[0m(path: "a.txt")',
+    ],
+    ids=["active-group", "agents", "finished-group", "no-arguments", "wrapped", "mcp"],
+)
+def test_every_row_a_tool_can_draw_without_its_bullet_ends_the_reply(rows: str) -> None:
+    assert pane.reply_in_progress(_with_rows(rows)) is None
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "  \x1b[1mFindings\x1b[0m\n\n  The second paragraph.",
+        "  \x1b[1mNote\x1b[0m that the bold word opens a paragraph.",
+        "  Calling read(path) is how this is done.",
+    ],
+    ids=["heading-above-text", "bold-opening", "parenthesis"],
+)
+def test_reply_text_shaped_a_little_like_a_tool_row_stays_in_the_reply(rows: str) -> None:
+    found = pane.reply_in_progress(_with_rows(rows))
+    assert found is not None and found.startswith(TOOL_REPLY)
+
+
+def test_the_rows_under_the_spinner_do_not_end_the_reply() -> None:
+    # The Tip row is drawn with the same glyph as a tool's result row.
+    frame = _with_rows("  More of the reply.")
+    assert "⎿  Tip" in frame
+    assert pane.reply_in_progress(frame) == f"{TOOL_REPLY}\n\nMore of the reply."
+
+
+def test_a_short_landed_reply_is_recognised_with_rows_below_it() -> None:
+    assert pane.same_reply(f"{TOOL_REPLY}\n\nAdvising using a model", TOOL_REPLY)
+
+
+def test_a_reply_that_only_begins_like_a_landed_one_is_another_reply() -> None:
+    assert not pane.same_reply(f"{TOOL_REPLY} And then it went on.", TOOL_REPLY)
+
+
 def test_idle_screen_has_no_reply_in_progress() -> None:
     assert pane.reply_in_progress(screen("idle.txt")) is None
     assert pane.reply_in_progress(screen("permission-bash.txt")) is None

@@ -86,9 +86,23 @@ _SPINNER_ROW = re.compile(r"^[·✢✳✶✻✽*]\s")
 _WORKING_ROW = re.compile(r"^[·✢✳✶✻✽*]\s+(.*….*?)\s*$")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*•]\s|\d+\.\s)")
 
+#: The default theme's dim grey, which reply text is not drawn in.
+_GREY = "38;5;246"
+
 #: Bullet colours of the rows that are not reply text, measured on the default theme:
 #: a tool or status row is grey (246), a finished agent row green (114).
-_TOOL_BULLET_COLOURS = ("38;5;246", "38;5;114")
+_TOOL_BULLET_COLOURS = (_GREY, "38;5;114")
+
+_STYLES = r"(?:\x1b\[[0-9;:]*m)*"
+#: Two blank cells where a bullet goes, and the styling in front of the first word after them.
+_BLANK_BULLET = re.compile(rf"^{_STYLES} {_STYLES} ({_STYLES})(?=[^ \x1b])")
+_BOLD = "\x1b[1m"
+#: A tool's bold name with its arguments after it, ``Bash(sleep 30)``.
+_NAME_AND_ARGUMENTS = re.compile(r"[^\x1b]+(?:\x1b\[[0-9;:]*m)+\(")
+#: A row in bold from its first word to its last.
+_ALL_BOLD = re.compile(r"[^\x1b]+(?:\x1b\[[0-9;:]*m)*\s*$")
+#: A group of tools or agents still running, ``Reading 1 file… (ctrl+o to expand)``.
+_ACTIVE_GROUP = re.compile(r"…(?:\s*\([^()]*\))?\s*$")
 
 #: How many letters and digits of a screen's reply are compared with a transcript record.
 _SAME_REPLY_PREFIX = 200
@@ -312,12 +326,51 @@ def _width(text: str) -> int:
     return sum(2 if unicodedata.east_asian_width(c) in ("F", "W") else 1 for c in text)
 
 
+def _above_spinner(lines: list[str], bottom: int) -> int:
+    """Where the conversation ends: the running spinner's row, or ``bottom`` without one.
+
+    The rows under the spinner are not the conversation, and a tip among them is drawn with
+    the glyph of a tool's result.
+    """
+    for index in range(bottom - 1, -1, -1):
+        line = lines[index]
+        if _SPINNER_ROW.match(line):
+            return index
+        if line.startswith(("⏺ ", "❯ ")) or _RULE.match(line.strip()):
+            break
+    return bottom
+
+
+def _tool_row_without_bullet(raw_line: str, lowest: bool) -> bool:
+    """Whether a captured row belongs to a tool, read from a row with no bullet on it.
+
+    While a tool runs, Claude Code draws a space in place of its bullet on every other
+    600 ms beat, and a finished group of tools is drawn with no bullet at all. Those rows
+    are indented as a reply's own continuation lines are. A bold or ellipsised row is only
+    taken for a tool's when it is the ``lowest`` of the conversation, since a reply can
+    hold a line like it higher up.
+    """
+    found = _BLANK_BULLET.match(raw_line)
+    if found is None:
+        return False
+    styling, words = found.group(1), raw_line[found.end() :]
+    if _strip(words).startswith("⎿") or _GREY in styling:
+        return True
+    bold = _BOLD in styling
+    if bold and _NAME_AND_ARGUMENTS.match(words):
+        return True
+    return lowest and (
+        bool(_ACTIVE_GROUP.search(_strip(words))) or (bold and bool(_ALL_BOLD.match(words)))
+    )
+
+
 def _block_lines(
     raw_lines: list[str], lines: list[str], bottom: int
 ) -> tuple[int, list[str]] | None:
     """The last reply text block above line ``bottom``: its first index and its lines."""
     start = None
-    for index in range(bottom - 1, -1, -1):
+    lowest = True
+    for index in range(_above_spinner(lines, bottom) - 1, -1, -1):
         line = lines[index]
         if line.startswith("⏺ "):
             colour = _BULLET_COLOUR.match(raw_lines[index])
@@ -328,6 +381,10 @@ def _block_lines(
             break
         if line.startswith("❯ ") or _RULE.match(line.strip()):
             return None
+        if line.strip():
+            if _tool_row_without_bullet(raw_lines[index], lowest):
+                return None
+            lowest = False
     if start is None:
         return None
     block: list[str] = []
@@ -403,14 +460,21 @@ def same_reply(screen_text: str, record_text: str) -> bool:
     Compared by letters and digits alone, since the terminal has already rendered the
     markdown, and over the first :data:`_SAME_REPLY_PREFIX` of them, since the screen may
     hold only the beginning and diverges from the markdown later (a code fence's language
-    is not drawn).
+    is not drawn). A record shorter than that prefix also matches a screen text whose
+    paragraphs begin with the whole of it, as when rows no reading recognised follow it.
     """
 
     def key(text: str) -> str:
         return "".join(c for c in _CODE_FENCE.sub("", text) if c.isalnum())
 
     head = key(screen_text)[:_SAME_REPLY_PREFIX]
-    return bool(head) and key(record_text).startswith(head)
+    record = key(record_text)
+    if not head or not record:
+        return False
+    if record.startswith(head):
+        return True
+    paragraphs = screen_text.split("\n\n")
+    return any(key("\n\n".join(paragraphs[:n])) == record for n in range(1, len(paragraphs)))
 
 
 # ----------------------------------------------------------------- finding a session's pane
