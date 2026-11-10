@@ -469,6 +469,66 @@ def test_facts_are_stated_on_a_read_with_nothing_new(bed: Bed) -> None:
     assert second["facts"] == first["facts"]
 
 
+# ------------------------------------------- KYO-714: the account's usage limits
+
+LIMITS_RESET = 1_999_999_999  # 2033-05-18T03:33:19Z
+
+
+def save_limits(store_home: Path, five_hour: float, seven_day_resets: int) -> None:
+    store_home.mkdir(parents=True, exist_ok=True)
+    (store_home / "usage-limits.json").write_text(
+        json.dumps(
+            {
+                "read_at": "2026-11-09T12:00:00.000Z",
+                "five_hour": {"used_percentage": five_hour, "resets_at": LIMITS_RESET},
+                "seven_day": {"used_percentage": 41.2, "resets_at": seven_day_resets},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_facts_carry_the_saved_limits_with_iso_reset_times(bed: Bed, store_home: Path) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    save_limits(store_home, 23.5, LIMITS_RESET + 3600)
+    limits = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["limits"]
+    assert limits == {
+        "five_hour": {"used_percentage": 23.5, "resets_at": "2033-05-18T03:33:19.000Z"},
+        "seven_day": {"used_percentage": 41.2, "resets_at": "2033-05-18T04:33:19.000Z"},
+        "read_at": "2026-11-09T12:00:00.000Z",
+    }
+
+
+def test_facts_leave_out_a_window_whose_reset_has_passed(bed: Bed, store_home: Path) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    save_limits(store_home, 23.5, 1_000_000_000)  # 2001
+    limits = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["limits"]
+    assert set(limits) == {"five_hour", "read_at"}
+
+
+def test_facts_state_no_limits_without_the_file(bed: Bed, store_home: Path) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert not (store_home / "usage-limits.json").exists()
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["limits"] is None
+
+
+def test_a_changed_limits_file_is_read_again_without_a_restart(
+    bed: Bed, store_home: Path, stream
+) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    save_limits(store_home, 23.5, LIMITS_RESET)
+    first = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["limits"]
+    assert first["five_hour"]["used_percentage"] == 23.5
+    opened = stream()
+    assert opened.event("ready")["facts"]["limits"]["five_hour"]["used_percentage"] == 23.5
+    save_limits(store_home, 61.0, LIMITS_RESET)
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["limits"]
+    assert second["five_hour"]["used_percentage"] == 61.0
+    # The stream says so too, though no reply of this session followed the change.
+    event = opened.event("facts")
+    assert event["facts"]["limits"]["five_hour"]["used_percentage"] == 61.0
+
+
 def test_a_session_with_no_reply_has_no_facts(bed: Bed) -> None:
     bed.write_transcript(bed.rows(1, source=FACTS_FILE))
     assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"] is None

@@ -4099,6 +4099,19 @@ UNREACHED: dict[str, str] = {
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_revoke_takes_no_permission_and_the_bare_form_clears_it"
     ),
+    # KYO-714: `kyo statusline`'s refusals, each proved in tests/test_kyo_statusline.py.
+    "cmd_statusline.py:_manage#0": (
+        "not provoked by this walk: `kyo statusline` is PROJECT_NONE and its refusals "
+        "are about Claude Code's user settings under $CLAUDE_CONFIG_DIR, which its --root "
+        "provocations do not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_statusline.py::test_a_different_status_line_is_refused_and_named_and_the_remedy_clears_it"
+    ),
+    "cmd_statusline.py:cmd_statusline#0": (
+        "not provoked by this walk: `kyo statusline` is PROJECT_NONE and its refusals "
+        "are about Claude Code's user settings under $CLAUDE_CONFIG_DIR, which its --root "
+        "provocations do not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_statusline.py::test_print_without_install_names_the_form_that_works"
+    ),
     # KYO-455: `kyo projects`'s refusals, each proved in tests/test_kyo_projects.py.
     "cmd_projects.py:add#0": (
         "not provoked by this walk: `kyo projects` is PROJECT_NONE and its refusals "

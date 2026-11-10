@@ -53,6 +53,7 @@ from . import (
     cmd_records,
     cmd_redact,
     cmd_sessions,
+    cmd_statusline,
     cmd_store,
     cmd_sweep,
     cmd_turns,
@@ -319,6 +320,12 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # MUTATING_COMMANDS for `projects`'s reason: it writes $KYOSEI_HOME/device-tokens.json
     # and no store.
     "devices": (device_tokens.cmd_devices, PROJECT_NONE),
+    # KYO-714: Claude Code's status line command, which saves the account's usage limits
+    # to $KYOSEI_HOME/usage-limits.json for kyo serve's session facts, and its
+    # --install/--uninstall of the user's statusLine setting. PROJECT_NONE: it runs in
+    # every Claude Code session, Kyosei project or not. Not in MUTATING_COMMANDS: it
+    # writes no store.
+    "statusline": (cmd_statusline.cmd_statusline, PROJECT_NONE),
     # KYO-514: the build's own agent setup prompt, and `--check`, the same checklist read
     # back against existing projects. PROJECT_NONE: the prompt needs no project, and
     # `--check` resolves the project here (or every registered one) itself, reporting an
@@ -2265,6 +2272,32 @@ def build_parser() -> KyoseiParser:
         help="with issue: a permission the token carries (repeatable). `send` lets it use the "
         "send routes and `notes` the note routes; a token issued without the one a route "
         "asks for is refused there",
+    )
+
+    p_statusline = sub.add_parser(
+        "statusline",
+        parents=[common],
+        help="Claude Code's status line command: reads the session JSON on stdin, saves the "
+        "account's usage limits to $KYOSEI_HOME/usage-limits.json for kyo serve, and prints "
+        "`5-hour NN% · weekly NN%`; exits 0 and prints nothing on any error (KYO-714)",
+    )
+    statusline_mode = p_statusline.add_mutually_exclusive_group()
+    statusline_mode.add_argument(
+        "--install",
+        action="store_true",
+        help="set statusLine in Claude Code's user settings (~/.claude/settings.json, or "
+        "$CLAUDE_CONFIG_DIR's) to run `kyo statusline`; refuses when a different status "
+        "line is set",
+    )
+    statusline_mode.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="remove the statusLine entry --install set, and no other",
+    )
+    p_statusline.add_argument(
+        "--print",
+        action="store_true",
+        help="with --install or --uninstall: show the change and write nothing",
     )
 
     p_onboard = sub.add_parser(
