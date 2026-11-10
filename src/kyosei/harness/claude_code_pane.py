@@ -16,7 +16,8 @@ writes to one, and only :func:`send_message`, :func:`send_slash_command` and
 
 WHAT IS ON THE SCREEN. The bottom of a captured pane is the input box (two ``─`` rules with a
 ``❯`` line between them) and a footer. When the box is present the session is idle or, if
-the footer holds ``esc to interrupt`` or a working row stands directly above the box, working. When it is absent an overlay holds the
+the footer holds ``esc to interrupt`` or a working row stands directly above the box,
+working. When it is absent an overlay holds the
 screen: a permission prompt (``Do you want ...?``, numbered options read from the screen,
 ``Esc to cancel``), an ``AskUserQuestion`` prompt (``Enter to select``), the ``/usage`` panel
 (``Usage by model:``), the trust dialog, or something not catalogued. Reply text above the
