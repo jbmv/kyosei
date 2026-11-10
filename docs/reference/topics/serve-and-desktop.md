@@ -725,7 +725,7 @@ on your reply 8c1f73e2-0d9d-4c8e-a1d5-3f2e0b7a4c11 "the transcript does not stre
 why don't we just reformat it ourselves?
 
 Note 2 (KYO-N42)
-on KYO-12.g1
+on record KYO-12.g1 "the iPad build is checked"
 on note KYO-N3
 this looks right on the iPad, approved
 ```
@@ -738,9 +738,46 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 | A reply | `on your reply <uuid> "<words>..."` |
 | A prompt | `on my prompt <uuid> "<words>..."` |
 | Of another session | either of those, with `in session <id>` before the words |
-| A record, criterion or gate | `on KYO-12.g1` |
-| A document or file | `on document <path> at <commit> lines 3-9 "<words>..."` |
+| A record, or a criterion, gate, dispatch, note or claim of one | `on record KYO-717.c4 "<words>..."` |
+| Lines of a served file | `on file <path> lines 333-345 "<words>..."` |
+| A document or file filed with a commit | `on document <path> at <commit> lines 3-9 "<words>..."` |
 | Another note | `on note <id>` |
+
+**A record and a served file (KYO-737).** A record's line carries the id of the record or of
+the element, and the first six words the element holds when the message is made: a record's
+title, a criterion's or a note's text, a claim's statement, a gate's detail. A dispatch has no
+words of its own and its line is the id alone. `kyo show` reads a record's id and a dispatch's;
+a criterion, gate, note or claim is printed by `kyo show` of the record its id begins with. An
+id the store does not hold is refused when the message is held, naming the command that lists
+the ids.
+
+A file's line carries the path relative to its root, the lines counted from 1 in the file's
+source, and the words at them. The root is the code repository unless the line says otherwise:
+
+```
+on file src/kyosei/serve_notes.py lines 333-345 "def find( server: Any, root_of:..."
+on file docs/plan.md in the store repository lines 12-14 "The app is built in small..."
+on file notes/plan.md in the scratchpad lines 3-3 "The second chunk waits on..." at "waits"
+```
+
+`in the scratchpad` is the scratchpad of the session the prompt was sent to, and `in the
+scratchpad of session <id>` another session's. A selection shorter than six words within one
+line is quoted as its sentence and `at` the selection, as on a reply, and in a markdown file a
+heading, list item, table cell or code block is labelled after the quote. Where no selection
+was made the quote is the first words of the lines, read from the source, so markdown marks
+appear in it as written.
+
+A client gives such an anchor as `{"kind": "file", "root", "path", "lines": [first, last]}`,
+where `root` is `code`, `store` or `scratch`, with `"session"` for `scratch` and `"chars":
+[start, end]` for a selection inside the lines, counted in code points of the file's text.
+The server reads the file as the blob route serves it at that moment, so the token needs the
+`files` permission as well, and a file that route would refuse is refused here with the same
+reason. The stored anchor is of an existing kind, `document` for a markdown file and `file`
+for any other, and holds the path, the lines, the selection, a digest of the text of the lines
+and the commit that was the head of the root's repository. The commit identifies which
+repository the path is in. A scratchpad has no commit, and its anchor holds the session
+instead. A file with uncommitted changes is anchored as served, and the digest, not the commit,
+is what records the words.
 
 A reply or prompt anchor takes one of two forms, by the length of the person's selection
 (KYO-733). A selection of six words or more is quoted as above. A shorter one says little about
@@ -827,8 +864,9 @@ message stays delivered: the server log names it, it is kept in
 
 **A session's marks (KYO-710).** After a prompt is sent, a chat can still show what each of
 its lines was anchored to. `GET sessions/<id>/marks` returns every sent note with a turn anchor
-in that session, oldest first, as `{"note", "text", "tags", "sent", "anchors"}`. Notes never
-sent are left out, and so are a note's anchors that are not turns or are turns of another
+in that session, and every note sent to that session that is anchored to a record or a file
+(KYO-737), oldest first, as `{"note", "text", "tags", "sent", "anchors"}`. Notes never
+sent are left out, and so are a note's anchors on another note or on turns of another
 session; a redacted note's `text` is `null`. An anchor on a reply is `{"role": "agent",
 "message", "start", "end"}`, with offsets into the reply `text` the session routes return for
 that `message_id`. It is the reverse of giving an anchor by message, by the same joining, so
@@ -838,6 +876,15 @@ whose record is not in the transcript, whose digest does not match the record's 
 record is not part of its reply is `{"role", "uuid", "stale": true}` and has no offsets. The
 offsets are read from the transcript, so the route is refused, as the session routes are,
 until the project sets `read_transcripts: true`.
+
+After a note's turn anchors come its records and files, each with a `kind` where a turn has a
+`role`. A record or element is `{"kind": "record", "id"}`, with `"stale": true` when the store
+does not hold the id. A file is `{"kind", "root", "path", "lines"}` with its `commit` or
+`session` and its `chars` when it has them, and `"stale": true` when the file as served now
+does not hold the same text at those lines, which the digest decides. A later commit that
+leaves the lines as they were does not make it stale; an edit to them does, committed or not,
+and so does a change above them that moves them. An anchor filed with a commit and no digest
+is compared with the file at that commit in the same way.
 
 ```json
 {

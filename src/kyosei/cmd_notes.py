@@ -15,11 +15,27 @@ AN ANCHOR addresses a place and holds no words from it:
 
 =========  ==================================================================
 turn       a transcript record (session, uuid), a character range, a digest
-record     a record, criterion or gate id
+record     a record's id, or the id of one of its criteria, gates,
+           dispatches, notes or claims
 document   a path at a commit, with a line range or a character range
 file       a path at a commit, with a line range
 note       another note's id, so a reply can be threaded
 =========  ==================================================================
+
+AN ELEMENT OF A RECORD (KYO-737) is addressed by its own id in the ``record`` kind's one
+``id`` key, as a criterion and a gate always were: ``KYO-12.d1``, ``KYO-12.n2`` and
+``KYO-12.m1`` name a dispatch, a note and a claim. An id is stable and never reused, so it is
+the whole address, and ``kyo show`` reads each of them. :func:`element_words` gives the words
+the element now holds, read when a message is made and never stored.
+
+A FILE AS IT IS SERVED (KYO-737). ``kyo serve`` files a ``document`` or ``file`` anchor for a
+span of a file a person read in a client (:mod:`kyosei.serve_notes`). Such an anchor carries,
+beside its path and lines, a digest of the text of those lines (:func:`lines_digest`), the
+commit that was the head of the file's repository when it was read, and for a file in a
+session's scratchpad the session in place of a commit. The digest is what says later whether
+the words are still at those lines. It is a plain SHA-256 under its own scheme name: the
+lines are in the repository at or after that commit, so there is no transcript text to keep
+out of the export, which is what the turn digest's key is for.
 
 THE DIGEST OF A TURN ANCHOR (:func:`span_digest`) is HMAC-SHA256 of the span's text, keyed
 by the SHA-256 of the whole record's text. Someone holding the transcript can recompute it
@@ -101,6 +117,8 @@ DIGEST_GIVEN = "given"
 #: The prefix of every digest, so a later scheme can sit beside this one in the same column.
 DIGEST_SCHEME = "span-hmac-sha256"
 DIGEST_RE = re.compile(rf"^{DIGEST_SCHEME}:[0-9a-f]{{64}}$")
+#: KYO-737: the digest of a file's lines as they were served (module docstring).
+LINES_DIGEST_SCHEME = "lines-sha256"
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 TAG_RE = re.compile(r"^[^\s,]{1,64}$")
 
@@ -113,6 +131,10 @@ ANCHOR_KEYS: dict[str, frozenset[str]] = {
     ANCHOR_FILE: frozenset({"kind", "path", "commit", "lines"}),
     ANCHOR_NOTE: frozenset({"kind", "id"}),
 }
+
+#: KYO-737: the elements of a record a ``record`` anchor may name, beside the record itself.
+#: They are the elements a client offers to anchor to, and each has a row of its own to read.
+RECORD_ELEMENTS = ("criterion", "gate", "dispatch", "note", "claim")
 
 #: KYO-709: the keys of a turn anchor given by message, a span of a reply as the session API
 #: joins it. Stored as one ``turn`` anchor per record the span covers.
@@ -136,6 +158,41 @@ def span_digest(record_text: str, start: int, end: int) -> str:
     key = hashlib.sha256(record_text.encode("utf-8")).digest()
     span = record_text[start:end].encode("utf-8")
     return f"{DIGEST_SCHEME}:{hmac.new(key, span, hashlib.sha256).hexdigest()}"
+
+
+def lines_digest(lines: list[str]) -> str:
+    """The digest of a file's lines as served, joined by one newline (module docstring)."""
+    joined = "\n".join(lines).encode("utf-8")
+    return f"{LINES_DIGEST_SCHEME}:{hashlib.sha256(joined).hexdigest()}"
+
+
+def element_words(store: Store, target: str) -> str | None:
+    """The words a record or one of its elements holds now; None when the store has no such
+    id (KYO-737).
+
+    A record's are its title, a criterion's and a note's their text, a claim's its statement
+    and a gate's its detail, or its type when it has none. A dispatch has no words of its
+    own and gives the empty string.
+    """
+    if ids.is_record_id(target):
+        return store.record(target)["title"] if store.record_exists(target) else None
+    kind = ids.child_kind(target)
+    try:
+        if kind == "criterion":
+            return store.criterion(target)["text"]
+        if kind == "gate":
+            gate = store.gate(target)
+            return gate["detail"] or gate["gate_type"]
+        if kind == "note":
+            return store.note(target)["text"]
+        if kind == "claim":
+            return store.claim(target)["statement"]
+        if kind == "dispatch":
+            store.dispatch(target)
+            return ""
+    except NotFound:
+        return None
+    return None
 
 
 def record_text(record: dict) -> str | None:
@@ -359,17 +416,23 @@ def _id_anchor(store: Store, kind: str, target: object, where: str) -> dict:
         if store.person_note(target) is None:
             raise NotFound(f"{where}: no note {target!r}: nothing was written")
         return {"kind": ANCHOR_NOTE, "target": target}
-    if ids.is_record_id(target):
-        if not store.record_exists(target):
-            raise NotFound(f"{where}: no record {target!r}: nothing was written")
-    elif ids.child_kind(target) == "criterion":
-        store.criterion(target)
-    elif ids.child_kind(target) == "gate":
-        store.gate(target)
-    else:
+    kind = "record" if ids.is_record_id(target) else ids.child_kind(target)
+    if kind != "record" and kind not in RECORD_ELEMENTS:
         raise UsageError(
-            f"{where}: {target!r} is not a record, criterion or gate id. A record anchor "
-            "takes KYO-12, KYO-12.c3 or KYO-12.g1"
+            f"{where}: {target!r} is not the id of a record or of a criterion, gate, "
+            "dispatch, note or claim of one. A record anchor takes KYO-12, KYO-12.c3, "
+            "KYO-12.g1, KYO-12.d1, KYO-12.n2 or KYO-12.m1"
+        )
+    if element_words(store, target) is None:
+        owner = target if kind == "record" else ids.record_of_child(target)
+        listing = (
+            "`kyo list` prints the ids of the records"
+            if kind == "record" or not store.record_exists(owner)
+            else f"`kyo show {owner}` prints the ids that record holds"
+        )
+        raise NotFound(
+            f"{where}: no {kind} {target!r} in this store, so there is nothing to anchor "
+            f"to; {listing}: nothing was written"
         )
     return {"kind": ANCHOR_RECORD, "target": target}
 
@@ -494,7 +557,26 @@ def anchor_label(anchor: dict) -> str:
             if "line_start" in anchor
             else f"chars {anchor['char_start']}-{anchor['char_end']}"
         )
-        return f"{kind} {anchor['target']} at {anchor['commit_sha']} {span}"
+        # KYO-737: a file read through `kyo serve` has the digest of its lines, a selection
+        # within them, and for a scratchpad file its session in place of a commit.
+        at = (
+            f" at {anchor['commit_sha']}"
+            if anchor.get("commit_sha")
+            else f" in the scratchpad of {anchor['session']}"
+            if anchor.get("session")
+            else ""
+        )
+        chars = (
+            f" chars {anchor['char_start']}-{anchor['char_end']}"
+            if "line_start" in anchor and "char_start" in anchor
+            else ""
+        )
+        digest = (
+            f" digest {_short(anchor['digest'])} ({anchor['digest_check']})"
+            if anchor.get("digest")
+            else ""
+        )
+        return f"{kind} {anchor['target']}{at} {span}{chars}{digest}"
     return f"{kind} {anchor['target']}"
 
 
@@ -652,10 +734,33 @@ def _in_reply(
     return low[1], high[1], low[0], high[0]
 
 
-def session_marks(ctx: Context, session: str) -> list[dict]:
+def path_place(anchor: dict) -> dict:
+    """A stored ``document`` or ``file`` anchor as the marks route gives it: its address in
+    the keys it was given by, with nothing said of whether its words are still there."""
+    place: dict = {"kind": anchor["kind"], "path": anchor["target"]}
+    if anchor.get("commit_sha"):
+        place["commit"] = anchor["commit_sha"]
+    if anchor.get("session"):
+        place["session"] = anchor["session"]
+    if "line_start" in anchor:
+        place["lines"] = [anchor["line_start"], anchor["line_end"]]
+    if "char_start" in anchor:
+        place["chars"] = [anchor["char_start"], anchor["char_end"]]
+    return place
+
+
+def session_marks(
+    ctx: Context, session: str, file_place: Callable[[dict], dict] = path_place
+) -> list[dict]:
     """KYO-710: every sent note with a turn anchor in this session, oldest first, each anchor
     given as a client draws the turn: a reply by message with offsets into the reply's text,
     a prompt by uuid with offsets into its record.
+
+    KYO-737: with them, every note sent to this session that is anchored to a record or to
+    a file, and after a note's turn anchors its other places, each with its ``kind``: a
+    record or an element of one as ``{"kind": "record", "id"}``, ``stale`` when the store
+    no longer holds the id, and a file as ``file_place`` gives it (:func:`path_place`, or
+    the server's, which also says ``stale``). An anchor to another note is not given.
 
     The reverse of :func:`_message_anchors`, by the same table (:func:`record_layout`): the
     anchors one span was stored as, one per record, are joined back into one where one ends
@@ -664,15 +769,18 @@ def session_marks(ctx: Context, session: str) -> list[dict]:
     in its reply any longer is given ``stale`` and no offsets. A redacted note's text is null.
     """
     store = ctx.store()
-    note_ids = find_note_ids(
-        store,
-        tags=[],
-        target=None,
-        anchored_to="turn",
-        person=None,
-        session=session,
-        sent=True,
-    )
+    note_ids = [
+        row["id"]
+        for row in store.conn.execute(
+            "SELECT n.id FROM person_notes n WHERE n.sent_at IS NOT NULL AND ("
+            " EXISTS (SELECT 1 FROM person_note_anchors a"
+            "  WHERE a.note_id = n.id AND a.kind = ? AND a.session = ?)"
+            " OR (n.sent_session = ? AND EXISTS (SELECT 1 FROM person_note_anchors a"
+            "  WHERE a.note_id = n.id AND a.kind IN (?, ?, ?)))"
+            ") ORDER BY n.seq",
+            (ANCHOR_TURN, session, session, ANCHOR_RECORD, ANCHOR_DOCUMENT, ANCHOR_FILE),
+        )
+    ]
     notes = [export.person_note_document(store, note_id) for note_id in note_ids]
     turns = {
         note["id"]: [
@@ -753,6 +861,13 @@ def session_marks(ctx: Context, session: str) -> list[dict]:
             entry = {"role": role, "message": message_id, "start": start, "end": end}
             given.append(entry)
             joinable = (entry, last_block)
+        for anchor in note["anchors"]:
+            if anchor["kind"] == ANCHOR_RECORD:
+                gone = element_words(store, anchor["target"]) is None
+                entry = {"kind": ANCHOR_RECORD, "id": anchor["target"]}
+                given.append(entry | {"stale": True} if gone else entry)
+            elif anchor["kind"] in (ANCHOR_DOCUMENT, ANCHOR_FILE):
+                given.append(file_place(anchor))
         marks.append(
             {
                 "note": note["id"],

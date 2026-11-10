@@ -4438,6 +4438,17 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-737.d1: an anchor to a span of a served file, refused when the prompt is held. Each
+    # remedy is a client's next request or a git command, run by the test the reason names.
+    "serve_notes.py:_file_anchor#5": (
+        "the same request naming lines the file has now; proved by tests/test_kyo_serve_notes"
+        ".py::test_c2_what_cannot_be_anchored_is_refused_by_name_and_nothing_is_held"
+    ),
+    "serve_notes.py:_file_anchor#7": (
+        "shell command: `git commit`, a first commit in the root's repository; proved by "
+        "tests/test_kyo_serve_notes.py::"
+        "test_c2_a_repository_with_no_commit_is_refused_and_a_first_commit_clears_it"
+    ),
     # KYO-735.d2: `kyo sessions scratch <dir>`, each refusal's re-invocation run by the
     # test the reason names.
     "cmd_sessions.py:record_scratch_dir#2": (

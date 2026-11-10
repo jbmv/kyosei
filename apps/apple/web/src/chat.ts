@@ -3,7 +3,9 @@
 // version replaces it in place.
 import { agentKind, shortModel } from "./agents";
 import {
-  drawnSpan, heldLine, lineOf, nearest, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan,
+  type FilePlace, type Place, blockLines, drawnSpan, fileLine, heldLine, lineAt, lineOf, nearest,
+  placeAnchor, placeKey, recordLine as placedRecord, samePlace, scrollToShow, sentenceAt, shiftLines, sourceIndex,
+  sourceSpan, spanPlace,
 } from "./marks";
 import {
   type Answer, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
@@ -15,7 +17,7 @@ import { highlight, render } from "./pipeline";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
   dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
-  recordPage, refParts, visit, when,
+  recordOf, recordPage, refParts, visit, when,
 } from "./records";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
@@ -190,6 +192,7 @@ const ICONS = {
   chat: '<path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 16h-7.5L7 19.5V16H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 5z"/>',
   records: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  page: '<path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M14 3.5v4h4M8.5 12h7M8.5 15.5h7"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -291,6 +294,36 @@ function drawHeld(line: string): HTMLElement | null {
   return chip;
 }
 
+/**
+ * The line `kyo serve` puts above a paragraph anchored to a record or to a file (KYO-737),
+ * drawn as an anchor to a reply is: a bare icon and words. A click opens the record at the
+ * element, or the file at the lines, in its view.
+ */
+function drawPlaceLine(line: string): HTMLElement | null {
+  const record = placedRecord(line);
+  const file = record ? null : fileLine(line);
+  if (!record && !file) return null;
+  const chip = document.createElement("span");
+  chip.className = "turn-anchor turn-place";
+  chip.title = line;
+  if (record) {
+    const words = record.words.replace(/\.\.\.$/, "…");
+    chip.dataset.place = placeKey({ kind: "record", id: record.id });
+    chip.append(icon("records"), words ? `${record.id} ${words}` : record.id);
+    chip.addEventListener("click", () => revealPlace({ kind: "record", id: record.id, words }));
+  } else if (file) {
+    const words = (file.selection ?? file.words).replace(/\.\.\.$/, "…");
+    const span = file.lines[0] === file.lines[1] ? `${file.lines[0]}` : `${file.lines[0]}-${file.lines[1]}`;
+    chip.dataset.place = placeKey({ kind: "path", ...file });
+    chip.append(icon("page"), `${nameOf(file.path)}:${span}${words ? ` ${words}` : ""}`);
+    chip.addEventListener("click", () => revealPlace({
+      kind: "path", root: file.root, path: file.path, lines: file.lines, words,
+      ...(file.session ? { session: file.session } : {}),
+    }));
+  }
+  return chip;
+}
+
 function drawTurn(turn: Turn): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
@@ -307,6 +340,13 @@ function drawTurn(turn: Turn): HTMLElement {
     const held = index === 0 ? drawHeld(line) : null;
     if (held) {
       element.append(held);
+      continue;
+    }
+    // KYO-737: an anchor to a record or to lines of a file is a chip that opens the place.
+    const place = drawPlaceLine(line);
+    if (place) {
+      flush(false);
+      element.append(place);
       continue;
     }
     const anchor = line.match(ANCHOR_LINE);
@@ -1613,7 +1653,8 @@ interface AnchorItem {
 }
 /** A file pasted into a paragraph, kept on the machine the session runs on. */
 interface FileItem { kind: "file"; id: string; name: string; path?: string; thumb?: string; pending?: string }
-type Item = TagItem | AnchorItem | FileItem;
+/** KYO-737: a record or lines of a file are held as the places `marks.ts` describes. */
+type Item = TagItem | AnchorItem | FileItem | Place;
 interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
 
 interface Marks {
@@ -1711,6 +1752,11 @@ function showCaret(area: HTMLTextAreaElement): void {
   );
 }
 
+/** The icon of one thing a mark holds: a record's and a file's are their views'. */
+function itemIcon(item: Item): keyof typeof ICONS {
+  return item.kind === "record" ? "records" : item.kind === "path" ? "page" : item.kind;
+}
+
 function drawMarks(area: HTMLTextAreaElement): void {
   const marks = marksOf.get(area)!;
   marks.mirror.replaceChildren(...area.value.split("\n").map((text) => {
@@ -1723,7 +1769,7 @@ function drawMarks(area: HTMLTextAreaElement): void {
     if (!items.length) return [];
     // One thing shows as what it is, and several as their number.
     const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(area, id));
-    if (items.length === 1) mark.append(icon(items[0].kind));
+    if (items.length === 1) mark.append(icon(itemIcon(items[0])));
     mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
       : item.kind === "file" ? `attached: ${item.name}` : `anchor: ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
@@ -1783,10 +1829,14 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
         chip.append(icon("file"));
       }
       chip.append(item.pending ? `${item.name} (uploading)` : item.name);
-    } else {
+    } else if (item.kind === "anchor") {
       // An anchor's chip goes to the place it names.
       const place = boxButton("mark-anchor", item.words, () => reveal(item));
       place.prepend(icon("anchor"));
+      chip.append(place);
+    } else {
+      const place = boxButton("mark-anchor", item.words, () => revealPlace(item));
+      place.prepend(icon(itemIcon(item)));
       chip.append(place);
     }
     chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
@@ -1960,12 +2010,13 @@ function spanAt(
  * the box was left, which a text area keeps while the focus is elsewhere. The text is not
  * changed, so an empty paragraph takes the anchor as it is.
  */
-function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem): void {
+function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem | Place): void {
   const marks = marksOf.get(area)!;
   const id = marks.ids[line ?? caretLine(area)];
   const held = marks.items.get(id) ?? [];
-  const same = (other: Item) => other.kind === "anchor" && other.key === item.key
-    && other.start === item.start && other.end === item.end;
+  const same = (other: Item) => (item.kind === "anchor"
+    ? other.kind === "anchor" && other.key === item.key && other.start === item.start && other.end === item.end
+    : (other.kind === "record" || other.kind === "path") && samePlace(other, item));
   if (!held.some(same)) marks.items.set(id, [...held, item]);
   // Typing goes on where it was.
   area.focus();
@@ -1973,7 +2024,7 @@ function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorI
   drawMarks(area);
 }
 
-function showAnchorMenu(x: number, y: number, item: AnchorItem): void {
+function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
   const areas = textAreas();
   const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
   const entry = (label: string, line: number | null, className = "") => {
@@ -2063,7 +2114,11 @@ function anchoredBlocks(item: AnchorItem): HTMLElement[] {
 /** A sent paragraph and where it was anchored, as `GET sessions/<id>/marks` gives it. */
 interface SentMark {
   note: string; text: string | null; tags: string[];
-  anchors: { role: string; message?: string; uuid?: string; start?: number; end?: number; stale?: boolean }[];
+  anchors: {
+    role?: string; message?: string; uuid?: string; start?: number; end?: number; stale?: boolean;
+    /** KYO-737: set on an anchor to a record (`id`) or to a file (`root`, `path`, `lines`). */
+    kind?: string; id?: string; root?: string; path?: string; lines?: number[];
+  }[];
 }
 let sentMarks_: SentMark[] = [];
 /** What is drawn for the sent marks, so the mouse can find the paragraph behind a place. */
@@ -2071,7 +2126,7 @@ let sentPlaces: { mark: SentMark; range: Range | null; blocks: HTMLElement[] }[]
 
 function sentItems(): { mark: SentMark; item: AnchorItem }[] {
   return sentMarks_.flatMap((mark) => mark.anchors.flatMap((anchor) => {
-    if (anchor.stale || anchor.start === undefined || anchor.end === undefined) return [];
+    if (anchor.kind || anchor.stale || anchor.start === undefined || anchor.end === undefined) return [];
     const key = anchor.message ? `r:${anchor.message}` : `t:${anchor.uuid}`;
     const item: AnchorItem = {
       kind: "anchor", key, session: "", start: anchor.start, end: anchor.end, words: "", exact: true,
@@ -2117,6 +2172,31 @@ function wordsRange(item: AnchorItem): Range | null {
 }
 
 /**
+ * A sent anchor to a record or a file that the server now gives as stale is drawn so: the
+ * element is gone from the store, or the file's lines no longer hold the words (KYO-737).
+ */
+function paintStalePlaces(): void {
+  const stale = new Set(sentMarks_.flatMap((mark) => mark.anchors)
+    .filter((anchor) => anchor.kind && anchor.stale).map((anchor) => placeKey(anchor as { kind: string })));
+  for (const chip of Array.from(chat.querySelectorAll<HTMLElement>(".turn-place"))) {
+    const gone = stale.has(chip.dataset.place ?? "");
+    chip.classList.toggle("stale", gone);
+    const line = (chip.title ?? "").replace(/\n\(stale:.*$/s, "");
+    chip.title = gone ? `${line}\n(stale: this place no longer holds what was anchored)` : line;
+  }
+}
+
+/** Opens the record at the element, or the file at the lines, that a place names. */
+function revealPlace(place: Place): void {
+  if (place.kind === "record") {
+    const record = recordOf(place.id);
+    if (record) openRecord({ record, ref: place.id });
+    return;
+  }
+  showFile(place.root, place.path, place.lines[0], null, false, place.lines[1]);
+}
+
+/**
  * Shows in the chat what the unsent prompts are anchored to: selected words are highlighted,
  * and an anchor to whole blocks puts a quiet bar beside them.
  */
@@ -2124,6 +2204,7 @@ function paintAnchors(): void {
   for (const block of Array.from(chat.querySelectorAll(".anchored, .anchored-sent"))) {
     block.classList.remove("anchored", "anchored-sent");
   }
+  paintStalePlaces();
   const ranges: Range[] = [];
   const sentRanges: Range[] = [];
   sentPlaces = sentItems().map(({ mark, item }) => {
@@ -2467,6 +2548,7 @@ function sentMarks(area: HTMLTextAreaElement): unknown[] {
     const items = marks.items.get(id) ?? [];
     if (!items.length) return [];
     const anchors = items.flatMap((item) => {
+      if (item.kind === "record" || item.kind === "path") return [placeAnchor(item)];
       if (item.kind !== "anchor") return [];
       const place = { kind: "turn", session: item.session, start: item.start, end: item.end };
       // A reply is named by its message, which may join several records; a prompt by its own.
@@ -3148,6 +3230,23 @@ document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip
 
 recordsHome.addEventListener("click", closeRecord);
 
+// KYO-737: a right-click on a citable element of the open record, or a selection within
+// one, offers Anchor as the chat does. The anchor is to the element, by its id.
+recordArticle.addEventListener("contextmenu", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const element = target?.closest<HTMLElement>("[data-record-ref]");
+  const id = element?.dataset.recordRef;
+  const own = ownSelection();
+  if (!own) window.getSelection()?.removeAllRanges();
+  if (!element || !id) return;
+  event.preventDefault();
+  const text = element.classList.contains("record-head")
+    ? recordArticle.querySelector("h1")?.textContent ?? ""
+    : element.querySelector(".rec-text")?.textContent ?? "";
+  const words = text.trim() ? `${id} ${firstWords(text, ANCHOR_WORDS)}` : id;
+  showAnchorMenu(event.clientX, event.clientY, { kind: "record", id, words });
+});
+
 // A record is opened by a row of a list, a link on a record's page, or a kyosei:// link in
 // the chat, which the page would otherwise have nowhere to follow.
 document.addEventListener("click", (event) => {
@@ -3392,6 +3491,8 @@ interface OpenFile {
   root: string;
   path: string;
   line: number | null;
+  /** The last line of the span the file was opened at, when it is more than one (KYO-737). */
+  lineEnd: number | null;
   /** Set until the line asked for has been scrolled to. */
   lineWaits: boolean;
   entry: Entry | null;
@@ -3647,6 +3748,8 @@ function fileSource(file: OpenFile, text: string): HTMLElement {
     const mark = document.createElement("div");
     mark.className = "file-line-mark";
     mark.style.top = `${SOURCE_PADDING_PX + (file.line - 1) * SOURCE_LINE_PX}px`;
+    const last = Math.min(Math.max(file.lineEnd ?? file.line, file.line), count);
+    mark.style.height = `${(last - file.line + 1) * SOURCE_LINE_PX}px`;
     box.append(mark);
   }
   return box;
@@ -3687,14 +3790,23 @@ function showFileLine(file: OpenFile): void {
     return;
   }
   const line = file.line - 1;
-  const block = Array.from(fileArticle.querySelectorAll<HTMLElement>("[data-source-line]"))
+  const last = Math.max(file.lineEnd ?? file.line, file.line) - 1;
+  const stamped = Array.from(fileArticle.querySelectorAll<HTMLElement>("[data-source-line]"));
+  const block = stamped
     .filter((candidate) =>
       Number(candidate.dataset.sourceLine) <= line && line < Number(candidate.dataset.sourceEnd))
     .pop();
   if (!block) return;
+  // A span of several blocks shows each innermost block it covers.
+  const covered = last > line
+    ? stamped.filter((candidate) => !candidate.querySelector("[data-source-line]")
+      && Number(candidate.dataset.sourceLine) <= last && Number(candidate.dataset.sourceEnd) > line)
+    : [];
   block.scrollIntoView({ block: "center" });
-  block.classList.add("revealed");
-  setTimeout(() => block.classList.remove("revealed"), REVEAL_MS);
+  for (const shown of covered.length ? covered : [block]) {
+    shown.classList.add("revealed");
+    setTimeout(() => shown.classList.remove("revealed"), REVEAL_MS);
+  }
 }
 
 /** The pane: the open file, or the tree when none is open. A redraw keeps the place read. */
@@ -3781,6 +3893,7 @@ function showTreeRow(path: string): void {
  */
 function showFile(
   root: string, path: string, line: number | null = null, entry: Entry | null = null, back = false,
+  lineEnd: number | null = null,
 ): void {
   chosenRoot = root;
   store(FILES_ROOT_KEY, root);
@@ -3803,12 +3916,13 @@ function showFile(
       }
       fileImages.clear();
       openFile = {
-        root, path, line, lineWaits: line !== null, entry: entry ?? entryAt(root, path),
+        root, path, line, lineEnd, lineWaits: line !== null, entry: entry ?? entryAt(root, path),
         asked: false, etag: null, text: null, data: null, mediaType: entry?.media_type ?? "",
         problem: null, whole: false,
       };
     } else if (openFile) {
       openFile.line = line;
+      openFile.lineEnd = lineEnd;
       openFile.lineWaits = line !== null;
     }
     if (!same) filesPane.scrollTop = 0;
@@ -4114,6 +4228,89 @@ document.addEventListener("click", (event) => {
 });
 
 filesBack.addEventListener("click", fileBack);
+
+/**
+ * The lines of the open file that a right-click names (KYO-737), in the file's source
+ * whatever is drawn. A selection the person made names its own lines and, where its words are
+ * found in the source, itself; with none, a rendered markdown file gives the block under the
+ * pointer and a source file the line. Null where there is nothing to name.
+ */
+function filePlaceAt(
+  file: OpenFile, target: Element, pointer: { x: number; y: number }, own: boolean,
+): Pick<FilePlace, "lines" | "chars" | "words"> | null {
+  const text = file.text;
+  if (text === null) return null;
+  const selection = window.getSelection();
+  const range = own && selection && !selection.isCollapsed && fileArticle.contains(selection.anchorNode)
+    && fileArticle.contains(selection.focusNode) ? selection.getRangeAt(0) : null;
+  const picked = range ? selection!.toString().trim() : "";
+  const code = fileArticle.querySelector<HTMLElement>(".file-code code");
+  if (code) {
+    // A source file is drawn as its text, so a place in the page is a place in the file.
+    const drawn = drawnOf(code);
+    if (range && picked && code.contains(range.startContainer) && code.contains(range.endContainer)) {
+      const span = spanPlace(
+        text, drawnOffset(drawn, range.startContainer, range.startOffset),
+        drawnOffset(drawn, range.endContainer, range.endOffset));
+      return span && { ...span, words: firstWords(picked, ANCHOR_WORDS) };
+    }
+    const caret = caretAt(pointer.x, pointer.y);
+    if (!caret) return null;
+    const gutter = fileArticle.querySelector<HTMLElement>(".file-gutter");
+    let lines: [number, number] | null = null;
+    if (gutter?.contains(caret.node)) {
+      // The gutter holds one number to a line.
+      const number = lineOf(gutter.textContent ?? "", drawnOffset(drawnOf(gutter), caret.node, caret.offset));
+      lines = lineAt(text, text.split("\n").slice(0, number).reduce((sum, row) => sum + row.length + 1, 0));
+    } else if (code.contains(caret.node)) {
+      lines = lineAt(text, drawnOffset(drawn, caret.node, caret.offset));
+    }
+    return lines && { lines, words: firstWords(text.split("\n")[lines[0] - 1], ANCHOR_WORDS) };
+  }
+  const holder = fileArticle.querySelector<HTMLElement>(".file-body");
+  if (!holder) return null;
+  const block = (node: Node | null) => {
+    const found = (node instanceof HTMLElement ? node : node?.parentElement)
+      ?.closest<HTMLElement>("[data-source-line]");
+    return found && holder.contains(found) ? found : null;
+  };
+  if (range && picked) {
+    const first = block(range.startContainer);
+    const last = block(range.endContainer) ?? first;
+    if (!first || !last) return null;
+    const part = sourceOf(first, text);
+    const drawn = drawnOf(first);
+    const at = drawnOffset(drawn, range.startContainer, range.startOffset);
+    const found = nearest(text, picked, part.base + sourceIndex(part.text, drawn.text, at));
+    const words = firstWords(picked, ANCHOR_WORDS);
+    // Words drawn as they are written are the selection itself; formatted ones name their blocks.
+    const span = found >= 0 ? spanPlace(text, found, found + picked.length) : null;
+    if (span) return { ...span, words };
+    const lines = blockLines(text, Number(first.dataset.sourceLine), Number(last.dataset.sourceEnd));
+    return lines && { lines, words };
+  }
+  const under = block(target);
+  if (!under) return null;
+  const lines = blockLines(text, Number(under.dataset.sourceLine), Number(under.dataset.sourceEnd));
+  return lines && { lines, words: firstWords(under.textContent ?? "", ANCHOR_WORDS) };
+}
+
+// KYO-737: a selection in the open file, or a right-click on a block of it, offers Anchor as
+// the chat does.
+fileArticle.addEventListener("contextmenu", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const file = openFile;
+  const own = ownSelection();
+  const place = file && target
+    ? filePlaceAt(file, target, { x: event.clientX, y: event.clientY }, own) : null;
+  if (!own) window.getSelection()?.removeAllRanges();
+  if (!file || !place) return;
+  event.preventDefault();
+  const session = isPerSession(fileRoots, file.root) ? filesSession : null;
+  showAnchorMenu(event.clientX, event.clientY, {
+    kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}),
+  });
+});
 document.getElementById("side-mentioned-more")!.addEventListener("click", () => {
   allMentions = !allMentions;
   drawMentions();

@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  drawnSpan, heldLine, lineOf, nearest, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan,
+  blockLines, codePoints, drawnSpan, fileLine, heldLine, lineAt, lineOf, nearest, placeAnchor, placeKey,
+  recordLine, samePlace, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan, spanPlace,
 } from "../src/marks.ts";
 
 /** Applies an edit to three lines with ids 1, 2, 3 and new ids from 10. */
@@ -269,4 +270,124 @@ test("a line a person might type, and an anchor line, are not taken for it", () 
   assert.equal(heldLine("held 14 minutes: written before your reply"), null);
   assert.equal(heldLine(`on your reply ${REPLY} "the transcript does not stream; the..."`), null);
   assert.equal(heldLine(`held 14 minutes: written before your reply ${REPLY} "x"`), null);
+});
+
+// ---- anchors to a record and to a place in a file (KYO-737)
+
+test("a record's line is read with its id and its words, and a dispatch's with none", () => {
+  assert.deepEqual(
+    recordLine('on record KYO-717.c4 "A record\'s page shows its criteria..."'),
+    { id: "KYO-717.c4", words: "A record's page shows its criteria..." });
+  assert.deepEqual(recordLine("on record KYO-717.d1"), { id: "KYO-717.d1", words: "" });
+  assert.deepEqual(recordLine('on record KYO-717 "Records view"'), { id: "KYO-717", words: "Records view" });
+  assert.deepEqual(recordLine("on record KYO-9.g1 (not in the store)"), { id: "KYO-9.g1", words: "" });
+});
+
+test("a line that only resembles a record's is not one", () => {
+  assert.equal(recordLine("on record KYO-717.c4 and then some words"), null);
+  assert.equal(recordLine("on record keeping, generally"), null);
+  assert.equal(recordLine("on KYO-717.c4"), null);
+  assert.equal(recordLine('on note KYO-N41'), null);
+});
+
+test("a file's line is read with its path, its lines and its words", () => {
+  assert.deepEqual(
+    fileLine('on file docs/proposals/native-apps.md lines 333-345 "The app is built in..."'),
+    {
+      root: "code", path: "docs/proposals/native-apps.md", session: null, lines: [333, 345],
+      words: "The app is built in...", selection: null,
+    });
+});
+
+test("a file's line names the root when it is not the code repository", () => {
+  const store = fileLine('on file docs/plan.md in the store repository lines 5-6 "The second chunk..." (list item)');
+  assert.equal(store?.root, "store");
+  assert.equal(store?.path, "docs/plan.md");
+  assert.equal(store?.words, "The second chunk...");
+  const scratch = fileLine('on file notes.md in the scratchpad lines 3-3 "Try the tunnel first."');
+  assert.deepEqual([scratch?.root, scratch?.session, scratch?.path], ["scratch", null, "notes.md"]);
+  const other = fileLine(
+    'on file a/b.md in the scratchpad of session 108d6543-12e9-4ae4-85fb-f303424bfa6a lines 1-2 "x"');
+  assert.deepEqual([other?.root, other?.session], ["scratch", "108d6543-12e9-4ae4-85fb-f303424bfa6a"]);
+});
+
+test("a short selection's line gives the sentence and the selection", () => {
+  const read = fileLine('on file src/tidy.py lines 5-5 "return text.strip()" at "strip"');
+  assert.deepEqual([read?.words, read?.selection], ["return text.strip()", "strip"]);
+  const gone = fileLine("on file src/tidy.py lines 5-5 (words unavailable)");
+  assert.deepEqual([gone?.path, gone?.words, gone?.lines], ["src/tidy.py", "", [5, 5]]);
+});
+
+test("a path with spaces is read whole, and the older line with a commit is not drawn", () => {
+  assert.equal(fileLine('on file my notes/a plan.md lines 1-1 "x"')?.path, "my notes/a plan.md");
+  assert.equal(fileLine('on file plan.md at 0123abc lines 2-3 "two three"'), null);
+  assert.equal(fileLine("on file plan.md"), null);
+});
+
+test("a span of a file names the source's lines and its code points", () => {
+  const text = "import os\n\n\ndef reformat(text):\n    return text.strip()\n";
+  const from = text.indexOf("def");
+  assert.deepEqual(spanPlace(text, from, text.length), { lines: [4, 5], chars: [from, text.length - 1] });
+  const word = text.indexOf("strip");
+  assert.deepEqual(spanPlace(text, word, word + 5), { lines: [5, 5], chars: [word, word + 5] });
+  // White space at the ends, a line break among it, is not part of what was selected.
+  assert.deepEqual(spanPlace(text, 9, from + 3), { lines: [4, 4], chars: [from, from + 3] });
+  assert.equal(spanPlace(text, 9, 12), null);
+});
+
+test("a selection is counted in code points, as the server counts the file's text", () => {
+  const text = "a 😀 b\nsecond 😀 line";
+  const at = text.indexOf("line");
+  assert.equal(codePoints(text, at), Array.from(text.slice(0, at)).length);
+  assert.deepEqual(spanPlace(text, at, at + 4)?.chars, [at - 2, at + 2]);
+  assert.deepEqual(spanPlace(text, at, at + 4)?.lines, [2, 2]);
+});
+
+test("a rendered block's lines are the source's, without the blank lines around it", () => {
+  const text = "# Plan\n\nFirst paragraph\nruns on.\n\n- one\n- two\n\n";
+  // The renderer stamps a block with its first line from 0 and the line after its last.
+  assert.deepEqual(blockLines(text, 0, 1), [1, 1]);
+  assert.deepEqual(blockLines(text, 2, 4), [3, 4]);
+  assert.deepEqual(blockLines(text, 5, 8), [6, 7]);
+  assert.deepEqual(blockLines(text, 2, 7), [3, 7]);
+  assert.equal(blockLines(text, 4, 5), null);
+  assert.deepEqual(blockLines(text, 5, 99), [6, 7]);
+});
+
+test("a click in a source file names the line under it, and a blank line names nothing", () => {
+  const text = "import os\n\nLIMIT = 3\n";
+  assert.deepEqual(lineAt(text, 3), [1, 1]);
+  assert.equal(lineAt(text, 10), null);
+  assert.deepEqual(lineAt(text, text.indexOf("LIMIT")), [3, 3]);
+});
+
+test("a place is sent as the anchor the server takes, without its words", () => {
+  assert.deepEqual(
+    placeAnchor({ kind: "record", id: "KYO-717.c4", words: "KYO-717.c4 A record's page" }),
+    { kind: "record", id: "KYO-717.c4" });
+  assert.deepEqual(
+    placeAnchor({ kind: "path", root: "store", path: "docs/plan.md", lines: [3, 5], words: "x" }),
+    { kind: "file", root: "store", path: "docs/plan.md", lines: [3, 5] });
+  assert.deepEqual(
+    placeAnchor({
+      kind: "path", root: "scratch", path: "n.md", session: "s-1", lines: [3, 3], chars: [10, 14], words: "x",
+    }),
+    { kind: "file", root: "scratch", path: "n.md", lines: [3, 3], chars: [10, 14], session: "s-1" });
+});
+
+test("the same place twice is one anchor, and another selection in the same lines is another", () => {
+  const lines = { kind: "path" as const, root: "code", path: "a.py", lines: [3, 5] as [number, number], words: "x" };
+  assert.ok(samePlace(lines, { ...lines, words: "y" }));
+  assert.ok(!samePlace(lines, { ...lines, chars: [4, 9] }));
+  assert.ok(!samePlace(lines, { ...lines, root: "store" }));
+  assert.ok(samePlace({ kind: "record", id: "KYO-1.c1", words: "" }, { kind: "record", id: "KYO-1.c1", words: "z" }));
+  assert.ok(!samePlace({ kind: "record", id: "KYO-1.c1", words: "" }, lines));
+});
+
+test("a sent line and the marks route's anchor for it have one key", () => {
+  const read = fileLine('on file docs/plan.md in the store repository lines 5-6 "x"')!;
+  assert.equal(
+    placeKey({ kind: "path", ...read }),
+    placeKey({ kind: "document", root: "store", path: "docs/plan.md", lines: [5, 6] }));
+  assert.equal(placeKey({ kind: "record", id: "KYO-1.g2" }), "record:KYO-1.g2");
 });

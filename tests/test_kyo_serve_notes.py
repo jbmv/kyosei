@@ -12,18 +12,19 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import subprocess
 import threading
 from pathlib import Path
 
 import pytest
 
-from kyosei import cmd_notes, commands, serve_notes
+from kyosei import cmd_notes, cmd_sessions, commands, serve, serve_notes
 from kyosei import store as store_module
 from kyosei.cmd_notes import mark_sent as cmd_notes_mark_sent
 from kyosei.cmd_notes import span_digest as cmd_notes_span_digest
 
-from .conftest import invoke, opt_in_transcripts
-from .test_kyo_serve import body_json
+from .conftest import git_init, invoke, new_record, opt_in_transcripts
+from .test_kyo_serve import body_json, register
 from .test_kyo_serve_held import looks, wait_until
 from .test_kyo_serve_send import FRAME_WORKING, IDLE, enable, issue, keys_sent, log_rows, post
 from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
@@ -1307,3 +1308,536 @@ def _fixture_record() -> dict:
         if row.get("uuid") == REPLY:
             return row
     raise AssertionError("the fixture's reply is gone")
+
+
+# ------------------------------------- KYO-737: anchors to a record and to a served file
+
+
+def kyo_of(bed: Bed):
+    """The CLI against the bed's project, as the ``kyo`` fixture runs it."""
+
+    def run(*args: str, stdin: str | None = None):
+        return invoke(["--root", str(bed.project), *args], stdin=stdin)
+
+    run.project = bed.project
+    return run
+
+
+def one_mark(*anchors: dict, text: str = "about this") -> dict:
+    return {
+        "segments": [{"kind": "typed", "text": text}],
+        "marks": [{"line": 0, "anchors": list(anchors)}],
+    }
+
+
+def on_lines(sent: dict) -> list[str]:
+    return [line for line in sent["message"].splitlines() if line.startswith("on ")]
+
+
+@pytest.fixture
+def with_files(bed: Bed, can_send: str, store_home: Path) -> str:
+    """A token that may also read files, as the app's does."""
+    return issue("mac", "notes", "send", "files")
+
+
+@pytest.fixture
+def elements(bed: Bed) -> dict[str, str]:
+    """A record with one of each element a prompt can cite, by the element's kind."""
+    kyo = kyo_of(bed)
+    record = new_record(
+        kyo,
+        title="Widgets explode when the cache is cold",
+        criteria=["widgets stop exploding in every build we ship from now on"],
+    )
+    assert kyo("gate", record, "holding-for", "--do", "the iPad build is checked").code == 0
+    noted = kyo("edit", record, "--note-file", "-", stdin="seen again on the laptop\n")
+    assert noted.code == 0, noted
+    claimed = kyo(
+        "claim", record, "--level", "asserted", "--method", "read the code", "--file", "-",
+        stdin="the cache eviction races the write",
+    )  # fmt: skip
+    assert claimed.code == 0, claimed
+    git_init(bed.project)
+    dispatched = kyo("dispatch", record, "--task-file", "-", stdin="Fix the race.")
+    assert dispatched.code == 0, dispatched
+    shown = kyo("show", record, "--json").json
+    return {
+        "record": record,
+        "criterion": shown["criteria"][0]["id"],
+        "gate": shown["gates"][0]["id"],
+        "note": shown["notes"][0]["id"],
+        "claim": shown["claims"][0]["id"],
+        "dispatch": shown["dispatches"][0]["id"],
+    }
+
+
+def test_c1_a_paragraph_is_anchored_to_a_record_and_to_each_element_of_one(
+    bed: Bed, notes_path: str, can_send: str, elements: dict[str, str]
+) -> None:
+    order = ("record", "criterion", "gate", "dispatch", "note", "claim")
+    anchors = [{"kind": "record", "id": elements[kind]} for kind in order]
+    status, sent = post(bed, SEND_PROMPT, one_mark(*anchors), can_send)
+    assert status == 200, sent
+    assert sent["message"].splitlines() == [
+        f'on record {elements["record"]} "Widgets explode when the cache is..."',
+        f'on record {elements["criterion"]} "widgets stop exploding in every build..."',
+        f'on record {elements["gate"]} "the iPad build is checked"',
+        # A dispatch has no words of its own; `kyo show` reads its id.
+        f"on record {elements['dispatch']}",
+        f'on record {elements["note"]} "seen again on the laptop"',
+        f'on record {elements["claim"]} "the cache eviction races the write"',
+        "about this",
+    ]
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, sent["held"]["id"])) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, sent["held"]["id"])
+    # Stored as the existing kind, by the element's own id, with no new key.
+    assert note["anchors"] == [
+        {"kind": "record", "target": elements[kind]} for kind in order
+    ]
+    # What takes an agent to the place: `kyo show` reads a record and a dispatch by their own
+    # ids, and prints every other element under the id of the record that holds it.
+    kyo = kyo_of(bed)
+    assert kyo("show", elements["dispatch"]).code == 0
+    shown = kyo("show", elements["record"])
+    assert shown.code == 0 and all(elements[kind] in shown.out for kind in order)
+    # A note on an element is found from its record.
+    found = on_the_cli(bed, "list", "--on", elements["record"])
+    assert [item["id"] for item in found["notes"]] == [note["id"]]
+
+
+@pytest.mark.parametrize("letter", ["c", "g", "d", "n", "m"])
+def test_c1_an_id_the_store_does_not_hold_is_refused_and_a_listed_id_clears_it(
+    bed: Bed, can_send: str, elements: dict[str, str], letter: str
+) -> None:
+    record = elements["record"]
+    missing = f"{record}.{letter}99"
+    status, refused = post(bed, SEND_PROMPT, one_mark({"kind": "record", "id": missing}), can_send)
+    assert status == 400, refused
+    assert f"{missing!r} in this store" in refused["error"]
+    assert f"`kyo show {record}` prints the ids that record holds" in refused["error"]
+    assert get(bed, HELD_ROUTE, can_send)[1]["held"] is None
+    # The remedy: an id that command prints.
+    shown = kyo_of(bed)("show", record)
+    listed = next(
+        word.strip(".,:()|") for word in shown.out.split() if f"{record}.{letter}" in word
+    )
+    status, sent = post(bed, SEND_PROMPT, one_mark({"kind": "record", "id": listed}), can_send)
+    assert status == 200, sent
+    assert on_lines(sent)[0].startswith(f"on record {listed}")
+
+
+def test_c1_a_record_the_store_does_not_hold_names_the_list_and_other_ids_are_refused(
+    bed: Bed, can_send: str, elements: dict[str, str]
+) -> None:
+    missing = one_mark({"kind": "record", "id": "TST-999"})
+    status, refused = post(bed, SEND_PROMPT, missing, can_send)
+    assert status == 400 and "`kyo list` prints the ids of the records" in refused["error"]
+    listed = kyo_of(bed)("list")
+    assert elements["record"] in listed.out
+    # A report is not an element a prompt anchors to, and the refusal says which are.
+    status, refused = post(
+        bed, SEND_PROMPT, one_mark({"kind": "record", "id": f"{elements['record']}.r1"}), can_send
+    )
+    assert status == 400 and "criterion, gate, dispatch, note or claim" in refused["error"]
+
+
+SOURCE = "import os\n\n\ndef reformat(text):\n    return text.strip()\n\nLIMIT = 3\n"
+PLAN = (
+    "# The plan\n"
+    "\n"
+    "The first chunk is the reader, and it is done.\n"
+    "\n"
+    "- The second chunk waits on the signing key that the lab holds.\n"
+    "- The third chunk is the composer.\n"
+)
+
+
+@pytest.fixture
+def code(bed: Bed) -> Path:
+    """The bed's project as a repository with a source file and a plan, committed."""
+    (bed.project / "src").mkdir()
+    (bed.project / "src" / "tidy.py").write_text(SOURCE, encoding="utf-8")
+    (bed.project / "docs").mkdir(exist_ok=True)
+    (bed.project / "docs" / "plan.md").write_text(PLAN, encoding="utf-8")
+    git_init(bed.project)
+    return bed.project
+
+
+def served(path: str, first: int, last: int, **more) -> dict:
+    return {"kind": "file", "root": "code", "path": path, "lines": [first, last], **more}
+
+
+def head_of(root: Path) -> str:
+    done = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    )
+    return done.stdout.strip()
+
+
+def test_c2_a_span_of_a_served_file_is_its_path_its_lines_and_its_words(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    status, sent = post(
+        bed,
+        SEND_PROMPT,
+        one_mark(served("src/tidy.py", 4, 5), served("docs/plan.md", 5, 6)),
+        with_files,
+    )
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        'on file src/tidy.py lines 4-5 "def reformat(text): return text.strip()"',
+        # A markdown block is quoted without its mark, and labelled as a reply's is.
+        'on file docs/plan.md lines 5-6 "The second chunk waits on the..." (list item)',
+    ]
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
+    (note,) = filed_by(bed, notes_path, with_files, sent["held"]["id"])
+    source, plan = note["anchors"]
+    # The existing kinds: a markdown file is a document, any other a file.
+    assert (source["kind"], plan["kind"]) == ("file", "document")
+    assert (source["target"], source["line_start"], source["line_end"]) == ("src/tidy.py", 4, 5)
+    # The commit the file was read at, and the digest of the lines as served.
+    assert source["commit_sha"] == plan["commit_sha"] == head_of(code)
+    assert source["digest"] == cmd_notes.lines_digest(SOURCE.split("\n")[3:5])
+    assert source["digest_check"] == "computed" and "session" not in source
+    assert set(source) <= {
+        "kind", "target", "commit_sha", "line_start", "line_end", "digest", "digest_check",
+    }  # fmt: skip
+    shown = on_the_cli(bed, "show", note["id"])
+    assert shown["note"]["anchors"] == note["anchors"]
+
+
+def chars_of(text: str, words: str) -> list[int]:
+    start = text.index(words)
+    return [start, start + len(words)]
+
+
+def test_c2_a_short_selection_quotes_its_sentence_and_a_long_one_is_quoted_itself(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    long = "waits on the signing key that the lab"
+    status, sent = post(
+        bed,
+        SEND_PROMPT,
+        one_mark(
+            served("docs/plan.md", 5, 5, chars=chars_of(PLAN, "waits")),
+            served("docs/plan.md", 5, 5, chars=chars_of(PLAN, long)),
+            served("docs/plan.md", 1, 1, chars=chars_of(PLAN, "The plan")),
+            served("src/tidy.py", 5, 5, chars=chars_of(SOURCE, "strip")),
+            served("src/tidy.py", 4, 5, chars=chars_of(SOURCE, "reformat(text):\n    return")),
+        ),
+        with_files,
+    )
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        'on file docs/plan.md lines 5-5 "The second chunk waits on the signing key that the..."'
+        ' at "waits" (list item)',
+        'on file docs/plan.md lines 5-5 "waits on the signing key that..." (list item)',
+        # A selection that is the whole of its sentence is the quote already.
+        'on file docs/plan.md lines 1-1 "The plan" (heading)',
+        # A source file has no blocks: the line is the sentence, and nothing is labelled.
+        'on file src/tidy.py lines 5-5 "return text.strip()" at "strip"',
+        # A few words over two lines are in no one sentence, and are quoted themselves.
+        'on file src/tidy.py lines 4-5 "reformat(text): return"',
+    ]
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
+    (note,) = filed_by(bed, notes_path, with_files, sent["held"]["id"])
+    first = note["anchors"][0]
+    assert [first["char_start"], first["char_end"]] == chars_of(PLAN, "waits")
+
+
+def test_c2_a_file_with_uncommitted_changes_is_anchored_as_it_is_served(
+    bed: Bed, with_files: str, code: Path
+) -> None:
+    (code / "src" / "tidy.py").write_text("# edited since the commit\n" + SOURCE, encoding="utf-8")
+    (code / "src" / "new.py").write_text("fresh = True\n", encoding="utf-8")
+    document = one_mark(served("src/tidy.py", 1, 1), served("src/new.py", 1, 1))
+    status, sent = post(bed, SEND_PROMPT, document, with_files)
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        'on file src/tidy.py lines 1-1 "# edited since the commit"',
+        'on file src/new.py lines 1-1 "fresh = True"',
+    ]
+
+
+def test_c2_what_cannot_be_anchored_is_refused_by_name_and_nothing_is_held(
+    bed: Bed, with_files: str, code: Path
+) -> None:
+    (code / "pic.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    for anchor, status, words in (
+        (served("src/tidy.py", 7, 9), 400, "do not fall within the 7 lines src/tidy.py has now"),
+        (served("src/tidy.py", 0, 1), 400, "do not fall within"),
+        (served("src/gone.py", 1, 1), 404, "marks[0].anchors[0]: src/gone.py is not a file"),
+        (served("pic.png", 1, 1), 415, "no lines to anchor to"),
+        (served("../outside.py", 1, 1), 400, "marks[0].anchors[0]"),
+        ({**served("src/tidy.py", 1, 1), "root": "attic"}, 400, "code, store, scratch"),
+        ({**served("src/tidy.py", 1, 1), "session": OLD}, 400, "leave it out"),
+        ({**served("src/tidy.py", 1, 1), "root": "scratch"}, 400, "needs 'session'"),
+        ({**served("src/tidy.py", 1, 1), "commit": "abc1234"}, 400, "kyo reads the commit"),
+        ({**served("src/tidy.py", 1, 1), "words": "import os"}, 400, "takes no 'words'"),
+        (served("src/tidy.py", 4, 4, chars=[0, 3]), 400, "not a selection inside lines 4-4"),
+    ):
+        got, refused = post(bed, SEND_PROMPT, one_mark(anchor), with_files)
+        assert got == status and words in refused["error"], (anchor, refused)
+    assert get(bed, HELD_ROUTE, with_files)[1]["held"] is None
+    # The remedy the first refusal names: lines the file has now.
+    assert post(bed, SEND_PROMPT, one_mark(served("src/tidy.py", 7, 7)), with_files)[0] == 200
+
+
+def test_c2_reading_a_file_for_an_anchor_needs_the_files_permission_and_issuing_it_clears_it(
+    bed: Bed, can_send: str, code: Path, store_home: Path
+) -> None:
+    document = one_mark(served("src/tidy.py", 1, 1))
+    status, refused = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 403 and refused["reason"] == "no-files-permission"
+    assert "--permission files" in refused["error"]
+    assert get(bed, HELD_ROUTE, can_send)[1]["held"] is None
+    # A record needs no file read, so the same token still anchors to one.
+    again = issue("studio", "notes", "send", "files")
+    status, sent = post(bed, SEND_PROMPT, document, again)
+    assert status == 200 and on_lines(sent) == ['on file src/tidy.py lines 1-1 "import os"']
+
+
+def test_c2_a_repository_with_no_commit_is_refused_and_a_first_commit_clears_it(
+    bed: Bed, with_files: str
+) -> None:
+    (bed.project / "first.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=bed.project, check=True)
+    document = one_mark(served("first.py", 1, 1))
+    status, refused = post(bed, SEND_PROMPT, document, with_files)
+    assert status == 400 and "has no commit yet" in refused["error"], refused
+    assert "`git commit`" in refused["error"]
+    git_init(bed.project)
+    assert post(bed, SEND_PROMPT, document, with_files)[0] == 200
+
+
+def report_scratch(bed: Bed, directory: Path) -> None:
+    """What `kyo sessions scratch <dir>` records for the bed's session."""
+    path = cmd_sessions.sessions_path(bed.project)
+    entries = [
+        {**entry, "scratchpad_dir": str(directory)} if entry["session_id"] == OLD else entry
+        for entry in cmd_sessions.read_sessions(path).entries
+    ]
+    assert any(entry.get("scratchpad_dir") for entry in entries)
+    assert cmd_sessions.write_sessions(path, entries) is None
+
+
+def test_c2_a_scratchpad_file_names_its_root_and_its_session_stands_for_a_commit(
+    bed: Bed, notes_path: str, with_files: str, code: Path, tmp_path: Path
+) -> None:
+    scratch = tmp_path / "scratchpad" / OLD
+    scratch.mkdir(parents=True)
+    (scratch / "notes.md").write_text("# Notes\n\nTry the tunnel first.\n", encoding="utf-8")
+    report_scratch(bed, scratch)
+    anchor = {**served("notes.md", 3, 3), "root": "scratch", "session": OLD}
+    status, sent = post(bed, SEND_PROMPT, one_mark(anchor), with_files)
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        'on file notes.md in the scratchpad lines 3-3 "Try the tunnel first."'
+    ]
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
+    (note,) = filed_by(bed, notes_path, with_files, sent["held"]["id"])
+    (stored,) = note["anchors"]
+    assert stored["session"] == OLD and "commit_sha" not in stored
+    assert stored["kind"] == "document" and stored["digest"].startswith("lines-sha256:")
+    (mark,) = marks_of(bed, with_files)
+    assert mark["anchors"] == [
+        {"kind": "document", "root": "scratch", "path": "notes.md", "session": OLD, "lines": [3, 3]}
+    ]
+    # Read from another session, the line says whose scratchpad it is.
+    ctx = commands.build_context(
+        str(bed.project), None, dict(bed.server.environ), ["serve", "notes"],
+        project=commands.PROJECT_REQUIRED, read_only=True,
+    )  # fmt: skip
+    try:
+        files = serve_notes._Files(bed.server, str(bed.project), None)
+        line = serve_notes._anchor_line(ctx, stored, {}, "another-session", files)
+    finally:
+        ctx.close()
+    assert line == (
+        f'on file notes.md in the scratchpad of session {OLD} lines 3-3 "Try the tunnel first."'
+    )
+
+
+def sent_with(bed: Bed, notes_path: str, token: str, *anchors: dict) -> dict:
+    """A prompt anchored to these places, delivered, as its filed note."""
+    status, sent = post(bed, SEND_PROMPT, one_mark(*anchors), token)
+    assert status == 200, sent
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, token, sent["held"]["id"])) == 1)
+    bed.show_frame(FRAME_WORKING)
+    return filed_by(bed, notes_path, token, sent["held"]["id"])[0]
+
+
+def commit_all(root: Path, message: str) -> None:
+    for args in (("add", "-A"), ("commit", "-q", "-m", message)):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def test_c3_the_marks_route_gives_records_and_files_with_the_turn_anchors(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    kyo = kyo_of(bed)
+    record = new_record(kyo, criteria=["the reader is done"])
+    criterion = kyo("show", record, "--json").json["criteria"][0]["id"]
+    note = sent_with(
+        bed,
+        notes_path,
+        with_files,
+        span(PROMPT, 0, 5),
+        {"kind": "record", "id": criterion},
+        served("src/tidy.py", 4, 5, chars=chars_of(SOURCE, "reformat")),
+    )
+    (mark,) = marks_of(bed, with_files)
+    assert mark["note"] == note["id"] and mark["text"] == "about this"
+    assert mark["anchors"] == [
+        {"role": "person", "uuid": PROMPT, "start": 0, "end": 5},
+        {"kind": "record", "id": criterion},
+        {
+            "kind": "file",
+            "root": "code",
+            "path": "src/tidy.py",
+            "commit": head_of(code),
+            "lines": [4, 5],
+            "chars": chars_of(SOURCE, "reformat"),
+        },
+    ]
+    # A note with no turn anchor is given too, when it was sent to this session.
+    alone = sent_with(bed, notes_path, with_files, {"kind": "record", "id": record})
+    assert [item["note"] for item in marks_of(bed, with_files)] == [note["id"], alone["id"]]
+    other = "11111111-2222-4333-8444-555555555555"
+    assert get(bed, f"{SESSIONS}/{other}/marks", with_files)[1]["marks"] == []
+
+
+def test_c3_a_file_anchor_is_stale_when_its_lines_no_longer_hold_the_words_and_not_before(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    sent_with(bed, notes_path, with_files, served("src/tidy.py", 4, 5))
+
+    def stale() -> bool:
+        (mark,) = marks_of(bed, with_files)
+        return mark["anchors"][0].get("stale", False)
+
+    assert not stale()
+    # A commit that leaves the file alone, and one that changes it below the lines.
+    (code / "other.txt").write_text("elsewhere\n", encoding="utf-8")
+    commit_all(code, "another file")
+    assert not stale()
+    (code / "src" / "tidy.py").write_text(SOURCE + "MORE = 4\n", encoding="utf-8")
+    commit_all(code, "a line added below")
+    assert not stale()
+    # The words changed in place, uncommitted: the file as served is what is compared.
+    (code / "src" / "tidy.py").write_text(SOURCE.replace("strip", "rstrip"), encoding="utf-8")
+    assert stale()
+    (code / "src" / "tidy.py").write_text(SOURCE, encoding="utf-8")
+    assert not stale()
+    # The words moved down a line: they are no longer at those lines.
+    (code / "src" / "tidy.py").write_text("import sys\n" + SOURCE, encoding="utf-8")
+    assert stale()
+    (code / "src" / "tidy.py").unlink()
+    assert stale()
+
+
+def test_c3_a_record_anchor_is_stale_when_the_store_no_longer_holds_the_element(
+    bed: Bed, notes_path: str, with_files: str
+) -> None:
+    kyo = kyo_of(bed)
+    record = new_record(kyo, criteria=["the reader is done"])
+    criterion = kyo("show", record, "--json").json["criteria"][0]["id"]
+    sent_with(bed, notes_path, with_files, {"kind": "record", "id": criterion})
+    (mark,) = marks_of(bed, with_files)
+    assert mark["anchors"] == [{"kind": "record", "id": criterion}]
+    connection = sqlite3.connect(bed.project / "kyosei" / "kyosei.db", isolation_level=None)
+    connection.execute("DELETE FROM criteria WHERE id = ?", (criterion,))
+    connection.close()
+    (mark,) = marks_of(bed, with_files)
+    assert mark["anchors"] == [{"kind": "record", "id": criterion, "stale": True}]
+
+
+def test_c3_an_anchor_filed_with_a_commit_alone_is_compared_with_the_file_at_that_commit(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    sha = head_of(code)
+    note = file_note(
+        bed,
+        notes_path,
+        with_files,
+        anchors=[{"kind": "file", "path": "src/tidy.py", "commit": sha, "lines": [4, 5]}],
+    )
+    sent_on_the_store(bed, [note["id"]])
+    place = {"kind": "file", "root": "code", "path": "src/tidy.py", "commit": sha, "lines": [4, 5]}
+    assert marks_of(bed, with_files)[0]["anchors"] == [place]
+    (code / "src" / "tidy.py").write_text(SOURCE + "MORE = 4\n", encoding="utf-8")
+    commit_all(code, "a line added below")
+    assert marks_of(bed, with_files)[0]["anchors"] == [place]
+    (code / "src" / "tidy.py").write_text("import sys\n" + SOURCE, encoding="utf-8")
+    assert marks_of(bed, with_files)[0]["anchors"] == [place | {"stale": True}]
+
+
+def test_c2_a_file_in_the_store_repository_names_that_root_by_its_commit(
+    split_project, store_home: Path, running
+) -> None:
+    code, store = split_project
+    (store / "docs").mkdir(exist_ok=True)
+    (store / "docs" / "plan.md").write_text(PLAN, encoding="utf-8")
+    if not (store / ".git").exists():
+        git_init(store)
+    else:
+        commit_all(store, "a plan")
+    (code / "docs").mkdir(exist_ok=True)
+    (code / "docs" / "plan.md").write_text("# Another plan, in the code\n", encoding="utf-8")
+    commit_all(code, "a plan of the same name")
+    register(store_home, code)
+    client = running()
+    name = serve.project_name(str(code))
+    token = issue("mac", "notes", "files")
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    anchor = {"kind": "file", "root": "store", "path": "docs/plan.md", "lines": [3, 3]}
+    status, _, body = client.request(
+        f"/v1/projects/{name}/notes",
+        method="POST",
+        headers=headers,
+        body=json.dumps({"text": "x", "entered": "typed", "anchors": [anchor]}).encode(),
+    )
+    assert status == 201, body
+    (stored,) = body_json(body)["note"]["anchors"]
+    assert stored["commit_sha"] == head_of(store) != head_of(code)
+    ctx = commands.build_context(
+        str(code), None, dict(client.server.environ), ["serve", "notes"],
+        project=commands.PROJECT_REQUIRED, read_only=True,
+    )  # fmt: skip
+    try:
+        files = serve_notes._Files(client.server, str(code), None)
+        line = serve_notes._anchor_line(ctx, stored, {}, OLD, files)
+        place = serve_notes._file_place(ctx, files, stored)
+    finally:
+        ctx.close()
+    assert line == (
+        'on file docs/plan.md in the store repository lines 3-3 "The first chunk is the reader,..."'
+    )
+    assert place["root"] == "store" and "stale" not in place
+
+
+def test_c1_c2_a_set_of_notes_is_sent_with_the_same_lines(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    kyo = kyo_of(bed)
+    record = new_record(kyo, title="The reader", criteria=["the reader is done"])
+    note = file_note(
+        bed,
+        notes_path,
+        with_files,
+        anchors=[{"kind": "record", "id": record}, served("src/tidy.py", 7, 7)],
+    )
+    status, sent = post(bed, SEND_NOTES, {"notes": [note["id"]]}, with_files)
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        f'on record {record} "The reader"',
+        'on file src/tidy.py lines 7-7 "LIMIT = 3"',
+    ]
+    # The file's words go into the message, so sending them needs the files permission too.
+    status, refused = post(bed, SEND_NOTES, {"notes": [note["id"]]}, issue("pad", "notes", "send"))
+    assert status == 403 and refused["reason"] == "no-files-permission"
