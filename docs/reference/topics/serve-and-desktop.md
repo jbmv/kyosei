@@ -556,6 +556,28 @@ response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (
 and `prompt` (for a message held by `send-prompt`, its own `segments` and `marks`; in the
 response to a hold and on the event stream, only the number of marks; otherwise `null`).
 
+**The line above a held message (KYO-730).** A held message is written during a turn and
+reaches the agent after the turn's replies, which its writer had not read when writing it.
+When the agent wrote one or more text replies between the holding and the delivery, the server
+types one line above the message at delivery:
+
+```
+held 14 minutes: written before your reply 8c1f73e2-0d9d-4c8e-a1d5-3f2e0b7a4c11 "The install is done and a..." and 2 later replies (replies are your text messages; tool calls are not counted)
+```
+
+The time held is in whole minutes, or in seconds under one minute. The uuid is the transcript
+record of the first reply written after the message was held, quoted by its first six words as
+an `on` line quotes a span, and `and N later replies` follows when more were written after it.
+A reply is an assistant message with text, and a message that is tool calls only is not
+counted. A message held across no text reply has no line, and neither has one delivered by
+Send now. If the transcript cannot be read at delivery, the message is delivered without the
+line and the server's log says so.
+
+The line is part of the prompt the transcript records, as the `on` and `attached` lines are,
+so a later anchor on that prompt counts its characters from the start of the line. The marks a
+prompt was sent with are taken from its own segments when it is held and are not moved by the
+line. In the send log the line is a first segment of its own, of the kind `held-line`.
+
 **Send now** (`held-now`, KYO-722) delivers the held message at once and without the two looks,
 to a working screen as well as an idle one. Claude Code queues what is typed during a turn and
 gives it to the agent at its next tool call, so the turn is not interrupted; once sent, the

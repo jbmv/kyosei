@@ -44,7 +44,9 @@ A HELD MESSAGE (KYO-703) is stored by :mod:`kyosei.serve_held` and delivered fro
 this stays the one module that reaches the sending methods. :func:`deliver_held` checks what
 a send route checks, afresh at each attempt, because the message waited and the machine's
 setting or the device may have changed. Its log rows have the actions ``hold``, ``retract``
-and ``held-delivery``.
+and ``held-delivery``. A line the server writes above a held message at delivery (KYO-730,
+:func:`kyosei.serve_notes.held_line`) is logged as a first segment of its own, of the kind
+``held-line``, so that the row does not count it among what the person typed.
 """
 
 from __future__ import annotations
@@ -87,6 +89,8 @@ TYPED = "typed"
 PASTED = "pasted"
 #: How a slash command's one segment is marked in the log.
 COMMAND = "command"
+#: How the line the server writes above a held message is marked in the log (KYO-730).
+HELD_LINE = "held-line"
 
 #: The log stores a request's session id as given, and an unauthenticated request chooses it.
 _LOGGED_ID_LIMIT = 200
@@ -405,7 +409,7 @@ def _keys(live: session_layer.LiveSession, action: str, segments: list[_Segment]
     if action in (MESSAGE, HELD_DELIVERY):
         live.send_message(
             [
-                session_layer.Typed(s.text) if s.kind == TYPED else session_layer.Pasted(s.text)
+                session_layer.Pasted(s.text) if s.kind == PASTED else session_layer.Typed(s.text)
                 for s in segments
             ]
         )
@@ -600,6 +604,7 @@ def deliver_held(
     settled: bool,
     mark_delivering: Callable[[], None],
     during_turn: bool = False,
+    line_above: Callable[[], str | None] | None = None,
 ) -> HeldOutcome:
     """Try to deliver one held message, and say what happened. Reads the pane once or twice.
 
@@ -613,6 +618,9 @@ def deliver_held(
     ``during_turn`` (KYO-722, Send now) delivers at once, with no second look, to a working
     screen as well as an idle one; the log row says so in its reason. A permission prompt, an
     overlay, an unrecognised screen and a used input box are refused as before.
+
+    ``line_above`` (KYO-730) is asked once, when the message is about to be sent, for a line to
+    type above it, and gives None for none. It is not asked for a message sent during a turn.
     """
     project_name, session_id = message["project"], message["session_id"]
     try:
@@ -639,6 +647,9 @@ def deliver_held(
     if not settled and not during_turn:
         return _waiting(idle=True)
     segments = [_Segment(s["kind"], s["text"]) for s in message["segments"]]
+    above = None if line_above is None or during_turn else line_above()
+    if above:
+        segments.insert(0, _Segment(HELD_LINE, above + "\n"))
     attempt = _Attempt(
         HELD_DELIVERY,
         project_name,

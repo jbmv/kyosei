@@ -15,11 +15,12 @@ import stat
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from kyosei import config, device_tokens, serve_files, serve_send, session_layer
+from kyosei import config, device_tokens, serve_files, serve_notes, serve_send, session_layer
 
 from .conftest import invoke
 from .test_kyo_serve import body_json, stop
@@ -858,3 +859,277 @@ def test_an_identical_prompt_after_the_first_was_delivered_is_refused_then_accep
     assert status == 409 and refused["reason"] == "already-sent", refused
     clock[0] = 60.0
     assert hold(bed, on)  # the same words a minute on are a new prompt
+
+
+# ------------------------------------------------- KYO-730: the line above a held prompt
+
+LAST_RECORD = "14879f01-da16-4f48-94a9-efb05b15b88f"
+FIRST_REPLY = "73073073-0000-4000-8000-000000000001"
+SECOND_REPLY = "73073073-0000-4000-8000-000000000002"
+THIRD_REPLY = "73073073-0000-4000-8000-000000000003"
+TOOL_ONLY = "73073073-0000-4000-8000-0000000000aa"
+HELD_PROMPT = "73073073-0000-4000-8000-0000000000bb"
+COUNTS = "(replies are your text messages; tool calls are not counted)"
+SEND_PROMPT = f"{SESSIONS}/{OLD}/send-prompt"
+MARKS = f"{SESSIONS}/{OLD}/marks"
+NOTES = f"{SESSIONS.rsplit('/', 1)[0]}/notes"
+
+
+def stamp(seconds_from_now: float) -> str:
+    moment = datetime.now(UTC) + timedelta(seconds=seconds_from_now)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+def reply_row(uuid: str, at: str, *, text: str | None = None, tool: str | None = None) -> str:
+    """One assistant record: a text block, a tool call, or both; a message of its own."""
+    content: list[dict] = []
+    if text is not None:
+        content.append({"type": "text", "text": text})
+    if tool is not None:
+        content.append({"type": "tool_use", "id": f"toolu_{uuid[-4:]}", "name": tool, "input": {}})
+    row = {
+        "type": "assistant",
+        "uuid": uuid,
+        "parentUuid": LAST_RECORD,
+        "isSidechain": False,
+        "timestamp": at,
+        "sessionId": OLD,
+        "message": {"id": f"msg_{uuid}", "role": "assistant", "content": content},
+    }
+    return json.dumps(row) + "\n"
+
+
+def held_for(store_home: Path, seconds: float) -> None:
+    """Move the held message's time back, as if it had been held that long."""
+    path = held_file(store_home)
+    message = json.loads(path.read_text(encoding="utf-8"))
+    message["at"] = stamp(-seconds)
+    path.write_text(json.dumps(message) + "\n", encoding="utf-8")
+
+
+def typed(bed: Bed) -> list[str]:
+    """What was typed into the pane, one entry for each run of literal keys."""
+    marker = "send-keys -t %1 -l -- "
+    return [line.split(marker, 1)[1] for line in keys_sent(bed) if marker in line]
+
+
+def deliver(bed: Bed, on: str) -> None:
+    bed.show(IDLE)
+    wait_until(lambda: held_now(bed, on) is None)
+
+
+def test_the_line_states_minutes_held_the_first_unseen_reply_and_how_many_followed() -> None:
+    replies = [
+        (FIRST_REPLY, "The install is done and a new build is on the machine."),
+        (SECOND_REPLY, "second"),
+        (THIRD_REPLY, "third"),
+    ]
+    assert serve_notes.held_line(14 * 60 + 59, replies) == (
+        f'held 14 minutes: written before your reply {FIRST_REPLY} "The install is done and a..." '
+        f"and 2 later replies {COUNTS}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("seconds", "said"),
+    [
+        (0.4, "0 seconds"),
+        (1.2, "1 second"),
+        (59.9, "59 seconds"),
+        (60, "1 minute"),
+        (125, "2 minutes"),
+    ],
+)
+def test_the_time_held_is_whole_minutes_and_seconds_under_one_minute(
+    seconds: float, said: str
+) -> None:
+    line = serve_notes.held_line(seconds, [(FIRST_REPLY, "done")])
+    assert line == f'held {said}: written before your reply {FIRST_REPLY} "done" {COUNTS}'
+
+
+def test_the_count_of_later_replies_is_left_out_when_there_are_none_and_singular_for_one() -> None:
+    alone = serve_notes.held_line(90, [(FIRST_REPLY, "done")])
+    assert alone is not None and " later " not in alone
+    two = serve_notes.held_line(90, [(FIRST_REPLY, "done"), (SECOND_REPLY, "more")])
+    assert two is not None and '"done" and 1 later reply (' in two
+
+
+def test_a_held_prompt_delivered_after_replies_begins_with_the_line(
+    bed: Bed, store_home: Path, on: str
+) -> None:
+    hold(bed, on)
+    bed.append(
+        [
+            reply_row(TOOL_ONLY, stamp(1), tool="Bash"),
+            reply_row(FIRST_REPLY, stamp(2), text="The install is done and a new build is up."),
+            reply_row(SECOND_REPLY, stamp(3), text="One more thing.", tool="Read"),
+            reply_row(THIRD_REPLY, stamp(4), text="And the last."),
+        ]
+    )
+    held_for(store_home, 14 * 60 + 30)
+
+    deliver(bed, on)
+
+    assert typed(bed) == [
+        f'held 14 minutes: written before your reply {FIRST_REPLY} "The install is done and a..." '
+        f"and 2 later replies {COUNTS}",
+        SECRET,
+    ]
+    # The log marks the line as the server's, so it is not counted as the person's typing.
+    delivered = log_rows(store_home)[-1]
+    assert [segment["kind"] for segment in delivered["segments"]] == ["held-line", "typed"]
+    assert delivered["segments"][1]["length"] == len(SECRET)
+
+
+def test_a_reply_written_before_the_prompt_was_held_is_not_named(
+    bed: Bed, store_home: Path, on: str
+) -> None:
+    bed.append([reply_row(FIRST_REPLY, stamp(-30), text="Seen before the prompt was written.")])
+    hold(bed, on)
+    bed.append([reply_row(SECOND_REPLY, stamp(2), text="Written while it was held.")])
+
+    deliver(bed, on)
+
+    assert typed(bed)[0].startswith(
+        f'held 0 seconds: written before your reply {SECOND_REPLY} "Written while it was held." ('
+    )
+
+
+def test_a_held_prompt_with_no_reply_since_carries_no_line(bed: Bed, on: str) -> None:
+    hold(bed, on)
+
+    deliver(bed, on)
+
+    assert typed(bed) == [SECRET]
+
+
+def test_tool_calls_alone_do_not_count_as_a_reply(bed: Bed, store_home: Path, on: str) -> None:
+    hold(bed, on)
+    bed.append(
+        [reply_row(TOOL_ONLY, stamp(1), tool="Bash"), reply_row(FIRST_REPLY, stamp(2), tool="Read")]
+    )
+
+    deliver(bed, on)
+
+    assert typed(bed) == [SECRET]
+    assert [s["kind"] for s in log_rows(store_home)[-1]["segments"]] == ["typed"]
+
+
+def test_a_prompt_delivered_by_send_now_carries_no_line(bed: Bed, on: str) -> None:
+    held = hold(bed, on)
+    bed.append([reply_row(FIRST_REPLY, stamp(2), text="Written while it was held.")])
+
+    assert send_now(bed, on, held)[0] == 200
+
+    assert typed(bed) == [SECRET]
+
+
+def test_a_transcript_that_cannot_be_read_costs_the_line_and_not_the_delivery(
+    bed: Bed, on: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hold(bed, on)
+    bed.append([reply_row(FIRST_REPLY, stamp(2), text="Written while it was held.")])
+
+    def unreadable(self):
+        raise OSError("no such transcript")
+
+    monkeypatch.setattr(session_layer.transcript.SessionTranscript, "read", unreadable)
+    deliver(bed, on)
+
+    assert typed(bed) == [SECRET]
+
+
+def as_recorded(bed: Bed, text: str) -> None:
+    """The delivered prompt as Claude Code records it in the transcript."""
+    row = {
+        "type": "user",
+        "uuid": HELD_PROMPT,
+        "parentUuid": LAST_RECORD,
+        "isSidechain": False,
+        "timestamp": stamp(5),
+        "sessionId": OLD,
+        "promptSource": "typed",
+        "origin": {"kind": "human"},
+        "message": {"role": "user", "content": text},
+    }
+    bed.append([json.dumps(row) + "\n"])
+
+
+def sent_marks(bed: Bed, token: str) -> list[dict]:
+    status, _, raw = bed.client.request(MARKS, headers={"Authorization": f"Bearer {token}"})
+    document = body_json(raw)
+    assert status == 200, document
+    return document["marks"]
+
+
+def test_an_anchor_on_a_held_prompt_with_the_line_still_resolves(
+    bed: Bed, store_home: Path
+) -> None:
+    """The line is part of the prompt's record, and an anchor on it counts from the line."""
+    enable(store_home)
+    token = issue("ipad", "notes", "send")
+    hold(bed, token)
+    bed.append([reply_row(FIRST_REPLY, stamp(2), text="Written while it was held.")])
+    deliver(bed, token)
+    line, words = typed(bed)
+    assert line.startswith("held ") and words == SECRET
+    recorded = f"{line}\n{words}"
+    as_recorded(bed, recorded)
+
+    # A client measures against the text the turns route gives, which holds the line.
+    status, _, raw = bed.client.request(f"{SESSIONS}/{OLD}/turns")
+    (turn,) = [t for t in body_json(raw)["turns"] if t["id"] == HELD_PROMPT]
+    assert status == 200 and turn["text"] == recorded
+    start = turn["text"].index(SECRET)
+    assert start == len(line) + 1
+    end = start + len(SECRET)
+    anchor = {"kind": "turn", "session": OLD, "uuid": HELD_PROMPT, "start": start, "end": end}
+
+    # It is sent as a mark of the next prompt, which quotes the words it addresses.
+    document = {
+        "segments": [{"kind": "typed", "text": "about that"}],
+        "marks": [{"line": 0, "anchors": [anchor], "tags": []}],
+    }
+    status, made = post(bed, SEND_PROMPT, document, token)
+    assert status == 200, made
+    assert made["message"] == f'on my prompt {HELD_PROMPT} "{SECRET}"\nabout that'
+    wait_until(lambda: held_now(bed, token) is None)
+    wait_until(lambda: sent_marks(bed, token))
+
+    (mark,) = sent_marks(bed, token)
+    assert mark["text"] == "about that"
+    assert mark["anchors"] == [{"role": "person", "uuid": HELD_PROMPT, "start": start, "end": end}]
+
+
+def test_a_held_prompts_own_marks_are_filed_unmoved_by_the_line(
+    bed: Bed, store_home: Path
+) -> None:
+    enable(store_home)
+    token = issue("ipad", "notes", "send")
+    bed.show_frame(FRAME_WORKING)
+    reply = "9b949b65-606d-47fa-bbfd-f46f11c8635d"  # the fixture's "A lighthouse is..."
+    document = {
+        "segments": [{"kind": "typed", "text": "first line\nwhy this way?"}],
+        "marks": [
+            {
+                "line": 1,
+                "anchors": [{"kind": "turn", "session": OLD, "uuid": reply, "start": 0, "end": 12}],
+                "tags": [],
+            }
+        ],
+    }
+    status, made = post(bed, SEND_PROMPT, document, token)
+    assert status == 200, made
+    bed.append([reply_row(FIRST_REPLY, stamp(2), text="Written while it was held.")])
+
+    deliver(bed, token)
+
+    line, first, on_line, marked = typed(bed)
+    assert line.startswith(f"held 0 seconds: written before your reply {FIRST_REPLY} ")
+    assert first == "first line" and marked == "why this way?"
+    assert on_line.startswith(f"on your reply {reply} ")
+    wait_until(lambda: sent_marks(bed, token))
+    (mark,) = sent_marks(bed, token)
+    assert mark["text"] == "why this way?"
+    (anchor,) = mark["anchors"]
+    assert anchor["start"] == 0 and anchor["end"] == 12 and "stale" not in anchor

@@ -84,6 +84,21 @@ pasted segment and ``typed`` otherwise, and the sent state from the start. A ret
 prompt files nothing, and the held message keeps the prompt's own segments and marks
 (``prompt``) so that a composer can restore them.
 
+A HELD PROMPT'S LINE (KYO-730). A prompt sent during a turn is held and typed when the turn
+ends, so the agent receives it after replies its writer had not read. :func:`held_line` writes
+one line that :mod:`kyosei.serve_held` types above such a prompt at delivery, shown here on
+two:
+
+    held 14 minutes: written before your reply 8c1f...e2 "The install is done and a..."
+    and 2 later replies (replies are your text messages; tool calls are not counted)
+
+The uuid is the record of the first text reply written since the prompt was held, and its
+words are quoted as an ``on`` line quotes them. A prompt held across no text reply, and one
+delivered by Send now, carries no line. The line is part of the prompt the transcript records,
+as the ``on`` and ``attached`` lines are, so an anchor on that prompt counts its characters
+from the line's first, on the server and in a client alike. A prompt's own marks are cut from
+its segments when it is held, before the line exists, and are not moved by it.
+
 A SESSION'S MARKS (KYO-710). After a prompt is sent, a chat still shows what each of its
 lines was anchored to. A client draws a reply as the text the session routes return for a
 ``message_id``, which may join several transcript records, while a stored turn anchor lies
@@ -381,6 +396,30 @@ def _words(span: str) -> str:
     shown = " ".join(words[:ANCHOR_WORDS])
     cut = len(words) > ANCHOR_WORDS or len(shown) > ANCHOR_CHARS
     return f'"{shown[:ANCHOR_CHARS]}{"..." if cut else ""}"'
+
+
+#: What ends a held prompt's line, so that a later session reads what a reply is here.
+HELD_LINE_COUNTS = "(replies are your text messages; tool calls are not counted)"
+
+
+def held_line(seconds: float, replies: list[tuple[str, str]]) -> str | None:
+    """The line above a held prompt at delivery, or None when no reply was written (KYO-730).
+
+    ``seconds`` is how long the prompt was held, and ``replies`` the agent's text replies
+    written in that time, oldest first, each as its record's uuid and its text. The time is
+    in whole minutes, or in seconds under one minute.
+    """
+    if not replies:
+        return None
+    whole = max(int(seconds), 0)
+    count, unit = (whole, "second") if whole < 60 else (whole // 60, "minute")
+    uuid, text = replies[0]
+    later = len(replies) - 1
+    more = f" and {later} later {'reply' if later == 1 else 'replies'}" if later else ""
+    return (
+        f"held {count} {unit}{'' if count == 1 else 's'}: written before your reply {uuid} "
+        f"{_words(text)}{more} {HELD_LINE_COUNTS}"
+    )
 
 
 def _anchor_line(

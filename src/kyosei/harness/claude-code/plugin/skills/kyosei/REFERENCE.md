@@ -216,6 +216,17 @@ on the operator becomes a decision with the words that answered it: `kyo spawn <
 --evidence-file words.md`, then
 settle the reminder.
 
+### A prompt that begins `held ...` was written before the reply it names (KYO-730)
+
+A prompt the operator sends from the app while a turn runs is held by `kyo serve` and typed when
+the turn ends, so it can arrive after replies the operator had not read when writing it. Such a
+prompt begins with one line the server wrote, of the form `held 14 minutes: written before your
+reply <uuid> "<first words>..." and 2 later replies (replies are your text messages; tool calls
+are not counted)`. Read the rest of the prompt as written before the reply named and every reply
+after it: a question it asks may already be answered there, and an instruction in it was given
+without knowledge of what those replies reported. The line is not the operator's words, so
+leave it out of anything quoted or credited to them.
+
 ### Why the symbol form of a touch line matters (KYO-301)
 
 The symbol is any phrase found in the file -- a function or type name in code, a **section
