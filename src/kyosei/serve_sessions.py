@@ -202,6 +202,7 @@ def _changes_json(changes: Any) -> dict:
         "cwd": changes.cwd,
         "root": changes.root,
         "remote": changes.remote,
+        "ahead": changes.ahead,
         "why": changes.why,
         "added": changes.added,
         "removed": changes.removed,
@@ -268,6 +269,7 @@ def _facts_json(facts: Any) -> dict | None:
         "lines": _lines_json(facts.lines),
         "limits": facts.limits,
         "cache": facts.cache,
+        "weekly_at_start": facts.weekly_at_start,
     }
 
 
@@ -870,6 +872,11 @@ class _Sampler:
             or (
                 self._facts is not None
                 and session_layer.read_cache(live.session_id, live.environ) != held.get("cache")
+            )
+            or (
+                self._facts is not None
+                and session_layer.read_weekly_at_start(live.session_id, live.environ)
+                != held.get("weekly_at_start")
             )
         ):
             now_facts = _facts_json(live.facts())

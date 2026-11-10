@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from .cmd_controller import Tmux, controller_env, find_tmux
 from .cmd_sessions import recorded_transcript_path
-from .cmd_statusline import read_cache, read_limits
+from .cmd_statusline import read_cache, read_limits, read_weekly_at_start
 from .config import READ_TRANSCRIPTS_KEY, Config, store_home, transcripts_opted_in
 from .errors import KyoseiError
 from .harness import claude_code_pane as pane
@@ -138,6 +138,9 @@ class SessionFacts:
     #: This session's prompt cache as `kyo statusline` last saved it, read at each build of
     #: the facts; None when nothing was saved for it (KYO-715).
     cache: dict | None = None
+    #: The weekly window's figure first saved for this session, to measure the session's own
+    #: use against; None when none was saved (KYO-717).
+    weekly_at_start: dict | None = None
 
 
 def read_line_totals(path: Path) -> transcript.LinesChanged:
@@ -218,6 +221,8 @@ class UncommittedChanges:
     untracked: UntrackedFiles = UntrackedFiles(0, 0, 0)
     #: None without an ``origin``, or with one that names no repository on a host.
     remote: str | None = None
+    #: Commits on HEAD that the branch's upstream lacks; None when it has no upstream (KYO-717).
+    ahead: int | None = None
 
 
 class LiveSession:
@@ -284,6 +289,7 @@ class LiveSession:
             self.lines_changed(),
             read_limits(self.environ),
             read_cache(self.session_id, self.environ),
+            read_weekly_at_start(self.session_id, self.environ),
         )
 
     def lines_changed(self) -> transcript.LinesChanged:
@@ -620,6 +626,12 @@ def uncommitted_changes(
             raise KyoseiError(f"git could not read {root}: {said}")
     added, removed, files = _numstat(diff.stdout)
     origin = git(root, "remote", "get-url", "origin")
+    counted = git(root, "rev-list", "--count", "@{upstream}..HEAD")
+    ahead = (
+        int(counted.stdout.decode("ascii", errors="replace").strip() or 0)
+        if counted.returncode == 0 and counted.stdout.strip().isdigit()
+        else None
+    )
     return UncommittedChanges(
         cwd,
         str(root),
@@ -631,6 +643,7 @@ def uncommitted_changes(
         repository_name(origin.stdout.decode("utf-8", errors="replace").strip())
         if origin.returncode == 0
         else None,
+        ahead,
     )
 
 

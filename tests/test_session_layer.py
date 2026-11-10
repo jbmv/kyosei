@@ -1771,3 +1771,18 @@ def test_facts_state_the_total_and_the_layer_keeps_one_follower(tmp_path: Path) 
         LINES_SESSION, path, config_dir=tmp_path, environ={"PATH": ""}, log_dir=tmp_path / "log"
     )
     assert again.lines_changed() == transcript.LinesChanged(11, 3)
+
+
+def test_ahead_counts_commits_the_upstream_lacks_and_is_none_without_one(
+    repo: Path, tmp_path: Path
+) -> None:
+    assert changes(repo).ahead is None
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(upstream)], check=True)
+    run_git(repo, "remote", "add", "origin", str(upstream))
+    run_git(repo, "push", "-q", "-u", "origin", "HEAD")
+    assert changes(repo).ahead == 0
+    (repo / "more.txt").write_text("x\n", encoding="utf-8")
+    run_git(repo, "add", "more.txt")
+    run_git(repo, "commit", "-q", "-m", "second")
+    assert changes(repo).ahead == 1

@@ -84,6 +84,18 @@ public struct SessionFacts: Decodable, Equatable, Sendable {
     public let permission_mode: String?
     public let lines: Lines?
     public let limits: Limits?
+    /// The weekly figure first read for this session (KYO-717).
+    public let weekly_at_start: Limits.Window?
+
+    /// Whole points of the weekly window used since this session's first figure, or nil
+    /// when that is unknown, the window has reset since, or the difference rounds to zero.
+    public var weeklyUsedThisSession: Int? {
+        guard let now = limits?.seven_day, let start = weekly_at_start,
+            let reset = now.resets_at, reset == start.resets_at
+        else { return nil }
+        let points = Int((now.used_percentage - start.used_percentage).rounded())
+        return points > 0 ? points : nil
+    }
 }
 
 /// Any response or frame carrying `facts`.
