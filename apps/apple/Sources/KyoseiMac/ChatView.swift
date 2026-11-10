@@ -231,6 +231,20 @@ struct RunningAgentsLabel: View {
     }
 }
 
+/// The web view of the chat. Command-F reaches the page's own handler as a key press when the
+/// view is first responder, but a key equivalent is offered to the menu first, so the view
+/// takes it here and asks the page to open its search field (KYO-741).
+final class ChatPage: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers == "f" {
+            evaluateJavaScript("window.kyo.find()", completionHandler: nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// The read-only chat: a page drawn from the renderer in the app's resources. It loads
 /// nothing else, and a link in a message opens in the person's browser.
 struct ChatWebView: NSViewRepresentable {
@@ -253,7 +267,7 @@ struct ChatWebView: NSViewRepresentable {
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = ChatPage(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = true
         feed.webView = view

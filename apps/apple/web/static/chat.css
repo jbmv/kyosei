@@ -626,6 +626,15 @@ body.terminal-open #terminal { display: flex; }
 .revealed { background: color-mix(in srgb, var(--pastel-blue) 22%, transparent); transition: background 0.4s; }
 ::highlight(anchored) { background-color: color-mix(in srgb, var(--pastel-blue) 38%, transparent); }
 
+/* Search hits (KYO-741): lighter than an anchor, the current one a little stronger. */
+::highlight(found) { background-color: color-mix(in srgb, var(--pastel-blue) 16%, transparent); }
+::highlight(found-current) { background-color: color-mix(in srgb, var(--pastel-blue) 42%, transparent); }
+.top-part[data-view="chat"] { flex: 1; }
+#find { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+#find[hidden] { display: none; }
+#find-field { width: 200px; }
+#find-count { min-width: 56px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* An anchor in a sent prompt: the server's line above the paragraph, drawn as a chip. */
 .turn-anchor { display: block; width: fit-content; max-width: 100%; margin: 2px 0; padding: 1px 9px; border-radius: 999px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); color: var(--muted); font-size: 0.86em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 .turn-anchor:hover { color: var(--text); }
