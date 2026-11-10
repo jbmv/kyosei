@@ -2,7 +2,9 @@
 // about a session. Each object is one element, addressed by the object's own id, and a later
 // version replaces it in place.
 import { agentKind, shortModel } from "./agents";
-import { lineOf, scrollToShow, shiftLines } from "./marks";
+import {
+  drawnSpan, heldLine, lineOf, nearest, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan,
+} from "./marks";
 import { render } from "./pipeline";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
@@ -173,6 +175,7 @@ const ICONS = {
   file: '<path d="M20 11.5l-8 8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  held: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -251,6 +254,24 @@ function drawAttached(line: string, name: string, id: string, extension: string)
   return image;
 }
 
+/**
+ * The line `kyo serve` puts above a prompt it held across replies (KYO-730), drawn as a chip
+ * like an anchor's: how long the prompt was held and the reply it was written before, which a
+ * click goes to.
+ */
+function drawHeld(line: string): HTMLElement | null {
+  const held = heldLine(line);
+  if (!held) return null;
+  const words = held.words.replace(/\.\.\.$/, "…");
+  const later = held.later ? ` and ${held.later} later ${held.later === 1 ? "reply" : "replies"}` : "";
+  const chip = document.createElement("span");
+  chip.className = "turn-anchor turn-held";
+  chip.append(icon("held"), `held ${held.held}, written before “${words}”${later}`);
+  chip.title = line;
+  chip.addEventListener("click", () => revealRecord(held.uuid, words));
+  return chip;
+}
+
 function drawTurn(turn: Turn): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
@@ -262,7 +283,13 @@ function drawTurn(turn: Turn): HTMLElement {
     if (plain.length) element.append(document.createTextNode(plain.join("\n") + (last ? "" : "\n")));
     plain = [];
   };
-  for (const line of (turn.text ?? "").split("\n")) {
+  for (const [index, line] of (turn.text ?? "").split("\n").entries()) {
+    // Only the server writes above a prompt's first line, so the line is read there alone.
+    const held = index === 0 ? drawHeld(line) : null;
+    if (held) {
+      element.append(held);
+      continue;
+    }
     const anchor = line.match(ANCHOR_LINE);
     const attached = anchor ? null : line.match(ATTACHED_LINE);
     if (attached) {
@@ -1796,23 +1823,97 @@ function firstWords(text: string, count: number): string {
   return words.slice(0, count).join(" ") + (words.length > count ? "…" : "");
 }
 
-/** The text range a right-click names: the selection if the text holds it, else its blocks. */
-function spanAt(holder: HTMLElement, key: string, target: HTMLElement): Omit<AnchorItem, "kind" | "key" | "session"> | null {
+/** A block's drawn text, and the text nodes that hold it. A reply's thinking is no part of it. */
+interface Drawn { text: string; nodes: { node: Text; from: number }[] }
+
+function drawnOf(block: HTMLElement): Drawn {
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  const nodes: Drawn["nodes"] = [];
+  let text = "";
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.parentElement?.closest(".thinking")) continue;
+    nodes.push({ node: node as Text, from: text.length });
+    text += node.nodeValue ?? "";
+  }
+  return { text, nodes };
+}
+
+/** Where a place in the page lies in a block's drawn text. */
+function drawnOffset(drawn: Drawn, node: Node, offset: number): number {
+  const own = drawn.nodes.find((held) => held.node === node);
+  if (own) return own.from + Math.min(offset, own.node.length);
+  const point = document.createRange();
+  point.setStart(node, offset);
+  point.collapse(true);
+  const next = drawn.nodes.find((held) => point.comparePoint(held.node, 0) >= 0);
+  return next ? next.from : drawn.text.length;
+}
+
+/**
+ * The part of a prompt's or reply's source that a block was drawn from, and where that part
+ * begins. A block is stamped with its lines; the prompt or reply itself is the whole source.
+ */
+function sourceOf(block: HTMLElement, source: string): { base: number; text: string } {
+  if (block.dataset.sourceLine === undefined) return { base: 0, text: source };
+  const lines = source.split("\n");
+  const offset = (line: number) => lines.slice(0, line).reduce((sum, text) => sum + text.length + 1, 0);
+  const base = offset(Number(block.dataset.sourceLine));
+  return { base, text: source.slice(base, Math.min(offset(Number(block.dataset.sourceEnd)), source.length)) };
+}
+
+/** The place in the page's text under a point of the window. */
+function caretAt(x: number, y: number): { node: Node; offset: number } | null {
+  const range = (document as any).caretRangeFromPoint?.(x, y) as Range | null | undefined;
+  if (range) return { node: range.startContainer, offset: range.startOffset };
+  const position = (document as any).caretPositionFromPoint?.(x, y);
+  return position ? { node: position.offsetNode, offset: position.offset } : null;
+}
+
+/**
+ * The text range a right-click names (KYO-729). A selection the person made is named as
+ * selected, at the place it was made and not where the same words first occur. With no such
+ * selection it is the sentence under the pointer. Text that reads differently from its source,
+ * and a click outside any sentence, name the blocks they lie in.
+ */
+function spanAt(
+  holder: HTMLElement, key: string, target: HTMLElement, pointer: { x: number; y: number }, own: boolean,
+): Omit<AnchorItem, "kind" | "key" | "session"> | null {
   if (target.closest(".thinking")) return null;
   const source = sources.get(key)!;
   const points = (index: number) => Array.from(source.slice(0, index)).length;
   const span = (from: number, to: number, words: string, exact = false) =>
     ({ start: points(from), end: points(to), words: firstWords(words, ANCHOR_WORDS), exact });
   const selection = window.getSelection();
-  const selected = selection && !selection.isCollapsed
+  const selected = own && selection && !selection.isCollapsed
     && holder.contains(selection.anchorNode) && holder.contains(selection.focusNode);
-  const picked = selected ? selection.toString().trim() : "";
-  const found = picked ? source.indexOf(picked) : -1;
-  if (found >= 0) return span(found, found + picked.length, picked, true);
-  // Formatted text reads differently from its source, so the blocks it lies in are named.
   const block = (node: Node | null) =>
     (node instanceof HTMLElement ? node : node?.parentElement)?.closest<HTMLElement>("[data-source-line]");
+  /** The block a place is in, or the whole prompt or reply where it is in none. */
+  const around = (node: Node | null) => {
+    const found = block(node);
+    return found && holder.contains(found) ? found : holder;
+  };
+  const picked = selected ? selection.toString().trim() : "";
   const range = selected ? selection.getRangeAt(0) : null;
+  if (picked && range) {
+    const from = around(range.startContainer);
+    const part = sourceOf(from, source);
+    const drawn = drawnOf(from);
+    const at = drawnOffset(drawn, range.startContainer, range.startOffset);
+    const found = nearest(source, picked, part.base + sourceIndex(part.text, drawn.text, at));
+    if (found >= 0) return span(found, found + picked.length, picked, true);
+  }
+  const caret = selected || target.closest(".turn-anchor") ? null : caretAt(pointer.x, pointer.y);
+  const under = caret && holder.contains(caret.node) ? around(caret.node) : null;
+  // A prompt has no blocks and is measured whole; a reply outside its blocks is not.
+  if (caret && under && (under !== holder || key.startsWith("t:"))) {
+    const part = sourceOf(under, source);
+    const drawn = drawnOf(under);
+    const [from, to] = sentenceAt(drawn.text, drawnOffset(drawn, caret.node, caret.offset));
+    const found = to > from ? sourceSpan(part.text, drawn.text, from, to) : null;
+    if (found) return span(part.base + found[0], part.base + found[1], drawn.text.slice(from, to), true);
+  }
+  // Formatted text reads differently from its source, so the blocks it lies in are named.
   const first = range ? block(range.startContainer) : block(target);
   const last = range ? block(range.endContainer) : first;
   if (!first || !last || !holder.contains(first)) {
@@ -1872,13 +1973,36 @@ function showAnchorMenu(x: number, y: number, item: AnchorItem): void {
   anchorMenu.style.top = `${Math.min(y, window.innerHeight - anchorMenu.offsetHeight - 8)}px`;
 }
 
+/**
+ * The selection as the press that opens the menu found it. WebKit selects the word under a
+ * secondary click before the menu's event, and that word is not a selection the person made.
+ */
+let pressedSelection: Range | null = null;
+document.addEventListener("mousedown", () => {
+  const selection = window.getSelection();
+  pressedSelection = selection && !selection.isCollapsed && selection.rangeCount
+    ? selection.getRangeAt(0).cloneRange() : null;
+}, true);
+
+/** Whether the selection now is the one the press found, and so the person's own. */
+function ownSelection(): boolean {
+  const selection = window.getSelection();
+  if (!pressedSelection || !selection || selection.isCollapsed || !selection.rangeCount) return false;
+  const now = selection.getRangeAt(0);
+  return now.compareBoundaryPoints(Range.START_TO_START, pressedSelection) === 0
+    && now.compareBoundaryPoints(Range.END_TO_END, pressedSelection) === 0;
+}
+
 chat.addEventListener("contextmenu", (event) => {
   const target = event.target as HTMLElement;
   const holder = target.closest<HTMLElement>("#chat > [data-key]");
   const key = holder?.dataset.key;
   const session = menu?.current;
   if (!holder || !key || !sources.has(key) || !session) return;
-  const span = spanAt(holder, key, target);
+  const own = ownSelection();
+  const span = spanAt(holder, key, target, { x: event.clientX, y: event.clientY }, own);
+  // The word the click itself selected goes, or the next click would find it as the person's.
+  if (!own) window.getSelection()?.removeAllRanges();
   if (!span) return;
   event.preventDefault();
   showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span });
@@ -1928,28 +2052,37 @@ function sentItems(): { mark: SentMark; item: AnchorItem }[] {
   }));
 }
 
-/** Where an anchor's selected words are drawn, if they lie within one of its blocks. */
+/**
+ * Where an anchor's words are drawn, if they lie within one of its blocks (KYO-729). The
+ * place is the one the anchor's offsets name, so that the same words earlier in the block are
+ * not marked in their stead. An anchor to the whole of its blocks has no such place unless
+ * its words are drawn as written, and is shown by the bar beside them.
+ */
 function wordsRange(item: AnchorItem): Range | null {
   const source = sources.get(item.key);
   if (!item.exact || source === undefined) return null;
-  const words = Array.from(source).slice(item.start, item.end).join("");
-  for (const block of anchoredBlocks(item)) {
-    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-    const nodes: { node: Text; from: number }[] = [];
-    let text = "";
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      nodes.push({ node: node as Text, from: text.length });
-      text += node.nodeValue ?? "";
-    }
-    const at = text.indexOf(words);
-    if (at < 0) continue;
-    const place = (offset: number, end: boolean) => {
-      const hit = nodes.findLast(({ from }) => (end ? from < offset : from <= offset)) ?? nodes[0];
+  const units = (point: number) => Array.from(source).slice(0, point).join("").length;
+  const start = units(item.start);
+  const end = units(item.end);
+  const blocks = anchoredBlocks(item);
+  for (const block of blocks) {
+    const part = sourceOf(block, source);
+    const from = start - part.base;
+    const to = end - part.base;
+    if (from < 0 || to > part.text.length || to <= from) continue;
+    const whole = !part.text.slice(0, from).trim() && !part.text.slice(to).trim();
+    const drawn = drawnOf(block);
+    const span = drawn.nodes.length
+      ? drawnSpan(part.text, drawn.text, from, to, blocks.length === 1 && !whole) : null;
+    if (!span) continue;
+    const place = (offset: number, last: boolean) => {
+      const hit = drawn.nodes.findLast((held) => (last ? held.from < offset : held.from <= offset))
+        ?? drawn.nodes[0];
       return [hit.node, offset - hit.from] as const;
     };
     const range = document.createRange();
-    range.setStart(...place(at, false));
-    range.setEnd(...place(at + words.length, true));
+    range.setStart(...place(span[0], false));
+    range.setEnd(...place(span[1], true));
     return range;
   }
   return null;

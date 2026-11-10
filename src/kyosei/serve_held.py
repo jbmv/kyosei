@@ -41,6 +41,15 @@ device since revoked. Each is looked at again on every poll. ``send-failed`` is 
 keys may have reached the pane, so it is not tried again and the person retracts it. So is a
 message found marked as being delivered when the server starts, which it died delivering.
 
+THE LINE ABOVE (KYO-730). A held message reaches the agent after replies its writer had not
+read, and nothing in it says so. At delivery the session's transcript is read through the
+session layer, and when the agent wrote a text reply after the message was held, one line
+naming the first such reply is typed above the message (:func:`kyosei.serve_notes.held_line`).
+A reply is an assistant message with text; one that is tool calls only is not counted. A
+message held across no reply has no line, and neither has one sent by Send now, which its
+writer chose to put into the turn. A transcript that cannot be read costs the line and not
+the delivery, and the log says so.
+
 RETRACT AGAINST DELIVERY. One lock per session is held across an attempt and across a
 retraction, so a retraction that arrives during an attempt waits for it, then either returns
 the text or finds the message gone. Exactly one of the two happens. ``If-Match`` names the
@@ -54,10 +63,12 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from . import clock, serve_files, serve_notes, serve_send
+from .errors import KyoseiError
 from .serve import Refusal
 from .serve_events import frame
 from .serve_sessions import ProjectSessions
@@ -74,6 +85,17 @@ DUPLICATE_WINDOW_SECONDS = 10.0
 
 #: The reason on a message found marked as being delivered when the server starts.
 _INTERRUPTED = "delivery-interrupted"
+
+
+def _moment(stamp: object) -> datetime | None:
+    """A timestamp of this tool's or of a transcript record's, or None when it is neither."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
 
 
 def _unreadable(path: Path, why: str) -> Refusal:
@@ -409,6 +431,32 @@ class HeldMessages:
                 f"{path} and is tried again when kyo serve next starts\n"
             )
 
+    def _line_above(self, message: dict) -> str | None:
+        """The line saying which reply this message was written before, or None (KYO-730)."""
+        session_id = message["session_id"]
+        held_at = _moment(message["at"])
+        now = _moment(clock.now())
+        if held_at is None or now is None:
+            return None
+        try:
+            root = self.server.project(message["project"]).root
+            reader = ProjectSessions(root, self.environ).open_live(session_id).transcript
+            reader.read()
+            replies = reader.replies
+        except (Refusal, KyoseiError, OSError) as exc:
+            self.server.log_stream.write(
+                f"kyo serve: the transcript of session {session_id} could not be read ({exc}), "
+                "so its held message is delivered without the line saying which reply it was "
+                "written before\n"
+            )
+            return None
+        since = [
+            (reply.uuid, reply.text)
+            for reply in replies
+            if reply.text.strip() and (at := _moment(reply.at)) is not None and at > held_at
+        ]
+        return serve_notes.held_line((now - held_at).total_seconds(), since)
+
     def _ensure_watching(self) -> None:
         with self._lock:
             if self._thread is None and not self.server.stopping.is_set():
@@ -535,6 +583,7 @@ class HeldMessages:
                 settled=settled,
                 mark_delivering=mark_delivering,
                 during_turn=during_turn,
+                line_above=lambda: self._line_above(message),
             )
             changed = False
             if result.outcome == "delivered":
