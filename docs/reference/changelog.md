@@ -621,6 +621,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-10** — `KYO-715` (task) — kyo serve: attachments on a composer prompt, and a session's prompt-cache state for the cold-cache warning
 - **2026-11-10** — `KYO-714` (task) — kyo statusline: save Claude Code's usage limits, and kyo serve sends them with the session facts
 - **2026-11-10** — `KYO-711` (task) — kyo serve: a subagent's token use so far, readable while it runs
 - **2026-11-10** — `KYO-710` (task) — kyo serve: a session's sent marks in reply offsets, and the list of tags in use
