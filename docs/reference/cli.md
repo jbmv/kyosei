@@ -470,7 +470,7 @@ Needs a Kyosei project: **no** — it never searches for one.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal}] {list,issue,revoke} [NAME|ID]`
+Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal,files}] {list,issue,revoke} [NAME|ID]`
 
 ### Positional arguments
 
@@ -479,7 +479,7 @@ Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 ### Options
 
-- `--permission {send,notes,start,terminal}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), and `terminal` the routes that draw a session's pane and type into it (KYO-721); a token issued without the one a route asks for is refused there
+- `--permission {send,notes,start,terminal,files}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), `terminal` the routes that draw a session's pane and type into it (KYO-721), and `files` the routes that read a project's files (KYO-735); a token issued without the one a route asks for is refused there
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

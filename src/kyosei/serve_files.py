@@ -44,6 +44,14 @@ set, through the same ``docs_parse`` walk the check uses) and its real path is s
 inside the code root. It is never a general file reader: a source file, ``kyosei/``, or a
 ``..`` is refused before a byte is read.
 
+A PROJECT'S FILES (KYO-735). :mod:`kyosei.serve_tree` reads, and never writes, the files of
+the code repository and of the store repository, for a device token holding the ``files``
+permission: what git shows in each (tracked files, and untracked files no ignore rule
+covers), never ``.git``, and nothing whose real path lies outside its root. It checks a path
+as this module does, as text through :func:`check_relpath` and then by its real path, and
+it is the general file reader the document route above is not. Without that token the
+server reads what the paragraphs above say and no more.
+
 What it cannot see: a symlink swapped in between the resolve and the write by another
 process on the same machine. That process could write ``kyosei/`` directly anyway; the
 boundary is against what a request can ask for, not against the machine's own users.

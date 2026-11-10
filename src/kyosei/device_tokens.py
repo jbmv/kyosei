@@ -2,7 +2,8 @@
 
 A route that can change something on this machine, the session send routes first, the note
 routes of chunk E5 next, the orchestrator start route after them (KYO-719) and then the
-terminal routes (KYO-721), is reached with a token issued to one device. Nothing here
+terminal routes (KYO-721), is reached with a token issued to one device. So are the routes that read
+a project's files (KYO-735), which change nothing and show source. Nothing here
 knows what any permission allows: a token carries a list of permission names, and a route
 asks for the one it needs. Adding a permission means adding its name to :data:`PERMISSIONS`.
 
@@ -63,12 +64,18 @@ PERMISSION_START = "start"
 #: an idle or working screen.
 PERMISSION_TERMINAL = "terminal"
 
+#: The permission that lets a token read a project's files, as a tree and as bytes (KYO-735).
+#: A name of its own, because a token issued to type into a session or to file notes was not
+#: issued to read every file of the code and store repositories.
+PERMISSION_FILES = "files"
+
 #: Every permission this build can grant.
 PERMISSIONS: tuple[str, ...] = (
     PERMISSION_SEND,
     PERMISSION_NOTES,
     PERMISSION_START,
     PERMISSION_TERMINAL,
+    PERMISSION_FILES,
 )
 
 #: Marks a string as a Kyosei token, for a person reading it and for secret scanners.
