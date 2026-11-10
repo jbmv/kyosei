@@ -15,7 +15,8 @@ permission (:mod:`kyosei.device_tokens`):
   composer prompt with its marks in place (below). It needs the ``send`` permission, and the
   ``notes`` permission as well when a mark holds an anchor or a tag.
 - ``GET sessions/{id}/marks`` -- every sent note with a turn anchor in that session, its
-  anchors given as a client draws the turns (KYO-710, below);
+  anchors given as a client draws the turns (KYO-710, below), and every note sent to it that
+  is anchored to a record or a file (KYO-737, below);
 - ``GET tags`` -- each tag now on a note, with how many notes carry it (KYO-710).
 
 The note's device is the name its token was issued to, and a body cannot name another: a
@@ -44,7 +45,7 @@ THE MESSAGE. :func:`compose` writes a fixed plain-text form, stated in the opera
     why don't we just reformat it ourselves?
 
     Note 2 (KYO-N42)
-    on KYO-12.g1
+    on record KYO-12.g1 "the iPad build is checked by..."
     this looks right on the iPad, approved
 
 A span's words are the first :data:`ANCHOR_WORDS` words and no more, read from the transcript
@@ -67,6 +68,42 @@ quote is followed by ``(heading)``, ``(list item)``, ``(table cell)`` or ``(code
 (:func:`block_of`), and a heading's line means the section under it. The stored anchor, and
 what reads it back, are unchanged: only this line is longer. The person's words are
 not re-wrapped or prefixed, so that a transcript check still finds them.
+
+A RECORD AND A FILE (KYO-737). A paragraph may also be anchored to a record or one of its
+elements, and to a span of a file the file routes serve (:mod:`kyosei.serve_tree`). The agent
+reads the line and cannot open the client, so each line carries what finds the place:
+
+    on record KYO-717.c4 "A record's page shows its criteria with..."
+    on file src/kyosei/serve_notes.py lines 333-345 "def find( server: Any, root_of:..."
+    on file docs/plan.md in the store repository lines 12-14 "The app is built in small..."
+    on file notes/plan.md in the scratchpad lines 3-3 "The second chunk waits on..." at "waits"
+
+A record's line is its id, which ``kyo show`` reads, and the first words the element holds now
+(:func:`kyosei.cmd_notes.element_words`); a dispatch has no words and is its id alone. A
+file's line is its path relative to its root, the root when it is not the code repository
+(``in the store repository``, ``in the scratchpad``, and ``in the scratchpad of session
+<id>`` when the scratchpad is another session's), its lines counted from 1, and its words as a
+turn's are quoted: a selection of fewer than :data:`ANCHOR_WORDS` words as its sentence and
+``at`` the selection, and in a markdown file the block's label after it. Lines are the source's
+lines whatever a client drew from them.
+
+A client gives such a file as ``{"kind": "file", "root", "path", "lines": [first, last]}``,
+with ``"chars": [start, end]`` for a selection inside those lines, counted in code points of
+the file's text, and ``"session"`` for the ``scratch`` root. The server reads the file as the
+blob route would serve it now, which needs the ``files`` permission as that route does, and
+stores an anchor of an existing kind: ``document`` for a markdown file and ``file`` for any
+other, the path as its target, the lines, the selection, a digest of the lines' text
+(:func:`kyosei.cmd_notes.lines_digest`) and the commit that is the head of the root's
+repository. That commit says which of the two repositories the path is in, so no root is
+stored. A scratchpad has no commit, and its anchor names the session instead. A file with
+uncommitted changes is anchored as it is served, and the commit then says only what the
+changes were made over, which the digest does not depend on.
+
+Such an anchor is ``stale`` when the file as served now does not hold the same text at those
+lines, by the digest. A commit to the file that leaves those lines as they were changes
+nothing. An anchor filed with a commit and no digest (``kyo notes add --anchors-file``) is
+compared with the file's text at its commit in the same way, and keeps the line it always had,
+``on file <path> at <commit> lines <first>-<last> "words..."``.
 
 A PROMPT WITH MARKS (KYO-709, decided by KYO-708). One composer box is one prompt, and a mark
 beside one of its lines holds that line's anchors and tags. ``segments`` is what ``POST held``
@@ -121,6 +158,10 @@ lines was anchored to. A client draws a reply as the text the session routes ret
 within one. :func:`kyosei.cmd_notes.session_marks` gives each anchor back in the client's
 terms, by the same table that cut it (:func:`kyosei.cmd_notes.record_layout`), and joins the
 anchors one span was stored as back into one. Both read routes open the store read-only.
+A record anchor comes back as ``{"kind": "record", "id"}`` and a file's as ``{"kind", "root",
+"path", "lines"}`` with its ``commit`` or ``session`` and its ``chars`` when it has them,
+each with ``"stale": true`` when the element is gone from the store or the lines no longer
+hold the words (KYO-737). Those entries carry a ``kind``; a turn's carry a ``role``.
 
 THE HELD PATH. A set of notes, or a prompt, is sent only through
 :meth:`kyosei.serve_held.HeldMessages.hold`, so a message during a turn waits for the turn,
@@ -138,9 +179,20 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
-from . import cmd_notes, commands, device_tokens, serve_attachments, serve_send, session_layer
+from . import (
+    cmd_notes,
+    commands,
+    device_tokens,
+    git_queries,
+    serve_attachments,
+    serve_files,
+    serve_send,
+    serve_tree,
+    session_layer,
+)
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .errors import KyoseiError, NotFound, UsageError
 from .export import person_note_document
@@ -163,6 +215,16 @@ _TAG_KEYS = frozenset({"add", "remove"})
 _SEND_KEYS = frozenset({"notes"})
 _PROMPT_KEYS = frozenset({"segments", "marks"})
 _MARK_KEYS = frozenset({"line", "anchors", "tags", "attachments"})
+
+#: KYO-737: the keys of an anchor to a span of a served file, as a client gives it.
+SERVED_FILE_KEYS = frozenset({"kind", "root", "path", "lines", "chars", "session"})
+_PATH_KINDS = (cmd_notes.ANCHOR_DOCUMENT, cmd_notes.ANCHOR_FILE)
+#: What a file's line says of a root that is not the code repository.
+_ROOT_WORDS = {
+    serve_tree.ROOT_CODE: "",
+    serve_tree.ROOT_STORE: " in the store repository",
+    serve_tree.ROOT_SCRATCH: " in the scratchpad",
+}
 
 #: The filters of ``GET notes``. Only ``tag`` may repeat.
 _FILTERS = ("tag", "on", "anchored-to", "session", "person", "sent")
@@ -275,24 +337,281 @@ def create(
         tags = sorted({cmd_notes.normalise_tag(tag) for tag in _strings(document, "tags")})
     if not text.strip() and not tags:
         raise serve_send.bad_request('a note needs "text" or at least one tag in "tags"')
-    with _context(server, root_of(), _actor(device), read_only=False) as ctx:
+    root = root_of()
+    files = _Files(server, root, authorization)
+    with _context(server, root, _actor(device), read_only=False) as ctx:
         note = cmd_notes.file_note(
             ctx,
             text=text,
             tags=tags,
-            anchors_of=lambda store: _validated(ctx, store, anchors, "anchors"),
+            anchors_of=lambda store: _validated(ctx, store, anchors, "anchors", files),
             device=device.name,
             entered=entered,
         )
     return {"ok": True, "note": note}
 
 
-def _validated(ctx: commands.Context, store: Any, anchors: list, where: str) -> list[dict]:
-    """The anchors as rows to store; a turn by message may become several (KYO-709)."""
+def _validated(
+    ctx: commands.Context, store: Any, anchors: list, where: str, files: _Files
+) -> list[dict]:
+    """The anchors as rows to store; a turn by message may become several (KYO-709), and a
+    served file is read here (KYO-737)."""
     rows: list[dict] = []
     for index, raw in enumerate(anchors):
-        rows += cmd_notes.validate_anchors(ctx, store, raw, f"{where}[{index}]")
+        if _is_served_file(raw):
+            rows.append(_file_anchor(files, raw, f"{where}[{index}]"))
+        else:
+            rows += cmd_notes.validate_anchors(ctx, store, raw, f"{where}[{index}]")
     return rows
+
+
+# ------------------------------------------------------- a served file's anchor (KYO-737)
+
+
+class _Files:
+    """One request's reading of served files for its anchors (module docstring).
+
+    The ``files`` permission is checked when the first such anchor is met, so a request with
+    none needs none. A file is read once however many anchors name it, and each read is the
+    file routes' own, with their checks.
+    """
+
+    def __init__(self, server: Any, root: str, authorization: str | None) -> None:
+        self._environ = server.environ
+        self._authorization = authorization
+        self._allowed = False
+        self.paths = serve_files.project_paths(root, server.environ)
+        self._texts: dict[tuple[str, str | None, str], str | None] = {}
+        self._commits: dict[str, str | None] = {}
+
+    def allow(self) -> None:
+        """Refuse a token without the ``files`` permission: the file's words go in a message."""
+        if not self._allowed:
+            serve_send.require_device(
+                self._environ, self._authorization, device_tokens.PERMISSION_FILES
+            )
+            self._allowed = True
+
+    def root(self, name: str, session: str | None) -> serve_tree.Root:
+        if name == serve_tree.ROOT_SCRATCH and session:
+            return serve_tree._scratch_root(self.paths, session)
+        return serve_tree._root(self.paths, name)
+
+    def text(self, name: str, session: str | None, relpath: str) -> str:
+        """The file's text as the blob route serves it now, or that route's refusal."""
+        kind = serve_tree.media_type(relpath.rsplit("/", 1)[-1])
+        if not serve_tree.is_text(kind):
+            raise Refusal(
+                415,
+                f"{relpath} is served as {kind}, which has no lines to anchor to; an anchor "
+                "to a file names lines of a text file",
+                reason="not-text",
+                root=name,
+                path=relpath,
+            )
+        _, data, _, _ = serve_tree.blob(self.root(name, session), relpath, None)
+        return data.decode("utf-8", errors="replace")
+
+    def text_now(self, name: str, session: str | None, relpath: str) -> str | None:
+        """The same, kept for the request, and None for a file that is not served now."""
+        key = (name, session, relpath)
+        if key not in self._texts:
+            try:
+                self._texts[key] = self.text(name, session, relpath)
+            except Refusal:
+                self._texts[key] = None
+        return self._texts[key]
+
+    def root_of(self, anchor: dict) -> str:
+        """The root a stored anchor's path is in: the scratchpad of its session, or the
+        repository that holds its commit, and failing that the first root serving the path."""
+        if anchor.get("session"):
+            return serve_tree.ROOT_SCRATCH
+        roots = serve_tree.served_roots(self.paths)
+        commit = anchor.get("commit_sha")
+        if commit:
+            if commit not in self._commits:
+                self._commits[commit] = next(
+                    (root.name for root in roots if _holds_commit(root.path, commit)), None
+                )
+            if self._commits[commit] is not None:
+                return self._commits[commit]
+        for root in roots:
+            if self.text_now(root.name, None, anchor["target"]) is not None:
+                return root.name
+        return roots[0].name
+
+
+def _holds_commit(repository: Path, commit: str) -> bool:
+    try:
+        done = git_queries.run_git(repository, "cat-file", "-e", f"{commit}^{{commit}}")
+    except OSError:
+        return False
+    return done.returncode == 0
+
+
+def _is_served_file(raw: object) -> bool:
+    """Whether a given anchor is one to a served file: a path anchor that names a root."""
+    return isinstance(raw, dict) and raw.get("kind") in _PATH_KINDS and "root" in raw
+
+
+def _has_lines_digest(anchor: dict) -> bool:
+    """Whether a stored anchor was read from a served file, and so has its lines' digest."""
+    return anchor["kind"] in _PATH_KINDS and str(anchor.get("digest") or "").startswith(
+        f"{cmd_notes.LINES_DIGEST_SCHEME}:"
+    )
+
+
+def file_lines(text: str) -> list[str]:
+    """A file's lines as a client counts them: split at each newline, and the newline that
+    ends the file begins no line."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def _line_span(lines: list[str], first: int, last: int) -> tuple[int, int]:
+    """Where lines ``first`` to ``last``, counted from 1, lie in the file's text."""
+    start = sum(len(line) + 1 for line in lines[: first - 1])
+    return start, start + len("\n".join(lines[first - 1 : last]))
+
+
+def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
+    """A span of a served file as the row to store, read from the file as served now."""
+    extra = sorted(set(raw) - SERVED_FILE_KEYS)
+    if extra:
+        raise UsageError(
+            f"{where}: an anchor to a served file takes no "
+            f"{', '.join(repr(key) for key in extra)}; it takes "
+            f"{', '.join(sorted(SERVED_FILE_KEYS))}, and kyo reads the commit and computes "
+            "the digest of the lines"
+        )
+    name, path, session = raw.get("root"), raw.get("path"), raw.get("session")
+    if name not in serve_tree.ROOTS:
+        raise UsageError(
+            f"{where}: 'root' must be one of {', '.join(serve_tree.ROOTS)}, the roots the "
+            "file routes serve"
+        )
+    if not isinstance(path, str) or not path:
+        raise UsageError(f"{where}: 'path' must be the file's path relative to its root")
+    if name == serve_tree.ROOT_SCRATCH:
+        if not isinstance(session, str) or not session:
+            raise UsageError(
+                f"{where}: a file in a scratchpad needs 'session', the session whose "
+                "scratchpad it is"
+            )
+    elif session is not None:
+        raise UsageError(
+            f"{where}: 'session' names the session of a scratchpad, and the {name} root has "
+            "none; leave it out"
+        )
+    first, last = cmd_notes._range(raw, "lines", where)
+    files.allow()
+    try:
+        text = files.text(name, session, path)
+    except Refusal as exc:
+        raise Refusal(exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra) from exc
+    lines = file_lines(text)
+    if not 1 <= first <= last <= len(lines):
+        raise UsageError(
+            f"{where}: lines {first}-{last} do not fall within the {len(lines)} lines "
+            f"{path} has now, counted from 1; read the file again and anchor to what it holds"
+        )
+    markdown = serve_tree.media_type(path.rsplit("/", 1)[-1]) == "text/markdown"
+    row: dict = {
+        "kind": cmd_notes.ANCHOR_DOCUMENT if markdown else cmd_notes.ANCHOR_FILE,
+        "target": path,
+        "line_start": first,
+        "line_end": last,
+        "digest": cmd_notes.lines_digest(lines[first - 1 : last]),
+        "digest_check": cmd_notes.DIGEST_COMPUTED,
+    }
+    if "chars" in raw:
+        start, end = cmd_notes._range(raw, "chars", where)
+        low, high = _line_span(lines, first, last)
+        if not low <= start < end <= high:
+            raise UsageError(
+                f"{where}: characters {start}-{end} are not a selection inside lines "
+                f"{first}-{last}, which are characters {low}-{high} of the file, counted in "
+                "code points from 0"
+            )
+        row |= {"char_start": start, "char_end": end}
+    if name == serve_tree.ROOT_SCRATCH:
+        return row | {"session": session}
+    commit = git_queries._git_head_or_none(files.root(name, None).path)
+    if commit is None:
+        raise UsageError(
+            f"{where}: the {name} repository has no commit yet, and an anchor to a file "
+            "records the commit it was read at; make a first commit there with `git commit` "
+            "and anchor again"
+        )
+    return row | {"commit_sha": commit}
+
+
+def _file_state(ctx: commands.Context, files: _Files, anchor: dict) -> tuple[str, str | None]:
+    """The root a stored path anchor is in, and the file's text now when its span is fresh.
+
+    Fresh means the file as served now holds at the anchor's lines the text it was anchored
+    on: by the digest, or for an anchor filed with a commit alone by the file at that commit
+    (module docstring). The text is None for a stale anchor.
+    """
+    name = files.root_of(anchor)
+    text = files.text_now(name, anchor.get("session"), anchor["target"])
+    if text is None:
+        return name, None
+    if "line_start" in anchor:
+        first, last = anchor["line_start"], anchor["line_end"]
+        lines = file_lines(text)
+        if not 1 <= first <= last <= len(lines):
+            return name, None
+        now = "\n".join(lines[first - 1 : last])
+        if _has_lines_digest(anchor):
+            fresh = cmd_notes.lines_digest(lines[first - 1 : last]) == anchor["digest"]
+        else:
+            then = cmd_notes._git_text(ctx, anchor.get("commit_sha") or "", anchor["target"])
+            fresh = then is not None and "\n".join(file_lines(then)[first - 1 : last]) == now
+    else:
+        start, end = anchor["char_start"], anchor["char_end"]
+        then = cmd_notes._git_text(ctx, anchor.get("commit_sha") or "", anchor["target"])
+        fresh = then is not None and end <= len(text) and then[start:end] == text[start:end]
+    return name, text if fresh else None
+
+
+def _file_place(ctx: commands.Context, files: _Files, anchor: dict) -> dict:
+    """A stored path anchor as the marks route gives it: its address, its root, and whether
+    it is stale."""
+    name, text = _file_state(ctx, files, anchor)
+    place = cmd_notes.path_place(anchor) | {"root": name}
+    return place if text is not None else place | {"stale": True}
+
+
+def _file_line(
+    ctx: commands.Context, files: _Files, anchor: dict, session_id: str
+) -> str:
+    """The line for an anchor read from a served file (module docstring)."""
+    first, last = anchor["line_start"], anchor["line_end"]
+    name, text = _file_state(ctx, files, anchor)
+    where = _ROOT_WORDS[name]
+    if name == serve_tree.ROOT_SCRATCH and anchor["session"] != session_id:
+        where += f" of session {anchor['session']}"
+    line = f"on file {anchor['target']}{where} lines {first}-{last}"
+    if text is None:
+        return f"{line} (words unavailable)"
+    markdown = anchor["kind"] == cmd_notes.ANCHOR_DOCUMENT
+    low, high = _line_span(file_lines(text), first, last)
+    if "char_start" not in anchor:
+        # The lines are the place: a block's own words, without the mark that begins it.
+        label, start, _ = block_of(text, low) if markdown else ("", low, high)
+        quote = _words(text[max(start, low) : high])
+        return f"{line} {quote}{f' ({label})' if label else ''}"
+    selected = text[anchor["char_start"] : anchor["char_end"]]
+    quote, label = _place(text, anchor["char_start"], markdown)
+    if len(_clean_words(selected)) >= ANCHOR_WORDS:
+        quote = _words(selected)
+    elif _words(selected) != quote:
+        quote = f"{quote} at {_words(selected)}"
+    return f"{line} {quote}{f' ({label})' if label else ''}"
 
 
 # ------------------------------------------------------------------------------ reading
@@ -359,13 +678,18 @@ def read(
 def marks(
     server: Any, root_of: Callable[[], str], authorization: str | None, session_id: str
 ) -> dict[str, Any]:
-    """Every sent note with a turn anchor in this session, oldest first (module docstring)."""
+    """Every sent note with a turn anchor in this session, and every note sent to it that is
+    on a record or a file, oldest first (module docstring)."""
     _device(server, authorization)
-    with _context(server, root_of(), None, read_only=True) as ctx:
+    root = root_of()
+    with _context(server, root, None, read_only=True) as ctx:
         if not transcripts_opted_in(ctx.store().config):
             # The offsets are read from the transcript, as the session routes read it.
             raise Refusal(403, session_layer.NOT_OPTED_IN, setting=READ_TRANSCRIPTS_KEY)
-        found = cmd_notes.session_marks(ctx, session_id)
+        files = _Files(server, root, authorization)
+        found = cmd_notes.session_marks(
+            ctx, session_id, lambda anchor: _file_place(ctx, files, anchor)
+        )
     return {"ok": True, "session": session_id, "count": len(found), "marks": found}
 
 
@@ -482,9 +806,18 @@ def block_of(text: str, at: int) -> tuple[str, int, int]:
     return "", 0, len(text)
 
 
-def _place(text: str, start: int, end: int) -> tuple[str, str]:
-    """The sentence holding offset ``start`` of ``text``, quoted, and its block's label."""
-    label, first, last = block_of(text, start)
+def _place(text: str, start: int, markdown: bool = True) -> tuple[str, str]:
+    """The sentence holding offset ``start`` of ``text``, quoted, and its block's label.
+
+    Text that is not markdown, as a source file is not, has no blocks: the sentence is
+    looked for in the line that holds the offset, and nothing is labelled.
+    """
+    if markdown:
+        label, first, last = block_of(text, start)
+    else:
+        newline = text.find("\n", start)
+        label, first = "", text.rfind("\n", 0, start) + 1
+        last = len(text) if newline < 0 else newline
     block = text[first:last]
     # A selection that starts before the block's words (on a marker or a pipe) is at its start.
     sentence_from, sentence_to = sentence_at(block, max(start - first, 0))
@@ -519,12 +852,22 @@ def held_line(seconds: float, replies: list[tuple[str, str]]) -> str | None:
 
 
 def _anchor_line(
-    ctx: commands.Context, anchor: dict, records: dict[str, dict], session_id: str
+    ctx: commands.Context,
+    anchor: dict,
+    records: dict[str, dict],
+    session_id: str,
+    files: _Files | None = None,
 ) -> str:
     """One anchor as one line: its id, and the first words of its span if it has one."""
     kind, target = anchor["kind"], anchor["target"]
     if kind == cmd_notes.ANCHOR_RECORD:
-        return f"on {target}"
+        # KYO-737: the id is the address, and the words say which element it is.
+        held = cmd_notes.element_words(ctx.store(), target)
+        if held is None:
+            return f"on record {target} (not in the store)"
+        return f"on record {target}{f' {_words(held)}' if _clean_words(held) else ''}"
+    if files is not None and _has_lines_digest(anchor):
+        return _file_line(ctx, files, anchor, session_id)
     if kind == cmd_notes.ANCHOR_NOTE:
         return f"on note {target}"
     if kind == cmd_notes.ANCHOR_TURN:
@@ -545,7 +888,7 @@ def _anchor_line(
         return f"{line} {_words(words)}"
     # A turn's span is read from its record, which span_text has found and checked.
     text = cmd_notes.record_text(records[target])
-    quote, label = _place(text, anchor["char_start"], anchor["char_end"])
+    quote, label = _place(text, anchor["char_start"])
     if len(_clean_words(words)) < ANCHOR_WORDS:
         # A selection that is the whole sentence is the quote already.
         if _words(words) != quote:
@@ -602,7 +945,7 @@ def _merged(pieces: list[tuple[str, str]]) -> list[dict[str, str]]:
 
 
 def compose(
-    ctx: commands.Context, notes: list[dict], session_id: str
+    ctx: commands.Context, notes: list[dict], session_id: str, files: _Files | None = None
 ) -> list[dict[str, str]]:
     """The message for these notes, as send segments (module docstring)."""
     records = _records_of(ctx, [anchor for note in notes for anchor in note["anchors"]])
@@ -611,7 +954,7 @@ def compose(
     for index, note in enumerate(notes, start=1):
         lines = [
             f"\n\nNote {index} ({note['id']})",
-            *(_anchor_line(ctx, a, records, session_id) for a in note["anchors"]),
+            *(_anchor_line(ctx, a, records, session_id, files) for a in note["anchors"]),
         ]
         body = note["text"]
         pieces.append((serve_send.TYPED, "\n".join(lines) + ("\n" if body else "")))
@@ -637,11 +980,16 @@ def send(
         raise serve_send.bad_request(
             '"notes" must list one or more note ids, each once, in the order they are to be read'
         )
-    with _context(server, root_of(), None, read_only=True) as ctx:
+    root = root_of()
+    with _context(server, root, None, read_only=True) as ctx:
         notes = [_note(ctx, note_id) for note_id in note_ids]
         for note in notes:
             _refuse_unsendable(note)
-        segments = compose(ctx, notes, session_id)
+        files = _Files(server, root, authorization)
+        if any(_has_lines_digest(anchor) for note in notes for anchor in note["anchors"]):
+            # The words of a served file go into the message, as the blob route would give them.
+            files.allow()
+        segments = compose(ctx, notes, session_id, files)
     answer = server.held_messages.hold(
         project_name,
         root_of,
@@ -779,6 +1127,7 @@ def _prompt_message(
     segments: list[dict[str, str]],
     marks: list[dict],
     session_id: str,
+    files: _Files | None = None,
 ) -> tuple[list[dict[str, str]], list[dict]]:
     """The message a prompt sends, and what each marked line files once it is delivered."""
     lines = _lines_of(segments)
@@ -788,7 +1137,7 @@ def _prompt_message(
     filing: list[dict] = []
     for mark in sorted(marks, key=lambda m: m["line"]):
         start, end, entered = lines[mark["line"]]
-        on = [_anchor_line(ctx, anchor, records, session_id) for anchor in mark["rows"]]
+        on = [_anchor_line(ctx, anchor, records, session_id, files) for anchor in mark["rows"]]
         on += [f"attached {attachment['path']}" for attachment in mark["attached"]]
         if on:
             # An empty line's own line break follows, so it becomes its `on` lines alone.
@@ -844,18 +1193,20 @@ def send_prompt(
     if any(_files_a_note(mark) for mark in marks):
         # A mark becomes a note, so marking needs what filing a note needs.
         _device(server, authorization)
-        with _context(server, root_of(), None, read_only=True) as ctx:
+        root = root_of()
+        files = _Files(server, root, authorization)
+        with _context(server, root, None, read_only=True) as ctx:
             store = ctx.store()
             for index, mark in enumerate(marks):
                 try:
                     mark["rows"] = _validated(
-                        ctx, store, mark["anchors"], f"marks[{index}].anchors"
+                        ctx, store, mark["anchors"], f"marks[{index}].anchors", files
                     )
                 except (UsageError, NotFound) as exc:
                     # A mark is part of the body, so an anchor that names nothing is a
                     # malformed body here rather than a missing note or record.
                     raise serve_send.bad_request(str(exc)) from exc
-            segments_sent, filing = _prompt_message(ctx, segments, marks, session_id)
+            segments_sent, filing = _prompt_message(ctx, segments, marks, session_id, files)
     elif marks:
         # Attachments alone: no anchor to read, so no store is opened.
         segments_sent, filing = _prompt_message(None, segments, marks, session_id)
