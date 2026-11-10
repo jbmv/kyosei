@@ -11,6 +11,9 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 [MDHero](https://github.com/vaibhav-kakde-in/mdhero), whose MIT licence is kept in
 `web/LICENSE-mdhero`.
 
+The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
+kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
+
 ## Running it
 
 ```
@@ -22,7 +25,8 @@ The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name a
 and project, which `KYOSEI_SERVE_URL` and `KYOSEI_PROJECT` override. Sending needs a device
 token from `kyo devices issue`, entered in Settings and kept in the Keychain. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
-permission.
+permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
+the `terminal` permission; without it the drawer shows the pane's text and the server's reason.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.

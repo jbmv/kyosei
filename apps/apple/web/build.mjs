@@ -20,3 +20,6 @@ cpSync("node_modules/katex/dist/katex.min.css", `${out}/katex.min.css`);
 cpSync("node_modules/katex/dist/fonts", `${out}/fonts`, { recursive: true });
 cpSync("node_modules/highlight.js/styles/github.min.css", `${out}/hljs-light.css`);
 cpSync("node_modules/highlight.js/styles/github-dark.min.css", `${out}/hljs-dark.css`);
+// The terminal emulator's own stylesheet, and its notice, which goes wherever its code does.
+cpSync("node_modules/@xterm/xterm/css/xterm.css", `${out}/xterm.css`);
+cpSync("LICENSE-xterm", `${out}/LICENSE-xterm`);

@@ -1,8 +1,8 @@
 """Per-device tokens, and ``kyo devices`` that manages them (KYO-699).
 
 A route that can change something on this machine, the session send routes first, the note
-routes of chunk E5 next and the orchestrator start route after them (KYO-719), is reached
-with a token issued to one device. Nothing here
+routes of chunk E5 next, the orchestrator start route after them (KYO-719) and then the
+terminal routes (KYO-721), is reached with a token issued to one device. Nothing here
 knows what any permission allows: a token carries a list of permission names, and a route
 asks for the one it needs. Adding a permission means adding its name to :data:`PERMISSIONS`.
 
@@ -57,8 +57,19 @@ PERMISSION_NOTES = "notes"
 #: issued to type into a session, or to file notes, was not issued for.
 PERMISSION_START = "start"
 
+#: The permission that lets a token open a terminal on a session's pane and type into it
+#: (KYO-721). A name of its own, because the terminal routes send whatever is typed to
+#: whatever the screen shows, a prompt included, where a `send` token's message goes only to
+#: an idle or working screen.
+PERMISSION_TERMINAL = "terminal"
+
 #: Every permission this build can grant.
-PERMISSIONS: tuple[str, ...] = (PERMISSION_SEND, PERMISSION_NOTES, PERMISSION_START)
+PERMISSIONS: tuple[str, ...] = (
+    PERMISSION_SEND,
+    PERMISSION_NOTES,
+    PERMISSION_START,
+    PERMISSION_TERMINAL,
+)
 
 #: Marks a string as a Kyosei token, for a person reading it and for secret scanners.
 TOKEN_PREFIX = "kyo_"

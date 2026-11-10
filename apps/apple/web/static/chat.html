@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="katex.min.css" />
     <link rel="stylesheet" href="hljs-light.css" media="(prefers-color-scheme: light)" />
     <link rel="stylesheet" href="hljs-dark.css" media="(prefers-color-scheme: dark)" />
+    <link rel="stylesheet" href="xterm.css" />
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
@@ -51,7 +52,11 @@
       </svg>
     </button>
 
-    <pre id="terminal"></pre>
+    <div id="terminal">
+      <div id="terminal-note" hidden></div>
+      <div id="terminal-screen"></div>
+      <pre id="terminal-text" hidden></pre>
+    </div>
 
     <div id="band"></div>
     <aside id="composer">
