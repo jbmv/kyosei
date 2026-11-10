@@ -668,3 +668,62 @@ extension ServeClient {
         }
     }
 }
+
+// MARK: The Files view (KYO-736)
+
+extension ServeClient {
+    /// What a file route answered: the bytes, the status, and the two headers a client reads.
+    public struct FileReply: Sendable {
+        public let data: Data
+        public let status: Int
+        public let etag: String?
+        public let contentType: String?
+    }
+
+    /// The characters a path segment or a query value is sent as itself. Everything else is
+    /// percent-encoded, so that a `?`, a `#`, a `%` or a `+` in a file's name is part of the
+    /// name: the resolve route reads its query as a form, where a bare `+` is a space.
+    private static let unreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    /// The address of a file route: `segments` under the project's `files`, each encoded as
+    /// one segment, and `query` after them.
+    public func filesURL(
+        project: String, segments: [String], query: [(name: String, value: String)] = []
+    ) -> URL {
+        func encoded(_ text: String) -> String {
+            text.addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? text
+        }
+        var components = URLComponents(
+            url: base.appending(path: "v1/projects/\(project)/files"),
+            resolvingAgainstBaseURL: false)!
+        if !segments.isEmpty {
+            components.percentEncodedPath += "/" + segments.map(encoded).joined(separator: "/")
+        }
+        if !query.isEmpty {
+            components.percentEncodedQuery =
+                query.map { "\(encoded($0.name))=\(encoded($0.value))" }.joined(separator: "&")
+        }
+        return components.url!
+    }
+
+    /// Reads one file route (see "Reading a project's files" in the reference). A refusal's
+    /// body is the server's own document, so it is returned rather than thrown. With
+    /// `ifNoneMatch` the blob route answers 304 and no bytes when the file is unchanged; the
+    /// system's own cache is not consulted, so that the status is the server's.
+    public func files(
+        project: String, segments: [String], query: [(name: String, value: String)] = [],
+        token: String?, ifNoneMatch: String? = nil
+    ) async throws -> FileReply {
+        var request = URLRequest(url: filesURL(project: project, segments: segments, query: query))
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        return FileReply(
+            data: data, status: http?.statusCode ?? 0,
+            etag: http?.value(forHTTPHeaderField: "ETag"),
+            contentType: http?.value(forHTTPHeaderField: "Content-Type"))
+    }
+}
