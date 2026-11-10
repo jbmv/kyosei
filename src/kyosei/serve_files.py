@@ -13,8 +13,9 @@ WHAT IS WRITABLE. Exactly two things per project:
 - the session scratchpad, ``<per-project home>/scratchpad.md``, one fixed path.
 
 And for this machine rather than a project: the send log, and the composer's unsent text
-(KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json``, private to this
-account and refused if it would lie inside a git repository.
+(KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json`` (and, KYO-709,
+``unfiled/<message id>.json``), private to this account and refused if it would lie inside a
+git repository.
 
 HOW IT HOLDS. One resolver, :func:`ideas_target`, for every idea route, read or
 write: the relative path is checked as text first (no absolute path, no NUL, no empty,
@@ -623,6 +624,8 @@ def open_private_log(path: Path) -> int:
 #: What follows ``$KYOSEI_HOME/composer/``: one directory per kind of unsent text.
 DRAFTS = "drafts"
 HELD = "held"
+#: KYO-709: a delivered message whose notes could not be filed yet, named by the message's id.
+UNFILED = "unfiled"
 
 #: A session id as a file name: Claude Code's are UUIDs, and nothing else may name a file.
 _SESSION_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")

@@ -731,6 +731,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # person_note_tag_changes -- what a person wrote, on the places it addresses, and
         # each later change to its tags. A real DDL change, so a real new hash.
         30: "2cd81e07a27af20e230ffa29a8af39ef972c801579b8e263b6573a0c74a0c2c6",
+        # KYO-709: person_notes gains sent_at, sent_session and sent_message -- a note's
+        # sent state as a field set once, in place of the `sent` tag. A real DDL change, so
+        # a real new hash.
+        31: "1bd4e138ed4cda1f98f15e5e37d6b3bc602fdacff57246848e9a78d12b6543bd",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2694,3 +2698,94 @@ def test_an_unknown_form_or_a_partial_span_is_refused(kyo, project: Path) -> Non
         _credited_record(kyo, project, words_form="pasted")
     with pytest.raises(KyoseiError, match="whole or not at all"):
         _credited_record(kyo, project, span_session="s")
+
+
+# --------------------------------------------------------------------- KYO-709.c7
+
+
+def _as_schema_30(project: Path) -> None:
+    """Make the notes ledgers and the db read as a store written at schema_version 30."""
+    from kyosei import ledgers as ledgers_module
+
+    export_directory = project / "kyosei" / "export"
+    for name in (
+        ledgers_module.PERSON_NOTES_FILENAME,
+        ledgers_module.PERSON_NOTE_TAG_CHANGES_FILENAME,
+    ):
+        path = export_directory / name
+        if not path.exists():
+            continue
+        lines = []
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            row = json.loads(raw)
+            row.pop("sent", None)  # schema 30 had no such key
+            row["schema_version"] = 30
+            lines.append(json.dumps(row, sort_keys=True) + "\n")
+        path.write_text("".join(lines), encoding="utf-8")
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        conn.execute("UPDATE meta SET value = '30' WHERE key = 'schema_version'")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_a_schema_30_store_with_sent_tags_opens_with_the_field_and_without_the_tag(
+    kyo, project: Path
+) -> None:
+    """The `sent` tag was the sent state until 31. Tagged later, the field takes the time of
+    the tag's change; filed with it, the note's filing. Either way the tag is gone, and a
+    note whose tag was removed again was not sent."""
+    later = kyo("notes", "add", "--entered", "typed", "--file", "-", "--json", stdin="a\n")
+    filed = kyo(
+        "notes", "add", "--entered", "typed", "--tag", "sent", "--tag", "keep", "--file", "-",
+        "--json", stdin="b\n",
+    )
+    removed = kyo("notes", "add", "--entered", "typed", "--file", "-", "--json", stdin="c\n")
+    later_id, filed_id, removed_id = (r.json["note"]["id"] for r in (later, filed, removed))
+    assert kyo("notes", "tag", later_id, "--add", "sent").code == 0
+    assert kyo("notes", "tag", removed_id, "--add", "sent").code == 0
+    assert kyo("notes", "tag", removed_id, "--remove", "sent").code == 0
+    tagged_at = kyo("notes", "show", later_id, "--json").json["note"]["tag_changes"][0]
+    filed_at = filed.json["note"]["created_at"]
+    _as_schema_30(project)
+
+    refused = kyo("notes", "show", later_id)
+    assert refused.code != 0 and "kyo rebuild --force" in refused.err
+    rebuilt = kyo("rebuild", "--force")
+    assert rebuilt.code == 0, rebuilt
+
+    later_note = kyo("notes", "show", later_id, "--json").json["note"]
+    assert later_note["sent"] == {"at": tagged_at["changed_at"], "session": None, "message": None}
+    assert later_note["tags"] == []
+    # The change itself stays in the note's history.
+    assert [c["tag"] for c in later_note["tag_changes"]] == ["sent"]
+    filed_note = kyo("notes", "show", filed_id, "--json").json["note"]
+    assert filed_note["sent"] == {"at": filed_at, "session": None, "message": None}
+    assert filed_note["tags"] == ["keep"]
+    removed_note = kyo("notes", "show", removed_id, "--json").json["note"]
+    assert removed_note["sent"] is None and removed_note["tags"] == []
+    sent_ids = [n["id"] for n in kyo("notes", "list", "--sent", "--json").json["notes"]]
+    assert sent_ids == [later_id, filed_id]
+
+    # A `sent` tag written at 31 is a tag, and moves no field.
+    assert kyo("notes", "tag", removed_id, "--add", "sent").code == 0
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    again = kyo("notes", "show", removed_id, "--json").json["note"]
+    assert again["sent"] is None and again["tags"] == ["sent"]
+    assert kyo("notes", "show", later_id, "--json").json["note"]["tags"] == []
+    doctor = kyo("doctor")
+    assert doctor.code == 0, doctor
+
+
+def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -> None:
+    from kyosei.schema import PERSON_NOTE_FIELD_DEFAULTS, SENT_FIELD_SCHEMA_VERSION
+
+    assert PERSON_NOTE_FIELD_DEFAULTS[SENT_FIELD_SCHEMA_VERSION] == {"sent": None}
+    note = kyo("notes", "add", "--entered", "typed", "--file", "-", "--json", stdin="a\n")
+    _as_schema_30(project)
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    shown = kyo("notes", "show", note.json["note"]["id"], "--json").json["note"]
+    assert shown["sent"] is None and shown["text"] == "a"

@@ -64,8 +64,10 @@ message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device 
 
 THE NOTE ROUTES (KYO-706). ``notes`` (GET, POST), ``notes/{id}`` (GET), ``notes/{id}/tags``
 (POST) and ``sessions/{id}/send-notes`` (POST) are :mod:`kyosei.serve_notes`, and need a device
-token holding the ``notes`` permission. They are the one exception to a read-only store: each
-write opens its own connection and goes through the transaction ``kyo notes`` uses.
+token holding the ``notes`` permission. So is ``sessions/{id}/send-prompt`` (POST, KYO-709), a
+composer prompt with its marks, which needs the ``send`` permission and ``notes`` with marks.
+They are the one exception to a read-only store: each write opens its own connection and goes
+through the transaction ``kyo notes`` uses.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
@@ -290,6 +292,8 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     "held": ("GET", "POST", "DELETE"),
     # KYO-706: a set of notes, sent as one held message (serve_notes).
     "send-notes": ("POST",),
+    # KYO-709: one composer prompt with its marks in place (serve_notes).
+    "send-prompt": ("POST",),
 }
 
 #: KYO-706: the note routes, under ``/v1/projects/{project}/``.
@@ -924,11 +928,12 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self.server.project(name).root
 
         authorization = self.headers.get("Authorization")
-        if route == "send-notes":
+        if route in ("send-notes", "send-prompt"):
             from . import serve_notes
 
+            sender = serve_notes.send if route == "send-notes" else serve_notes.send_prompt
             return 200, _json_bytes(
-                serve_notes.send(self.server, name, root_of, session_id, authorization, self._body)
+                sender(self.server, name, root_of, session_id, authorization, self._body)
             )
         if route == "draft":
             status, document = serve_drafts.perform(
@@ -1250,7 +1255,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f"GET {project}/events, GET {project}/sessions and GET "
         f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
         f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, POST "
-        f"{project}/sessions/{{id}}/send, .../slash, .../interrupt or .../send-notes, GET/POST "
+        f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "
+        f".../send-prompt, GET/POST "
         f"{project}/notes, GET {project}/notes/{{id}} and POST {project}/notes/{{id}}/tags",
     )
 

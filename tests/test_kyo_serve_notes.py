@@ -19,6 +19,7 @@ import pytest
 
 from kyosei import serve_notes
 from kyosei import store as store_module
+from kyosei.cmd_notes import mark_sent as cmd_notes_mark_sent
 
 from .conftest import invoke
 from .test_kyo_serve import body_json
@@ -473,20 +474,23 @@ def test_the_delivered_message_reaches_the_pane_and_the_notes_are_filed_as_sent(
 ) -> None:
     first, second, third = three_notes(bed, notes_path, can_send)
     ids = [first["id"], second["id"], third["id"]]
-    assert post(bed, SEND_NOTES, {"notes": ids}, can_send)[0] == 200
+    _, held = post(bed, SEND_NOTES, {"notes": ids}, can_send)
     looks(bed)
     for note_id in ids:
-        assert get(bed, f"{notes_path}/{note_id}", can_send)[1]["note"]["tags"] == []
+        assert get(bed, f"{notes_path}/{note_id}", can_send)[1]["note"]["sent"] is None
     bed.show(IDLE)
 
-    def sent_tag() -> bool:
-        found = get(bed, f"{notes_path}?tag={serve_notes.SENT_TAG}", can_send)[1]
-        return found["count"] == 3
+    def all_sent() -> bool:
+        return get(bed, f"{notes_path}?sent=true", can_send)[1]["count"] == 3
 
-    wait_until(sent_tag)
+    wait_until(all_sent)
     assert any("why not reformat it?" in key for key in keys_sent(bed))
-    change = get(bed, f"{notes_path}/{ids[0]}", can_send)[1]["note"]["tag_changes"][0]
-    assert change["tag"] == "sent" and change["author"] == "kyo-serve:ipad"
+    note = get(bed, f"{notes_path}/{ids[0]}", can_send)[1]["note"]
+    # KYO-709.c7: a field naming the session and the held message, and no tag.
+    assert note["sent"]["session"] == OLD and note["sent"]["message"] == held["held"]["id"]
+    assert note["sent"]["at"].endswith("Z")
+    assert note["tags"] == [] and note["tag_changes"] == []
+    assert get(bed, f"{notes_path}?sent=false", can_send)[1]["count"] == 0
     rows = [row for row in log_rows(store_home) if row["action"] == "held-delivery"]
     assert [row["outcome"] for row in rows] == ["sent"]
 
@@ -494,7 +498,7 @@ def test_the_delivered_message_reaches_the_pane_and_the_notes_are_filed_as_sent(
 def untouched(bed: Bed, notes_path: str, token: str, *note_ids: str) -> None:
     for note_id in note_ids:
         note = get(bed, f"{notes_path}/{note_id}", token)[1]["note"]
-        assert note["tags"] == [] and note["tag_changes"] == []
+        assert note["tags"] == [] and note["tag_changes"] == [] and note["sent"] is None
 
 
 def test_a_message_refused_because_sending_is_off_files_nothing_as_sent(
@@ -592,22 +596,40 @@ def test_a_note_redacted_since_filing_is_refused_and_leaving_it_out_clears_it(
     assert post(bed, SEND_NOTES, {"notes": [kept["id"]]}, can_send)[0] == 200
 
 
-def test_a_sent_mark_that_cannot_be_written_is_logged_and_the_named_remedy_clears_it(
-    bed: Bed, notes_path: str, can_send: str, monkeypatch: pytest.MonkeyPatch
+def test_a_sent_state_that_cannot_be_written_is_logged_and_written_at_the_next_start(
+    bed: Bed, notes_path: str, can_send: str, monkeypatch: pytest.MonkeyPatch, store_home: Path
 ) -> None:
     note = file_note(bed, notes_path, can_send)
 
     def locked(*args, **kwargs):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(serve_notes.cmd_notes, "change_tags", locked)
+    monkeypatch.setattr(serve_notes.cmd_notes, "mark_sent", locked)
     written = io.StringIO()
     monkeypatch.setattr(bed.server, "log_stream", written)
-    assert post(bed, SEND_NOTES, {"notes": [note["id"]]}, can_send)[0] == 200
+    _, held = post(bed, SEND_NOTES, {"notes": [note["id"]]}, can_send)
     bed.show(IDLE)
-    remedy = f"`kyo notes tag {note['id']} --add sent`"
-    wait_until(lambda: remedy in written.getvalue())
-    monkeypatch.undo()
-    result = invoke(["--root", str(bed.project), "notes", "tag", note["id"], "--add", "sent"])
-    assert result.code == 0, result
-    assert on_the_cli(bed, "show", note["id"])["note"]["tags"] == ["sent"]
+    wait_until(lambda: "filed when kyo serve next starts" in written.getvalue())
+    assert held["held"]["id"] in written.getvalue()
+    unfiled = store_home / "composer" / "unfiled" / f"{held['held']['id']}.json"
+    assert unfiled.is_file()
+    # Delivered, and not held again.
+    assert get(bed, f"{SESSIONS}/{OLD}/held", can_send)[1]["held"] is None
+    monkeypatch.setattr(serve_notes.cmd_notes, "mark_sent", cmd_notes_mark_sent)
+    bed.server.held_messages.resume()
+    sent = get(bed, f"{notes_path}/{note['id']}", can_send)[1]["note"]["sent"]
+    assert sent["message"] == held["held"]["id"] and sent["session"] == OLD
+    assert not unfiled.exists()
+
+
+def test_the_sent_state_is_not_a_field_a_route_can_set(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    sent = {"at": "2026-11-09T12:00:00.000Z", "session": OLD, "message": "x"}
+    status, refused = post(bed, notes_path, {"text": "x", "entered": "typed", "sent": sent}, token)
+    assert status == 400 and "'sent'" in refused["error"]
+    note = file_note(bed, notes_path, token)
+    status, refused = post(bed, f"{notes_path}/{note['id']}/tags", {"sent": None}, token)
+    assert status == 400 and "'sent'" in refused["error"]
+    status, refused = get(bed, f"{notes_path}?sent=maybe", token)
+    assert status == 400 and "?sent must be true or false" in refused["error"]
