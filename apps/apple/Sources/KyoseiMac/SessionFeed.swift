@@ -255,6 +255,51 @@ final class SessionFeed {
         }
     }
 
+    /// The file types the server keeps as they are. Anything else an image can be made from,
+    /// such as HEIC from an Apple camera, is sent as JPEG.
+    private static let keptTypes: Set<String> = [
+        "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf",
+    ]
+
+    /// Uploads a file pasted into a prompt to the machine the session runs on, and tells the
+    /// composer the id and path the server gave it.
+    func attach(body: [String: Any]) {
+        let ref = body["ref"] as? String ?? ""
+        func fail(_ why: String) {
+            send("attached", #"{"ref": \#(quoted(ref)), "error": \#(quoted(why))}"#)
+        }
+        guard let session = current, let token = Self.deviceToken() else {
+            return fail("No session or device token to attach with.")
+        }
+        guard var data = Data(base64Encoded: body["data"] as? String ?? ""), !data.isEmpty else {
+            return fail("That file could not be read.")
+        }
+        var type = body["type"] as? String ?? ""
+        if !Self.keptTypes.contains(type) {
+            guard let image = NSImage(data: data), let tiff = image.tiffRepresentation,
+                let jpeg = NSBitmapImageRep(data: tiff)?.representation(
+                    using: .jpeg, properties: [.compressionFactor: 0.9])
+            else { return fail("That kind of file cannot be attached.") }
+            data = jpeg
+            type = "image/jpeg"
+        }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "POST", sessionPath(session, "attachments"), token: token, body: data,
+                    contentType: type)
+            else { return fail("The server could not be reached.") }
+            let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+            let file = object?["attachment"] as? [String: Any] ?? object
+            guard reply.status == 200 || reply.status == 201, let id = file?["id"] as? String else {
+                return fail(refusal(reply.data))
+            }
+            send(
+                "attached",
+                #"{"ref": \#(quoted(ref)), "id": \#(quoted(id)), "path": \#(quoted(file?["path"] as? String))}"#)
+        }
+    }
+
     /// Takes a held message back, returning its text to the composer.
     func retract(id: String) {
         guard let session = current, let token = Self.deviceToken() else { return }

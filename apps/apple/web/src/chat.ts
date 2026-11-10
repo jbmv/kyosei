@@ -28,6 +28,8 @@ interface Batch {
 interface Facts {
   git_branch: string | null;
   context: { percent: number | null; tokens: number | null; window: number | null } | null;
+  /** The prompt cache as Claude Code last reported it for this session (KYO-715). */
+  cache?: { warm: boolean | null; expires_at: string | null; recache_tokens_if_cold: number | null } | null;
 }
 interface SessionRow {
   session_id: string; title: string | null; live: boolean; first_seen: string;
@@ -54,6 +56,32 @@ window.addEventListener("error", (event) => log(`error: ${event.message}`));
 function atBottom(): boolean {
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < STICK_DISTANCE;
 }
+
+const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
+const ACTIVITY_RED_MS = 45 * 60 * 1000;
+
+/**
+ * How long ago the session last did anything, in the top bar. The prompt cache is read on
+ * every request, so this is also how long the cache has gone unread, and it turns amber and
+ * then red as an hour's cache nears its end.
+ */
+function drawActivity(): void {
+  const label = document.getElementById("top-activity")!;
+  const last = (chat.lastElementChild as HTMLElement | null)?.dataset.at;
+  const ago = last ? Date.now() - new Date(last).getTime() : NaN;
+  if (!Number.isFinite(ago)) {
+    label.textContent = "";
+    return;
+  }
+  const seconds = Math.max(0, Math.floor(ago / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const words = minutes >= 60
+    ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
+    : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  label.textContent = `Last activity: ${words} ago`;
+  label.className = ago > ACTIVITY_RED_MS ? "red" : ago > ACTIVITY_AMBER_MS ? "amber" : "";
+}
+setInterval(drawActivity, 1000);
 
 /** Runs a change to the page, following it down only if the reader was at the end. */
 function keepingPlace(change: () => void): void {
@@ -85,6 +113,7 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
 
 const ICONS = {
   anchor: '<circle cx="12" cy="5" r="2.4"/><path d="M12 7.4V21M8 11h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
+  file: '<path d="M20 11.5l-8 8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -648,6 +677,7 @@ function setText(id: string, text: string): void {
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
   setText("top-title", session?.title ?? menu?.project ?? "");
+  drawActivity();
   drawAgents();
 
   const own = [...calls.values()].filter(isOwnBackgroundTask);
@@ -1102,6 +1132,30 @@ const kyo = {
     adoptShelf();
   },
 
+  /** The server's answer to a pasted file: its id and path, or why it was refused. */
+  attached(frame: { ref: string; id?: string; path?: string; error?: string }): void {
+    const upload = uploads.get(frame.ref);
+    if (!upload) return;
+    uploads.delete(frame.ref);
+    const { area, item } = upload;
+    const marks = marksOf.get(area);
+    if (!marks) return;
+    if (frame.error || !frame.id) {
+      for (const [id, items] of marks.items) {
+        const rest = items.filter((other) => other !== item);
+        if (rest.length) marks.items.set(id, rest);
+        else marks.items.delete(id);
+      }
+      composerNote.textContent = frame.error ?? "The file could not be attached.";
+    } else {
+      item.id = frame.id;
+      item.path = frame.path;
+      delete item.pending;
+    }
+    remember();
+    drawMarks(area);
+  },
+
   /** The session's sent prompts' anchors, from the store, which the chat keeps showing. */
   marks(frame: { marks?: SentMark[] }): void {
     sentMarks_ = frame.marks ?? [];
@@ -1168,7 +1222,9 @@ interface AnchorItem {
   /** The range is the words that were selected, not the whole of the blocks they lie in. */
   exact?: boolean;
 }
-type Item = TagItem | AnchorItem;
+/** A file pasted into a paragraph, kept on the machine the session runs on. */
+interface FileItem { kind: "file"; id: string; name: string; path?: string; thumb?: string; pending?: string }
+type Item = TagItem | AnchorItem | FileItem;
 interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
 
 interface Marks {
@@ -1192,9 +1248,6 @@ markPanel.className = "mark-panel";
 
 const TAGS_KEY = "composer-tags";
 let storeTags: string[] = [];
-const tagList = document.createElement("datalist");
-tagList.id = "tag-list";
-document.body.append(tagList);
 
 /** Tags to suggest: those on the prompts now, then those used on this device, newest first. */
 function knownTags(): string[] {
@@ -1249,7 +1302,8 @@ function drawMarks(area: HTMLTextAreaElement): void {
     // One thing shows as what it is, and several as their number.
     const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(area, id));
     if (items.length === 1) mark.append(icon(items[0].kind));
-    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `anchor: ${item.words}`)).join("\n");
+    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
+      : item.kind === "file" ? `attached: ${item.name}` : `anchor: ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
     return [mark];
   });
@@ -1297,6 +1351,16 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     chip.className = "mark-item";
     if (item.kind === "tag") {
       chip.textContent = `#${item.name}`;
+    } else if (item.kind === "file") {
+      if (item.thumb) {
+        const thumb = document.createElement("img");
+        thumb.className = "mark-thumb";
+        thumb.src = item.thumb;
+        chip.append(thumb);
+      } else {
+        chip.append(icon("file"));
+      }
+      chip.append(item.pending ? `${item.name} (uploading)` : item.name);
     } else {
       // An anchor's chip goes to the place it names.
       const place = boxButton("mark-anchor", item.words, () => reveal(item));
@@ -1308,13 +1372,26 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
   });
   const field = document.createElement("input");
   field.placeholder = "Add a tag…";
-  field.setAttribute("list", "tag-list");
-  tagList.replaceChildren(...knownTags().filter((name) => !held.some((item) => item.kind === "tag" && item.name === name))
-    .map((name) => {
-      const option = document.createElement("option");
-      option.value = name;
-      return option;
-    }));
+  // The suggestions are drawn in the panel: the system's own list for a field opened in
+  // the wrong place in the app's web view.
+  const suggestions = document.createElement("div");
+  suggestions.className = "tag-suggestions";
+  const addTag = (name: string) => {
+    store(TAGS_KEY, [name, ...stored<string[]>(TAGS_KEY, []).filter((used) => used !== name)].slice(0, 200));
+    if (!held.some((item) => item.kind === "tag" && item.name === name)) change([...held, { kind: "tag", name }]);
+  };
+  const suggest = () => {
+    const typed = field.value.trim().replace(/^#/, "").toLowerCase();
+    const seen = new Set(held.flatMap((item) => (item.kind === "tag" ? [item.name.toLowerCase()] : [])));
+    const names = knownTags().filter((name) => {
+      const lower = name.toLowerCase();
+      if (seen.has(lower) || !lower.includes(typed)) return false;
+      seen.add(lower);
+      return true;
+    }).slice(0, 8);
+    suggestions.replaceChildren(...names.map((name) => boxButton("tag-suggestion", `#${name}`, () => addTag(name))));
+  };
+  field.addEventListener("input", suggest);
   field.addEventListener("keydown", (event) => {
     event.stopPropagation();
     if (event.key === "Escape") {
@@ -1324,11 +1401,10 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     const name = field.value.trim().replace(/^#/, "");
     if (event.key !== "Enter" || !name) return;
     event.preventDefault();
-    const has = held.some((item) => item.kind === "tag" && item.name === name);
-    store(TAGS_KEY, [name, ...stored<string[]>(TAGS_KEY, []).filter((used) => used !== name)].slice(0, 200));
-    if (!has) change([...held, { kind: "tag", name }]);
+    addTag(name);
   });
-  markPanel.replaceChildren(...chips, field);
+  markPanel.replaceChildren(...chips, field, suggestions);
+  suggest();
   markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
   area.closest(".box")!.append(markPanel);
   if (refocus || !held.length) field.focus();
@@ -1614,6 +1690,13 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   area.addEventListener("keydown", (event) => listKeys(area, event));
   area.addEventListener("focus", () => { lastArea = area; });
   area.addEventListener("paste", (event) => {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (files.length) {
+      // A pasted file belongs to the paragraph the caret is in.
+      event.preventDefault();
+      for (const file of files) attachFile(area, file);
+      return;
+    }
     const text = event.clipboardData?.getData("text/plain");
     if (text) pasted.set(area, [...(pasted.get(area) ?? []), text]);
   });
@@ -1691,7 +1774,8 @@ function currentBoxes(): SavedBox[] {
     return {
       text: area.value,
       marks: marks.ids.flatMap((id, line) => {
-        const items = marks.items.get(id);
+        // A file still uploading is not saved: nothing would finish it after a relaunch.
+        const items = marks.items.get(id)?.filter((item) => !(item.kind === "file" && item.pending));
         return items?.length ? [{ line, items }] : [];
       }),
     };
@@ -1777,6 +1861,47 @@ function messageSegments(area: HTMLTextAreaElement): { kind: string; text: strin
 }
 
 const HELD_KEY = "composer-held";
+/** The prompt whose Send was answered with the cold-cache warning, until it is pressed again. */
+let coldConfirm: HTMLTextAreaElement | null = null;
+
+const uploads = new Map<string, { area: HTMLTextAreaElement; item: FileItem }>();
+let nextUpload = 1;
+const THUMB_PX = 96;
+
+/** A small picture of an image for the mark's panel, or nothing for what cannot be drawn. */
+async function thumbnail(file: File): Promise<string | undefined> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, THUMB_PX / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Puts a pasted file on the caret's paragraph and sends it to the session's machine. */
+async function attachFile(area: HTMLTextAreaElement, file: File): Promise<void> {
+  const marks = marksOf.get(area)!;
+  const line = area.value.slice(0, area.selectionStart).split("\n").length - 1;
+  const id = marks.ids[line];
+  const ref = `upload-${nextUpload++}`;
+  const item: FileItem = { kind: "file", id: "", name: file.name || "pasted image", pending: ref };
+  marks.items.set(id, [...(marks.items.get(id) ?? []), item]);
+  uploads.set(ref, { area, item });
+  drawMarks(area);
+  item.thumb = await thumbnail(file);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  post("attach", { ref, type: file.type, name: item.name, data: btoa(binary) });
+  drawMarks(area);
+}
 
 /** A prompt's marks as the server takes them: the line, its anchors and its tags. */
 function sentMarks(area: HTMLTextAreaElement): unknown[] {
@@ -1793,7 +1918,8 @@ function sentMarks(area: HTMLTextAreaElement): unknown[] {
         : { ...place, uuid: item.key.slice(2) }];
     });
     const tags = items.flatMap((item) => (item.kind === "tag" ? [item.name] : []));
-    return [{ line, anchors, tags }];
+    const attachments = items.flatMap((item) => (item.kind === "file" && item.id ? [item.id] : []));
+    return [{ line, anchors, tags, ...(attachments.length ? { attachments } : {}) }];
   });
 }
 
@@ -1807,6 +1933,25 @@ function attemptSend(area: HTMLTextAreaElement): void {
     composerNote.textContent = "One message is already waiting. Edit it first.";
     return;
   }
+  const waiting = Array.from(marksOf.get(area)!.items.values()).flat()
+    .some((item) => item.kind === "file" && item.pending);
+  if (waiting) {
+    composerNote.textContent = "A file is still uploading.";
+    return;
+  }
+  // After the cache has expired the whole context is written again, so Send asks once more.
+  const cache = facts?.cache;
+  const expired = cache?.expires_at ? new Date(cache.expires_at).getTime() : NaN;
+  if (expired < Date.now() && coldConfirm !== area) {
+    const tokens = cache?.recache_tokens_if_cold;
+    const went = new Date(expired).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    composerNote.textContent = `The cache went cold at ${went}. Sending rewrites ${
+      tokens ? `about ${tokenWords(tokens)} tokens` : "the whole context"}. Send again to confirm.`;
+    coldConfirm = area;
+    window.setTimeout(() => { if (coldConfirm === area) coldConfirm = null; }, 15000);
+    return;
+  }
+  coldConfirm = null;
   composerNote.textContent = "Sending…";
   sending = area.closest<HTMLElement>(".box");
   // Kept so that a message taken back to edit returns with its marks.

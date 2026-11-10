@@ -150,13 +150,13 @@ public struct ServeClient: Sendable {
     /// A request a device token authorises. Returns the body and status for the caller to read.
     public func authorised(
         _ method: String, _ path: String, token: String, body: Data? = nil, ifMatch: String? = nil,
-        ifNoneMatch: String? = nil
+        ifNoneMatch: String? = nil, contentType: String = "application/json"
     ) async throws -> (data: Data, status: Int) {
         var request = URLRequest(url: url(path))
         request.httpMethod = method
         request.httpBody = body
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
         if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
         let (data, response) = try await URLSession.shared.data(for: request)
