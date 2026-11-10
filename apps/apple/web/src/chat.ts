@@ -19,6 +19,9 @@ import {
   dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
   recordOf, recordPage, refParts, visit, when,
 } from "./records";
+import {
+  type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
+} from "./history";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
@@ -193,6 +196,9 @@ const ICONS = {
   records: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   page: '<path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M14 3.5v4h4M8.5 12h7M8.5 15.5h7"/>',
+  home: '<path d="M4 11.2L12 4l8 7.2"/><path d="M6 10v9.5h4.5V14h3v5.5H18V10"/>',
+  back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
+  forward: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -203,6 +209,26 @@ function icon(kind: keyof typeof ICONS): SVGElement {
   svg.setAttribute("class", "icon");
   svg.innerHTML = ICONS[kind];
   return svg;
+}
+
+/**
+ * Fills the three bare icons of a view's top bar, once, and wires them to what each does.
+ * `can` says whether Back and Forward have somewhere to go, so the others are dimmed.
+ */
+function navIcons(prefix: string, steps: { home: () => void; back: () => void; forward: () => void }): void {
+  for (const kind of ["home", "back", "forward"] as const) {
+    const button = document.getElementById(`${prefix}-${kind}`)!;
+    button.replaceChildren(icon(kind));
+    button.addEventListener("click", () => {
+      if (!(button as HTMLButtonElement).disabled) steps[kind]();
+    });
+  }
+}
+
+function drawNav(prefix: string, homeNow: boolean, history: History<unknown>): void {
+  (document.getElementById(`${prefix}-home`) as HTMLButtonElement).disabled = homeNow;
+  (document.getElementById(`${prefix}-back`) as HTMLButtonElement).disabled = !canBack(history);
+  (document.getElementById(`${prefix}-forward`) as HTMLButtonElement).disabled = !canForward(history);
 }
 
 /**
@@ -2797,7 +2823,6 @@ const recordsLanding = document.getElementById("records-landing")!;
 const recordArticle = document.getElementById("record")!;
 const recordsList = document.getElementById("records-list")!;
 const recordsHistoryList = document.getElementById("records-history")!;
-const recordsHome = document.getElementById("records-home")!;
 
 let recordRows: RecordRow[] = [];
 let readyRecords = new Set<string>();
@@ -2813,6 +2838,8 @@ const narrowing: Narrowing = {
 narrowing.search = "";
 let kindFolds = stored<Record<string, boolean>>(FOLDS_KEY, {});
 let viewedRecords: string[] = [];
+/** The records opened, in order, with the landing page as home (KYO-738). */
+let recordPlaces: History<string> = fresh();
 /** The one record that is open, or null on the landing page. */
 let openRecordId: string | null = null;
 /** The open record as the server last sent it, and the text it was sent as. */
@@ -2965,7 +2992,7 @@ function drawRecordLists(): void {
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";
-  recordsHome.hidden = openRecordId === null;
+  drawNav("records", openRecordId === null, recordPlaces);
   document.getElementById("records-count")!.textContent = openRecordId !== null || !listsRead
     ? ""
     : shown.length === recordRows.length
@@ -3110,7 +3137,8 @@ function enterRecords(): void {
  * Opens a record in the Records view, in place of the one that was open: one record is
  * open at a time, whichever list, page or chat link it was opened from.
  */
-function openRecord(target: LinkTarget): void {
+function openRecord(target: LinkTarget, stepping = false): void {
+  if (!stepping) recordPlaces = visitPlace(recordPlaces, target.record);
   if (openRecordId === null) landingPlace = recordsPane.scrollTop;
   const changed = openRecordId !== target.record;
   if (changed) {
@@ -3130,8 +3158,9 @@ function openRecord(target: LinkTarget): void {
   if (changed) recordsPane.scrollTop = 0;
 }
 
-/** Back to the landing page, where it was left. */
-function closeRecord(): void {
+/** Back to the landing page, where it was left; the places behind stay. */
+function closeRecord(stepping = false): void {
+  if (!stepping) recordPlaces = visitPlace(recordPlaces, null);
   openRecordId = null;
   openRecordDoc = null;
   openRecordText = "";
@@ -3140,6 +3169,13 @@ function closeRecord(): void {
   drawRecordLists();
   drawRecord();
   recordsPane.scrollTop = landingPlace;
+}
+
+/** Shows the place the history now stands on, without adding to it. */
+function showRecordPlace(): void {
+  const place = current(recordPlaces);
+  if (place === null) closeRecord(true);
+  else openRecord({ record: place, ref: place }, true);
 }
 
 const recordFrames = {
@@ -3151,6 +3187,7 @@ const recordFrames = {
     listsRead = false;
     listsProblem = null;
     viewedRecords = historyFrom(frame.history);
+    recordPlaces = fresh();
     openRecordId = null;
     openRecordDoc = null;
     openRecordText = "";
@@ -3228,7 +3265,11 @@ document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip
   });
 });
 
-recordsHome.addEventListener("click", closeRecord);
+navIcons("records", {
+  home: () => closeRecord(),
+  back: () => { recordPlaces = stepBack(recordPlaces); showRecordPlace(); },
+  forward: () => { recordPlaces = stepForward(recordPlaces); showRecordPlace(); },
+});
 
 // KYO-737: a right-click on a citable element of the open record, or a selection within
 // one, offers Anchor as the chat does. The anchor is to the element, by its id.
@@ -3477,7 +3518,6 @@ const FILES_DOTFILES_KEY = "files-dotfiles";
 /** How often the open file is asked for again, and every how many times the tree is too. */
 const FILE_REFRESH_MS = 3000;
 const TREE_REFRESH_EVERY = 4;
-const TRAIL_LIMIT = 50;
 /** One line of a source file, in pixels, which a line's place is measured by. */
 const SOURCE_LINE_PX = 19;
 const SOURCE_PADDING_PX = 12;
@@ -3485,7 +3525,6 @@ const filesPane = document.getElementById("view-files")!;
 const filesNote = document.getElementById("files-note")!;
 const filesLanding = document.getElementById("files-landing")!;
 const fileArticle = document.getElementById("file")!;
-const filesBack = document.getElementById("files-back")!;
 
 interface OpenFile {
   root: string;
@@ -3525,7 +3564,10 @@ const listingTexts = new Map<string, string>();
 const openDirs = new Set<string>();
 const askedDirs = new Set<string>();
 let openFile: OpenFile | null = null;
-const fileTrail: { root: string; path: string }[] = [];
+/** The files opened, in order, with the file browser as home (KYO-738). */
+let fileHistory: History<{ root: string; path: string }> = fresh();
+const sameFile = (a: { root: string; path: string }, b: { root: string; path: string }) =>
+  a.root === b.root && a.path === b.path;
 /** The images a markdown file shows, as data, by root and path. */
 const fileImages = new Map<string, string>();
 let filesTicks = 0;
@@ -3561,10 +3603,9 @@ function followFilesSession(session: string | null): void {
       for (const key of [...held]) if (key.startsWith(prefix)) held.delete(key);
     }
     if (openFile?.root === root.name) openFile = null;
-    for (let index = fileTrail.length - 1; index >= 0; index--) {
-      if (fileTrail[index].root === root.name) fileTrail.splice(index, 1);
-    }
+    fileHistory = without(fileHistory, (place) => place.root === root.name);
   }
+  if (!openFile) fileHistory = visitPlace(fileHistory, null, sameFile);
   fileRoots = servedRoots(rootsDocument, filesSession);
   const shown = shownRoot();
   if (currentView === "files" && shown && !askedDirs.has(dirKey(shown, ""))) askDir(shown, "");
@@ -3671,8 +3712,7 @@ function drawFilesSide(): void {
   document.querySelectorAll<HTMLElement>(".files-tree").forEach((holder) => {
     fill(holder, rows.length ? rows.map((row) => treeRow(root!, row)) : [emptyRow(nothing)]);
   });
-  filesBack.hidden = !openFile;
-  filesBack.textContent = fileTrail.length ? "Back" : "All files";
+  drawNav("files", !openFile, fileHistory);
   setText("files-path", openFile ? `${rootLabel(openFile.root)} / ${openFile.path}` : "");
   document.getElementById("files-path")!.title = openFile
     ? serverPath(fileRoots, openFile.root, openFile.path) ?? openFile.path : "";
@@ -3892,7 +3932,7 @@ function showTreeRow(path: string): void {
  * given; a folder is opened in the tree. `entry` says what the file is when the opener knows.
  */
 function showFile(
-  root: string, path: string, line: number | null = null, entry: Entry | null = null, back = false,
+  root: string, path: string, line: number | null = null, entry: Entry | null = null, stepping = false,
   lineEnd: number | null = null,
 ): void {
   chosenRoot = root;
@@ -3904,16 +3944,13 @@ function showFile(
     // A folder is shown in the tree, which the pane holds while no file is open.
     if (path) openDir(root, path);
     if (openFile) {
-      fileTrail.push({ root: openFile.root, path: openFile.path });
+      if (!stepping) fileHistory = visitPlace(fileHistory, null, sameFile);
       openFile = null;
     }
   } else {
     const same = openFile?.root === root && openFile.path === path;
     if (!same) {
-      if (openFile && !back) {
-        fileTrail.push({ root: openFile.root, path: openFile.path });
-        if (fileTrail.length > TRAIL_LIMIT) fileTrail.shift();
-      }
+      if (!stepping) fileHistory = visitPlace(fileHistory, { root, path }, sameFile);
       fileImages.clear();
       openFile = {
         root, path, line, lineEnd, lineWaits: line !== null, entry: entry ?? entryAt(root, path),
@@ -3934,17 +3971,23 @@ function showFile(
   showTreeRow(path);
 }
 
-/** Back to the file read before this one, or to the tree when there was none. */
-function fileBack(): void {
-  const before = fileTrail.pop();
-  if (before) {
-    showFile(before.root, before.path, null, null, true);
+/** Shows the place the history now stands on, without adding to it: a file, or the browser. */
+function showFilePlace(): void {
+  const place = current(fileHistory);
+  if (place) {
+    showFile(place.root, place.path, null, null, true);
     return;
   }
   openFile = null;
   drawFilesSide();
   drawFile();
   filesPane.scrollTop = 0;
+}
+
+/** Home: the file browser as when no file is open, with the files opened kept behind. */
+function filesHome(): void {
+  fileHistory = visitPlace(fileHistory, null, sameFile);
+  showFilePlace();
 }
 
 function refreshOpenFile(): void {
@@ -4008,7 +4051,7 @@ const fileFrames = {
       rootProblems.clear();
       openDirs.clear();
       openFile = null;
-      fileTrail.length = 0;
+      fileHistory = fresh();
       fileImages.clear();
     }
     rootsDocument = null;
@@ -4227,7 +4270,11 @@ document.addEventListener("click", (event) => {
   if (item) showFile(item.root, item.path, item.line, item.entry);
 });
 
-filesBack.addEventListener("click", fileBack);
+navIcons("files", {
+  home: filesHome,
+  back: () => { fileHistory = stepBack(fileHistory); showFilePlace(); },
+  forward: () => { fileHistory = stepForward(fileHistory); showFilePlace(); },
+});
 
 /**
  * The lines of the open file that a right-click names (KYO-737), in the file's source

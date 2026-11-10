@@ -21,11 +21,19 @@
     <header id="top">
       <span class="top-part" data-view="chat"><span id="top-title"></span><span id="top-activity"></span></span>
       <span class="top-part" data-view="records" hidden>
-        <button id="records-home" hidden>All records</button>
+        <span class="nav-icons" data-nav="records">
+          <button id="records-home" class="nav-icon" data-nav-icon="home" title="Home" aria-label="Home"></button>
+          <button id="records-back" class="nav-icon" data-nav-icon="back" title="Back" aria-label="Back"></button>
+          <button id="records-forward" class="nav-icon" data-nav-icon="forward" title="Forward" aria-label="Forward"></button>
+        </span>
         <span id="records-count"></span>
       </span>
       <span class="top-part" data-view="files" hidden>
-        <button id="files-back" hidden>All files</button>
+        <span class="nav-icons" data-nav="files">
+          <button id="files-home" class="nav-icon" data-nav-icon="home" title="Home" aria-label="Home"></button>
+          <button id="files-back" class="nav-icon" data-nav-icon="back" title="Back" aria-label="Back"></button>
+          <button id="files-forward" class="nav-icon" data-nav-icon="forward" title="Forward" aria-label="Forward"></button>
+        </span>
         <span id="files-path"></span>
         <span id="files-meta"></span>
       </span>
