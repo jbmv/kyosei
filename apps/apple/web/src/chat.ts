@@ -57,6 +57,11 @@ function atBottom(): boolean {
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < STICK_DISTANCE;
 }
 
+/**
+ * When the main conversation last replied or called a tool. A subagent's work and a
+ * background task's are not counted: they do not read the main conversation's cache.
+ */
+let lastMainActivity = "";
 const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
 const ACTIVITY_RED_MS = 45 * 60 * 1000;
 
@@ -67,8 +72,11 @@ const ACTIVITY_RED_MS = 45 * 60 * 1000;
  */
 function drawActivity(): void {
   const label = document.getElementById("top-activity")!;
-  const last = (chat.lastElementChild as HTMLElement | null)?.dataset.at;
-  const ago = last ? Date.now() - new Date(last).getTime() : NaN;
+  const ago = lastMainActivity ? Date.now() - new Date(lastMainActivity).getTime() : NaN;
+  const expires = facts?.cache?.expires_at;
+  label.title = expires
+    ? `The prompt cache expires at ${new Date(expires).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+    : "";
   if (!Number.isFinite(ago)) {
     label.textContent = "";
     return;
@@ -955,6 +963,7 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 
 const kyo = {
   clear(): void {
+    lastMainActivity = "";
     chat.replaceChildren();
     elements.clear();
     rendered.clear();
@@ -1021,6 +1030,9 @@ const kyo = {
   apply(batch: Batch): void {
     keepingPlace(() => {
       if (batch.reset) kyo.clear();
+      for (const { at } of [...(batch.replies ?? []), ...(batch.tool_calls ?? [])]) {
+        if (at > lastMainActivity) lastMainActivity = at;
+      }
       for (const turn of batch.turns ?? []) {
         const version = `${turn.text}|${turn.images?.length ?? 0}`;
         sources.set(`t:${turn.id}`, turn.text ?? "");
@@ -1928,7 +1940,11 @@ let sending: HTMLElement | null = null;
 
 function attemptSend(area: HTMLTextAreaElement): void {
   const segments = messageSegments(area);
-  if (!segments.length) return;
+  if (!segments.length) {
+    // A prompt needs some words: the server sends text, and a mark rides on a line of it.
+    if (marksOf.get(area)!.items.size) composerNote.textContent = "Add a few words to send this.";
+    return;
+  }
   if (heldId) {
     composerNote.textContent = "One message is already waiting. Edit it first.";
     return;
