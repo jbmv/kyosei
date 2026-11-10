@@ -94,6 +94,7 @@ struct RunningAgentsLabel: View {
                                 if let since = agent.since {
                                     Text(since, style: .timer).monospacedDigit()
                                 }
+                                if !agent.tokens.isEmpty { Text("\(agent.tokens) tokens").monospacedDigit() }
                             }
                             .foregroundStyle(.secondary)
                         }
@@ -203,7 +204,8 @@ struct ChatWebView: NSViewRepresentable {
                         id: index,
                         name: agent["name"] as? String ?? "",
                         type: agent["type"] as? String ?? "",
-                        since: stamps.date(from: agent["since"] as? String ?? ""))
+                        since: stamps.date(from: agent["since"] as? String ?? ""),
+                        tokens: agent["tokens"] as? String ?? "")
                 }
                 return
             }

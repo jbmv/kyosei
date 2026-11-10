@@ -622,6 +622,12 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
   name.title = name.textContent;
   row.append(name);
   const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at;
+  if (running && agentUsage.has(agent.agent_id)) {
+    const tokens = document.createElement("span");
+    tokens.className = "side-task-time";
+    tokens.textContent = tokenWords(agentUsage.get(agent.agent_id)!);
+    row.append(tokens);
+  }
   if (running && since) {
     const time = document.createElement("span");
     time.className = "side-task-time";
@@ -710,9 +716,21 @@ function drawAgents(): void {
       name: agent.description,
       type: agent.agent_type,
       since: [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? "",
+      tokens: agentUsage.has(agent.agent_id) ? tokenWords(agentUsage.get(agent.agent_id)!) : "",
     })),
   });
 }
+
+/** Each subagent's tokens so far, as the server last summed its transcript. */
+const agentUsage = new Map<string, number>();
+const USAGE_REFRESH_MS = 15000;
+
+// A running subagent's count grows, so it is asked for again while any is running.
+setInterval(() => {
+  for (const agent of subagents.values()) {
+    if (!agentFinished(agent)) requestAgent(agent.agent_id);
+  }
+}, USAGE_REFRESH_MS);
 
 function requestAgent(agent: string): void {
   (window as any).webkit?.messageHandlers?.agent?.postMessage({ agent });
@@ -906,8 +924,10 @@ const kyo = {
   agent(data: {
     agent_id: string; tool_calls: ToolCall[];
     dispatch?: { added: number; removed: number } | null;
+    usage?: { total: number } | null;
   }): void {
     agentCalls.set(data.agent_id, data.tool_calls);
+    if (data.usage) agentUsage.set(data.agent_id, data.usage.total);
     if (data.dispatch) agentDispatches.set(data.agent_id, data.dispatch);
     drawAgents();
   },

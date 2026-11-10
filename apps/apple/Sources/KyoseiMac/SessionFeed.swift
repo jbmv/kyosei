@@ -9,6 +9,8 @@ struct RunningAgent: Identifiable, Equatable {
     let name: String
     let type: String
     let since: Date?
+    /// Its tokens so far, in words, or empty before the server has been asked.
+    var tokens = ""
 
     /// The record a dispatched worker is on, read from its description.
     var record: String? {
