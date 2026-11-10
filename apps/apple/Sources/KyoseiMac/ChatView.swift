@@ -1,4 +1,5 @@
 import AppKit
+import KyoseiClient
 import SwiftUI
 import WebKit
 
@@ -13,6 +14,10 @@ struct ChatView: View {
                 Text(feed.project).fontWeight(.semibold).foregroundStyle(.primary)
                 if let percent = feed.facts?.context?.percent {
                     ContextMeter(percent: percent)
+                }
+                if let limits = feed.facts?.limits {
+                    if let window = limits.five_hour { LimitLabel(name: "5-hour", window: window) }
+                    if let window = limits.seven_day { LimitLabel(name: "Weekly", window: window) }
                 }
                 if let facts = feed.facts {
                     Text(facts.model ?? "model unknown")
@@ -68,6 +73,29 @@ struct ContextMeter: View {
                         .frame(width: 64 * CGFloat(min(max(percent, 0), 100)) / 100)
                 }
         }
+    }
+}
+
+/// How much of one usage window is spent. Hovering shows when the window resets.
+struct LimitLabel: View {
+    let name: String
+    let window: SessionFacts.Limits.Window
+
+    private var resets: String {
+        let stamps = ISO8601DateFormatter()
+        let plain = stamps.date(from: window.resets_at ?? "")
+        stamps.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = plain ?? stamps.date(from: window.resets_at ?? "") else {
+            return "Reset time unknown"
+        }
+        return "Resets \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    var body: some View {
+        Text("\(name): \(Int(window.used_percentage.rounded()))%")
+            .monospacedDigit()
+            .foregroundStyle(window.used_percentage >= 90 ? Color.red : window.used_percentage >= 75 ? Color.orange : Color.secondary)
+            .help(resets)
     }
 }
 

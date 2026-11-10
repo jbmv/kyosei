@@ -66,12 +66,24 @@ public struct SessionFacts: Decodable, Equatable, Sendable {
         public let removed: Int
     }
 
+    /// The subscription's usage limits, as Claude Code last reported them (KYO-714).
+    public struct Limits: Decodable, Equatable, Sendable {
+        public struct Window: Decodable, Equatable, Sendable {
+            public let used_percentage: Double
+            public let resets_at: String?
+        }
+
+        public let five_hour: Window?
+        public let seven_day: Window?
+    }
+
     public let model: String?
     public let effort: String?
     public let git_branch: String?
     public let context: Context?
     public let permission_mode: String?
     public let lines: Lines?
+    public let limits: Limits?
 }
 
 /// Any response or frame carrying `facts`.
