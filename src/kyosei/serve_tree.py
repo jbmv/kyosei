@@ -583,7 +583,9 @@ def _scratch_tree(root: Root, relpath: str) -> dict[str, Any]:
             path=relpath,
         )
     try:
-        names = sorted(os.listdir(target))
+        # A scratchpad may hold scratch repositories (KYO-735); their `.git` is never listed,
+        # as the text check never reads into one.
+        names = sorted(name for name in os.listdir(target) if name.lower() != ".git")
     except OSError as exc:
         raise _not_shown(root, relpath, "directory") from exc
     prefix = f"{relpath}/" if relpath else ""

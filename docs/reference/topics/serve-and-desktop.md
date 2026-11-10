@@ -1040,9 +1040,10 @@ project's session and no other directory. The command is refused without a sessi
 session the project does not record, and for a path that is not an existing directory. It is
 also refused, with the reason, for `/`, a home directory or a directory that holds one, either
 served root or a directory that holds or lies inside one, and any directory that lies inside a
-git repository or holds one (a repository is looked for to four levels below, in at most
-20,000 directories). The server applies the same bounds on every request, so a directory that
-became a repository since it was reported is refused (403, `scratch-unfit`). `GET .../files`
+git repository. A scratchpad that holds a repository is allowed, since agents make scratch
+projects there, and a `.git` inside it is never listed or read. The server applies the same
+bounds on every request, so a directory that came to lie inside a repository since it was
+reported is refused (403, `scratch-unfit`). `GET .../files`
 lists `scratch` with the sessions that have reported a directory. A session this project does
 not record is refused (404, `no-such-session`), including a session id of another project; a
 session with no directory reported is refused (404, `scratch-not-recorded`) with the command

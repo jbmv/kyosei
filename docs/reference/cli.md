@@ -1471,7 +1471,7 @@ Usage: `kyo sessions [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--sli
 
 ### Positional arguments
 
-- `[scratch DIR ...]` — optional. `scratch <dir>` records <dir> as the scratchpad directory of the session named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's `scratch` root; refused for a directory that is `/`, a home directory, either served root, or holds or lies inside a git repository (KYO-735)
+- `[scratch DIR ...]` — optional. `scratch <dir>` records <dir> as the scratchpad directory of the session named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's `scratch` root; refused for a directory that is `/`, a home directory, either served root, or lies inside a git repository (KYO-735)
 
 ### Options
 

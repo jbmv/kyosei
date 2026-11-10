@@ -756,3 +756,17 @@ def test_the_listing_of_a_large_directory_is_complete(files: Served) -> None:
     status, listed = files.json("code/tree/many")
     assert status == 200
     assert names(listed) == [f"file-{index:05d}.txt" for index in range(count)]
+
+
+def test_a_scratchpad_may_hold_a_repository_whose_git_is_never_listed(tmp_path: Path) -> None:
+    # The first real scratchpad reported held scratch projects with repositories of their own.
+    pad = tmp_path / "pad"
+    (pad / "proj" / ".git").mkdir(parents=True)
+    (pad / "proj" / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (pad / "proj" / "notes.md").write_text("# n\n", encoding="utf-8")
+    assert cmd_sessions.scratch_dir_problem(Path(os.path.realpath(pad)), []) is None
+    root = serve_tree.Root(serve_tree.ROOT_SCRATCH, Path(os.path.realpath(pad)), git=False)
+    names = [entry["name"] for entry in serve_tree.tree(root, "proj")["entries"]]
+    assert names == ["notes.md"]
+    with pytest.raises(serve.Refusal):
+        serve_tree.blob(root, "proj/.git/config", None)

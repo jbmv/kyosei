@@ -7721,8 +7721,9 @@ def test_kyo735_scratch_refuses_a_directory_in_or_holding_a_repository(
     subprocess.run(["git", "init", "-q", str(elsewhere / "repo")], check=True)
     refused = kyo("sessions", "scratch", str(inside))
     assert refused.code == 64 and "lies inside the git repository" in refused.err
-    refused = kyo("sessions", "scratch", str(elsewhere))
-    assert refused.code == 64 and "holds a git repository" in refused.err
+    # A directory that HOLDS a repository is a fit scratchpad: agents make scratch projects
+    # in theirs, and the route never lists or reads a `.git`.
+    assert kyo("sessions", "scratch", str(elsewhere)).code == 0
     pad = tmp_path / "pad"
     pad.mkdir()
     assert kyo("sessions", "scratch", str(pad)).code == 0

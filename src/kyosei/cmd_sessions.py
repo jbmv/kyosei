@@ -478,12 +478,6 @@ def write_sessions(path: Path, entries: list[dict]) -> str | None:
 #: The environment variable the harness sets to the running session's id.
 SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
 
-#: How far below a directory a nested git repository is looked for, and how many directories
-#: the look visits before it stops. A repository deeper than the first or past the second is
-#: not seen; the bound keeps a request for a very large directory from walking all of it.
-SCRATCH_REPOSITORY_DEPTH = 4
-SCRATCH_REPOSITORY_VISITS = 20_000
-
 #: The directories whose children are home directories, on the two platforms this runs on.
 _HOME_PARENTS = ("/Users", "/home")
 
@@ -492,27 +486,16 @@ def _is_under(base: Path, path: Path) -> bool:
     return path == base or base in path.parents
 
 
-def _holds_repository(directory: Path) -> bool:
-    """Whether a git repository lies in ``directory`` or within a few levels below it."""
-    base_depth = len(directory.parts)
-    for visited, (current, dirnames, filenames) in enumerate(os.walk(directory), start=1):
-        if ".git" in dirnames or ".git" in filenames:
-            return True
-        if visited >= SCRATCH_REPOSITORY_VISITS:
-            return False
-        if len(Path(current).parts) - base_depth >= SCRATCH_REPOSITORY_DEPTH:
-            dirnames[:] = []
-    return False
-
-
 def scratch_dir_problem(real: Path, served_roots: list[Path]) -> str | None:
     """Why ``real`` may not be a session's scratch root, or None when it may.
 
     A directory an agent names could be anything, so the refusals are the ones that would
     turn a file route into a way to read a machine: the filesystem root, a home directory
     (or one that holds it), either served root and anything that holds or lies inside one,
-    and any directory that holds or lies inside a git repository, since a repository is
-    served by what git shows and not by this root's every-file rule.
+    and any directory that lies inside a git repository, since a repository is served by
+    what git shows and not by this root's every-file rule. A scratchpad that HOLDS a
+    repository is allowed: agents make scratch projects there as a matter of course (the
+    first real scratchpad reported held three), and the route never lists or reads a `.git`.
     """
     home = Path(os.path.realpath(Path.home()))
     if real == Path(real.anchor):
@@ -526,8 +509,6 @@ def scratch_dir_problem(real: Path, served_roots: list[Path]) -> str | None:
     for ancestor in (real, *real.parents):
         if (ancestor / ".git").exists():
             return f"it lies inside the git repository at {ancestor}"
-    if _holds_repository(real):
-        return "it holds a git repository, which is served by what git shows"
     return None
 
 
