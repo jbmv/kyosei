@@ -569,7 +569,8 @@ kyo report <dispatch-id> --file .kyosei-report.json   # structured ingest; absen
                                   #   worker commits its work without committing its report;
                                   #   `--check` runs the same checks and writes nothing (KYO-477)
 kyo note --shift                  # append to the current shift log (stdin/file; continuous, never at closeout)
-kyo notes add|list|show|tag       # what a person wrote, on what it addresses; found by tag or anchor (KYO-705)
+kyo notes add|list|show|tag|tags  # what a person wrote, on what it addresses; found by tag or anchor (KYO-705);
+                                  #   `tags` lists the tags in use with their counts (KYO-710)
 kyo next                          # ready work: dispatchable, ungated, disjoint from running work
                                     # (undeclared touches = its own counted class, never "disjoint")
 kyo brief [--compact]             # session briefing: counts (actionable kinds only), ready list,

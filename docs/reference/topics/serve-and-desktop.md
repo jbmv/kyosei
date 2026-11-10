@@ -664,8 +664,8 @@ session; a redacted note's `text` is `null`. An anchor on a reply is `{"role": "
 that `message_id`. It is the reverse of giving an anchor by message, by the same joining, so
 the anchors stored one per record for one span come back as one. An anchor on a prompt is
 `{"role": "person", "uuid", "start", "end"}`, with offsets into the prompt's record. An anchor
-whose record the transcript no longer holds, whose digest no longer matches, or whose record
-is no longer part of its reply is `{"role", "uuid", "stale": true}` and has no offsets. The
+whose record is not in the transcript, whose digest does not match the record's text, or whose
+record is not part of its reply is `{"role", "uuid", "stale": true}` and has no offsets. The
 offsets are read from the transcript, so the route is refused, as the session routes are,
 until the project sets `read_transcripts: true`.
 
