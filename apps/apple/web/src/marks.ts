@@ -100,3 +100,182 @@ export function shiftLines(
     merged,
   };
 }
+
+// ---- where an anchor's words are drawn (KYO-729)
+//
+// An anchor's offsets count the source text of a reply or a prompt, and the page shows that
+// text drawn: markdown without its marks, quotes and dashes set by the typographer, a server
+// line as a chip. The two are matched character by character, in order, so that a place in
+// one can be found in the other and words that occur twice are told apart by where they are.
+
+/** How far ahead a character of the drawn text is looked for, as one of a run and alone. */
+const RUN = 3;
+const CLOSE = 16;
+const FAR = 400;
+const ALONE = 40;
+
+const SPACE = /\s/;
+
+interface Matching {
+  /** For each drawn character, the source index it was drawn from, or where it would be. */
+  at: number[];
+  /** Whether that character was found in the source; a drawn-only one was not. */
+  found: boolean[];
+}
+
+/**
+ * Matches each character of `drawn` to one of `source`, in order. A character is taken where
+ * the three characters from it next occur, if that is close; else where it next occurs alone,
+ * if close; else at the run farther off. One found nowhere near was drawn from nothing, as a
+ * curled quote is, and takes the place the matching has reached without moving it. The
+ * address of a link is passed over once its words are matched.
+ */
+function match(source: string, drawn: string): Matching {
+  const at: number[] = [];
+  const found: boolean[] = [];
+  let reached = 0;
+  const ahead = (words: string, within: number) => {
+    const index = source.slice(reached, reached + within + words.length).indexOf(words);
+    return index < 0 ? -1 : reached + index;
+  };
+  for (let index = 0; index < drawn.length; index++) {
+    const char = drawn[index];
+    // A link's address is not drawn, and its characters must not be taken for later ones.
+    if (char !== "]" && source.startsWith("](", reached)) {
+      const close = source.indexOf(")", reached);
+      if (close >= 0) reached = close + 1;
+    }
+    if (SPACE.test(char)) {
+      const space = reached < source.length && SPACE.test(source[reached]);
+      at.push(reached);
+      found.push(space);
+      if (space) reached++;
+      continue;
+    }
+    const run = drawn.slice(index, index + RUN);
+    const inRun = run.length === RUN ? ahead(run, FAR) : -1;
+    const alone = ahead(char, ALONE);
+    let place = -1;
+    if (inRun >= 0 && inRun - reached <= CLOSE) place = inRun;
+    else if (alone >= 0 && alone - reached <= CLOSE) place = alone;
+    else if (inRun >= 0) place = inRun;
+    else place = alone;
+    at.push(place < 0 ? reached : place);
+    found.push(place >= 0);
+    if (place >= 0) reached = place + 1;
+  }
+  return { at, found };
+}
+
+/** Where `words` occur in `text` nearest to `about`, or -1 when they do not occur. */
+export function nearest(text: string, words: string, about: number): number {
+  let best = -1;
+  if (!words) return best;
+  for (let at = text.indexOf(words); at >= 0; at = text.indexOf(words, at + 1)) {
+    if (best < 0 || Math.abs(at - about) < Math.abs(best - about)) best = at;
+  }
+  return best;
+}
+
+/**
+ * The sentence of `text` that position `at` is in, as `[from, to]`: it ends at a full stop,
+ * question mark or exclamation mark that white space or the end follows, at a line break, or
+ * at the end of the text, and has no white space at either end. A full stop inside a word,
+ * as in a file name or a number, ends nothing.
+ */
+export function sentenceAt(text: string, at: number): [number, number] {
+  let from = 0;
+  let to = text.length;
+  for (const end of text.matchAll(/[.!?]+["')\]”’]*(?=\s|$)|\n/g)) {
+    const stop = end.index + (end[0] === "\n" ? 0 : end[0].length);
+    if (at < stop) {
+      to = stop;
+      break;
+    }
+    from = end.index + end[0].length;
+  }
+  while (from < to && SPACE.test(text[from])) from++;
+  while (to > from && SPACE.test(text[to - 1])) to--;
+  return [from, to];
+}
+
+/** Inline marks that open or close around words, which a span of the source takes with it. */
+const OPENING = "*_`~[\"'";
+const CLOSING = "*_`~\"'";
+
+/**
+ * The span of `source` that the drawn characters `from` to `to` came from, or null when
+ * their ends cannot be found in it. The marks that wrap the words are part of the span, and
+ * so is the address of a link the words end in.
+ */
+export function sourceSpan(source: string, drawn: string, from: number, to: number): [number, number] | null {
+  const { at, found } = match(source, drawn);
+  while (from < to && !(found[from] && !SPACE.test(drawn[from]))) from++;
+  while (to > from && !(found[to - 1] && !SPACE.test(drawn[to - 1]))) to--;
+  if (from >= to) return null;
+  let start = at[from];
+  let end = at[to - 1] + 1;
+  while (start > 0 && OPENING.includes(source[start - 1])) start--;
+  const closing = () => {
+    while (end < source.length && CLOSING.includes(source[end])) end++;
+  };
+  closing();
+  const link = /^\]\([^)\n]*\)/.exec(source.slice(end));
+  if (link) end += link[0].length;
+  closing();
+  return [start, end];
+}
+
+/** The source index the drawn character `index` came from, or where it would have been. */
+export function sourceIndex(source: string, drawn: string, index: number): number {
+  const { at } = match(source, drawn);
+  return index < at.length ? at[index] : source.length;
+}
+
+/**
+ * Where the span `start` to `end` of `source` is drawn, as `[from, to]` in `drawn`, or null.
+ * Words drawn as they are written are found by their text, at the occurrence nearest to
+ * where the offsets point, so that the same words earlier in the text are not taken for
+ * them. With `formatted`, words drawn differently from their source are placed by the
+ * characters that came from the span.
+ */
+export function drawnSpan(
+  source: string, drawn: string, start: number, end: number, formatted = false,
+): [number, number] | null {
+  const { at, found } = match(source, drawn);
+  const first = at.findIndex((place) => place >= start);
+  const words = source.slice(start, end);
+  const written = nearest(drawn, words, first < 0 ? drawn.length : first);
+  if (written >= 0) return [written, written + words.length];
+  if (!formatted) return null;
+  let from = -1;
+  let to = -1;
+  at.forEach((place, index) => {
+    if (!found[index] || SPACE.test(drawn[index]) || place < start || place >= end) return;
+    if (from < 0) from = index;
+    to = index + 1;
+  });
+  return from < 0 ? null : [from, to];
+}
+
+// ---- the line above a held prompt (KYO-730)
+
+/** What `kyo serve` wrote above a prompt it held across one or more of the agent's replies. */
+export interface HeldLine {
+  /** How long it was held, as written: `14 minutes`. */
+  held: string;
+  /** The record of the first reply its writer had not seen. */
+  uuid: string;
+  /** That reply's opening words, with `...` where they go on. */
+  words: string;
+  /** How many more replies followed that one. */
+  later: number;
+}
+
+const HELD_LINE = /^held (\d+ (?:second|minute)s?): written before your reply ([0-9a-f-]{36}) "(.*)"(?: and (\d+) later repl(?:y|ies))? \(replies are your text messages; tool calls are not counted\)$/;
+
+/** Reads the line `kyo serve` types above a held prompt at delivery, or null for any other. */
+export function heldLine(line: string): HeldLine | null {
+  const read = line.match(HELD_LINE);
+  return read && { held: read[1], uuid: read[2], words: read[3], later: Number(read[4] ?? 0) };
+}

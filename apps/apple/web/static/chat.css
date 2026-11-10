@@ -606,6 +606,8 @@ body.terminal-open #terminal { display: flex; }
 /* An anchor in a sent prompt: the server's line above the paragraph, drawn as a chip. */
 .turn-anchor { display: block; width: fit-content; max-width: 100%; margin: 2px 0; padding: 1px 9px; border-radius: 999px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); color: var(--muted); font-size: 0.86em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 .turn-anchor:hover { color: var(--text); }
+/* The server's line above a prompt it held across replies: grey, since no one anchored it. */
+.turn-held { background: color-mix(in srgb, var(--muted) 16%, transparent); }
 
 .icon { width: 1.05em; height: 1.05em; vertical-align: -0.16em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .mark .icon { width: 16px; height: 16px; vertical-align: -3px; }
