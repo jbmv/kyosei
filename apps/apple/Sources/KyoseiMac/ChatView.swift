@@ -249,7 +249,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
             "send", "retract", "interrupt", "saveDraft", "attach", "start", "sendNow", "copy",
-            "terminal",
+            "terminal", "records",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
@@ -338,6 +338,10 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "terminal", let body = message.body as? [String: Any] {
                 feed.terminal(body: body)
+                return
+            }
+            if message.name == "records", let body = message.body as? [String: Any] {
+                feed.records(body: body)
                 return
             }
             if message.name == "start" {

@@ -607,3 +607,64 @@ private final class FollowProgress: @unchecked Sendable {
         return true
     }
 }
+
+// MARK: The Records view (KYO-732)
+
+extension ServeClient {
+    /// The bytes `kyo <command> <positionals> --<flag>=<value> --json` prints, and the status
+    /// the server gave them. A refusal's body is the server's own document, so it is returned
+    /// rather than thrown. A flag given twice is sent twice, as `kyo gates --type` takes it.
+    public func command(
+        project: String, _ command: String, positionals: [String] = [],
+        flags: [(name: String, value: String)] = []
+    ) async throws -> (data: Data, status: Int) {
+        var address = base.appending(path: "v1/projects/\(project)/cmd/\(command)")
+        for positional in positionals { address.append(path: positional) }
+        var components = URLComponents(url: address, resolvingAgainstBaseURL: false)!
+        if !flags.isEmpty {
+            components.queryItems = flags.map { URLQueryItem(name: $0.name, value: $0.value) }
+        }
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+
+    /// The project's change events until the connection ends: a `changed` frame names the
+    /// kind of thing that changed (`store`, `ideas`, `sessions` or `scratchpad`). A connection
+    /// that carries nothing for `idleLimit` seconds, keepalives included, ends with an error.
+    public func projectEvents(
+        project: String, idleLimit: TimeInterval = ServeClient.streamIdleLimit
+    ) -> AsyncThrowingStream<ServerEvent, Error> {
+        var request = URLRequest(url: base.appending(path: "v1/projects/\(project)/events"))
+        request.timeoutInterval = idleLimit
+        let finalRequest = request
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await URLSession.shared.bytes(for: finalRequest)
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard code == 200 else {
+                        var body: [UInt8] = []
+                        for try await byte in bytes where body.count < 65536 { body.append(byte) }
+                        throw ServeError.status(code, String(decoding: body, as: UTF8.self))
+                    }
+                    var parser = ServerEventParser()
+                    var line: [UInt8] = []
+                    for try await byte in bytes {
+                        guard byte == UInt8(ascii: "\n") else {
+                            line.append(byte)
+                            continue
+                        }
+                        if let event = parser.feed(line: String(decoding: line, as: UTF8.self)) {
+                            continuation.yield(event)
+                        }
+                        line.removeAll(keepingCapacity: true)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
