@@ -75,6 +75,7 @@ from .serve import API_PREFIX, Refusal
 from .serve_events import KEEPALIVE, frame
 from .serve_files import ProjectPaths, project_paths
 from .store import open_store
+from .worker_tokens import sum_transcript_usage
 
 #: How often a subscribed session is sampled. One capture measured about 4.4 ms.
 SAMPLE_SECONDS = 0.5
@@ -129,6 +130,26 @@ def _usage_json(usage: Any) -> dict | None:
         "cache_read_tokens": usage.cache_read_tokens,
         "cache_creation_tokens": usage.cache_creation_tokens,
     }
+
+
+def _transcript_usage_json(reader: Any) -> dict | None:
+    """The tokens a subagent's transcript records so far, summed as a dispatch's are (KYO-711).
+
+    ``worker_tokens.sum_transcript_usage`` makes the sum, so the number a client shows while
+    the agent runs and the number its dispatch reports afterwards come from one place. It is
+    read again on every request, so a transcript that has grown since gives the larger sum.
+    None when the reader could not make out the file's format, which ``why`` states.
+    """
+    if not reader.readable:
+        return None
+    counts = sum_transcript_usage(reader.path).counts
+    usage = {
+        "input_tokens": counts["input_tokens"],
+        "output_tokens": counts["output_tokens"],
+        "cache_read_tokens": counts["cache_read_input_tokens"],
+        "cache_creation_tokens": counts["cache_creation_input_tokens"],
+    }
+    return {**usage, "total": sum(usage.values())}
 
 
 def _reply_json(reply: Any) -> dict:
@@ -551,7 +572,8 @@ class ProjectSessions:
         The lines are here rather than on the ``subagents`` of ``/turns`` because they cost a
         store read and git commands per subagent. That list is read for every subagent of a
         session at once, and carried by a cursor that re-sends an object only when the
-        transcript changes it, which a branch moving does not.
+        transcript changes it, which a branch moving does not. ``usage`` is here for the same
+        reason: it grows with every message the subagent sends while it runs (KYO-711).
         """
         self.require(session_id)
         live = self.open_live(session_id)
@@ -576,6 +598,7 @@ class ProjectSessions:
             "why": reader.why,
             "dispatch": dispatch,
             "dispatch_why": dispatch_why,
+            "usage": _transcript_usage_json(reader),
             "tool_calls": [_tool_call_json(call) for call in reader.tool_calls],
         }
 
