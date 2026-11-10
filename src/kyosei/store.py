@@ -872,6 +872,16 @@ class Store:
             )
         ]
 
+    def person_note_tag_counts(self) -> list[sqlite3.Row]:
+        """KYO-710: each tag on at least one note now, with its count (``tag``, ``count``),
+        most used first and then by name. A tag removed from every note has no row left."""
+        return list(
+            self.conn.execute(
+                "SELECT tag, COUNT(*) AS count FROM person_note_tags"
+                " GROUP BY tag ORDER BY count DESC, tag"
+            )
+        )
+
     def person_note_tag_changes(self, note_id: str) -> list[sqlite3.Row]:
         """KYO-705.c5: every tag added to or removed from a note since it was filed, oldest
         first."""

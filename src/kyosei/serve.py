@@ -65,7 +65,8 @@ message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device 
 THE NOTE ROUTES (KYO-706). ``notes`` (GET, POST), ``notes/{id}`` (GET), ``notes/{id}/tags``
 (POST) and ``sessions/{id}/send-notes`` (POST) are :mod:`kyosei.serve_notes`, and need a device
 token holding the ``notes`` permission. So is ``sessions/{id}/send-prompt`` (POST, KYO-709), a
-composer prompt with its marks, which needs the ``send`` permission and ``notes`` with marks.
+composer prompt with its marks, which needs the ``send`` permission and ``notes`` with marks,
+and so are ``sessions/{id}/marks`` and ``tags`` (GET, KYO-710), which only read.
 They are the one exception to a read-only store: each write opens its own connection and goes
 through the transaction ``kyo notes`` uses.
 
@@ -299,6 +300,11 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
 #: KYO-706: the note routes, under ``/v1/projects/{project}/``.
 NOTES_ROUTE = "notes"
 _NOTE_TAGS_ROUTE = "tags"
+
+#: KYO-710: ``sessions/{id}/marks`` (GET), a session's sent notes in reply offsets, and
+#: ``tags`` (GET), the tags in use; both :mod:`kyosei.serve_notes`.
+SESSION_MARKS_ROUTE = "marks"
+TAGS_ROUTE = "tags"
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -702,6 +708,13 @@ class ServeHandler(BaseHTTPRequestHandler):
                 allowed = ("POST",)
             else:
                 raise _no_route(method, split.path)
+        elif (len(rest) == 3 and rest[0] == "projects" and rest[2] == TAGS_ROUTE) or (
+            len(rest) == 5
+            and rest[0] == "projects"
+            and rest[2] == "sessions"
+            and rest[4] == SESSION_MARKS_ROUTE
+        ):
+            allowed = ("GET",)
         elif (
             len(rest) == 5
             and rest[0] == "projects"
@@ -742,6 +755,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._command(rest[1], rest[3], rest[4:], split.query)
         if rest[2] == NOTES_ROUTE:
             return self._note_route(method, rest[1], rest[3:], split.query)
+        if rest[2] == TAGS_ROUTE or (len(rest) == 5 and rest[4] == SESSION_MARKS_ROUTE):
+            return self._note_read(rest[1], rest[3] if len(rest) == 5 else None, split.query)
         if rest[2] == "sessions":
             if len(rest) == 5 and rest[4] in SESSION_SEND_ROUTES:
                 return self._session_send(rest[1], rest[3], rest[4], split.query)
@@ -987,6 +1002,25 @@ class ServeHandler(BaseHTTPRequestHandler):
         return 200, _json_bytes(
             serve_notes.tag(server, root_of, authorization, rest[0], self._body)
         )
+
+    def _note_read(self, name: str, session_id: str | None, query: str) -> tuple:
+        """``tags`` and ``sessions/{id}/marks``: note reads, each carrying a device token."""
+        from . import serve_notes
+
+        if query:
+            raise Refusal(
+                400,
+                "this route takes no query string; send the token as "
+                "`Authorization: Bearer <token>`",
+            )
+
+        def root_of() -> str:
+            return self.server.project(name).root
+
+        server, authorization = self.server, self.headers.get("Authorization")
+        if session_id is None:
+            return 200, _json_bytes(serve_notes.tags(server, root_of, authorization))
+        return 200, _json_bytes(serve_notes.marks(server, root_of, authorization, session_id))
 
     def _session_image(self, project, session_id: str, turn: str, index: str) -> tuple:
         if not (index.isascii() and index.isdigit()):
@@ -1257,7 +1291,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, POST "
         f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "
         f".../send-prompt, GET/POST "
-        f"{project}/notes, GET {project}/notes/{{id}} and POST {project}/notes/{{id}}/tags",
+        f"{project}/notes, GET {project}/notes/{{id}}, POST {project}/notes/{{id}}/tags, "
+        f"GET {project}/tags and GET {project}/sessions/{{id}}/marks",
     )
 
 

@@ -381,8 +381,8 @@ MUTATING_COMMANDS = (
     "flag",
     "brief",
     "note",
-    # KYO-705: `kyo notes add` and `tag` write rows and an event; `list` and `show` are pure
-    # reads, on `docs`' reasoning below: the entry names the command.
+    # KYO-705: `kyo notes add` and `tag` write rows and an event; `list`, `show` and `tags`
+    # are pure reads, on `docs`' reasoning below: the entry names the command.
     "notes",
     # KYO-137: `kyo docs settle` writes the verdict that clears a docs obligation, and
     # writes an events row and a fresh export like every other mutation. The command's
@@ -2847,10 +2847,16 @@ def build_parser() -> KyoseiParser:
     p_notes = sub.add_parser(
         "notes",
         parents=[common],
-        help="what a person wrote, on the places it addresses: add one, or find notes by "
-        "tag and by what they are on (KYO-705); the shift log is `kyo note --shift`",
+        help="what a person wrote, on the places it addresses: add one, find notes by "
+        "tag and by what they are on, or list the tags in use (KYO-705); the shift log is "
+        "`kyo note --shift`",
     )
-    p_notes.add_argument("action", choices=["add", "list", "show", "tag"], help="what to do")
+    p_notes.add_argument(
+        "action",
+        choices=["add", "list", "show", "tag", "tags"],
+        help="what to do; tags lists each tag now on a note with how many carry it, most "
+        "used first (KYO-710)",
+    )
     p_notes.add_argument("id", nargs="?", help="show and tag: the note, PREFIX-NN")
     p_notes.add_argument(
         "--file", metavar="FILE", help="add: the note's text from a file, or '-' for stdin (law 5)"

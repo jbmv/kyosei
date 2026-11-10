@@ -845,3 +845,29 @@ def test_a_span_by_message_with_nothing_to_read_is_cleared_by_giving_it_by_uuid(
     given = _anchored(kyo, write_file, [_turn(start=0, end=4, digest=digest, role="agent")])
     assert given.code == 0, given
     assert given.json["note"]["anchors"][0]["digest_check"] == "given"
+
+
+# ------------------------------------------------- KYO-710.c4: the tags in use, by count
+
+
+def test_notes_tags_lists_each_tag_in_use_with_its_count(kyo, project: Path) -> None:
+    assert kyo("notes", "tags").out.strip() == "no tags in use"
+    _add(kyo, "--tag", "later", "--tag", "ask")
+    _add(kyo, "--tag", "ask")
+    third = _add(kyo, "--tag", "zeta").json["note"]["id"]
+    listed = kyo("notes", "tags", "--json").json
+    assert listed["tags"] == [
+        {"tag": "ask", "count": 2},
+        {"tag": "later", "count": 1},
+        {"tag": "zeta", "count": 1},
+    ]
+    assert kyo("notes", "tags").out.splitlines() == ["2  ask", "1  later", "1  zeta"]
+    assert kyo("notes", "tag", third, "--remove", "zeta").code == 0
+    assert "zeta" not in kyo("notes", "tags").out, "a tag on no note is not in use"
+
+
+def test_notes_tags_takes_no_filter_and_names_the_command_that_does(kyo, project: Path) -> None:
+    _add(kyo, "--tag", "ask")
+    refused = kyo("notes", "tags", "--tag", "ask")
+    assert refused.code != 0 and "kyo notes list --tag TAG" in refused.err
+    assert kyo("notes", "list", "--tag", "ask", "--json").json["count"] == 1

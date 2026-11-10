@@ -2453,6 +2453,17 @@ def _changing_a_filed_notes_text(at: Path) -> Provocation:
     return Provocation(root, ("notes", "tag", "TST-N1", "--file", str(first), "--add", "x"))
 
 
+def _filtering_the_tags_in_use(at: Path) -> Provocation:
+    """KYO-710: `kyo notes tags` lists every tag in use; a filter belongs to `notes list`."""
+    root, _record = _project_with_a_record(at)
+    first = at / "note.txt"
+    first.write_text("my words\n")
+    runner = _runner(root)
+    added = runner("notes", "add", "--entered", "typed", "--file", str(first), "--tag", "ask")
+    assert added.code == 0
+    return Provocation(root, ("notes", "tags", "--tag", "ask"))
+
+
 def _redacting_again_with_a_different_reason(at: Path) -> Provocation:
     """KYO-405: a rerun of `kyo redact` is a retry only under the reason already
     recorded; a new reason is refused, and the refusal names the retry."""
@@ -3524,6 +3535,13 @@ PROVOKED: dict[str, Expectation] = {
         clears_by_rerun=False,
         bindings={"FILE": "{scratch}/more.txt"},
         scratch_files={"more.txt": "more to say\n"},
+    ),
+    # KYO-710: `kyo notes tags` given a filter. A wrong invocation, so the check is that
+    # the listing it names runs from this state.
+    "cmd_notes.py:_tags#0": Expectation(
+        _filtering_the_tags_in_use,
+        clears_by_rerun=False,
+        bindings={"TAG": "ask"},
     ),
     # KYO-405: the refusal of a redaction rerun under a different reason names the rerun
     # that IS accepted — the recorded reason, from a file. About the invocation: the

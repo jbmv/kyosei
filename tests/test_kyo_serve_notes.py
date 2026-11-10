@@ -17,11 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import serve_notes
+from kyosei import commands, serve_notes
 from kyosei import store as store_module
 from kyosei.cmd_notes import mark_sent as cmd_notes_mark_sent
+from kyosei.cmd_notes import span_digest as cmd_notes_span_digest
 
-from .conftest import invoke
+from .conftest import invoke, opt_in_transcripts
 from .test_kyo_serve import body_json
 from .test_kyo_serve_held import looks, wait_until
 from .test_kyo_serve_send import FRAME_WORKING, IDLE, enable, issue, keys_sent, log_rows, post
@@ -32,6 +33,7 @@ from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
     Bed,
     bed,
     running,
+    unopted,
 )
 
 SEND_NOTES = f"{SESSIONS}/{OLD}/send-notes"
@@ -901,3 +903,278 @@ def test_send_prompt_refuses_a_key_it_does_not_take(
         assert status == 400 and "does not take" in refused["error"]
     status, refused = post(bed, SEND_PROMPT, {"segments": []}, can_send)
     assert status == 400 and '"segments"' in refused["error"]
+
+
+# ------------------------------------------- KYO-710: a session's marks, and the tags in use
+
+MARKS = f"{SESSIONS}/{OLD}/marks"
+OTHER_SESSION = "0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6"
+#: KYO-710.c2: a reply written as two records, the first holding two text blocks.
+SPLIT_MESSAGE = "msg_kyo710_split_reply"
+SPLIT_FIRST = "71071071-0000-4000-8000-000000000001"
+SPLIT_SECOND = "71071071-0000-4000-8000-000000000002"
+#: A record the transcript never held.
+MISSING_RECORD = "71071071-dead-4000-8000-0000000000ff"
+#: The fixture transcript's last record, which the split reply follows.
+LAST_RECORD = "14879f01-da16-4f48-94a9-efb05b15b88f"
+
+
+def tags_path(bed: Bed) -> str:
+    return f"/v1/projects/{bed.project.name}/tags"
+
+
+def given_turn(session: str, uuid: str, role: str = "agent") -> dict:
+    """A turn anchor kyo cannot read, so filed on the caller's word (``digest_check: given``)."""
+    digest = cmd_notes_span_digest("words nobody has", 0, 5)
+    return {**span(uuid, 0, 5), "session": session, "digest": digest, "role": role}
+
+
+def sent_on_the_store(bed: Bed, note_ids: list[str], message: str = "held-test") -> None:
+    """What `kyo serve` does when a message holding these notes is delivered."""
+    ctx = commands.build_context(
+        str(bed.project),
+        "test",
+        dict(bed.server.environ),
+        ["notes"],
+        project=commands.PROJECT_REQUIRED,
+        read_only=False,
+    )
+    try:
+        cmd_notes_mark_sent(
+            ctx, note_ids, at="2026-11-09T12:00:00.000Z", session=OLD, message=message
+        )
+    finally:
+        ctx.close()
+
+
+def append_split_reply(bed: Bed) -> str:
+    """The split reply, appended to the session; returns its text as the session routes do."""
+
+    def record(uuid: str, parent: str, stamp: str, blocks: list[str]) -> str:
+        row = {
+            "type": "assistant",
+            "uuid": uuid,
+            "parentUuid": parent,
+            "isSidechain": False,
+            "timestamp": stamp,
+            "sessionId": OLD,
+            "message": {
+                "id": SPLIT_MESSAGE,
+                "role": "assistant",
+                "content": [{"type": "text", "text": text} for text in blocks],
+            },
+        }
+        return json.dumps(row) + "\n"
+
+    bed.append(
+        [
+            record(SPLIT_FIRST, LAST_RECORD, "2026-11-09T14:11:00.000Z", ["alpha beta", "gamma"]),
+            record(SPLIT_SECOND, SPLIT_FIRST, "2026-11-09T14:11:01.000Z", ["delta epsilon"]),
+        ]
+    )
+    status, turns = get(bed, f"{SESSIONS}/{OLD}/turns", None)
+    assert status == 200, turns
+    (reply,) = [r for r in turns["replies"] if r["message_id"] == SPLIT_MESSAGE]
+    return reply["text"]
+
+
+def by_message(text: str, words: str) -> dict:
+    start = text.index(words)
+    return {
+        "kind": "turn",
+        "session": OLD,
+        "message": SPLIT_MESSAGE,
+        "start": start,
+        "end": start + len(words),
+    }
+
+
+def marks_of(bed: Bed, token: str) -> list[dict]:
+    status, document = get(bed, MARKS, token)
+    assert status == 200, document
+    assert document["count"] == len(document["marks"]) and document["session"] == OLD
+    return document["marks"]
+
+
+def test_marks_are_the_sent_notes_on_turns_of_the_session_oldest_first(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    first = file_note(bed, notes_path, token, text="on the prompt", anchors=[span(PROMPT, 0, 5)])
+    unsent = file_note(bed, notes_path, token, text="never sent", anchors=[span()])
+    no_turn = file_note(bed, notes_path, token, text="on a note", anchors=[])
+    mixed = file_note(
+        bed,
+        notes_path,
+        token,
+        text="on the reply",
+        tags=["ask"],
+        anchors=[
+            {"kind": "note", "id": first["id"]},
+            span(),
+            given_turn(OTHER_SESSION, REPLY),
+        ],
+    )
+    elsewhere = file_note(bed, notes_path, token, anchors=[given_turn(OTHER_SESSION, REPLY)])
+    sent_on_the_store(bed, [mixed["id"], first["id"], no_turn["id"], elsewhere["id"]])
+    marks = marks_of(bed, token)
+    assert [mark["note"] for mark in marks] == [first["id"], mixed["id"]]
+    assert unsent["id"] not in {mark["note"] for mark in marks}
+    on_prompt, on_reply = marks
+    assert on_prompt["text"] == "on the prompt" and on_prompt["tags"] == []
+    assert on_prompt["sent"] == {
+        "at": "2026-11-09T12:00:00.000Z",
+        "session": OLD,
+        "message": "held-test",
+    }
+    assert set(on_reply) == {"note", "text", "tags", "sent", "anchors"}
+    assert on_reply["tags"] == ["ask"]
+    # The note anchor and the other session's turn are left out.
+    assert on_reply["anchors"] == [
+        {"role": "agent", "message": REPLY_MESSAGE, "start": 0, "end": 200}
+    ]
+
+
+def test_a_redacted_notes_text_is_left_out_of_its_marks(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    note = file_note(bed, notes_path, token, text="remove me", anchors=[span()])
+    sent_on_the_store(bed, [note["id"]])
+    connection = sqlite3.connect(bed.project / "kyosei" / "kyosei.db", isolation_level=None)
+    connection.execute(
+        "UPDATE person_notes SET text = '', redacted_at = 'now', redacted_why = 'test' "
+        "WHERE id = ?",
+        (note["id"],),
+    )
+    connection.close()
+    (mark,) = marks_of(bed, token)
+    assert mark["text"] is None and mark["anchors"][0]["message"] == REPLY_MESSAGE
+
+
+def test_a_span_stored_across_two_records_comes_back_as_one_anchor_on_the_reply(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    text = append_split_reply(bed)
+    assert text == "alpha beta\n\ngamma\n\ndelta epsilon"
+    document = {
+        "segments": [{"kind": "typed", "text": "across\nwithin"}],
+        "marks": [
+            {"line": 0, "anchors": [by_message(text, "gamma\n\ndelta")]},
+            {"line": 1, "anchors": [by_message(text, "beta\n\ngamma")]},
+        ],
+    }
+    status, sent = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 200, sent
+    bed.show(IDLE)
+    message_id = sent["held"]["id"]
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 2)
+    across, within = filed_by(bed, notes_path, can_send, message_id)
+    # Stored one anchor per record, as KYO-709 does.
+    assert [a["target"] for a in across["anchors"]] == [SPLIT_FIRST, SPLIT_SECOND]
+    marks = {mark["note"]: mark for mark in marks_of(bed, can_send)}
+    (joined,) = marks[across["id"]]["anchors"]
+    assert joined["role"] == "agent" and joined["message"] == SPLIT_MESSAGE
+    assert text[joined["start"] : joined["end"]] == "gamma\n\ndelta"
+    (one,) = marks[within["id"]]["anchors"]
+    assert text[one["start"] : one["end"]] == "beta\n\ngamma"
+
+
+def test_two_anchors_a_note_was_given_apart_stay_apart(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    text = append_split_reply(bed)
+    note = file_note(
+        bed,
+        notes_path,
+        token,
+        anchors=[by_message(text, "alpha"), by_message(text, "epsilon")],
+    )
+    sent_on_the_store(bed, [note["id"]])
+    (mark,) = marks_of(bed, token)
+    assert [text[a["start"] : a["end"]] for a in mark["anchors"]] == ["alpha", "epsilon"]
+
+
+def test_a_prompt_anchor_has_its_uuid_and_a_moved_or_missing_record_is_stale(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    note = file_note(
+        bed,
+        notes_path,
+        token,
+        anchors=[span(PROMPT, 0, 22), span(), given_turn(OLD, MISSING_RECORD)],
+    )
+    sent_on_the_store(bed, [note["id"]])
+    (mark,) = marks_of(bed, token)
+    prompt, reply, missing = mark["anchors"]
+    assert prompt == {"role": "person", "uuid": PROMPT, "start": 0, "end": 22}
+    assert reply["message"] == REPLY_MESSAGE
+    assert missing == {"role": "agent", "uuid": MISSING_RECORD, "stale": True}
+    # The reply's words change, so its digest no longer matches; the prompt's stay.
+    bed.write_transcript(
+        [
+            line.replace("lighthouse", "beacon") if REPLY in line else line
+            for line in bed.rows()
+        ]
+    )
+    (mark,) = marks_of(bed, token)
+    assert mark["anchors"][1] == {"role": "agent", "uuid": REPLY, "stale": True}
+    assert "start" not in mark["anchors"][1] and mark["anchors"][0]["start"] == 0
+
+
+def test_tags_in_use_are_counted_most_used_first_then_by_name(
+    bed: Bed, notes_path: str, token: str
+) -> None:
+    file_note(bed, notes_path, token, tags=["beta", "alpha"])
+    file_note(bed, notes_path, token, tags=["beta", "gamma"])
+    gone = file_note(bed, notes_path, token, tags=["delta"])
+    status, listed = get(bed, tags_path(bed), token)
+    assert status == 200, listed
+    assert listed["tags"] == [
+        {"tag": "beta", "count": 2},
+        {"tag": "alpha", "count": 1},
+        {"tag": "delta", "count": 1},
+        {"tag": "gamma", "count": 1},
+    ]
+    assert listed["count"] == 4
+    post(bed, f"{notes_path}/{gone['id']}/tags", {"remove": ["delta"]}, token)
+    listed = get(bed, tags_path(bed), token)[1]
+    assert "delta" not in {row["tag"] for row in listed["tags"]}
+    # The CLI prints the same list.
+    assert on_the_cli(bed, "tags")["tags"] == listed["tags"]
+
+
+@pytest.mark.parametrize("route", ["marks", "tags"])
+def test_marks_and_tags_need_the_notes_permission_and_the_remedy_clears_it(
+    bed: Bed, store_home: Path, route: str
+) -> None:
+    path = MARKS if route == "marks" else tags_path(bed)
+    status, refused = get(bed, path, None)
+    assert status == 401 and refused["reason"] == "no-token"
+    assert "kyo devices issue <name> --permission notes" in refused["error"]
+    status, refused = get(bed, path, issue("ipad", "send"))
+    assert status == 403 and refused["reason"] == "no-notes-permission"
+    assert "--permission notes" in refused["error"]
+    assert invoke(["devices", "revoke", "ipad"]).code == 0
+    assert get(bed, path, issue("ipad", "notes"))[0] == 200
+
+
+def test_marks_and_tags_take_no_query_and_answer_get_only(bed: Bed, token: str) -> None:
+    for path in (MARKS, tags_path(bed)):
+        status, refused = get(bed, f"{path}?x=1", token)
+        assert status == 400 and "query string" in refused["error"]
+        status, headers, _ = bed.client.request(
+            path, method="DELETE", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert status == 405 and headers["Allow"] == "GET"
+
+
+def test_marks_refuse_until_the_project_opts_in_and_opting_in_clears_it(
+    unopted, project: Path, store_home: Path
+) -> None:
+    token = issue("ipad", "notes")
+    path = f"/v1/projects/{project.name}/sessions/{OLD}/marks"
+    status, _, body = unopted.request(path, headers={"Authorization": f"Bearer {token}"})
+    refused = body_json(body)
+    assert status == 403 and "read_transcripts: true" in refused["error"]
+    opt_in_transcripts(project)
+    status, _, body = unopted.request(path, headers={"Authorization": f"Bearer {token}"})
+    assert status == 200 and body_json(body)["marks"] == []

@@ -14,6 +14,9 @@ permission (:mod:`kyosei.device_tokens`):
 - ``POST sessions/{id}/send-prompt`` -- ``{"segments": [...], "marks": [...]}`` sends one
   composer prompt with its marks in place (below). It needs the ``send`` permission, and the
   ``notes`` permission as well when ``marks`` is not empty.
+- ``GET sessions/{id}/marks`` -- every sent note with a turn anchor in that session, its
+  anchors given as a client draws the turns (KYO-710, below);
+- ``GET tags`` -- each tag now on a note, with how many notes carry it (KYO-710).
 
 The note's device is the name its token was issued to, and a body cannot name another: a
 note is evidence of who wrote it, and the token is what authenticates that.
@@ -69,6 +72,13 @@ pasted segment and ``typed`` otherwise, and the sent state from the start. A ret
 prompt files nothing, and the held message keeps the prompt's own segments and marks
 (``prompt``) so that a composer can restore them.
 
+A SESSION'S MARKS (KYO-710). After a prompt is sent, a chat still shows what each of its
+lines was anchored to. A client draws a reply as the text the session routes return for a
+``message_id``, which may join several transcript records, while a stored turn anchor lies
+within one. :func:`kyosei.cmd_notes.session_marks` gives each anchor back in the client's
+terms, by the same table that cut it (:func:`kyosei.cmd_notes.record_layout`), and joins the
+anchors one span was stored as back into one. Both read routes open the store read-only.
+
 THE HELD PATH. A set of notes, or a prompt, is sent only through
 :meth:`kyosei.serve_held.HeldMessages.hold`, so a message during a turn waits for the turn,
 and every check a send makes applies. What a delivered message files -- a set of notes'
@@ -86,7 +96,8 @@ import unicodedata
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from . import cmd_notes, commands, device_tokens, serve_send
+from . import cmd_notes, commands, device_tokens, serve_send, session_layer
+from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .errors import KyoseiError, NotFound, UsageError
 from .export import person_note_document
 from .serve import Refusal
@@ -297,6 +308,27 @@ def read(
     _device(server, authorization)
     with _context(server, root_of(), None, read_only=True) as ctx:
         return {"ok": True, "note": _note(ctx, note_id)}
+
+
+def marks(
+    server: Any, root_of: Callable[[], str], authorization: str | None, session_id: str
+) -> dict[str, Any]:
+    """Every sent note with a turn anchor in this session, oldest first (module docstring)."""
+    _device(server, authorization)
+    with _context(server, root_of(), None, read_only=True) as ctx:
+        if not transcripts_opted_in(ctx.store().config):
+            # The offsets are read from the transcript, as the session routes read it.
+            raise Refusal(403, session_layer.NOT_OPTED_IN, setting=READ_TRANSCRIPTS_KEY)
+        found = cmd_notes.session_marks(ctx, session_id)
+    return {"ok": True, "session": session_id, "count": len(found), "marks": found}
+
+
+def tags(server: Any, root_of: Callable[[], str], authorization: str | None) -> dict[str, Any]:
+    """Each tag now on a note with its count, most used first and then by name."""
+    _device(server, authorization)
+    with _context(server, root_of(), None, read_only=True) as ctx:
+        counts = cmd_notes.tag_counts(ctx.store())
+    return {"ok": True, "count": len(counts), "tags": counts}
 
 
 # ------------------------------------------------------------------------------ tagging

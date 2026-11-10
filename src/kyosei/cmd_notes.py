@@ -270,6 +270,29 @@ def _turn_anchor(ctx: Context, raw: dict, where: str) -> dict:
     return {**fields, "role": read_role, "digest": computed, "digest_check": DIGEST_COMPUTED}
 
 
+def record_layout(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int, int]]:
+    """Where each block of one reply lies, in its record and in the reply (KYO-709, KYO-710).
+
+    ``blocks`` is :func:`read_reply_blocks`'s. Each entry is the block's record uuid, where the
+    block begins in that record's :func:`record_text`, and where it begins and ends in the
+    reply's text (:func:`kyosei.harness.claude_code_transcript.reply_layout`). A record's text
+    joins its own blocks with one newline, so a block's place in its record is counted
+    afresh. Both directions read this one table: a span given by message is cut into record
+    anchors with it, and a stored anchor is given back in reply offsets with it.
+    """
+    layout: list[tuple[str, int, int, int]] = []
+    offset_in_record: dict[str, int] = {}
+    parts = [text for _, text in blocks]
+    for (uuid, text), (block_start, block_end) in zip(
+        blocks, transcript.reply_layout(parts), strict=True
+    ):
+        before = offset_in_record.get(uuid)
+        first = 0 if before is None else before + 1  # the newline record_text joins with
+        offset_in_record[uuid] = first + len(text)
+        layout.append((uuid, first, block_start, block_end))
+    return layout
+
+
 def _message_anchors(ctx: Context, raw: dict, where: str) -> list[dict]:
     """A span of one reply, as the session API joins it, as one anchor per record covered.
 
@@ -300,20 +323,13 @@ def _message_anchors(ctx: Context, raw: dict, where: str) -> list[dict]:
             "measured against that reply's text, so it needs the transcript; give the "
             "anchor by 'uuid' with 'digest' and 'role' instead: nothing was written"
         )
-    parts = [text for _, text in blocks]
-    length = len(transcript.reply_text(parts))
+    length = len(transcript.reply_text([text for _, text in blocks]))
     if end > length:
         raise UsageError(
             f"{where}: the range ends at {end}, past the reply's {length} characters"
         )
     spans: dict[str, list[int]] = {}
-    offset_in_record: dict[str, int] = {}
-    for (uuid, text), (block_start, block_end) in zip(
-        blocks, transcript.reply_layout(parts), strict=True
-    ):
-        before = offset_in_record.get(uuid)
-        first = 0 if before is None else before + 1  # the newline record_text joins with
-        offset_in_record[uuid] = first + len(text)
+    for uuid, first, block_start, block_end in record_layout(blocks):
         low, high = max(start, block_start), min(end, block_end)
         if low >= high:
             continue
@@ -590,6 +606,171 @@ def span_text(ctx: Context, anchor: dict, records: dict[str, dict]) -> str | Non
             return "\n".join(text.splitlines()[anchor["line_start"] - 1 : anchor["line_end"]])
         return text[anchor["char_start"] : anchor["char_end"]]
     return None
+
+
+def _replies_of(
+    ctx: Context, session: str, message_ids: set[str]
+) -> dict[str, list[tuple[str, str]]]:
+    """Each reply's blocks, as :func:`read_reply_blocks` gives them, read in one pass per file.
+
+    A reply is taken from the first of the session's files that holds it, as there.
+    """
+    found: dict[str, list[tuple[str, str]]] = {}
+    for path in _transcript_paths(ctx, session):
+        wanted = message_ids - set(found)
+        if not wanted:
+            break
+        rows = [
+            record
+            for record in transcript._parse_lines(path)
+            if isinstance(record.get("message"), dict) and record["message"].get("id") in wanted
+        ]
+        for message_id in wanted:
+            blocks = transcript.reply_blocks(rows, message_id)
+            if blocks:
+                found[message_id] = blocks
+    return found
+
+
+def _in_reply(
+    layout: list[tuple[str, int, int, int]], uuid: str, start: int, end: int
+) -> tuple[int, int, int, int] | None:
+    """A span of one record as offsets into the reply's text, with the indexes of the blocks
+    it starts and ends in; None when the record is not one of the reply's."""
+
+    def at(offset: int) -> tuple[int, int] | None:
+        # A record's blocks occupy [first, first + length], one newline apart, so an offset
+        # falls in one block's range at most.
+        for index, (owner, first, block_start, block_end) in enumerate(layout):
+            if owner == uuid and first <= offset <= first + block_end - block_start:
+                return index, block_start + offset - first
+        return None
+
+    low, high = at(start), at(end)
+    if low is None or high is None:
+        return None
+    return low[1], high[1], low[0], high[0]
+
+
+def session_marks(ctx: Context, session: str) -> list[dict]:
+    """KYO-710: every sent note with a turn anchor in this session, oldest first, each anchor
+    given as a client draws the turn: a reply by message with offsets into the reply's text,
+    a prompt by uuid with offsets into its record.
+
+    The reverse of :func:`_message_anchors`, by the same table (:func:`record_layout`): the
+    anchors one span was stored as, one per record, are joined back into one where one ends
+    at a block's end and the next starts at the following block's start in another record.
+    An anchor whose record is gone, whose digest no longer matches, or whose record is not
+    in its reply any longer is given ``stale`` and no offsets. A redacted note's text is null.
+    """
+    store = ctx.store()
+    note_ids = find_note_ids(
+        store,
+        tags=[],
+        target=None,
+        anchored_to="turn",
+        person=None,
+        session=session,
+        sent=True,
+    )
+    notes = [export.person_note_document(store, note_id) for note_id in note_ids]
+    turns = {
+        note["id"]: [
+            anchor
+            for anchor in note["anchors"]
+            if anchor["kind"] == ANCHOR_TURN and anchor["session"] == session
+        ]
+        for note in notes
+    }
+    records = read_records(
+        ctx, session, {anchor["target"] for anchors in turns.values() for anchor in anchors}
+    )
+
+    def message_of(anchor: dict) -> str | None:
+        if anchor["role"] != ROLE_AGENT or span_text(ctx, anchor, records) is None:
+            return None
+        message = records[anchor["target"]].get("message")
+        message_id = message.get("id") if isinstance(message, dict) else None
+        return message_id if isinstance(message_id, str) else None
+
+    message_ids = {
+        message_id
+        for anchors in turns.values()
+        for anchor in anchors
+        if (message_id := message_of(anchor)) is not None
+    }
+    layouts = {
+        message_id: record_layout(blocks)
+        for message_id, blocks in _replies_of(ctx, session, message_ids).items()
+    }
+    marks: list[dict] = []
+    for note in notes:
+        given: list[dict] = []
+        # The last anchor given back on a reply, and the block it ends in, while it may join.
+        joinable: tuple[dict, int] | None = None
+        for anchor in turns[note["id"]]:
+            role, uuid = anchor["role"], anchor["target"]
+            stale = {"role": role, "uuid": uuid, "stale": True}
+            if role != ROLE_AGENT:
+                joinable = None
+                fresh = span_text(ctx, anchor, records) is not None
+                given.append(
+                    {
+                        "role": role,
+                        "uuid": uuid,
+                        "start": anchor["char_start"],
+                        "end": anchor["char_end"],
+                    }
+                    if fresh
+                    else stale
+                )
+                continue
+            message_id = message_of(anchor)
+            layout = layouts.get(message_id) if message_id is not None else None
+            place = (
+                None
+                if layout is None
+                else _in_reply(layout, uuid, anchor["char_start"], anchor["char_end"])
+            )
+            if place is None:
+                joinable = None
+                given.append(stale)
+                continue
+            start, end, first_block, last_block = place
+            assert layout is not None
+            if joinable is not None:
+                previous, previous_block = joinable
+                if (
+                    previous["message"] == message_id
+                    and first_block == previous_block + 1
+                    and previous["end"] == layout[previous_block][3]
+                    and start == layout[first_block][2]
+                    and layout[previous_block][0] != uuid
+                ):
+                    previous["end"] = end
+                    joinable = (previous, last_block)
+                    continue
+            entry = {"role": role, "message": message_id, "start": start, "end": end}
+            given.append(entry)
+            joinable = (entry, last_block)
+        marks.append(
+            {
+                "note": note["id"],
+                "text": None if note["redacted_at"] else note["text"],
+                "tags": note["tags"],
+                "sent": note["sent"],
+                "anchors": given,
+            }
+        )
+    return marks
+
+
+def tag_counts(store: Store) -> list[dict]:
+    """KYO-710: each tag now on at least one note, with how many carry it, most used first
+    and then by name."""
+    return [
+        {"tag": row["tag"], "count": row["count"]} for row in store.person_note_tag_counts()
+    ]
 
 
 def file_note(
@@ -878,9 +1059,36 @@ def _tag(ctx: Context, args: Namespace) -> Output:
     )
 
 
+def _tags(ctx: Context, args: Namespace) -> Output:
+    given = [
+        flag
+        for flag, value in (
+            ("a note id", args.id),
+            ("--file", args.file),
+            ("--on", args.on),
+            ("--anchors-file", args.anchors_file),
+            ("--tag", args.tag),
+            ("--person", args.person),
+            ("--device", args.device),
+            ("--entered", args.entered),
+            ("--anchored-to", args.anchored_to),
+        )
+        if value
+    ]
+    if given:
+        raise UsageError(
+            f"kyo notes tags lists every tag in use and takes no {', '.join(given)}; to find "
+            "the notes carrying a tag, run `kyo notes list --tag TAG`"
+        )
+    counts = tag_counts(ctx.store())
+    width = max((len(str(row["count"])) for row in counts), default=1)
+    lines = [f"{row['count']:>{width}}  {row['tag']}" for row in counts] or ["no tags in use"]
+    return Output(lines, {"ok": True, "command": "notes tags", "tags": counts})
+
+
 def cmd_notes(ctx: Context, args: Namespace) -> Output:
-    """``kyo notes add|list|show|tag`` (module docstring)."""
-    if args.action in ("add", "show") and (
+    """``kyo notes add|list|show|tag|tags`` (module docstring)."""
+    if args.action in ("add", "show", "tags") and (
         getattr(args, "sent", False) or getattr(args, "unsent", False)
     ):
         raise UsageError(
@@ -898,4 +1106,6 @@ def cmd_notes(ctx: Context, args: Namespace) -> Output:
         return _add(ctx, args)
     if args.action == "show":
         return _show(ctx, args)
+    if args.action == "tags":
+        return _tags(ctx, args)
     return _list(ctx, args)
