@@ -1,6 +1,7 @@
 // The read-only chat. It holds the objects `kyo serve` sent and draws them; it decides nothing
 // about a session. Each object is one element, addressed by the object's own id, and a later
 // version replaces it in place.
+import { shiftLines } from "./marks";
 import { render } from "./pipeline";
 
 interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
@@ -993,7 +994,7 @@ const kyo = {
   },
 
   /** The server's draft for a session just opened: none yet is `etag: null`. */
-  draft(frame: { boxes: { text: string }[]; etag: string | null }): void {
+  draft(frame: { boxes: SavedBox[]; etag: string | null }): void {
     if (frame.etag === null) {
       // Nothing saved for this session: what is in the boxes becomes its draft.
       adoptShelf();
@@ -1001,9 +1002,11 @@ const kyo = {
       return;
     }
     loadingDraft = true;
-    showTexts(frame.boxes.map((box) => box.text).filter(Boolean));
+    // The server's draft carries each prompt's marks, so a prompt opens the same on any device.
+    const saved = frame.boxes.filter((box) => box.text);
+    showTexts(saved.map((box) => box.text), saved);
     loadingDraft = false;
-    store(CURRENT_KEY, currentTexts());
+    store(CURRENT_KEY, currentBoxes());
     adoptShelf();
   },
 
@@ -1049,14 +1052,177 @@ function boxButton(className: string, label: string, act: () => void): HTMLButto
   return button;
 }
 
+// ---- marks: the gutter [+] beside a paragraph, which holds what is attached to it
+
+/** One thing a mark holds. Anchors and attachments join tags here as they are built. */
+interface Item { kind: "tag"; name: string }
+interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
+
+interface Marks {
+  /** The text the ids were last matched to. */
+  text: string;
+  /** One id for each line of the text. */
+  ids: number[];
+  items: Map<number, Item[]>;
+  /** What a removed line held, by that line's text, so undoing or pasting it back restores it. */
+  lost: Map<string, Item[]>;
+  gutter: HTMLElement;
+  mirror: HTMLElement;
+  ghost: HTMLButtonElement;
+}
+
+const marksOf = new WeakMap<HTMLTextAreaElement, Marks>();
+let nextLine = 1;
+let openMark: { area: HTMLTextAreaElement; id: number } | null = null;
+const markPanel = document.createElement("div");
+markPanel.className = "mark-panel";
+
+/** Carries each mark to where its paragraph went in an edit. */
+function trackEdit(area: HTMLTextAreaElement): void {
+  const marks = marksOf.get(area)!;
+  const before = marks.text.split("\n");
+  const shift = shiftLines(marks.text, area.value, marks.ids, () => nextLine++, area.selectionStart);
+  for (const [from, into] of shift.merged) {
+    const moved = marks.items.get(from);
+    if (moved) marks.items.set(into, [...(marks.items.get(into) ?? []), ...moved]);
+    marks.items.delete(from);
+  }
+  for (const id of shift.dropped) {
+    const held = marks.items.get(id);
+    const text = before[marks.ids.indexOf(id)];
+    if (held && text) marks.lost.set(text, held);
+    marks.items.delete(id);
+  }
+  const after = area.value.split("\n");
+  shift.ids.forEach((id, line) => {
+    // A removed paragraph that is back, by undo or by paste, takes up what it held.
+    const back = after[line] && !marks.items.has(id) ? marks.lost.get(after[line]) : undefined;
+    if (!back) return;
+    marks.items.set(id, back);
+    marks.lost.delete(after[line]);
+  });
+  marks.ids = shift.ids;
+  marks.text = area.value;
+}
+
+/** Where a line sits beside the text, read from a hidden copy that wraps as the text does. */
+function lineTop(marks: Marks, line: number): number {
+  return (marks.mirror.children[line] as HTMLElement | undefined)?.offsetTop ?? 0;
+}
+
+function drawMarks(area: HTMLTextAreaElement): void {
+  const marks = marksOf.get(area)!;
+  marks.mirror.replaceChildren(...area.value.split("\n").map((text) => {
+    const line = document.createElement("div");
+    line.textContent = text || "\u200b";
+    return line;
+  }));
+  const held = marks.ids.flatMap((id, line) => {
+    const count = marks.items.get(id)?.length ?? 0;
+    if (!count) return [];
+    const mark = boxButton("mark held", String(count), () => showMark(area, id));
+    mark.style.top = `${lineTop(marks, line)}px`;
+    return [mark];
+  });
+  marks.ghost.hidden = true;
+  marks.gutter.replaceChildren(marks.ghost, ...held);
+  if (openMark?.area === area) {
+    if (marks.ids.includes(openMark.id)) showMark(area, openMark.id);
+    else hideMark();
+  }
+}
+
+/** The ghost [+] follows the mouse, on the paragraphs that hold nothing yet. */
+function followMouse(area: HTMLTextAreaElement, event: MouseEvent): void {
+  const marks = marksOf.get(area)!;
+  const y = event.clientY - marks.mirror.getBoundingClientRect().top;
+  const lines = Array.from(marks.mirror.children) as HTMLElement[];
+  const line = lines.findIndex((element) => y < element.offsetTop + element.offsetHeight);
+  const id = marks.ids[line < 0 ? lines.length - 1 : line];
+  marks.ghost.hidden = id === undefined || Boolean(marks.items.get(id)?.length);
+  marks.ghost.dataset.id = String(id);
+  marks.ghost.style.top = `${lineTop(marks, marks.ids.indexOf(id))}px`;
+}
+
+function hideMark(): void {
+  openMark = null;
+  markPanel.remove();
+}
+
+/** The list of what one mark holds, each removable, and a field that adds a tag. */
+function showMark(area: HTMLTextAreaElement, id: number): void {
+  const marks = marksOf.get(area)!;
+  const refocus = openMark?.area === area && openMark.id === id
+    && markPanel.contains(document.activeElement);
+  openMark = { area, id };
+  const change = (items: Item[]) => {
+    if (items.length) marks.items.set(id, items);
+    else marks.items.delete(id);
+    remember();
+    drawMarks(area);
+  };
+  const held = marks.items.get(id) ?? [];
+  const chips = held.map((item, index) => {
+    const chip = document.createElement("span");
+    chip.className = "mark-item";
+    chip.textContent = `#${item.name}`;
+    chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
+    return chip;
+  });
+  const field = document.createElement("input");
+  field.placeholder = "Add a tag…";
+  field.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      hideMark();
+      area.focus();
+    }
+    const name = field.value.trim().replace(/^#/, "");
+    if (event.key !== "Enter" || !name) return;
+    event.preventDefault();
+    if (!held.some((item) => item.name === name)) change([...held, { kind: "tag", name }]);
+  });
+  markPanel.replaceChildren(...chips, field);
+  markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
+  area.closest(".box")!.append(markPanel);
+  if (refocus || !held.length) field.focus();
+}
+
+document.addEventListener("mousedown", (event) => {
+  const target = event.target as HTMLElement;
+  if (openMark && !markPanel.contains(target) && !target.closest(".mark")) hideMark();
+});
+
 /** A box for one prompt: the whole of one message, with its own Send and Clear. */
-function addBox(text = ""): HTMLTextAreaElement {
+function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   const box = document.createElement("div");
   box.className = "box";
   const area = document.createElement("textarea");
   area.rows = 1;
   area.placeholder = "Reply…";
   area.value = text;
+  const gutter = document.createElement("div");
+  gutter.className = "box-gutter";
+  const mirror = document.createElement("div");
+  mirror.className = "box-mirror";
+  const ghost = boxButton("mark ghost", "+", () => showMark(area, Number(ghost.dataset.id)));
+  ghost.title = "Attach to this paragraph";
+  const ids = text.split("\n").map(() => nextLine++);
+  const marks: Marks = {
+    text, ids, gutter, mirror, ghost, lost: new Map(),
+    items: new Map(saved.filter((mark) => mark.line < ids.length && mark.items.length)
+      .map((mark) => [ids[mark.line], mark.items])),
+  };
+  marksOf.set(area, marks);
+  const words = document.createElement("div");
+  words.className = "box-text";
+  words.append(area, mirror);
+  const body = document.createElement("div");
+  body.className = "box-body";
+  body.append(gutter, words);
+  body.addEventListener("mousemove", (event) => followMouse(area, event));
+  body.addEventListener("mouseleave", () => { ghost.hidden = true; });
+  new ResizeObserver(() => drawMarks(area)).observe(words);
   area.addEventListener("keydown", (event) => listKeys(area, event));
   area.addEventListener("paste", (event) => {
     const text = event.clipboardData?.getData("text/plain");
@@ -1064,11 +1230,14 @@ function addBox(text = ""): HTMLTextAreaElement {
   });
   area.addEventListener("input", () => {
     fitBox(area);
+    trackEdit(area);
+    drawMarks(area);
     remember();
   });
-  // An empty box closes up when you leave it, unless it is the only one.
-  area.addEventListener("blur", () => {
-    if (!area.value && textAreas().length > 1) box.remove();
+  // An empty box closes up when you leave it, unless it is the only one or holds a mark.
+  area.addEventListener("blur", (event) => {
+    if (markPanel.contains(event.relatedTarget as Node | null)) return;
+    if (!area.value && !marks.items.size && textAreas().length > 1) box.remove();
   });
   let armed: number | undefined;
   const disarm = () => {
@@ -1094,9 +1263,10 @@ function addBox(text = ""): HTMLTextAreaElement {
   const actions = document.createElement("div");
   actions.className = "box-actions";
   actions.append(clear, send);
-  box.append(area, actions);
+  box.append(body, actions);
   boxes.append(box);
   fitBox(area);
+  drawMarks(area);
   return area;
 }
 
@@ -1124,6 +1294,26 @@ function currentTexts(): string[] {
   return textAreas().map((area) => area.value).filter(Boolean);
 }
 
+/** Each prompt with its marks, by the line each is on. */
+function currentBoxes(): SavedBox[] {
+  return textAreas().filter((area) => area.value).map((area) => {
+    const marks = marksOf.get(area)!;
+    return {
+      text: area.value,
+      marks: marks.ids.flatMap((id, line) => {
+        const items = marks.items.get(id);
+        return items?.length ? [{ line, items }] : [];
+      }),
+    };
+  });
+}
+
+/** What this window last kept. Before marks it kept the texts alone. */
+function storedBoxes(): SavedBox[] {
+  return stored<(SavedBox | string)[]>(CURRENT_KEY, [])
+    .map((box) => (typeof box === "string" ? { text: box } : box));
+}
+
 const DRAFT_SAVE_DELAY_MS = 700;
 let draftSave: number | undefined;
 let loadingDraft = false;
@@ -1146,17 +1336,22 @@ function adoptShelf(): void {
 /** Keeps the boxes in this window's storage at once, and on the server after a pause. */
 function remember(): void {
   if (loadingDraft) return;
-  store(CURRENT_KEY, currentTexts());
+  store(CURRENT_KEY, currentBoxes());
   if (draftSave !== undefined) clearTimeout(draftSave);
   draftSave = window.setTimeout(() => {
     draftSave = undefined;
-    post("saveDraft", { boxes: currentTexts().map((text) => ({ text })) });
+    post("saveDraft", { boxes: currentBoxes() });
   }, DRAFT_SAVE_DELAY_MS);
 }
 
-function showTexts(texts: string[]): void {
+/**
+ * Shows these prompts. A prompt whose text is already known keeps its marks, which come from
+ * what is on the screen or from `kept`.
+ */
+function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
+  hideMark();
   boxes.replaceChildren();
-  for (const text of texts) addBox(text);
+  for (const text of texts) addBox(text, kept.find((box) => box.text === text)?.marks);
   if (!texts.length) addBox();
   remember();
 }
@@ -1301,7 +1496,8 @@ band.addEventListener("mousedown", (event) => {
 const savedWidth = stored<number | null>(WIDTH_KEY, null);
 if (savedWidth !== null) setComposerWidth(savedWidth);
 
-showTexts(stored<string[]>(CURRENT_KEY, []));
+const startBoxes = storedBoxes();
+showTexts(startBoxes.map((box) => box.text), startBoxes);
 const newPromptButton = document.getElementById("new-prompt")!;
 // Keeping the focus where it is stops the click from closing an empty box under it.
 newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());

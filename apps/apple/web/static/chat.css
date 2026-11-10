@@ -218,16 +218,72 @@ a { color: var(--link); }
 .box-clear { border: 0; background: none; color: var(--apple-red); font-weight: 500; padding-left: 0 !important; }
 .box-send { border: 1px solid var(--line); background: var(--panel); color: var(--text); font-weight: 600; }
 
+.box { position: relative; }
+.box-body { display: flex; }
+.box-gutter { flex: none; position: relative; width: 24px; margin-left: -6px; }
+.box-text { flex: 1; min-width: 0; position: relative; }
+
+.box textarea, .box-mirror {
+  margin: 0;
+  padding: 0;
+  font: 15px/1.45 -apple-system, system-ui, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
 .box textarea {
-  flex: none;
+  display: block;
+  width: 100%;
   border: 0;
   outline: 0;
   resize: none;
   background: none;
   color: var(--text);
-  font: 15px/1.45 -apple-system, system-ui, sans-serif;
   overflow: hidden;
 }
+
+/* A hidden copy of the text, wrapped the same way, tells the gutter where each line sits. */
+.box-mirror { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+
+.mark {
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 20px;
+  text-align: center;
+}
+.mark[hidden] { display: none; }
+.mark.ghost { opacity: 0.45; }
+.mark.ghost:hover { opacity: 1; background: var(--line); }
+.mark.held { background: var(--pastel-blue); color: #fff; font-size: 11px; font-weight: 600; }
+
+.mark-panel {
+  position: absolute;
+  left: 8px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+}
+.mark-item { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; border-radius: 999px; background: var(--line); }
+.mark-remove { border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 4px; }
+.mark-panel input { width: 110px; border: 0; outline: 0; background: none; color: var(--text); font-size: 13px; }
 
 #composer-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
 #composer-note { flex: 1; color: var(--muted); font-size: 12.5px; }
