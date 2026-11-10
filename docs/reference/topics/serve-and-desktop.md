@@ -491,7 +491,9 @@ would type it. It passes the checks a send makes, so holding needs `serve_send: 
 session holds one at a time; a second is refused with `already-held`, naming the id to
 retract. A message held on an idle screen is delivered on the next looks. `GET` and the
 response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (`held` or
-`delivering`), `reason`, `detail`, `retrying` and `notes` (the ids of a set of notes, or empty).
+`delivering`), `reason`, `detail`, `retrying`, `notes` (the ids of a set of notes, or empty)
+and `prompt` (for a message held by `send-prompt`, its own `segments` and `marks`; in the
+response to a hold and on the event stream, only the number of marks; otherwise `null`).
 
 The server watches a held session once a second, in its own thread, whether or not a client
 is connected; the thread ends when nothing is held. A look costs one pane lookup and one
@@ -506,8 +508,8 @@ every poll. `retrying: false` means it will not be tried again and you must retr
 keys may have reached the pane: `send-failed`, and `delivery-interrupted` for a message the
 server was delivering when it stopped.
 
-`DELETE` returns `id`, `automatic` and `segments` with their text, and the message is not
-delivered. It waits for any delivery already in flight, so it either returns the text or is
+`DELETE` returns `id`, `automatic`, `segments` with their text, `notes` and `prompt`, and the
+message is not delivered. It waits for any delivery already in flight, so it either returns the text or is
 refused with 404 `not-held`, never both; `not-held` also answers a message already delivered
 or taken back. `If-Match` is required and must name the held message (428 without it, 412 if it
 names another), so a device cannot take back a newer message it has not seen. Retracting
@@ -530,21 +532,39 @@ kyo devices issue my-ipad --permission notes --permission send
 
 The two permissions are separate because `send` drives a session and `notes` writes the
 store. A device that only takes notes needs `notes` alone, and sending a set of notes needs
-both. A token is sent as `Authorization: Bearer <token>`.
+both. `send-prompt` needs `send`, and `notes` as well when the prompt has marks. A token is
+sent as `Authorization: Bearer <token>`.
 
 | Route | Method | Body or query | What it does |
 |---|---|---|---|
 | `notes` | POST | `{"text", "anchors", "tags", "entered"}` | File a note |
-| `notes` | GET | `?tag=` (repeatable), `?on=`, `?anchored-to=`, `?session=`, `?person=` | The notes matching every filter, oldest first |
+| `notes` | GET | `?tag=` (repeatable), `?on=`, `?anchored-to=`, `?session=`, `?person=`, `?sent=` | The notes matching every filter, oldest first |
 | `notes/<id>` | GET | | One note |
 | `notes/<id>/tags` | POST | `{"add": [...], "remove": [...]}` | Move its tags |
 | `sessions/<id>/send-notes` | POST | `{"notes": [ids]}` | Send them as one message |
+| `sessions/<id>/send-prompt` | POST | `{"segments": [...], "marks": [...]}` | Send one composer prompt with its marks in place |
 
 `text` may be empty if there are tags. `anchors` are the objects `kyo notes add
---anchors-file` takes, and a note may have none. `entered` is `typed`, `pasted`, `dictated` or
+--anchors-file` takes, and a note may have none. A turn anchor may also be given by reply
+message, as `{"kind": "turn", "session", "message": <message_id>, "start", "end"}`, with
+offsets into the reply `text` the session routes return for that `message_id`. A reply can
+join several transcript records, while a stored turn anchor lies within one, so kyo stores one
+ordinary turn anchor for each record the span covers, each within its own record, using the
+same joining as the session routes. It needs the transcript, and offsets outside the reply's
+text are refused. `entered` is `typed`, `pasted`, `dictated` or
 `drawn`. A note's device is the name its token was issued to; a body cannot name one. A
 filter's `?on=` matches an anchor's target or a turn's session, `?session=` a turn's session,
 and `?anchored-to=` is one of `prompt`, `output`, `turn`, `record`, `document`, `file`, `note`.
+`?sent=true` keeps the notes that were sent and `?sent=false` those never sent.
+
+**A note's sent state** is the field `sent`: `null` for a note never sent, otherwise `{"at",
+"session", "message"}`, the time the message holding it was delivered, the session it went to
+and the held message's id. It is set once, by the server at delivery, and no command or route
+changes or clears it; `kyo notes show` prints it and `kyo notes list --sent` or `--unsent`
+filters on it. Before schema 31 it was a `sent` tag. `kyo rebuild --force` on such a store
+moves that tag to the field, timed by the tag's change (or the note's filing, if it was filed
+with the tag) and with no session or message, which were not recorded, and the tag is gone. A
+`sent` tag added since is an ordinary tag.
 
 A note is filed and its tags are moved by the same code as `kyo notes`, so an event and the
 ledger lines are written as there, and a write holds the same lock: SQLite's write lock, then
@@ -554,9 +574,9 @@ serve` makes to a store; every other route opens it read-only.
 
 **Sending notes.** `send-notes` builds one plain-text message and holds it through the path
 above, so a message sent during a turn waits for the turn and the send checks all apply
-(`serve_send: true`, the `send` permission, a recorded session and a pane). The notes get the
-tag `sent` when the message is delivered, and not when it is held, refused or retracted. The
-response carries the held message's description, the `notes` and the `message` text. `GET
+(`serve_send: true`, the `send` permission, a recorded session and a pane). The notes get
+their sent state when the message is delivered, and not when it is held, refused or
+retracted; a note already sent keeps its first. The response carries the held message's description, the `notes` and the `message` text. `GET
 held` and the retraction response name the `notes`, so a composer can restore them.
 
 The message has this form:
@@ -597,10 +617,46 @@ entered as a paste, is delivered as a paste.
 To read a span in full, an agent runs `kyo notes show <note id>`, which gives each anchor's
 session, uuid and character range, and for a document its path, commit and lines.
 
+**Sending a prompt (KYO-709).** One composer box is one prompt, and a mark beside one of its
+lines holds that line's anchors and tags. `segments` is what `POST held` takes. Each mark is
+`{"line": n, "anchors": [...], "tags": [...]}`, where `line` counts the lines of the segments'
+joined text from 0 and a line has at most one mark. The message is that text unchanged, with
+the `on` lines of each marked line, in the form above, typed directly above it. It has no
+`[kyo-message]` header and no `Note N` heading, and a prompt without marks is the typed text
+exactly. For the prompt
+
+```
+the transcript does not stream
+why don't we just reformat it ourselves?
+```
+
+with its second line (line 1) marked on a reply, the agent receives
+
+```
+the transcript does not stream
+on your reply 8c1f73e2-0d9d-4c8e-a1d5-3f2e0b7a4c11 "the transcript does not stream; the..."
+why don't we just reformat it ourselves?
+```
+
+A marked line with no text is sent as its `on` lines alone. The message is held as any other,
+and its anchors are validated when it is held: a mark whose anchor does not validate, whose
+`line` lies outside the text, that repeats a line or that holds neither an anchor nor a tag is
+refused `bad-request`, naming the mark, and nothing is held.
+
+Notes are filed only when the message is delivered: one for each marked line, with the line's
+text, its anchors and tags, the token's device, `entered` as `pasted` when the line lies wholly
+inside a pasted segment and `typed` otherwise, and the sent state from the start. An unmarked
+line files nothing, and a retracted prompt files nothing. `GET held` and the retraction
+response carry the prompt's own `segments` and `marks` under `prompt`, so a composer can
+restore them. If the notes, or a set of notes' sent state, cannot be filed after delivery, the
+message stays delivered: the server log names it, it is kept in
+`$KYOSEI_HOME/composer/unfiled/<message id>.json`, and the filing is tried again each time
+`kyo serve` starts, until it succeeds.
+
 Refusals carry a `reason`: `no-token`, `unknown-token`, `revoked-token`, `no-notes-permission`,
 `bad-request`, `not-found`, `store-locked`, `store-refused`, and on `send-notes` also
-`note-redacted` and `note-unsendable` (a control character in a filed note), plus those of the
-held route.
+`note-redacted` and `note-unsendable` (a control character in a filed note), on
+`send-prompt` `no-send-permission`, plus those of the held route.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 

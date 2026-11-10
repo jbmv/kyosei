@@ -633,3 +633,271 @@ def test_the_sent_state_is_not_a_field_a_route_can_set(
     assert status == 400 and "'sent'" in refused["error"]
     status, refused = get(bed, f"{notes_path}?sent=maybe", token)
     assert status == 400 and "?sent must be true or false" in refused["error"]
+
+
+# ------------------------------------------------------- KYO-709: sending a marked prompt
+
+SEND_PROMPT = f"{SESSIONS}/{OLD}/send-prompt"
+HELD_ROUTE = f"{SESSIONS}/{OLD}/held"
+#: The message id of the fixture's reply REPLY; its other record holds thinking only.
+REPLY_MESSAGE = "msg_011CgsUrszPMRurWqUwuNvoD"
+
+PROMPT_SEGMENTS = [
+    {"kind": "typed", "text": "the transcript does not stream\nwhy not reformat?\n"},
+    {"kind": "pasted", "text": "pasted line\nsecond pasted"},
+    {"kind": "typed", "text": "\nlast words"},
+]
+
+
+def marked_prompt(first: dict) -> dict:
+    return {
+        "segments": PROMPT_SEGMENTS,
+        "marks": [
+            {"line": 1, "anchors": [span()], "tags": ["#Ask"]},
+            {"line": 2, "anchors": [{"kind": "note", "id": first["id"]}]},
+        ],
+    }
+
+
+def expected_prompt(first: dict) -> str:
+    words = " ".join(reply_words().split()[:6])
+    return (
+        "the transcript does not stream\n"
+        f'on your reply {REPLY} "{words}..."\n'
+        "why not reformat?\n"
+        f"on note {first['id']}\n"
+        "pasted line\n"
+        "second pasted\n"
+        "last words"
+    )
+
+
+def filed_by(bed: Bed, notes_path: str, token: str, message_id: str) -> list[dict]:
+    notes = get(bed, f"{notes_path}?sent=true", token)[1]["notes"]
+    return [note for note in notes if note["sent"]["message"] == message_id]
+
+
+def test_a_marked_prompt_is_its_text_with_each_marks_on_lines_above_its_line(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    first = file_note(bed, notes_path, can_send)
+    status, sent = post(bed, SEND_PROMPT, marked_prompt(first), can_send)
+    assert status == 200, sent
+    assert sent["message"] == expected_prompt(first)
+    assert "[kyo-message" not in sent["message"] and "Note 1" not in sent["message"]
+    # The on lines are typed; the pasted segment stays a paste.
+    held = get(bed, HELD_ROUTE, can_send)[1]["held"]
+    assert [segment["kind"] for segment in held["segments"]] == ["typed", "pasted", "typed"]
+    assert held["segments"][1]["text"] == "pasted line\nsecond pasted"
+    assert sent["action"] == "hold" and sent["held"]["prompt"] == {"marks": 2}
+    looks(bed)
+    assert keys_sent(bed) == []
+
+
+def test_a_prompt_without_marks_is_its_typed_text_exactly(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    status, sent = post(bed, SEND_PROMPT, {"segments": PROMPT_SEGMENTS}, can_send)
+    assert status == 200, sent
+    assert sent["message"] == "".join(segment["text"] for segment in PROMPT_SEGMENTS)
+    held = get(bed, HELD_ROUTE, can_send)[1]["held"]
+    assert held["segments"] == PROMPT_SEGMENTS
+    assert held["prompt"] == {"segments": PROMPT_SEGMENTS, "marks": []}
+
+
+@pytest.mark.parametrize(
+    ("marks", "words"),
+    [
+        ([{"line": 0, "anchors": [{"kind": "record", "id": "TST-999"}]}], "marks[0].anchors[0]"),
+        ([{"line": 0, "anchors": [{**span(), "end": 99999}]}], "marks[0].anchors[0]"),
+        ([{"line": 5, "tags": ["x"]}], "marks[0]: line 5 is outside the text"),
+        ([{"line": -1, "tags": ["x"]}], "marks[0]: line -1"),
+        ([{"line": 0, "tags": ["x"]}, {"line": 0, "tags": ["y"]}], "marks[1] marks line 0"),
+        ([{"line": 0}], "marks[0] holds no anchor and no tag"),
+        ([{"line": "0", "tags": ["x"]}], "marks[0]"),
+        ([{"line": 0, "tags": ["x"], "text": "copied"}], "marks[0] takes no 'text'"),
+        ({"line": 0}, '"marks" must be a list'),
+    ],
+)
+def test_a_bad_mark_is_refused_naming_it_and_nothing_is_held(
+    bed: Bed, notes_path: str, can_send: str, marks: object, words: str
+) -> None:
+    document = {"segments": PROMPT_SEGMENTS, "marks": marks}
+    status, refused = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 400 and refused["reason"] == "bad-request", refused
+    assert words in refused["error"]
+    assert get(bed, HELD_ROUTE, can_send)[1]["held"] is None
+    assert post(bed, SEND_PROMPT, {"segments": PROMPT_SEGMENTS}, can_send)[0] == 200
+
+
+def test_on_delivery_each_marked_line_is_filed_as_a_note_and_no_other(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    first = file_note(bed, notes_path, can_send)
+    _, sent = post(bed, SEND_PROMPT, marked_prompt(first), can_send)
+    message_id = sent["held"]["id"]
+    looks(bed)
+    assert filed_by(bed, notes_path, can_send, message_id) == [], "held, so not yet filed"
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 2)
+    asked, pasted = filed_by(bed, notes_path, can_send, message_id)
+    assert asked["text"] == "why not reformat?" and asked["entered"] == "typed"
+    assert asked["tags"] == ["ask"] and asked["device"] == "ipad"
+    assert [a["target"] for a in asked["anchors"]] == [REPLY]
+    assert asked["author"] == "kyo-serve:ipad"
+    assert pasted["text"] == "pasted line" and pasted["entered"] == "pasted"
+    assert pasted["anchors"] == [{"kind": "note", "target": first["id"]}]
+    assert asked["sent"]["session"] == OLD and asked["sent"]["message"] == message_id
+    # One note per marked line: the three unmarked lines filed nothing.
+    assert get(bed, notes_path, can_send)[1]["count"] == 3
+    assert any("why not reformat?" in key for key in keys_sent(bed))
+
+
+def test_a_retracted_prompt_files_nothing_and_gives_back_its_segments_and_marks(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    first = file_note(bed, notes_path, can_send)
+    document = marked_prompt(first)
+    _, sent = post(bed, SEND_PROMPT, document, can_send)
+    held = get(bed, HELD_ROUTE, can_send)[1]["held"]
+    assert held["prompt"] == {"segments": PROMPT_SEGMENTS, "marks": document["marks"]}
+    status, _, body = bed.client.request(
+        HELD_ROUTE,
+        method="DELETE",
+        headers={"Authorization": f"Bearer {can_send}", "If-Match": sent["held"]["id"]},
+    )
+    retracted = body_json(body)
+    assert status == 200, retracted
+    assert retracted["prompt"] == {"segments": PROMPT_SEGMENTS, "marks": document["marks"]}
+    # Nothing is left to deliver, so nothing reads the pane or files a note.
+    bed.show(IDLE)
+    bed.server.held_messages.attend(OLD)
+    assert get(bed, notes_path, can_send)[1]["count"] == 1
+    assert keys_sent(bed) == []
+
+
+def test_an_empty_marked_line_is_sent_as_its_on_lines_alone_and_filed(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    first = file_note(bed, notes_path, can_send)
+    document = {
+        "segments": [{"kind": "typed", "text": "first\n\nlast"}],
+        "marks": [{"line": 1, "anchors": [{"kind": "note", "id": first["id"]}]}],
+    }
+    status, sent = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 200, sent
+    assert sent["message"] == f"first\non note {first['id']}\nlast"
+    bed.show(IDLE)
+    message_id = sent["held"]["id"]
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, message_id)
+    assert note["text"] == "" and note["anchors"] == [{"kind": "note", "target": first["id"]}]
+
+
+def test_a_mark_by_reply_message_is_stored_by_record_and_reads_the_right_words(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    anchor = {"kind": "turn", "session": OLD, "message": REPLY_MESSAGE, "start": 0, "end": 200}
+    document = {
+        "segments": [{"kind": "typed", "text": "about this"}],
+        "marks": [{"line": 0, "anchors": [anchor]}],
+    }
+    status, sent = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 200, sent
+    words = " ".join(reply_words().split()[:6])
+    assert sent["message"] == f'on your reply {REPLY} "{words}..."\nabout this'
+    bed.show(IDLE)
+    message_id = sent["held"]["id"]
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, message_id)
+    (stored,) = note["anchors"]
+    assert stored["target"] == REPLY and stored["char_end"] == 200
+    past = {**anchor, "end": len(reply_words()) + 3}
+    status, refused = post(
+        bed, SEND_PROMPT, {**document, "marks": [{"line": 0, "anchors": [past]}]}, can_send
+    )
+    assert status == 400 and "past the reply's" in refused["error"]
+
+
+def test_a_prompt_whose_notes_cannot_be_filed_is_kept_delivered_and_filed_at_the_next_start(
+    bed: Bed,
+    notes_path: str,
+    can_send: str,
+    monkeypatch: pytest.MonkeyPatch,
+    store_home: Path,
+) -> None:
+    first = file_note(bed, notes_path, can_send)
+    real = serve_notes.cmd_notes.file_notes
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(serve_notes.cmd_notes, "file_notes", locked)
+    written = io.StringIO()
+    monkeypatch.setattr(bed.server, "log_stream", written)
+    _, sent = post(bed, SEND_PROMPT, marked_prompt(first), can_send)
+    message_id = sent["held"]["id"]
+    bed.show(IDLE)
+    wait_until(lambda: "filed when kyo serve next starts" in written.getvalue())
+    assert message_id in written.getvalue() and "database is locked" in written.getvalue()
+    unfiled = store_home / "composer" / "unfiled" / f"{message_id}.json"
+    assert unfiled.is_file()
+    assert get(bed, HELD_ROUTE, can_send)[1]["held"] is None, "delivered, not held again"
+    assert keys_sent(bed) and filed_by(bed, notes_path, can_send, message_id) == []
+
+    # The next start tries again; this time the store takes them.
+    monkeypatch.setattr(serve_notes.cmd_notes, "file_notes", real)
+    bed.server.held_messages.resume()
+    assert len(filed_by(bed, notes_path, can_send, message_id)) == 2
+    assert not unfiled.exists()
+    bed.server.held_messages.resume()
+    assert get(bed, notes_path, can_send)[1]["count"] == 3, "filed once"
+
+
+def test_send_prompt_needs_the_send_permission_and_the_remedy_clears_it(
+    bed: Bed, notes_path: str, store_home: Path
+) -> None:
+    enable(store_home)
+    notes_only = issue("phone", "notes")
+    status, refused = post(bed, SEND_PROMPT, {"segments": PROMPT_SEGMENTS}, notes_only)
+    assert status == 403 and refused["reason"] == "no-send-permission"
+    assert "--permission send" in refused["error"]
+    assert get(bed, HELD_ROUTE, issue("laptop", "send"))[1]["held"] is None
+    assert invoke(["devices", "revoke", "phone"]).code == 0
+    token = issue("phone", "notes", "send")
+    assert post(bed, SEND_PROMPT, {"segments": PROMPT_SEGMENTS}, token)[0] == 200
+
+
+def test_a_marked_prompt_needs_the_notes_permission_and_the_remedy_clears_it(
+    bed: Bed, notes_path: str, store_home: Path
+) -> None:
+    enable(store_home)
+    send_only = issue("laptop", "send")
+    document = {"segments": PROMPT_SEGMENTS, "marks": [{"line": 0, "tags": ["x"]}]}
+    status, refused = post(bed, SEND_PROMPT, document, send_only)
+    assert status == 403 and refused["reason"] == "no-notes-permission"
+    assert "--permission notes" in refused["error"]
+    assert get(bed, HELD_ROUTE, send_only)[1]["held"] is None
+    # Without marks the same token may send.
+    status, sent = post(bed, SEND_PROMPT, {"segments": PROMPT_SEGMENTS}, send_only)
+    assert status == 200, sent
+    _, _, _ = bed.client.request(
+        HELD_ROUTE,
+        method="DELETE",
+        headers={"Authorization": f"Bearer {send_only}", "If-Match": sent["held"]["id"]},
+    )
+    assert invoke(["devices", "revoke", "laptop"]).code == 0
+    assert post(bed, SEND_PROMPT, document, issue("laptop", "send", "notes"))[0] == 200
+
+
+def test_send_prompt_refuses_a_key_it_does_not_take(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    for document in (
+        {"segments": PROMPT_SEGMENTS, "automatic": True},
+        {"segments": PROMPT_SEGMENTS, "notes": []},
+    ):
+        status, refused = post(bed, SEND_PROMPT, document, can_send)
+        assert status == 400 and "does not take" in refused["error"]
+    status, refused = post(bed, SEND_PROMPT, {"segments": []}, can_send)
+    assert status == 400 and '"segments"' in refused["error"]

@@ -830,3 +830,18 @@ def test_a_span_by_message_outside_the_reply_is_refused(
     refused = _anchored(kyo, write_file, [extra])
     assert refused.code != 0 and "'digest'" in refused.err
     assert kyo("notes", "list", "--json").json["notes"] == []
+
+
+def test_a_span_by_message_with_nothing_to_read_is_cleared_by_giving_it_by_uuid(
+    kyo, project: Path, write_file
+) -> None:
+    """No transcript to read: the refusal names giving the anchor by uuid with its digest and
+    role, and that anchor is filed."""
+    by_message = {"kind": "turn", "session": SESSION, "message": "msg_x", "start": 0, "end": 4}
+    refused = _anchored(kyo, write_file, [by_message])
+    assert refused.code != 0
+    assert "give the anchor by 'uuid' with 'digest' and 'role'" in refused.err
+    digest = cmd_notes.span_digest(REPLY_TEXT, 0, 4)
+    given = _anchored(kyo, write_file, [_turn(start=0, end=4, digest=digest, role="agent")])
+    assert given.code == 0, given
+    assert given.json["note"]["anchors"][0]["digest_check"] == "given"
