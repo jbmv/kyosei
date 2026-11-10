@@ -562,13 +562,22 @@ _IDLE = "idle"
 _WORKING = "working"
 
 
-def _not_idle(screen: Any) -> HeldOutcome | None:
-    """Why this screen must not receive a held message, or None when it may."""
+#: The reason on the log row of a held message sent to a working screen (KYO-722).
+DURING_TURN = "during-turn"
+
+
+def _not_idle(screen: Any, *, during_turn: bool = False) -> HeldOutcome | None:
+    """Why this screen must not receive a held message, or None when it may.
+
+    ``during_turn`` is a person's Send now (KYO-722): a working screen may take it, since Claude
+    Code queues what is typed during a turn and gives it to the agent at its next tool call.
+    Every other screen is refused as it is for an ordinary delivery.
+    """
     if screen is None:
         return _waiting("no-pane", "the pane could not be read")
-    if screen.state == _WORKING:
+    if screen.state == _WORKING and not during_turn:
         return _waiting()
-    if screen.state != _IDLE:
+    if screen.state not in (_IDLE, _WORKING):
         return _waiting(
             "screen-not-ready",
             f"the screen shows {screen.state}, which is left to the person to answer; the "
@@ -590,6 +599,7 @@ def deliver_held(
     *,
     settled: bool,
     mark_delivering: Callable[[], None],
+    during_turn: bool = False,
 ) -> HeldOutcome:
     """Try to deliver one held message, and say what happened. Reads the pane once or twice.
 
@@ -599,6 +609,10 @@ def deliver_held(
     immediately before the keys, since the layer's own check would accept a working screen.
     ``mark_delivering`` runs before the first key, so a server that dies during the keys
     leaves a message that says so and is not sent twice.
+
+    ``during_turn`` (KYO-722, Send now) delivers at once, with no second look, to a working
+    screen as well as an idle one; the log row says so in its reason. A permission prompt, an
+    overlay, an unrecognised screen and a used input box are refused as before.
     """
     project_name, session_id = message["project"], message["session_id"]
     try:
@@ -619,10 +633,10 @@ def deliver_held(
         return _waiting(refusal.extra.get("reason", "session-route"), str(refusal))
     except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
         return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
-    blocked = _not_idle(screen)
+    blocked = _not_idle(screen, during_turn=during_turn)
     if blocked is not None:
         return blocked
-    if not settled:
+    if not settled and not during_turn:
         return _waiting(idle=True)
     segments = [_Segment(s["kind"], s["text"]) for s in message["segments"]]
     attempt = _Attempt(
@@ -641,7 +655,7 @@ def deliver_held(
     try:
         with _SEND_LOCK:
             try:
-                blocked = _not_idle(live.screen())
+                blocked = _not_idle(live.screen(), during_turn=during_turn)
             except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
                 return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
             if blocked is not None:
@@ -663,6 +677,8 @@ def deliver_held(
                 )
             else:
                 attempt.outcome, attempt.status = "sent", 200
+                if during_turn:
+                    attempt.reason = DURING_TURN
                 result = HeldOutcome("delivered")
         try:
             _append(descriptor, attempt)

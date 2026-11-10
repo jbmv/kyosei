@@ -355,6 +355,26 @@ final class SessionFeed {
         }
     }
 
+    /// Delivers the held message during the turn (KYO-722). Claude Code queues it and gives it to
+    /// the agent at its next tool call. The server's `held` event then clears the held box; a
+    /// refusal is said in words and the message stays held.
+    func sendNow(id: String) {
+        guard let session = current, let token = Self.deviceToken() else { return }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "POST", sessionPath(session, "held-now"), token: token,
+                    body: Data("{}".utf8), ifMatch: id)
+            else {
+                send("note", #"{"text": "The server could not be reached."}"#)
+                return
+            }
+            if reply.status != 200 {
+                send("note", #"{"text": \#(quoted(refusal(reply.data)))}"#)
+            }
+        }
+    }
+
     func interrupt() {
         guard let session = current, let token = Self.deviceToken() else { return }
         Task {

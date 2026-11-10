@@ -530,6 +530,7 @@ session. The routes are under `/v1/projects/<name>/sessions/<id>/`.
 | `held` | POST | Hold a message: the body of `send` |
 | `held` | GET | The held message with its text, or `held: null` |
 | `held` | DELETE | Retract it, with `If-Match: <its id>` |
+| `held-now` | POST | Send it now, during a turn, with `If-Match: <its id>` (KYO-722) |
 
 **A draft** is written with `If-Match: <etag>`, or `If-None-Match: *` for a first draft, and
 a writer holding an older etag is refused with 412 and the current etag, so one device cannot
@@ -545,6 +546,14 @@ response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (
 `delivering`), `reason`, `detail`, `retrying`, `notes` (the ids of a set of notes, or empty)
 and `prompt` (for a message held by `send-prompt`, its own `segments` and `marks`; in the
 response to a hold and on the event stream, only the number of marks; otherwise `null`).
+
+**Send now** (`held-now`, KYO-722) delivers the held message at once and without the two looks,
+to a working screen as well as an idle one. Claude Code queues what is typed during a turn and
+gives it to the agent at its next tool call, so the turn is not interrupted; once sent, the
+message cannot be edited from the app afterwards. It needs the same token and `If-Match` as a retraction. A
+prompt, a dialog, an unrecognised screen and text in the input box are refused as for any
+delivery, with 409 and the same `reason`, and the message stays held. The log row is a
+`held-delivery` whose `reason` is `during-turn`.
 
 The server watches a held session once a second, in its own thread, whether or not a client
 is connected; the thread ends when nothing is held. A look costs one pane lookup and one
