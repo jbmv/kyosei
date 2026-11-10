@@ -89,6 +89,18 @@ final class SessionFeed {
 
     /// Stores the device token through the system's own `security` tool.
     static func storeDeviceToken(_ token: String) -> Bool {
+        // A token saved under another account name, as one added by hand is, would be found
+        // first and sent in place of this one. Every item for the service goes before the add.
+        for _ in 0..<8 {
+            let old = Process()
+            old.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            old.arguments = ["delete-generic-password", "-s", tokenService]
+            old.standardOutput = Pipe()
+            old.standardError = Pipe()
+            guard (try? old.run()) != nil else { break }
+            old.waitUntilExit()
+            if old.terminationStatus != 0 { break }
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = [
