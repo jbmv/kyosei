@@ -70,12 +70,16 @@ from .errors import (
 )
 from .prose import single_line
 from .render import (
+    claim_lines,
     criterion_text,
     echo_block,
     echo_value,
+    element_heading,
     evidence_text,
     flag_text,
+    gate_lines,
     map_text,
+    note_lines,
     report_standings,
     result_value,
     shift_note_text,
@@ -1860,19 +1864,62 @@ def _show_flag(store: Store, flag_id: str) -> Output:
     return Output([flag_text(flag)], {"object": "flag", **flag})
 
 
-def _show_criterion(store: Store, criterion_id: str) -> Output:
-    """``kyo show <criterion-id>`` (KYO-220.c2).
+def _show_element(store: Store, element_id: str, child_kind: str) -> Output:
+    """``kyo show <criterion-, gate-, note- or claim-id>`` (KYO-220.c2, KYO-739.c1).
 
-    Built through :func:`kyosei.export._criterion`, which is the same function
-    ``kyo show <record>`` renders its criteria block from, so the two readings of one
-    criterion cannot disagree about its verdict history.
+    An anchor in a prompt names an element of a record (KYO-737), and the record's whole
+    ``kyo show`` was the only way to read one. The element is rendered by the same
+    function the record's own block calls (``render.gate_lines``, ``claim_lines``,
+    ``note_lines``, and for a criterion ``criterion_text``, which was already shared
+    through :func:`kyosei.export._criterion`), under one heading naming the owning
+    record, so the two readings of one element cannot disagree. ``--json`` is the
+    element's object from the record's own ``--json``, with ``record_id`` and
+    ``record_title`` beside it.
     """
-    row = store.criterion(criterion_id)  # raises NotFound("no criterion ...")
-    record_id = row["record_id"]
-    criterion = export._criterion(store, row)
+    owner = ids.record_of_child(element_id) or ""
+    plural = {"criterion": "criteria", "gate": "gates", "note": "notes", "claim": "claims"}
+    try:
+        doc = with_credit_fields(export.record_document(store, owner), store.config.people)
+    except NotFound:
+        doc = None
+    element = None
+    if doc is not None:
+        element = next((e for e in doc[plural[child_kind]] if e["id"] == element_id), None)
+    if element is None:
+        if doc is None:
+            # An id naming a record this store does not hold: the store's own refusal.
+            getattr(store, child_kind)(element_id)
+        held = ", ".join(e["id"] for e in doc[plural[child_kind]]) or "none"
+        raise NotFound(
+            f"no {child_kind} {element_id!r}: record {owner} ({doc['title']}) holds "
+            f"{child_kind} ids {held}; `kyo show {owner}` lists every element it holds"
+        )
+    quotes = {e["id"]: e["text"] for e in doc["evidence_artifacts"] if not e["redacted_at"]}
+    if child_kind == "criterion":
+        body = [criterion_text(element, record_id=owner)]
+        lines = [
+            f"{body[0].splitlines()[0]}  {doc['title']}",
+            *body[0].splitlines()[1:],
+        ]
+    else:
+        heading = element_heading(child_kind, element_id, owner, doc["title"])
+        if child_kind == "gate":
+            more = gate_lines(doc, element, quotes)
+            if element["do"] and "\n" in element["do"]:
+                more += echo_block("do (in full)", element["do"])
+        elif child_kind == "claim":
+            more = claim_lines(element)
+        else:
+            more = note_lines(element)
+        lines = [heading, *more]
     return Output(
-        [criterion_text(criterion, record_id=record_id)],
-        {"object": "criterion", "record_id": record_id, **criterion},
+        ["\n".join(lines)],
+        {
+            "object": child_kind,
+            "record_id": owner,
+            "record_title": doc["title"],
+            **element,
+        },
     )
 
 
@@ -1987,6 +2034,9 @@ def _show_report(store: Store, report_id: str) -> Output:
 SHOWABLE_SHAPES: tuple[tuple[str, str], ...] = (
     ("PREFIX-N", "a record"),
     ("PREFIX-N.cN", "a criterion, with its verdict history"),
+    ("PREFIX-N.gN", "a gate"),
+    ("PREFIX-N.nN", "a note"),
+    ("PREFIX-N.mN", "a claim"),
     ("PREFIX-N.eN", "an evidence artifact"),
     ("PREFIX-N.fN", "a sweep flag"),
     ("PREFIX-N.dN", "a dispatch, printing its frozen brief back"),
@@ -2074,8 +2124,8 @@ def _show(ctx: Context, args: Namespace) -> Output:
     # KYO-220.c1/c2: three more child shapes the tool mints and could not read back.
     if child_kind == "flag":
         return _show_flag(store, args.id)
-    if child_kind == "criterion":
-        return _show_criterion(store, args.id)
+    if child_kind in ("criterion", "gate", "note", "claim"):
+        return _show_element(store, args.id, child_kind)
     if child_kind == "evidence":
         return _show_evidence(store, args.id)
     if child_kind == "report":

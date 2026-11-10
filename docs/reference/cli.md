@@ -1507,7 +1507,7 @@ Usage: `kyo show [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 
 ### Positional arguments
 
-- `ID` — **required**. the id of the object to print — PREFIX-N — a record; PREFIX-N.cN — a criterion, with its verdict history; PREFIX-N.eN — an evidence artifact; PREFIX-N.fN — a sweep flag; PREFIX-N.dN — a dispatch, printing its frozen brief back; PREFIX-N.rN — a stored report, its amendment chain and its body; PREFIX-SN — a shift note
+- `ID` — **required**. the id of the object to print — PREFIX-N — a record; PREFIX-N.cN — a criterion, with its verdict history; PREFIX-N.gN — a gate; PREFIX-N.nN — a note; PREFIX-N.mN — a claim; PREFIX-N.eN — an evidence artifact; PREFIX-N.fN — a sweep flag; PREFIX-N.dN — a dispatch, printing its frozen brief back; PREFIX-N.rN — a stored report, its amendment chain and its body; PREFIX-SN — a shift note
 
 ### Options
 
