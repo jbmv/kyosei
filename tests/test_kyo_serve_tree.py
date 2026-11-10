@@ -703,8 +703,10 @@ def test_a_path_no_root_holds_or_git_does_not_show_is_not_found(
 ) -> None:
     answer = resolved(files, text)
     assert answer["found"] is False and answer["reason"] == "not-found"
+    # An ignored file's absolute path is on disk inside the root: not served, and said to be
+    # not shown, so that a client can still offer to copy or reveal it.
     absolute = resolved(files, str(files.code / "secret.env"))
-    assert absolute["found"] is False and absolute["reason"] == "not-found"
+    assert absolute["found"] is False and absolute["reason"] == "not-shown"
 
 
 def test_a_link_that_leaves_the_root_does_not_resolve(files: Served, tmp_path: Path) -> None:
@@ -770,3 +772,18 @@ def test_a_scratchpad_may_hold_a_repository_whose_git_is_never_listed(tmp_path: 
     assert names == ["notes.md"]
     with pytest.raises(serve.Refusal):
         serve_tree.blob(root, "proj/.git/config", None)
+
+
+def test_an_ignored_file_inside_a_root_resolves_as_not_shown_and_is_not_served(
+    files: Served,
+) -> None:
+    # Build output under an absolute path: on disk and inside the code root, but ignored. The
+    # answer lets a client offer to copy or reveal the path; nothing serves the file.
+    built = files.code / "build" / "out.txt"
+    answer = resolved(files, str(built))
+    assert answer["found"] is False and answer["root"] is None and answer["path"] is None
+    assert answer["reason"] == "not-shown", answer
+    # A path inside the root that is not on disk is plainly not found.
+    assert resolved(files, str(files.code / "build" / "absent.txt"))["reason"] == "not-found"
+    # And a relative path that git does not show stays not found, whatever is on disk.
+    assert resolved(files, "build/out.txt")["reason"] == "not-found"

@@ -367,7 +367,9 @@ export function answerOf(given: string, document: unknown): Answer | null {
       size: typeof doc.size === "number" ? doc.size : undefined,
     };
   }
-  if (doc.reason === "outside-every-root") {
+  // A file inside a root that git does not show (build output) is not served either, and is
+  // offered as an outside path is: copied, or revealed where it can be reached.
+  if (doc.reason === "outside-every-root" || doc.reason === "not-shown") {
     return { kind: "outside", path: line === null ? given.trim() : withoutLine(given.trim()), line };
   }
   return { kind: "none" };

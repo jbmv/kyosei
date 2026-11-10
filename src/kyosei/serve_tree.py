@@ -745,6 +745,11 @@ def resolve(paths: serve_files.ProjectPaths, given: str) -> dict[str, Any]:
     if absolute and not inside_a_root:
         reason = "outside-every-root"
         detail = "the path lies outside every root this project serves"
+    elif absolute and any(os.path.lexists(os.path.expanduser(form)) for form, _ in forms):
+        # Inside a root and on disk, but not something git shows: build output, an ignored
+        # file. It is not served, and a client may still offer to copy or reveal the path.
+        reason = "not-shown"
+        detail = "the path is inside a root and on disk, but git does not show it there"
     else:
         reason = "not-found"
         detail = "no root holds a file or directory git shows at that path"

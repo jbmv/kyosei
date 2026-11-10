@@ -322,6 +322,11 @@ test("a path outside every root is an outside path, without its line", () => {
 
 test("a path no root holds is not a link, and a refusal is no answer", () => {
   assert.deepEqual(answerOf("and/or.x", resolvedNowhere), { kind: "none" });
+  // Inside a root and on disk, but not shown by git: offered as an outside path is.
+  assert.deepEqual(
+    answerOf("/Users/x/repo/build/App.app", { ...resolvedNowhere, given: "/Users/x/repo/build/App.app", reason: "not-shown" }),
+    { kind: "outside", path: "/Users/x/repo/build/App.app", line: null },
+  );
   assert.equal(answerOf("docs/guide.md", { ok: false, error: "no", reason: "no-files-permission" }), null);
   assert.equal(answerOf("docs/guide.md", null), null);
 });

@@ -1098,8 +1098,10 @@ a line (`src/kyosei/serve.py:120`, also `:120:7` and `:120-140`). It answers
 ```
 
 or, when no root holds the path, `"found": false` with `root` and `path` null and a `reason`:
-`outside-every-root` for an absolute path written outside both roots, and `not-found` for a
-path that neither root holds as something git shows. A relative path is tried against the code
+`outside-every-root` for an absolute path written outside both roots, `not-shown` for an
+absolute path that is inside a root and on disk but that git does not show there (an ignored
+file, build output), and `not-found` for a path that neither root holds as something git
+shows. Neither of the first two is served; a client may offer to copy or reveal such a path. A relative path is tried against the code
 root and then the store root. An absolute path is compared with the roots as text first, so
 nothing outside a root is looked at on disk to answer.
 

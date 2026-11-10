@@ -894,3 +894,12 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 .file-code { flex: 1; min-width: 0; padding-left: 2px; padding-right: 14px; overflow-x: auto; white-space: pre; tab-size: 4; }
 .file-code code, .file-code code.hljs { display: inline; padding: 0; overflow: visible; background: none; font: inherit; white-space: inherit; }
 .file-line-mark { position: absolute; left: 0; right: 0; height: 19px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); pointer-events: none; }
+
+/* Each view tints the page lightly, so that the mode is seen at a glance: Records bluish,
+   Files purplish. The chat keeps the plain background, and the composer its own. */
+body.view-records { --background: #f1f5fb; }
+body.view-files { --background: #f5f1fb; }
+@media (prefers-color-scheme: dark) {
+  body.view-records { --background: #21262e; }
+  body.view-files { --background: #28242f; }
+}
