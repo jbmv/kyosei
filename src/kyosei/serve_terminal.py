@@ -530,7 +530,7 @@ class Terminals:
 
     # ------------------------------------------------------------------------- opening
 
-    def open(
+    def connect(
         self,
         project_name: str,
         root_of: Callable[[], str],

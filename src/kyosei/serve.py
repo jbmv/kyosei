@@ -1135,7 +1135,7 @@ class ServeHandler(BaseHTTPRequestHandler):
                 )
             act = terminals.input if rest[0] == serve_terminal.INPUT else terminals.resize
             return 200, _json_bytes(act(name, session_id, authorization, self._body))
-        connection = terminals.open(
+        connection = terminals.connect(
             name,
             lambda: self.server.project(name).root,
             session_id,
