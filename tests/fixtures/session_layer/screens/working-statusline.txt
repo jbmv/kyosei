@@ -1,0 +1,9 @@
+● Sample reply text.
+
+✻ Hatching… (40s · ↓ 3.6k tokens · thought for 3s)
+  ⎿  Tip: Continue your session in Claude Code Desktop with /desktop
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  weekly 12%
+  ⏵⏵ auto mode on (shift+tab to cycle)

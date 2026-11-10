@@ -16,7 +16,7 @@ writes to one, and only :func:`send_message`, :func:`send_slash_command` and
 
 WHAT IS ON THE SCREEN. The bottom of a captured pane is the input box (two ``─`` rules with a
 ``❯`` line between them) and a footer. When the box is present the session is idle or, if
-the footer holds ``esc to interrupt``, working. When it is absent an overlay holds the
+the footer holds ``esc to interrupt`` or a working row stands directly above the box, working. When it is absent an overlay holds the
 screen: a permission prompt (``Do you want ...?``, numbered options read from the screen,
 ``Esc to cancel``), an ``AskUserQuestion`` prompt (``Enter to select``), the ``/usage`` panel
 (``Usage by model:``), the trust dialog, or something not catalogued. Reply text above the
@@ -244,7 +244,8 @@ def classify(raw: str, *, log_unrecognised_screen: Callable[[str], None] | None 
     if box is not None:
         footer = lines[box.rule_below + 1 :]
         background = _background(footer)
-        state = WORKING if any("esc to interrupt" in line for line in footer) else IDLE
+        hint = any("esc to interrupt" in line for line in footer)
+        state = WORKING if hint or _working_row_above(lines, box) else IDLE
         return Screen(state, input_text=box.text, background=background)
     if _TRUST_TEXT in " ".join(plain.split()):
         return Screen(TRUST_DIALOG)
@@ -279,11 +280,30 @@ class Terminal:
     working_line: str | None
 
 
+def _working_row_above(lines: list[str], box: _InputBox) -> str | None:
+    """The working row standing directly above the input box, by its words.
+
+    A custom status line replaces the footer's ``esc to interrupt`` (KYO-716), so a running
+    turn is also read from its spinner row. Only blank lines and the dim ``⎿`` hint line
+    that may sit between the row and the box are skipped; any other line ends the search,
+    so a row quoted higher in the conversation counts for nothing, and a finished turn's
+    row (``✻ Churned for 40s``) has no ellipsis and does not match.
+    """
+    for line in reversed(lines[: box.first - 1]):
+        if not line.strip() or line.lstrip().startswith("⎿"):
+            continue
+        found = _WORKING_ROW.match(line)
+        return found.group(1) if found else None
+    return None
+
+
 def _working_line(lines: list[str], raw_lines: list[str]) -> str | None:
     """The spinner row between the input box and the person's prompt, by its words."""
     box = _input_box(lines, raw_lines)
     if box is None:
         return None
+    if not any("esc to interrupt" in line for line in lines[box.rule_below + 1 :]):
+        return _working_row_above(lines, box)  # the screen is working by that row alone
     for line in reversed(lines[: box.first - 1]):
         if line.startswith("❯ "):
             return None

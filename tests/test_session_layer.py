@@ -1771,3 +1771,46 @@ def test_facts_state_the_total_and_the_layer_keeps_one_follower(tmp_path: Path) 
         LINES_SESSION, path, config_dir=tmp_path, environ={"PATH": ""}, log_dir=tmp_path / "log"
     )
     assert again.lines_changed() == transcript.LinesChanged(11, 3)
+
+
+# -------------------------------- KYO-716: working under a status line with no interrupt hint
+#
+# ``working-statusline.txt`` is the screen of a working session whose footer is a custom
+# status row and the mode row, as captured on 2026-11-10; the reply text is synthetic.
+
+
+def test_a_working_row_above_the_box_is_working_without_the_interrupt_hint() -> None:
+    raw = screen("working-statusline.txt")
+    assert "esc to interrupt" not in raw
+    assert pane.classify(raw).state == pane.WORKING
+
+
+def test_the_working_row_rule_is_what_makes_it_working(monkeypatch) -> None:
+    monkeypatch.setattr(pane, "_working_row_above", lambda lines, box: None)
+    assert pane.classify(screen("working-statusline.txt")).state == pane.IDLE
+
+
+def test_a_finished_turns_row_with_that_footer_is_idle() -> None:
+    assert pane.classify(screen("finished-statusline.txt")).state == pane.IDLE
+
+
+def test_a_screen_with_that_footer_and_no_spinner_row_is_idle() -> None:
+    raw = screen("working-statusline.txt").replace("✻ Hatching…", "Hatching…")
+    assert pane.classify(raw).state == pane.IDLE
+
+
+def test_a_quoted_working_row_higher_up_does_not_make_a_screen_working() -> None:
+    raw = screen("quoted-working-row.txt")
+    assert pane.classify(raw).state == pane.IDLE
+
+
+def test_the_terminal_returns_the_working_line_under_that_footer() -> None:
+    raw = screen("working-statusline.txt")
+    found = pane.terminal(raw, pane.classify(raw))
+    assert found.working_line == "Hatching… (40s · ↓ 3.6k tokens · thought for 3s)"
+
+
+def test_an_interrupt_is_sent_on_that_screen() -> None:
+    tmux = FakeTmux([screen("working-statusline.txt")])
+    pane.send_interrupt(tmux, "%3")
+    assert [c for c, _ in tmux.commands] == [("send-keys", "-t", "%3", "Escape")]
