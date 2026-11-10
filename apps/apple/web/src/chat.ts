@@ -979,19 +979,24 @@ const kyo = {
     }
     composerNote.textContent = "";
     showHeld(frame.id ?? null);
-    showTexts([]);
+    // Only the prompt that was sent leaves; the others are still drafts.
+    sending?.remove();
+    sending = null;
+    if (!textAreas().length) addBox();
+    remember();
   },
 
   /** A held message taken back, to edit. */
   retracted(frame: { text: string }): void {
     showHeld(null);
-    showTexts(currentTexts().length ? [frame.text, ...currentTexts()] : [frame.text]);
+    showTexts([frame.text, ...currentTexts()]);
   },
 
   /** The server's draft for a session just opened: none yet is `etag: null`. */
   draft(frame: { boxes: { text: string }[]; etag: string | null }): void {
     if (frame.etag === null) {
       // Nothing saved for this session: what is in the boxes becomes its draft.
+      adoptShelf();
       remember();
       return;
     }
@@ -999,6 +1004,7 @@ const kyo = {
     showTexts(frame.boxes.map((box) => box.text).filter(Boolean));
     loadingDraft = false;
     store(CURRENT_KEY, currentTexts());
+    adoptShelf();
   },
 
   note(frame: { text: string }): void {
@@ -1033,15 +1039,20 @@ function textAreas(): HTMLTextAreaElement[] {
   return Array.from(boxes.querySelectorAll("textarea"));
 }
 
-/** A box for one note. The last box is always empty, ready for the next. */
+/** A button inside a box. It leaves the focus in the text, so an empty box does not close under it. */
+function boxButton(className: string, label: string, act: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", act);
+  return button;
+}
+
+/** A box for one prompt: the whole of one message, with its own Send and Clear. */
 function addBox(text = ""): HTMLTextAreaElement {
   const box = document.createElement("div");
   box.className = "box";
-  const link = document.createElement("button");
-  link.className = "box-link";
-  link.textContent = "+";
-  link.title = "Linking to the chat comes with tagging";
-  link.disabled = true;
   const area = document.createElement("textarea");
   area.rows = 1;
   area.placeholder = "Reply…";
@@ -1053,22 +1064,42 @@ function addBox(text = ""): HTMLTextAreaElement {
   });
   area.addEventListener("input", () => {
     fitBox(area);
-    const areas = textAreas();
-    if (area === areas[areas.length - 1] && area.value) addBox();
     remember();
   });
-  // An emptied box closes up when you leave it, unless it is the last.
+  // An empty box closes up when you leave it, unless it is the only one.
   area.addEventListener("blur", () => {
-    const areas = textAreas();
-    if (!area.value && area !== areas[areas.length - 1]) box.remove();
+    if (!area.value && textAreas().length > 1) box.remove();
   });
-  box.append(link, area);
+  let armed: number | undefined;
+  const disarm = () => {
+    if (armed !== undefined) clearTimeout(armed);
+    armed = undefined;
+    clear.textContent = "Clear";
+  };
+  // Clear asks once more, then removes this prompt and leaves the others.
+  const clear = boxButton("box-clear", "Clear", () => {
+    if (armed === undefined) {
+      if (!area.value) return;
+      clear.textContent = "Clear?";
+      armed = window.setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    box.remove();
+    if (!textAreas().length) addBox().focus();
+    remember();
+  });
+  const send = boxButton("box-send", "Send", () => attemptSend(area));
+  send.title = "Send (⌘↩)";
+  const actions = document.createElement("div");
+  actions.className = "box-actions";
+  actions.append(clear, send);
+  box.append(area, actions);
   boxes.append(box);
   fitBox(area);
   return area;
 }
 
-// Until the server's draft routes are wired in, drafts are kept in this window's storage.
 const CURRENT_KEY = "composer-current";
 const SHELF_KEY = "composer-shelf";
 const WIDTH_KEY = "composer-width";
@@ -1097,6 +1128,21 @@ const DRAFT_SAVE_DELAY_MS = 700;
 let draftSave: number | undefined;
 let loadingDraft = false;
 
+/**
+ * Prompts once kept on the Drafts shelf become prompts in the composer, where unsent prompts
+ * are the drafts. It runs after the session's saved draft has loaded, which replaces the boxes.
+ */
+function adoptShelf(): void {
+  const shelf = stored<Shelved[]>(SHELF_KEY, []);
+  if (!shelf.length) return;
+  const have = new Set(currentTexts());
+  const adopted = shelf.map((draft) => draft.texts.join("\n\n")).filter((text) => !have.has(text));
+  if (adopted.length) showTexts([...currentTexts(), ...adopted]);
+  try {
+    localStorage.removeItem(SHELF_KEY);
+  } catch {}
+}
+
 /** Keeps the boxes in this window's storage at once, and on the server after a pause. */
 function remember(): void {
   if (loadingDraft) return;
@@ -1111,16 +1157,21 @@ function remember(): void {
 function showTexts(texts: string[]): void {
   boxes.replaceChildren();
   for (const text of texts) addBox(text);
-  addBox();
+  if (!texts.length) addBox();
   remember();
+}
+
+/** A new prompt is made on purpose: an empty box is reused before another is added. */
+function newPrompt(): void {
+  (textAreas().find((area) => !area.value) ?? addBox()).focus();
 }
 
 function post(name: string, body: unknown): void {
   (window as any).webkit?.messageHandlers?.[name]?.postMessage(body);
 }
 
-/** Each box's text in order, split at what was pasted, since a paste is sent as a paste. */
-function messageSegments(): { kind: string; text: string }[] {
+/** One prompt's text, split at what was pasted, since a paste is sent as a paste. */
+function messageSegments(area: HTMLTextAreaElement): { kind: string; text: string }[] {
   const segments: { kind: string; text: string }[] = [];
   const add = (kind: string, text: string) => {
     const last = segments[segments.length - 1];
@@ -1128,32 +1179,30 @@ function messageSegments(): { kind: string; text: string }[] {
     if (last?.kind === kind) last.text += text;
     else segments.push({ kind, text });
   };
-  let first = true;
-  for (const area of textAreas()) {
-    if (!area.value) continue;
-    if (!first) add("typed", "\n\n");
-    first = false;
-    let rest = area.value;
-    for (const piece of pasted.get(area) ?? []) {
-      const at = rest.indexOf(piece);
-      if (at < 0) continue;
-      add("typed", rest.slice(0, at));
-      add("pasted", piece);
-      rest = rest.slice(at + piece.length);
-    }
-    add("typed", rest);
+  let rest = area.value;
+  for (const piece of pasted.get(area) ?? []) {
+    const at = rest.indexOf(piece);
+    if (at < 0) continue;
+    add("typed", rest.slice(0, at));
+    add("pasted", piece);
+    rest = rest.slice(at + piece.length);
   }
+  add("typed", rest);
   return segments;
 }
 
-function attemptSend(): void {
-  const segments = messageSegments();
+/** The box whose prompt the server has been asked to take, until it answers. */
+let sending: HTMLElement | null = null;
+
+function attemptSend(area: HTMLTextAreaElement): void {
+  const segments = messageSegments(area);
   if (!segments.length) return;
   if (heldId) {
     composerNote.textContent = "One message is already waiting. Edit it first.";
     return;
   }
   composerNote.textContent = "Sending…";
+  sending = area.closest<HTMLElement>(".box");
   post("send", { segments });
 }
 
@@ -1225,70 +1274,6 @@ function listKeys(area: HTMLTextAreaElement, event: KeyboardEvent): void {
   replaceRange(area, caret, caret, `\n${indent}${marker} `);
 }
 
-const clearButton = document.getElementById("clear") as HTMLButtonElement;
-let clearArmed: number | undefined;
-
-function disarmClear(): void {
-  if (clearArmed !== undefined) clearTimeout(clearArmed);
-  clearArmed = undefined;
-  clearButton.textContent = "Clear";
-}
-
-clearButton.addEventListener("click", () => {
-  if (clearArmed === undefined) {
-    if (!currentTexts().length) return;
-    clearButton.textContent = "Clear all?";
-    clearArmed = window.setTimeout(disarmClear, 3000);
-    return;
-  }
-  disarmClear();
-  showTexts([]);
-});
-
-const draftsPanel = document.getElementById("drafts-panel")!;
-
-function drawDrafts(): void {
-  const shelf = stored<Shelved[]>(SHELF_KEY, []);
-  const save = document.createElement("button");
-  save.className = "draft-save";
-  save.textContent = "Save this prompt to drafts and start blank";
-  save.disabled = !currentTexts().length;
-  save.addEventListener("click", () => {
-    store(SHELF_KEY, [{ at: new Date().toISOString(), texts: currentTexts() }, ...shelf]);
-    showTexts([]);
-    drawDrafts();
-  });
-  const rows = shelf.map((draft, index) => {
-    const row = document.createElement("div");
-    row.className = "draft-row";
-    row.append(draft.texts[0].split("\n")[0]);
-    const when = document.createElement("small");
-    when.textContent = stampWords(draft.at);
-    row.append(when);
-    // Loading a draft shelves what is in the window, so nothing is lost.
-    row.addEventListener("click", () => {
-      const rest = shelf.filter((_, position) => position !== index);
-      const current = currentTexts();
-      store(SHELF_KEY, current.length ? [{ at: new Date().toISOString(), texts: current }, ...rest] : rest);
-      showTexts(draft.texts);
-      draftsPanel.hidden = true;
-    });
-    return row;
-  });
-  if (!rows.length) {
-    const empty = document.createElement("div");
-    empty.className = "draft-empty";
-    empty.textContent = "No saved drafts";
-    rows.push(empty);
-  }
-  draftsPanel.replaceChildren(save, ...rows);
-}
-
-document.getElementById("drafts")!.addEventListener("click", () => {
-  draftsPanel.hidden = !draftsPanel.hidden;
-  if (!draftsPanel.hidden) drawDrafts();
-});
-
 const COMPOSER_MIN = 300;
 const CHAT_MIN = 420;
 const band = document.getElementById("band")!;
@@ -1317,12 +1302,19 @@ const savedWidth = stored<number | null>(WIDTH_KEY, null);
 if (savedWidth !== null) setComposerWidth(savedWidth);
 
 showTexts(stored<string[]>(CURRENT_KEY, []));
-document.getElementById("send")!.addEventListener("click", attemptSend);
+const newPromptButton = document.getElementById("new-prompt")!;
+// Keeping the focus where it is stops the click from closing an empty box under it.
+newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());
+newPromptButton.addEventListener("click", newPrompt);
+// Cmd-Return sends the prompt being typed in, or the only one there is.
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && event.metaKey) {
-    event.preventDefault();
-    attemptSend();
-  }
+  if (event.key !== "Enter" || !event.metaKey) return;
+  const areas = textAreas();
+  const focused = areas.find((area) => area === document.activeElement);
+  const target = focused ?? (areas.length === 1 ? areas[0] : undefined);
+  if (!target) return;
+  event.preventDefault();
+  attemptSend(target);
 });
 
 (window as any).kyo = kyo;
