@@ -602,7 +602,7 @@ body.terminal-open #terminal { display: flex; }
 
 .mark-anchor { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: none; color: var(--text); font-size: 13px; padding: 0; }
 
-#anchor-menu {
+#anchor-menu, #path-menu {
   position: fixed;
   z-index: 10;
   display: flex;
@@ -616,8 +616,8 @@ body.terminal-open #terminal { display: flex; }
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
   font-size: 13px;
 }
-#anchor-menu button { padding: 5px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); font-size: 13px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#anchor-menu button:hover { background: var(--pastel-blue); color: #fff; }
+#anchor-menu button, #path-menu button { padding: 5px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); font-size: 13px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#anchor-menu button:hover, #path-menu button:hover { background: var(--pastel-blue); color: #fff; }
 #anchor-menu .anchor-new { font-weight: 600; }
 .anchor-heading { margin-top: 4px; padding: 5px 9px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
 
@@ -707,10 +707,10 @@ body.terminal-open .view-pane { bottom: 46%; }
 /* ---------------------------------------------------------------------------- Records */
 
 /* Bare text in the accent colour, as the composer's Send is. */
-#records-home { padding: 0; border: 0; background: none; color: var(--link); font-size: 13.5px; font-weight: 600; cursor: pointer; }
-#records-home::before { content: "\2039\00a0"; }
-#records-home:hover { color: var(--pastel-blue); text-decoration: underline; }
-#records-home[hidden] { display: none; }
+#records-home, #files-back { padding: 0; border: 0; background: none; color: var(--link); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+#records-home::before, #files-back::before { content: "\2039\00a0"; }
+#records-home:hover, #files-back:hover { color: var(--pastel-blue); text-decoration: underline; }
+#records-home[hidden], #files-back[hidden] { display: none; }
 #records-home:not([hidden]) + #records-count { margin-left: 14px; }
 #records-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -819,3 +819,78 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 .record-none { margin-top: 26px; color: var(--muted); font-size: 13px; }
 a.ref { text-decoration: none; }
 a.ref:hover { text-decoration: underline; }
+
+/* ------------------------------------------------------------------------ Files (KYO-736) */
+
+/* A file path the server placed: a link like any other, without the underline until the
+   pointer is on it. One outside every served folder is quieter and dotted, since a click
+   offers to copy it and not to open it. An address not yet placed is drawn as its words. */
+a.path-link { text-decoration: none; cursor: pointer; }
+a.path-link:hover { text-decoration: underline; }
+a.path-link.outside { color: inherit; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+a.path-link.outside:hover { color: var(--link); text-decoration: underline; }
+a[data-local] { color: inherit; text-decoration: none; cursor: text; }
+.path-menu-path { margin-top: 0; padding-bottom: 5px; border-top: 0; max-width: 268px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+
+/* Bare text in the accent colour, as the composer's Send is. */
+.text-button { padding: 0; border: 0; background: none; color: var(--link); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.text-button:hover { color: var(--pastel-blue); text-decoration: underline; }
+.text-button[hidden] { display: none; }
+
+#files-back:not([hidden]) + #files-path { margin-left: 14px; }
+#files-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; user-select: text; -webkit-user-select: text; }
+#files-meta { margin-left: 14px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#files-path:empty + #files-meta { margin-left: 0; }
+
+/* The side bar in Files: the tree takes two thirds, and the files mentioned the last. */
+body.view-files #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
+#files-side { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.files-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+#files-side > .files-bar { margin: 0 4px; }
+/* The root chips are the view's only chips. */
+.files-roots { display: flex; flex-wrap: wrap; gap: 6px; }
+#files-side > .files-tree { flex: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#files-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
+#files-mentioned { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+.tree-row { display: flex; align-items: baseline; gap: 5px; padding: 3px 10px 3px 8px; border-radius: 6px; font-size: 13.5px; line-height: 1.45; white-space: nowrap; cursor: default; }
+.tree-row:hover { background: var(--panel); }
+.tree-row.current { background: var(--line); }
+.tree-row .chevron { flex: none; display: inline-block; width: 10px; color: var(--muted); text-align: center; }
+.tree-row.open > .chevron { transform: rotate(90deg); }
+.tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tree-row.dot .tree-name { color: var(--muted); }
+.tree-waiting { color: var(--muted); font-size: 12px; }
+
+.mention-row { padding: 5px 10px; border-radius: 7px; font-size: 13.5px; line-height: 1.35; cursor: default; }
+.mention-row:hover { background: var(--panel); }
+.mention-name, .mention-place { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-place { color: var(--muted); font-size: 12px; }
+#side #side-mentioned .mention-row, #side #side-mentioned .rec-empty { margin: 0 -10px; }
+#side #side-mentioned .rec-empty { padding: 0 10px; color: var(--muted); font-size: 14px; }
+#side-mentioned-more { color: var(--muted); }
+#side-mentioned-more[hidden] { display: none; }
+
+/* The pane. Prose keeps the transcript's measure; a source file takes the pane's width. */
+.files-inner { padding: 22px 28px 40px; }
+#files-landing, .file-body, .file-facts, .file-note, .file-more, #files-note { max-width: 780px; margin-left: auto; margin-right: auto; }
+#files-landing[hidden], #file[hidden], #files-note[hidden] { display: none; }
+#files-landing .files-bar { margin-bottom: 12px; }
+#files-landing .tree-row { font-size: 14px; }
+#files-note, .file-note, .file-more { color: var(--muted); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+#files-note, .file-note { margin-bottom: 14px; }
+.file-more { margin-top: 12px; }
+.file-more .text-button { font-size: 13.5px; }
+.file-facts h1 { margin: 0 0 12px; font-size: 1.35em; line-height: 1.3; overflow-wrap: anywhere; }
+.file-facts dd { user-select: text; -webkit-user-select: text; }
+.file-image { display: block; max-width: 100%; margin: 0 auto 12px; border-radius: 6px; }
+.file-image + .file-note { text-align: center; }
+
+/* A source file: the numbers stay while a long line is scrolled, and every line is one
+   height, which is how a line's place is found. */
+.file-source { position: relative; display: flex; border-radius: 8px; background: var(--panel); font: 12.5px/19px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.file-gutter, .file-code { margin: 0; padding-top: 12px; padding-bottom: 12px; font: inherit; }
+.file-gutter { flex: none; padding-left: 14px; padding-right: 12px; color: var(--muted); text-align: right; opacity: 0.75; user-select: none; -webkit-user-select: none; }
+.file-code { flex: 1; min-width: 0; padding-left: 2px; padding-right: 14px; overflow-x: auto; white-space: pre; tab-size: 4; }
+.file-code code, .file-code code.hljs { display: inline; padding: 0; overflow: visible; background: none; font: inherit; white-space: inherit; }
+.file-line-mark { position: absolute; left: 0; right: 0; height: 19px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); pointer-events: none; }

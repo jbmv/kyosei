@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import KyoseiClient
 import Observation
@@ -173,6 +174,7 @@ final class SessionFeed {
             }
         }
         sendRecordsStart()
+        sendFilesStart()
         recordsTask = Task { await followProject() }
     }
 
@@ -847,6 +849,155 @@ final class SessionFeed {
             }
             lost = true
             try? await Task.sleep(for: retry.next())
+        }
+    }
+
+    // MARK: The Files view (KYO-736)
+
+    private static let pathMappingServerKey = "pathMappingServer"
+    private static let pathMappingHereKey = "pathMappingHere"
+
+    /// The optional path mapping: a prefix of a path on the server's machine, and what it
+    /// stands for on this one. It is this device's own, so it is kept in the app's defaults.
+    static var savedPathMapping: (server: String, here: String) {
+        (
+            UserDefaults.standard.string(forKey: pathMappingServerKey) ?? "",
+            UserDefaults.standard.string(forKey: pathMappingHereKey) ?? ""
+        )
+    }
+
+    static func savePathMapping(server: String, here: String) {
+        UserDefaults.standard.set(
+            server.trimmingCharacters(in: .whitespaces), forKey: pathMappingServerKey)
+        UserDefaults.standard.set(
+            here.trimmingCharacters(in: .whitespaces), forKey: pathMappingHereKey)
+    }
+
+    /// The device token the file routes are asked with. It is read when the app starts and
+    /// when Settings are saved, since reading it starts a process and a request must not.
+    private var filesToken: String?
+
+    /// Whether the server's machine is this one, which it is when its address is loopback.
+    private var serverIsThisMachine: Bool {
+        ["127.0.0.1", "localhost", "::1", "[::1]"].contains(client.base.host() ?? "")
+    }
+
+    /// Tells the page which project's files it shows, whether a path on the server's machine
+    /// is a path here, and the mapping Settings holds. The page asks again what was refused.
+    private func sendFilesStart() {
+        filesToken = Self.deviceToken()
+        let mapping = Self.savedPathMapping
+        let mappings =
+            mapping.server.isEmpty || mapping.here.isEmpty
+            ? "[]" : #"[{"server": \#(quoted(mapping.server)), "here": \#(quoted(mapping.here))}]"#
+        send(
+            "files",
+            #"{"project": \#(quoted(project)), "same_machine": \#(serverIsThisMachine), "#
+                + #""mappings": \#(mappings)}"#)
+    }
+
+    /// A file route's JSON for the page, or `null` when it was refused or is not JSON.
+    private func filesDocument(_ reply: ServeClient.FileReply?) -> String {
+        guard let reply, reply.status == 200,
+            (try? JSONSerialization.jsonObject(with: reply.data)) != nil
+        else { return "null" }
+        return String(decoding: reply.data, as: UTF8.self)
+    }
+
+    /// Why a file route gave nothing, quoted for the page: the server's own sentence, which
+    /// names the remedy, or that it was not reached. `null` when it answered.
+    private func filesProblem(_ reply: ServeClient.FileReply?) -> String {
+        guard let reply else { return quoted("The server could not be reached.") }
+        return reply.status == 200 || reply.status == 304 ? "null" : quoted(refusal(reply.data))
+    }
+
+    /// What the page's Files view and its path links ask: the roots, one folder, one file,
+    /// where a path written in a reply is, and whether a path is a file on this machine,
+    /// which Reveal in Finder then shows. Without a device token the request is sent
+    /// without one, and the server's refusal says how a token is issued.
+    func files(body: [String: Any]) {
+        let project = project
+        let client = client
+        let token = filesToken
+        let root = body["root"] as? String ?? ""
+        let path = body["path"] as? String ?? ""
+        // The scratch root is one directory for each session, named after the root.
+        let session = body["session"] as? String
+        let parts = path.split(separator: "/").map(String.init)
+        let named = #""root": \#(quoted(root)), "path": \#(quoted(path)), "session": \#(quoted(session))"#
+        switch body["want"] as? String {
+        case "roots":
+            Task {
+                let reply = try? await client.files(project: project, segments: [], token: token)
+                guard project == self.project else { return }
+                send(
+                    "filesRoots",
+                    #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
+                        + #""error": \#(filesProblem(reply))}"#)
+            }
+        case "tree":
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: [root] + (session.map { [$0] } ?? []) + ["tree"] + parts,
+                    token: token)
+                guard project == self.project else { return }
+                send(
+                    "filesTree",
+                    #"{\#(named), "status": \#(reply?.status ?? 0), "document": "#
+                        + #"\#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
+            }
+        case "blob":
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: [root] + (session.map { [$0] } ?? []) + ["blob"] + parts,
+                    token: token, ifNoneMatch: body["etag"] as? String)
+                guard project == self.project else { return }
+                var text = "null"
+                var data = "null"
+                let type = reply?.contentType ?? ""
+                let mediaType = type.split(separator: ";").first.map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+                if let reply, reply.status == 200 {
+                    // A text type states its charset, which is how this route tells text
+                    // from other bytes. An image travels as the chat's images do.
+                    if type.lowercased().contains("charset=") {
+                        text = quoted(String(decoding: reply.data, as: UTF8.self))
+                    } else if let mediaType, mediaType.hasPrefix("image/") {
+                        data = quoted("data:\(mediaType);base64,\(reply.data.base64EncodedString())")
+                    }
+                }
+                send(
+                    "filesBlob",
+                    #"{\#(named), "status": \#(reply?.status ?? 0), "etag": \#(quoted(reply?.etag)), "#
+                        + #""media_type": \#(quoted(mediaType)), "size": "#
+                        + (reply?.status == 200 ? String(reply?.data.count ?? 0) : "null")
+                        + #", "text": \#(text), "data": \#(data), "error": \#(filesProblem(reply))}"#)
+            }
+        case "resolve":
+            guard let given = body["given"] as? String else { return }
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: ["resolve"], query: [(name: "path", value: given)],
+                    token: token)
+                guard project == self.project else { return }
+                send(
+                    "filesResolved",
+                    #"{"given": \#(quoted(given)), "status": \#(reply?.status ?? 0), "document": "#
+                        + #"\#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
+            }
+        case "exists":
+            let here = NSString(string: path).expandingTildeInPath
+            let exists = path.hasPrefix("/") || path.hasPrefix("~/")
+                ? FileManager.default.fileExists(atPath: here) : false
+            send("filesExists", #"{"path": \#(quoted(path)), "exists": \#(exists)}"#)
+        case "reveal":
+            // Only a path that is a file or a folder on this machine has a place in Finder.
+            let here = NSString(string: path).expandingTildeInPath
+            guard here.hasPrefix("/"), FileManager.default.fileExists(atPath: here) else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: here)])
+        default:
+            break
         }
     }
 

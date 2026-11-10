@@ -6,6 +6,10 @@ struct SettingsView: View {
     @State private var server = SessionFeed.savedServer
     @State private var project = SessionFeed.savedProject
     @State private var token = ""
+    /// The optional path mapping (KYO-736): a prefix of a path on the server's machine, and
+    /// the folder it is on this one, such as a mount of the server's home folder.
+    @State private var mappedServer = SessionFeed.savedPathMapping.server
+    @State private var mappedHere = SessionFeed.savedPathMapping.here
     @State private var note = ""
 
     var body: some View {
@@ -13,6 +17,19 @@ struct SettingsView: View {
             TextField("Server", text: $server, prompt: Text("https://your-host.ts.net"))
             TextField("Project", text: $project)
             SecureField("Device token", text: $token, prompt: Text("Leave blank to keep the current one"))
+            Section {
+                TextField("Path on the server", text: $mappedServer, prompt: Text("/Users/name"))
+                TextField("Is here on this Mac", text: $mappedHere, prompt: Text("/Volumes/name"))
+            } footer: {
+                Text(
+                    "Optional. A file outside the folders the server serves cannot be opened in "
+                        + "Files; with this mapping it can be revealed in Finder where the "
+                        + "server's folder is mounted on this Mac."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Text(note).foregroundStyle(.secondary)
                 Spacer()
@@ -35,6 +52,7 @@ struct SettingsView: View {
             }
             token = ""
         }
+        SessionFeed.savePathMapping(server: mappedServer, here: mappedHere)
         feed.configure(server: base, project: project)
         note = "Saved."
     }

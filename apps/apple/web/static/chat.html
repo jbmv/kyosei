@@ -24,6 +24,11 @@
         <button id="records-home" hidden>All records</button>
         <span id="records-count"></span>
       </span>
+      <span class="top-part" data-view="files" hidden>
+        <button id="files-back" hidden>All files</button>
+        <span id="files-path"></span>
+        <span id="files-meta"></span>
+      </span>
     </header>
 
     <nav id="menu">
@@ -38,6 +43,17 @@
           <div id="records-list"></div>
           <h4>History</h4>
           <div id="records-history"></div>
+        </div>
+        <!-- Files (KYO-736): a chip for each root the server serves, the chosen root's tree,
+             and the files the session's replies and prompts have named. -->
+        <div id="files-side" data-view="files" hidden>
+          <div class="files-bar">
+            <div class="files-roots"></div>
+            <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
+          </div>
+          <div class="files-tree"></div>
+          <h4>Mentioned in this session</h4>
+          <div id="files-mentioned"></div>
         </div>
         <div data-view="chat">
         <h4>Sessions</h4>
@@ -55,6 +71,11 @@
             <div id="side-tasks"></div>
             <div id="side-finished" class="clickable"></div>
             <div id="side-tasks-done"></div>
+          </section>
+          <section>
+            <h4>Files mentioned</h4>
+            <div id="side-mentioned"></div>
+            <div id="side-mentioned-more" class="clickable" hidden></div>
           </section>
         </div>
         </div>
@@ -124,6 +145,19 @@
           <div id="records-groups"></div>
         </div>
         <article id="record" hidden></article>
+      </div>
+    </section>
+    <section id="view-files" class="view-pane" data-view="files" hidden>
+      <div class="files-inner">
+        <div id="files-note" hidden></div>
+        <div id="files-landing">
+          <div class="files-bar">
+            <div class="files-roots"></div>
+            <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
+          </div>
+          <div class="files-tree"></div>
+        </div>
+        <article id="file" hidden></article>
       </div>
     </section>
     <script src="chat.js"></script>

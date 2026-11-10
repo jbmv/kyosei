@@ -5,11 +5,17 @@ import { agentKind, shortModel } from "./agents";
 import {
   drawnSpan, heldLine, lineOf, nearest, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan,
 } from "./marks";
-import { render } from "./pipeline";
+import {
+  type Answer, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
+  answerOf, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
+  languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, nameOf, pathSpans, rootLabel,
+  rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
+} from "./files";
+import { highlight, render } from "./pipeline";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
   dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
-  recordPage, refParts, visit,
+  recordPage, refParts, visit, when,
 } from "./records";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
@@ -183,6 +189,7 @@ const ICONS = {
   held: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
   chat: '<path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 16h-7.5L7 19.5V16H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 5z"/>',
   records: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -1296,6 +1303,9 @@ const kyo = {
     agentDispatches.clear();
     requestedAgents.clear();
     deliveries.length = 0;
+    // The files mentioned are the session's; what the server said of each path still stands.
+    mentions = [];
+    drawMentions();
     landedKeys.length = 0;
     terminalColumns = 0;
     facts = null;
@@ -1344,6 +1354,7 @@ const kyo = {
     // Another project's press says nothing about this one.
     if (menu && menu.project !== data.project) startFrame = null;
     menu = data;
+    followFilesSession(data.current);
     drawMenu();
     drawEnded();
     drawStart();
@@ -1381,6 +1392,7 @@ const kyo = {
         const version = `${turn.text}|${turn.images?.length ?? 0}`;
         sources.set(`t:${turn.id}`, turn.text ?? "");
         place(`t:${turn.id}`, turn.at, version, () => drawTurn(turn));
+        linkPlaced(`t:${turn.id}`);
       }
       for (const reply of batch.replies ?? []) {
         if (reply.text) landedKeys.push(lettersAndDigits(reply.text));
@@ -1390,11 +1402,13 @@ const kyo = {
           sources.set(`r:${reply.message_id}`, reply.text ?? "");
           if (reply.uuid) recordKeys.set(reply.uuid, `r:${reply.message_id}`);
           place(`r:${reply.message_id}`, reply.at, version, () => drawReply(reply));
+          linkPlaced(`r:${reply.message_id}`);
         }
       }
       for (const delivery of batch.deliveries ?? []) {
         deliveries.push(delivery);
         place(`d:${delivery.uuid}`, delivery.at, delivery.text ?? "", () => drawDelivery(delivery));
+        linkPlaced(`d:${delivery.uuid}`);
       }
       for (const call of batch.tool_calls ?? []) {
         const version = `${call.result?.text ?? ""}${call.result?.is_error ?? ""}`;
@@ -1403,6 +1417,7 @@ const kyo = {
       }
       for (const output of batch.command_outputs ?? []) {
         place(`o:${output.uuid}`, output.at, output.text, () => drawCommandOutput(output));
+        linkPlaced(`o:${output.uuid}`);
       }
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
@@ -2655,6 +2670,7 @@ document.getElementById("start-button")!.addEventListener("click", () => post("s
 const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () => void }[] = [
   { id: "chat", name: "Chat", icon: "chat" },
   { id: "records", name: "Records", icon: "records", entered: () => enterRecords() },
+  { id: "files", name: "Files", icon: "folder", entered: () => enterFiles() },
 ];
 let currentView = "chat";
 /** Where the transcript was when another view replaced it. */
@@ -2773,6 +2789,8 @@ function prose(source: string): HTMLElement {
     const parts = refParts(text.data, prefixes);
     if (parts.some((part) => part.link)) text.replaceWith(linked(text.data, prefixes));
   }
+  // KYO-736: a file path on a record's page is a link by the same rule as one in a reply.
+  linkQuietly(holder);
   return holder;
 }
 
@@ -2931,6 +2949,8 @@ function recordItem(section: string, item: Item): HTMLElement {
     }
     element.append(details);
   }
+  // The paths in what is drawn as it was written: a touch, a reason, a report's evidence.
+  linkQuietly(element);
   return element;
 }
 
@@ -3099,6 +3119,7 @@ const recordFrames = {
   /** The project's event stream reported a change: read again what is being shown. */
   recordsChanged(frame: { kind?: string }): void {
     if (frame.kind && frame.kind !== "store") return;
+    filesChanged();
     if (listsAsked) post("records", { want: "lists" });
     if (openRecordId !== null) post("records", { want: "record", id: openRecordId });
   },
@@ -3147,7 +3168,961 @@ document.addEventListener("click", (event) => {
   openRecord({ record: row.dataset.open, ref: row.dataset.open });
 });
 
+// ------------------------------------------------------- file paths as links (KYO-736)
+
+/** What the server made of each path asked, and when it said so. */
+const pathAnswers = new Map<string, { answer: Answer; at: number }>();
+/** The paths asked and not yet answered, those still to ask, and how many are out. */
+const pathsAsked = new Set<string>();
+const pathQueue: string[] = [];
+let pathsOut = 0;
+const PATHS_AT_ONCE = 4;
+/** Set when the server refuses the device's token, after which nothing more is asked. */
+let pathsRefused = false;
+/** The drawn elements that hold a path still unanswered, by the path. */
+const pathHolders = new Map<string, Set<HTMLElement>>();
+/** Whether a drawn element's files count as mentioned in the session. */
+const pathContext = new WeakMap<HTMLElement, { mention: boolean }>();
+const relinkWaiting = new Set<HTMLElement>();
+let relinkTimer: number | undefined;
+let mentions: Mention[] = [];
+let allMentions = false;
+const MENTIONS_SHOWN = 6;
+const PATH_SKIPPED = "a, button, pre, summary, textarea, .katex, .thinking";
+
+function knownPath(given: string): Answer | null {
+  const known = pathAnswers.get(given);
+  return known && stands(known.answer, known.at, Date.now()) ? known.answer : null;
+}
+
+function sendPathQuestions(): void {
+  while (pathsOut < PATHS_AT_ONCE && pathQueue.length) {
+    // The path asked last is the one drawn last, which is the one nearest the reader.
+    const given = pathQueue.pop()!;
+    pathsOut += 1;
+    post("files", { want: "resolve", given });
+  }
+}
+
+/** Asks the server where a path is, once, and notes the element to draw again when it says. */
+function askPath(given: string, holder: HTMLElement): void {
+  if (pathsRefused) return;
+  if (!pathHolders.has(given)) pathHolders.set(given, new Set());
+  pathHolders.get(given)!.add(holder);
+  if (pathsAsked.has(given)) return;
+  pathsAsked.add(given);
+  pathQueue.push(given);
+  sendPathQuestions();
+}
+
+function pathTitle(answer: Answer): string {
+  if (answer.kind === "file") {
+    return `${rootLabel(answer.root)}: ${answer.path || "/"}${answer.line ? `, line ${answer.line}` : ""}`;
+  }
+  return answer.kind === "outside" ? `${answer.path}\nOutside the folders the server serves` : "";
+}
+
+/** Makes a link of an answered path, and counts a served file as mentioned. */
+function dressPathLink(link: HTMLAnchorElement, given: string, answer: Answer, holder: HTMLElement): void {
+  link.setAttribute("href", "#");
+  link.dataset.given = given;
+  link.className = answer.kind === "file" ? "path-link" : "path-link outside";
+  link.title = pathTitle(answer);
+  if (answer.kind === "file" && pathContext.get(holder)?.mention && answer.type !== "dir") {
+    mentions = mentioned(mentions, {
+      root: answer.root, path: answer.path, line: answer.line,
+      at: holder.dataset.at ?? holder.closest<HTMLElement>("[data-at]")?.dataset.at ?? "",
+      entry: entryOf(answer),
+    });
+    drawMentionsSoon();
+  }
+}
+
+/**
+ * Draws the file paths in an element as links (KYO-736): the words that read as a path, in
+ * text and in code spans, and the markdown links whose address has no scheme. A path is asked
+ * of the server once and drawn as a link only when the server places it, so the element is
+ * drawn first and linked when the answer comes. Fenced code blocks are left as they are.
+ */
+function linkPaths(holder: HTMLElement): void {
+  for (const link of Array.from(holder.querySelectorAll<HTMLAnchorElement>("a[data-local]"))) {
+    const given = hrefPath(link.dataset.local ?? "");
+    if (!given) continue;
+    const answer = knownPath(given);
+    if (!answer) {
+      askPath(given, holder);
+    } else if (answer.kind !== "none") {
+      link.removeAttribute("data-local");
+      dressPathLink(link, given, answer, holder);
+    }
+  }
+  // A bare file name such as README.md is made a web address by the renderer, since `.md`
+  // and `.py` are also countries' domains. When the server holds a file of that name, it is
+  // the file that was meant.
+  for (const link of Array.from(holder.querySelectorAll<HTMLAnchorElement>('a[href^="http://"]'))) {
+    const given = link.textContent ?? "";
+    if (link.getAttribute("href") !== `http://${given}` || !/^[\w.+-]+\.[A-Za-z0-9]+$/.test(given)) continue;
+    const answer = knownPath(given);
+    if (!answer) askPath(given, holder);
+    else if (answer.kind === "file") dressPathLink(link, given, answer, holder);
+  }
+  const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.parentElement?.closest(PATH_SKIPPED)) texts.push(node as Text);
+  }
+  for (const text of texts) {
+    const data = text.data;
+    if (!data.includes("/")) continue;
+    const whole = text.parentElement?.tagName === "CODE" ? wholePath(data) : null;
+    const from = whole ? data.indexOf(whole) : 0;
+    const spans = whole ? [{ from, to: from + whole.length, text: whole }] : pathSpans(data);
+    const parts: (string | HTMLElement)[] = [];
+    let at = 0;
+    let made = false;
+    for (const span of spans) {
+      const answer = knownPath(span.text);
+      if (!answer) {
+        askPath(span.text, holder);
+        continue;
+      }
+      if (answer.kind === "none" || (answer.kind === "outside" && !looksOutside(answer.path))) continue;
+      const link = document.createElement("a");
+      link.textContent = data.slice(span.from, span.to);
+      dressPathLink(link, span.text, answer, holder);
+      parts.push(data.slice(at, span.from), link);
+      at = span.to;
+      made = true;
+    }
+    if (made) text.replaceWith(...parts, data.slice(at));
+  }
+}
+
+/** Links a placed transcript element's paths, once for each time it is built. */
+function linkPlaced(key: string): void {
+  const element = elements.get(key);
+  if (!element || pathContext.has(element)) return;
+  pathContext.set(element, { mention: true });
+  linkPaths(element);
+}
+
+/** Links the paths of an element of a record's page or a file, which mention nothing. */
+function linkQuietly(holder: HTMLElement): void {
+  pathContext.set(holder, { mention: false });
+  linkPaths(holder);
+}
+
+function relinkSoon(holders: Iterable<HTMLElement>): void {
+  for (const holder of holders) relinkWaiting.add(holder);
+  if (relinkTimer !== undefined) return;
+  relinkTimer = window.setTimeout(() => {
+    relinkTimer = undefined;
+    const waiting = [...relinkWaiting];
+    relinkWaiting.clear();
+    let inChat = false;
+    for (const holder of waiting) {
+      linkPaths(holder);
+      inChat ||= chat.contains(holder);
+    }
+    // A link splits the text it is made in, which the painted anchors were measured against.
+    if (inChat) paintAnchors();
+  }, 0);
+}
+
+function copyText(text: string): void {
+  const native = (window as any).webkit?.messageHandlers?.copy;
+  if (native) native.postMessage({ text });
+  else void navigator.clipboard?.writeText(text);
+}
+
+// ---- a path outside every root: what the app can still do with it
+
+const pathMenu = document.createElement("div");
+pathMenu.id = "path-menu";
+/** The server's machine is this one, and the mapping Settings holds for when it is not. */
+let sameMachine = false;
+let pathMappings: Mapping[] = [];
+/** The place on this machine the open menu's path would have, while the app checks for it. */
+let menuPlace: string | null = null;
+
+function showPathMenu(x: number, y: number, path: string): void {
+  const heading = document.createElement("div");
+  heading.className = "anchor-heading path-menu-path";
+  heading.textContent = path;
+  pathMenu.replaceChildren(
+    heading,
+    boxButton("", "Copy path", () => {
+      pathMenu.remove();
+      copyText(path);
+    }),
+  );
+  document.body.append(pathMenu);
+  pathMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - pathMenu.offsetWidth - 8))}px`;
+  pathMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - pathMenu.offsetHeight - 8))}px`;
+  // Reveal in Finder is offered once the app says the file is on this machine.
+  menuPlace = localPath(path, sameMachine, pathMappings);
+  if (menuPlace) post("files", { want: "exists", path: menuPlace });
+}
+
+document.addEventListener("mousedown", (event) => {
+  if (!(event.target instanceof Node) || !pathMenu.contains(event.target)) pathMenu.remove();
+}, true);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") pathMenu.remove();
+});
+
+// ----------------------------------------------------------------------- Files (KYO-736)
+
+const FILES_ROOT_KEY = "files-root";
+const FILES_DOTFILES_KEY = "files-dotfiles";
+/** How often the open file is asked for again, and every how many times the tree is too. */
+const FILE_REFRESH_MS = 3000;
+const TREE_REFRESH_EVERY = 4;
+const TRAIL_LIMIT = 50;
+/** One line of a source file, in pixels, which a line's place is measured by. */
+const SOURCE_LINE_PX = 19;
+const SOURCE_PADDING_PX = 12;
+const filesPane = document.getElementById("view-files")!;
+const filesNote = document.getElementById("files-note")!;
+const filesLanding = document.getElementById("files-landing")!;
+const fileArticle = document.getElementById("file")!;
+const filesBack = document.getElementById("files-back")!;
+
+interface OpenFile {
+  root: string;
+  path: string;
+  line: number | null;
+  /** Set until the line asked for has been scrolled to. */
+  lineWaits: boolean;
+  entry: Entry | null;
+  /** Whether the server has been asked for the file, or need not be. */
+  asked: boolean;
+  etag: string | null;
+  text: string | null;
+  data: string | null;
+  mediaType: string;
+  problem: string | null;
+  /** Whether the reader asked for all of a long text. */
+  whole: boolean;
+}
+
+let filesProject: string | null = null;
+/** The roots document as the server sent it, and the roots it gives the followed session. */
+let rootsDocument: unknown = null;
+let fileRoots: RootInfo[] = [];
+/** The server's sentence for a root whose tree it refused, shown in the tree's place. */
+const rootProblems = new Map<string, string>();
+/** The session whose scratchpad the Scratch root shows. */
+let filesSession: string | null = null;
+let rootsAsked = false;
+let rootsRead = false;
+let rootsProblem: string | null = null;
+let chosenRoot = stored<string>(FILES_ROOT_KEY, "code");
+let showDotfiles = stored<boolean>(FILES_DOTFILES_KEY, false) === true;
+const listings = new Map<string, Entry[]>();
+const listingTexts = new Map<string, string>();
+const openDirs = new Set<string>();
+const askedDirs = new Set<string>();
+let openFile: OpenFile | null = null;
+const fileTrail: { root: string; path: string }[] = [];
+/** The images a markdown file shows, as data, by root and path. */
+const fileImages = new Map<string, string>();
+let filesTicks = 0;
+
+function shownRoot(): string | null {
+  return rootShown(chosenRoot, fileRoots);
+}
+
+/** A request for a root's tree or bytes, which names the session for a root that has one each. */
+function askFiles(want: "tree" | "blob", root: string, path: string, etag?: string | null): void {
+  const session = isPerSession(fileRoots, root) ? filesSession : null;
+  post("files", { want, root, path, session, ...(want === "blob" ? { etag: etag ?? null } : {}) });
+}
+
+function askDir(root: string, path: string): void {
+  askedDirs.add(dirKey(root, path));
+  askFiles("tree", root, path);
+}
+
+/**
+ * The followed session changed: the Scratch root is that session's directory, so what was
+ * read of another session's is dropped and the chip's tree is asked for again.
+ */
+function followFilesSession(session: string | null): void {
+  if (session === filesSession) return;
+  filesSession = session;
+  for (const root of servedRoots(rootsDocument, "any").filter((info) => info.per_session)) {
+    const prefix = `${root.name}:`;
+    for (const held of [listings, listingTexts, rootProblems]) {
+      for (const key of [...held.keys()]) if (key.startsWith(prefix) || key === root.name) held.delete(key);
+    }
+    for (const held of [openDirs, askedDirs]) {
+      for (const key of [...held]) if (key.startsWith(prefix)) held.delete(key);
+    }
+    if (openFile?.root === root.name) openFile = null;
+    for (let index = fileTrail.length - 1; index >= 0; index--) {
+      if (fileTrail[index].root === root.name) fileTrail.splice(index, 1);
+    }
+  }
+  fileRoots = servedRoots(rootsDocument, filesSession);
+  const shown = shownRoot();
+  if (currentView === "files" && shown && !askedDirs.has(dirKey(shown, ""))) askDir(shown, "");
+  drawFilesSide();
+  drawFile();
+}
+
+function openDir(root: string, path: string): void {
+  if (path) openDirs.add(dirKey(root, path));
+  if (!askedDirs.has(dirKey(root, path))) askDir(root, path);
+}
+
+function entryAt(root: string, path: string): Entry | null {
+  return listings.get(dirKey(root, folderOf(path)))?.find((entry) => entry.path === path) ?? null;
+}
+
+function modifiedWords(entry: Entry | null): string {
+  if (typeof entry?.mtime_ns !== "number") return "";
+  return when(new Date(entry.mtime_ns / 1e6).toISOString()) ?? "";
+}
+
+function treeRow(root: string, row: TreeRow): HTMLElement {
+  const { entry } = row;
+  const item = document.createElement("div");
+  item.className = "tree-row";
+  item.style.paddingLeft = `${8 + row.depth * 14}px`;
+  item.title = entry.path;
+  if (isDotfile(entry.name)) item.classList.add("dot");
+  if (entry.type === "dir") {
+    item.dataset.dir = entry.path;
+    item.setAttribute("role", "button");
+    item.setAttribute("aria-expanded", String(row.open));
+    if (row.open) item.classList.add("open");
+  } else {
+    item.dataset.file = entry.path;
+    if (openFile?.root === root && openFile.path === entry.path) item.classList.add("current");
+  }
+  item.append(span("chevron", entry.type === "dir" ? "›" : ""), span("tree-name", entry.name));
+  if (row.waiting) item.append(span("tree-waiting", "reading"));
+  return item;
+}
+
+function mentionRow(item: Mention, index: number): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "mention-row";
+  row.dataset.mention = String(index);
+  row.title = pathTitle({ kind: "file", name: item.entry.name, type: "file", ...item });
+  const folder = folderOf(item.path);
+  row.append(
+    span("mention-name", `${item.entry.name}${item.line ? `:${item.line}` : ""}`),
+    span("mention-place", `${rootLabel(item.root)}${folder ? ` · ${folder}` : ""}`));
+  return row;
+}
+
+/** The files mentioned in the session, newest first, in the chat's side bar and in Files'. */
+function drawMentions(): void {
+  const rows = mentions.map(mentionRow);
+  fill(
+    document.getElementById("files-mentioned")!,
+    rows.length ? rows : [emptyRow("No file has been mentioned.")]);
+  const short = allMentions ? mentions : mentions.slice(0, MENTIONS_SHOWN);
+  document.getElementById("side-mentioned")!.replaceChildren(
+    ...(short.length ? short.map(mentionRow) : [emptyRow("None yet.")]));
+  const more = document.getElementById("side-mentioned-more")!;
+  more.hidden = mentions.length <= MENTIONS_SHOWN;
+  more.textContent = allMentions ? "Show fewer" : `See all ${mentions.length}`;
+}
+
+let mentionsTimer: number | undefined;
+function drawMentionsSoon(): void {
+  if (mentionsTimer !== undefined) return;
+  mentionsTimer = window.setTimeout(() => {
+    mentionsTimer = undefined;
+    drawMentions();
+  }, 0);
+}
+
+/** The root chips, the dotfiles toggle, the tree and the top bar's words. */
+function drawFilesSide(): void {
+  const root = shownRoot();
+  document.querySelectorAll<HTMLElement>(".files-roots").forEach((holder) => {
+    holder.replaceChildren(...fileRoots.map((info) => {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.dataset.root = info.name;
+      chip.setAttribute("aria-pressed", String(info.name === root));
+      chip.textContent = rootLabel(info.name);
+      if (info.path) chip.title = info.path;
+      return chip;
+    }));
+  });
+  document.querySelectorAll<HTMLElement>(".files-dots").forEach((toggle) => {
+    toggle.textContent = showDotfiles ? "Hide dotfiles" : "Show dotfiles";
+    toggle.setAttribute("aria-pressed", String(showDotfiles));
+    toggle.hidden = !root;
+  });
+  const rows = root ? treeRows(root, listings, openDirs, showDotfiles) : [];
+  const nothing = rootsProblem
+    ? "The files could not be read."
+    : root && rootProblems.has(root) ? rootProblems.get(root)!
+    : !rootsRead || (root && !listings.has(dirKey(root, "")))
+      ? "Reading the files."
+      : "This folder shows no file.";
+  document.querySelectorAll<HTMLElement>(".files-tree").forEach((holder) => {
+    fill(holder, rows.length ? rows.map((row) => treeRow(root!, row)) : [emptyRow(nothing)]);
+  });
+  filesBack.hidden = !openFile;
+  filesBack.textContent = fileTrail.length ? "Back" : "All files";
+  setText("files-path", openFile ? `${rootLabel(openFile.root)} / ${openFile.path}` : "");
+  document.getElementById("files-path")!.title = openFile
+    ? serverPath(fileRoots, openFile.root, openFile.path) ?? openFile.path : "";
+  const entry = openFile?.entry ?? null;
+  setText("files-meta", openFile
+    ? [sizeWords(entry?.size), modifiedWords(entry)].filter(Boolean).join(" · ")
+    : root && rootsRead ? fileRoots.find((info) => info.name === root)?.path ?? "" : "");
+}
+
+function fileNote(text: string): HTMLElement {
+  const note = document.createElement("div");
+  note.className = "file-note";
+  note.textContent = text;
+  return note;
+}
+
+/** A markdown file drawn as a reply is, with its links and images read against its folder. */
+function fileMarkdown(file: OpenFile, text: string): HTMLElement {
+  const holder = document.createElement("div");
+  holder.className = "reply file-body";
+  holder.innerHTML = render(text);
+  addCopyButtons(holder);
+  const folder = folderOf(file.path);
+  for (const link of Array.from(holder.querySelectorAll<HTMLAnchorElement>("a[data-local]"))) {
+    const place = linkPlace(folder, link.dataset.local ?? "");
+    if (place?.kind !== "inside") continue;
+    link.removeAttribute("data-local");
+    link.setAttribute("href", "#");
+    link.className = "path-link";
+    link.dataset.inside = place.path;
+    if (place.line) link.dataset.line = String(place.line);
+    link.title = `${rootLabel(file.root)}: ${place.path}`;
+  }
+  for (const image of Array.from(holder.querySelectorAll<HTMLImageElement>("img[data-local]"))) {
+    const place = linkPlace(folder, image.dataset.local ?? "");
+    if (place?.kind !== "inside") continue;
+    const key = dirKey(file.root, place.path);
+    const data = fileImages.get(key);
+    if (data) {
+      image.src = data;
+    } else {
+      image.dataset.blob = key;
+      askFiles("blob", file.root, place.path);
+    }
+  }
+  // A path written out in the file's text is a link by the same rule as one in a reply.
+  linkQuietly(holder);
+  return holder;
+}
+
+/** A source or text file, read-only: its line numbers beside its text, coloured by its type. */
+function fileSource(file: OpenFile, text: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "file-source";
+  const count = Math.max(1, lineCount(text));
+  const gutter = document.createElement("pre");
+  gutter.className = "file-gutter";
+  gutter.setAttribute("aria-hidden", "true");
+  gutter.textContent = Array.from({ length: count }, (_, index) => index + 1).join("\n");
+  const body = document.createElement("pre");
+  body.className = "file-code";
+  const code = document.createElement("code");
+  const coloured = text.length <= HIGHLIGHT_CHARS ? highlight(text, languageOf(file.path)) : null;
+  if (coloured === null) {
+    code.textContent = text;
+  } else {
+    code.className = "hljs";
+    code.innerHTML = coloured;
+  }
+  body.append(code);
+  box.append(gutter, body);
+  if (file.line && file.line <= count) {
+    const mark = document.createElement("div");
+    mark.className = "file-line-mark";
+    mark.style.top = `${SOURCE_PADDING_PX + (file.line - 1) * SOURCE_LINE_PX}px`;
+    box.append(mark);
+  }
+  return box;
+}
+
+function fileFacts(file: OpenFile, entry: Entry): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "file-facts";
+  const name = document.createElement("h1");
+  name.textContent = entry.name || nameOf(file.path);
+  const facts = document.createElement("dl");
+  facts.className = "record-facts";
+  const rows: [string, string][] = [
+    ["type", entry.type === "file" || !entry.type ? entry.media_type ?? file.mediaType : entry.type],
+    ["size", sizeWords(entry.size)],
+    ["modified", modifiedWords(entry)],
+    ["path", serverPath(fileRoots, file.root, file.path) ?? file.path],
+  ];
+  for (const [label, text] of rows) {
+    if (!text) continue;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const value = document.createElement("dd");
+    value.textContent = text;
+    facts.append(term, value);
+  }
+  box.append(name, facts, fileNote("This type of file is not shown here."));
+  return box;
+}
+
+/** Scrolls to the line the file was opened at, once its text is drawn. */
+function showFileLine(file: OpenFile): void {
+  if (!file.lineWaits || !file.line || file.text === null) return;
+  file.lineWaits = false;
+  const mark = fileArticle.querySelector<HTMLElement>(".file-line-mark");
+  if (mark) {
+    mark.scrollIntoView({ block: "center" });
+    return;
+  }
+  const line = file.line - 1;
+  const block = Array.from(fileArticle.querySelectorAll<HTMLElement>("[data-source-line]"))
+    .filter((candidate) =>
+      Number(candidate.dataset.sourceLine) <= line && line < Number(candidate.dataset.sourceEnd))
+    .pop();
+  if (!block) return;
+  block.scrollIntoView({ block: "center" });
+  block.classList.add("revealed");
+  setTimeout(() => block.classList.remove("revealed"), REVEAL_MS);
+}
+
+/** The pane: the open file, or the tree when none is open. A redraw keeps the place read. */
+function drawFile(): void {
+  filesNote.hidden = !rootsProblem;
+  filesNote.textContent = rootsProblem ? `The files could not be read. ${rootsProblem}` : "";
+  filesLanding.hidden = openFile !== null;
+  fileArticle.hidden = openFile === null;
+  const file = openFile;
+  if (!file) {
+    fileArticle.replaceChildren();
+    return;
+  }
+  const top = filesPane.scrollTop;
+  const left = fileArticle.querySelector(".file-code")?.scrollLeft ?? 0;
+  const name = nameOf(file.path);
+  const parts: HTMLElement[] = [];
+  if (file.problem) parts.push(fileNote(`${name} could not be read. ${file.problem}`));
+  if (file.text !== null) {
+    // A line beyond the head of a long file is in the rest of it.
+    const head = headOf(file.text);
+    if (!head.whole && file.line && file.lineWaits && file.line > lineCount(head.text)) file.whole = true;
+    const shown = file.whole ? file.text : head.text;
+    const kind = fileKind({ name, media_type: file.mediaType, text: true });
+    parts.push(kind === "markdown" ? fileMarkdown(file, shown) : fileSource(file, shown));
+    if (!head.whole && !file.whole) {
+      const more = document.createElement("div");
+      more.className = "file-more";
+      const button = document.createElement("button");
+      button.className = "text-button";
+      button.textContent = "Show the whole file";
+      button.addEventListener("click", () => {
+        file.whole = true;
+        drawFile();
+      });
+      more.append(
+        `The first ${lineCount(head.text).toLocaleString()} of ${lineCount(file.text).toLocaleString()} lines are shown. `,
+        button);
+      parts.push(more);
+    }
+  } else if (file.data) {
+    const image = document.createElement("img");
+    image.className = "file-image";
+    image.alt = name;
+    image.src = file.data;
+    parts.push(image, fileNote(
+      [name, file.mediaType, sizeWords(file.entry?.size)].filter(Boolean).join(" · ")));
+  } else if (file.entry && file.asked && !file.problem) {
+    parts.push(fileFacts(file, file.entry));
+  } else if (!file.problem) {
+    parts.push(fileNote(`Reading ${name}.`));
+  }
+  fileArticle.replaceChildren(...parts);
+  filesPane.scrollTop = top;
+  const code = fileArticle.querySelector(".file-code");
+  if (code) code.scrollLeft = left;
+  showFileLine(file);
+}
+
+/**
+ * Asks for the open file's bytes. A file that is neither text nor an image is drawn from its
+ * entry and is not fetched, and a file opened by its path alone waits for its folder's
+ * listing, which says what it is.
+ */
+function askOpenFile(listed = false): void {
+  const file = openFile;
+  if (!file || file.asked) return;
+  file.entry ??= entryAt(file.root, file.path);
+  if (!file.entry && !listed && !listings.has(dirKey(file.root, folderOf(file.path)))) return;
+  file.asked = true;
+  if (file.entry && fileKind(file.entry) === "other") return;
+  askFiles("blob", file.root, file.path);
+}
+
+function showTreeRow(path: string): void {
+  for (const row of Array.from(document.querySelectorAll<HTMLElement>(".files-tree .tree-row"))) {
+    if ((row.dataset.file ?? row.dataset.dir) === path) row.scrollIntoView({ block: "nearest" });
+  }
+}
+
+/**
+ * Opens a file in the Files view, in place of the one that was open, at a line when one is
+ * given; a folder is opened in the tree. `entry` says what the file is when the opener knows.
+ */
+function showFile(
+  root: string, path: string, line: number | null = null, entry: Entry | null = null, back = false,
+): void {
+  chosenRoot = root;
+  store(FILES_ROOT_KEY, root);
+  openDir(root, "");
+  for (const folder of foldersAbove(path)) openDir(root, folder);
+  const folder = entry?.type === "dir" || path === "";
+  if (folder) {
+    // A folder is shown in the tree, which the pane holds while no file is open.
+    if (path) openDir(root, path);
+    if (openFile) {
+      fileTrail.push({ root: openFile.root, path: openFile.path });
+      openFile = null;
+    }
+  } else {
+    const same = openFile?.root === root && openFile.path === path;
+    if (!same) {
+      if (openFile && !back) {
+        fileTrail.push({ root: openFile.root, path: openFile.path });
+        if (fileTrail.length > TRAIL_LIMIT) fileTrail.shift();
+      }
+      fileImages.clear();
+      openFile = {
+        root, path, line, lineWaits: line !== null, entry: entry ?? entryAt(root, path),
+        asked: false, etag: null, text: null, data: null, mediaType: entry?.media_type ?? "",
+        problem: null, whole: false,
+      };
+    } else if (openFile) {
+      openFile.line = line;
+      openFile.lineWaits = line !== null;
+    }
+    if (!same) filesPane.scrollTop = 0;
+  }
+  showView("files");
+  askOpenFile();
+  drawFilesSide();
+  drawFile();
+  showTreeRow(path);
+}
+
+/** Back to the file read before this one, or to the tree when there was none. */
+function fileBack(): void {
+  const before = fileTrail.pop();
+  if (before) {
+    showFile(before.root, before.path, null, null, true);
+    return;
+  }
+  openFile = null;
+  drawFilesSide();
+  drawFile();
+  filesPane.scrollTop = 0;
+}
+
+function refreshOpenFile(): void {
+  const file = openFile;
+  if (!file?.asked || (file.entry && fileKind(file.entry) === "other" && file.text === null && !file.data)) return;
+  askFiles("blob", file.root, file.path, file.etag);
+}
+
+function refreshTree(): void {
+  if (rootsProblem || !rootsRead) {
+    post("files", { want: "roots" });
+    return;
+  }
+  const root = shownRoot();
+  if (!root) return;
+  askDir(root, "");
+  for (const key of openDirs) {
+    if (key.startsWith(`${root}:`)) askDir(root, key.slice(root.length + 1));
+  }
+  if (openFile && openFile.root !== root) askDir(openFile.root, folderOf(openFile.path));
+}
+
+function enterFiles(): void {
+  if (!rootsAsked) {
+    rootsAsked = true;
+    post("files", { want: "roots" });
+  } else {
+    refreshOpenFile();
+    refreshTree();
+  }
+  drawFilesSide();
+  drawFile();
+}
+
+// The file routes send no event when a file changes, so the view asks again while it is
+// shown: the open file by its tag, which the server answers without the bytes when nothing
+// changed, and less often the folders that are open.
+setInterval(() => {
+  if (currentView !== "files" || document.hidden) return;
+  filesTicks += 1;
+  refreshOpenFile();
+  if (filesTicks % TREE_REFRESH_EVERY === 0) refreshTree();
+}, FILE_REFRESH_MS);
+
+const fileFrames = {
+  /**
+   * The project whose files the view shows, whether the server's machine is this one, and
+   * the path mapping Settings holds. It is sent again when Settings are saved, and what the
+   * server refused before is then asked again.
+   */
+  files(frame: { project?: string; same_machine?: boolean; mappings?: Mapping[] }): void {
+    sameMachine = frame.same_machine === true;
+    pathMappings = Array.isArray(frame.mappings) ? frame.mappings : [];
+    if (frame.project !== filesProject) {
+      filesProject = frame.project ?? null;
+      pathAnswers.clear();
+      pathHolders.clear();
+      mentions = [];
+      listings.clear();
+      listingTexts.clear();
+      rootProblems.clear();
+      openDirs.clear();
+      openFile = null;
+      fileTrail.length = 0;
+      fileImages.clear();
+    }
+    rootsDocument = null;
+    fileRoots = [];
+    rootsRead = false;
+    rootsProblem = null;
+    askedDirs.clear();
+    pathsRefused = false;
+    pathsAsked.clear();
+    pathQueue.length = 0;
+    pathsOut = 0;
+    for (const given of pathHolders.keys()) {
+      pathsAsked.add(given);
+      pathQueue.push(given);
+    }
+    sendPathQuestions();
+    rootsAsked = currentView === "files";
+    if (rootsAsked) post("files", { want: "roots" });
+    if (openFile) {
+      openFile.asked = false;
+      askOpenFile(true);
+    }
+    drawFilesSide();
+    drawFile();
+    drawMentions();
+  },
+
+  /** `GET .../files`, or the server's own sentence when it refused. */
+  filesRoots(frame: { document?: unknown; error?: string | null }): void {
+    if ((frame.document as { ok?: unknown } | null)?.ok === true) {
+      rootsDocument = frame.document;
+      fileRoots = servedRoots(rootsDocument, filesSession);
+      rootsRead = true;
+      rootsProblem = null;
+      const root = shownRoot();
+      if (root && !askedDirs.has(dirKey(root, ""))) askDir(root, "");
+    } else if (!rootsRead || frame.error) {
+      // A read that could not reach the server leaves the roots as they were.
+      rootsProblem = frame.error ?? "The server sent no roots.";
+    }
+    drawFilesSide();
+    drawFile();
+  },
+
+  /** One folder's listing. A folder that is gone is closed. */
+  filesTree(frame: {
+    root: string; path: string; session?: string | null; status?: number; document?: unknown;
+    error?: string | null;
+  }): void {
+    // An answer about another session's scratchpad is not this one's.
+    if (frame.session && frame.session !== filesSession) return;
+    const key = dirKey(frame.root, frame.path);
+    const entries = entriesOf(frame.document);
+    const file = openFile;
+    const holdsFile = !!file && file.root === frame.root && folderOf(file.path) === frame.path;
+    if (frame.path === "") {
+      // A refused root says why in the tree's place; the sentence names the remedy.
+      if (entries || !frame.status) rootProblems.delete(frame.root);
+      else rootProblems.set(frame.root, frame.error ?? "The server refused that.");
+    }
+    if (!entries) {
+      if (frame.path === "" && frame.status) {
+        listings.delete(key);
+        listingTexts.delete(key);
+      } else if (frame.status === 404) {
+        listings.delete(key);
+        listingTexts.delete(key);
+        openDirs.delete(key);
+      } else if (!listings.has(key)) {
+        askedDirs.delete(key);
+      }
+      if (holdsFile) askOpenFile(true);
+      drawFilesSide();
+      if (holdsFile) drawFile();
+      return;
+    }
+    const text = JSON.stringify(entries);
+    const changed = listingTexts.get(key) !== text;
+    listings.set(key, entries);
+    listingTexts.set(key, text);
+    if (holdsFile && file) {
+      const entry = entries.find((item) => item.path === file.path) ?? null;
+      const drawnFromEntry = file.asked && file.text === null && !file.data;
+      if (entry) file.entry = entry;
+      if (!file.asked) askOpenFile(true);
+      else if (changed && drawnFromEntry) drawFile();
+    }
+    if (changed || holdsFile) drawFilesSide();
+  },
+
+  /**
+   * One file: its text, or an image as data, with its tag. Status 304 says the copy the
+   * page holds is current.
+   */
+  filesBlob(frame: {
+    root: string; path: string; session?: string | null; status: number; etag?: string | null;
+    media_type?: string | null; size?: number | null; text?: string | null; data?: string | null;
+    error?: string | null;
+  }): void {
+    if (frame.session && frame.session !== filesSession) return;
+    const key = dirKey(frame.root, frame.path);
+    if (frame.status === 200 && frame.data) {
+      fileImages.set(key, frame.data);
+      document.querySelectorAll<HTMLImageElement>("img[data-blob]").forEach((image) => {
+        if (image.dataset.blob !== key) return;
+        image.src = frame.data!;
+        image.removeAttribute("data-blob");
+      });
+    }
+    const file = openFile;
+    if (!file || file.root !== frame.root || file.path !== frame.path || frame.status === 304) return;
+    if (frame.status === 200) {
+      file.etag = frame.etag ?? null;
+      file.text = typeof frame.text === "string" ? frame.text : null;
+      file.data = file.text === null ? frame.data ?? null : null;
+      file.mediaType = frame.media_type ?? file.mediaType;
+      file.problem = null;
+      file.entry ??= {
+        name: nameOf(file.path), path: file.path, type: "file", media_type: file.mediaType,
+        size: frame.size ?? undefined, text: file.text !== null,
+      };
+      if (typeof frame.size === "number") file.entry = { ...file.entry, size: frame.size };
+    } else if (frame.status === 0 && (file.text !== null || file.data)) {
+      // The server could not be reached; what is shown stays until it can.
+      return;
+    } else {
+      file.problem = frame.error ?? "The server could not be reached.";
+    }
+    drawFilesSide();
+    drawFile();
+  },
+
+  /** Where one path is, by the resolve route. A refusal of the token ends the asking. */
+  filesResolved(frame: { given: string; status?: number; document?: unknown }): void {
+    pathsOut = Math.max(0, pathsOut - 1);
+    pathsAsked.delete(frame.given);
+    if (frame.status === 401 || frame.status === 403) {
+      pathsRefused = true;
+      pathQueue.length = 0;
+      pathsAsked.clear();
+      return;
+    }
+    const answer = answerOf(frame.given, frame.document);
+    const holders = pathHolders.get(frame.given);
+    pathHolders.delete(frame.given);
+    if (answer) {
+      pathAnswers.set(frame.given, { answer, at: Date.now() });
+      if (holders && answer.kind !== "none") relinkSoon(holders);
+    }
+    sendPathQuestions();
+  },
+
+  /** Whether a path is a file on this machine, which the open menu then offers to reveal. */
+  filesExists(frame: { path: string; exists: boolean }): void {
+    if (!frame.exists || frame.path !== menuPlace || !pathMenu.isConnected) return;
+    if (pathMenu.querySelector(".path-reveal")) return;
+    pathMenu.append(boxButton("path-reveal", "Reveal in Finder", () => {
+      pathMenu.remove();
+      post("files", { want: "reveal", path: frame.path });
+    }));
+  },
+};
+
+/** The store changed, which is where the plans are: read again what the view shows. */
+function filesChanged(): void {
+  if (currentView !== "files") return;
+  refreshOpenFile();
+  refreshTree();
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  const link = target.closest<HTMLAnchorElement>("a.path-link, a[data-local]");
+  if (link) {
+    // Such a link has no address the page could follow.
+    event.preventDefault();
+    if (link.dataset.inside !== undefined && openFile) {
+      showFile(openFile.root, link.dataset.inside, Number(link.dataset.line) || null);
+      return;
+    }
+    const answer = link.dataset.given ? pathAnswers.get(link.dataset.given)?.answer : null;
+    if (answer?.kind === "file") showFile(answer.root, answer.path, answer.line, entryOf(answer));
+    else if (answer?.kind === "outside") showPathMenu(event.clientX, event.clientY, answer.path);
+    return;
+  }
+  const chip = target.closest<HTMLElement>(".files-roots [data-root]");
+  if (chip?.dataset.root) {
+    chosenRoot = chip.dataset.root;
+    store(FILES_ROOT_KEY, chosenRoot);
+    openDir(chosenRoot, "");
+    drawFilesSide();
+    return;
+  }
+  if (target.closest(".files-dots")) {
+    showDotfiles = !showDotfiles;
+    store(FILES_DOTFILES_KEY, showDotfiles);
+    drawFilesSide();
+    return;
+  }
+  const row = target.closest<HTMLElement>(".files-tree .tree-row");
+  const root = shownRoot();
+  if (row && root) {
+    if (row.dataset.dir !== undefined) {
+      const key = dirKey(root, row.dataset.dir);
+      if (openDirs.has(key)) openDirs.delete(key);
+      else openDir(root, row.dataset.dir);
+      drawFilesSide();
+    } else if (row.dataset.file !== undefined) {
+      showFile(root, row.dataset.file, null, entryAt(root, row.dataset.file));
+    }
+    return;
+  }
+  const mention = target.closest<HTMLElement>("[data-mention]");
+  const item = mention ? mentions[Number(mention.dataset.mention)] : undefined;
+  if (item) showFile(item.root, item.path, item.line, item.entry);
+});
+
+filesBack.addEventListener("click", fileBack);
+document.getElementById("side-mentioned-more")!.addEventListener("click", () => {
+  allMentions = !allMentions;
+  drawMentions();
+});
+
 drawViews();
 drawRecordLists();
+drawFilesSide();
+drawFile();
+drawMentions();
 
-(window as any).kyo = Object.assign(kyo, recordFrames);
+(window as any).kyo = Object.assign(kyo, recordFrames, fileFrames);

@@ -1,7 +1,8 @@
 // Adapted from MDHero's src/lib/renderer/pipeline.ts (MIT, see ../LICENSE-mdhero): the same
 // markdown-it, DOMPurify, highlight.js and KaTeX configuration. Removed: frontmatter,
 // Marp, image-path resolution through Tauri and the direction plugin. Changed: every block
-// is stamped with its source line, not only the top-level ones, and kyosei:// links survive.
+// is stamped with its source line, not only the top-level ones, kyosei:// links survive, and
+// an address with no scheme is kept for the page to place among the project's files.
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import taskLists from "markdown-it-task-lists";
@@ -64,9 +65,42 @@ const ADD_TAGS = [
   "math", "mrow", "mi", "mo", "mn", "msup", "msub", "mfrac", "mover", "munder", "msqrt",
   "mtable", "mtr", "mtd", "annotation", "semantics", "mspace", "mtext", "mpadded",
 ];
-const ADD_ATTR = ["class", "style", "aria-hidden", "mathvariant", "encoding", "data-source-line", "data-source-end"];
+const ADD_ATTR = [
+  "class", "style", "aria-hidden", "mathvariant", "encoding", "data-source-line", "data-source-end",
+  "data-local",
+];
 const ALLOWED_URI_REGEXP = /^(?:https?|mailto|kyosei):/i;
+
+/** Whether a link's or an image's address has no scheme, and so names a file. */
+function isLocal(address: string): boolean {
+  const text = address.trim();
+  return !!text && !/^[a-z][a-z0-9+.-]*:/i.test(text) && !text.startsWith("//");
+}
+
+// KYO-736: an address with no scheme is a file's path, which the page cannot follow or load.
+// It is kept as `data-local` and its `href` or `src` goes, so that the page can ask the server
+// where the file is and draw the link or the image itself.
+DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
+  const name = node.nodeName;
+  const holds = (name === "A" && data.attrName === "href") || (name === "IMG" && data.attrName === "src");
+  if (!holds || !isLocal(data.attrValue)) return;
+  node.setAttribute("data-local", data.attrValue);
+  data.keepAttr = false;
+});
 
 export function render(source: string): string {
   return DOMPurify.sanitize(md.render(source), { ADD_TAGS, ADD_ATTR, ALLOWED_URI_REGEXP });
+}
+
+/**
+ * A source file's text coloured for the language named, as HTML, or null when the
+ * highlighter does not know the language, and the text is then drawn plain (KYO-736).
+ */
+export function highlight(source: string, language: string | null): string | null {
+  if (!language || !hljs.getLanguage(language)) return null;
+  try {
+    return hljs.highlight(source, { language, ignoreIllegals: true }).value;
+  } catch {
+    return null;
+  }
 }
