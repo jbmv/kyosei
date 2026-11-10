@@ -92,7 +92,9 @@ and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
 THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
 directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
 ``files/resolve?path=`` (a path as an agent writes one), all GET. They read the code repository
-and the store repository as git shows them and nothing outside either, need a device token
+and the store repository as git shows them, and a session's scratchpad directory
+(``files/scratch/{session}/tree`` and ``.../blob/{relpath}``) only as that session reported it
+with ``kyo sessions scratch``; nothing outside these is read. They need a device token
 holding the ``files`` permission, and write nothing; :mod:`kyosei.serve_tree` holds that.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and

@@ -115,7 +115,11 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: 28,279): a decision is now filed from the discussion `kyo discuss open` stamped when the
 #: choice was put, or opened late, which changes what an orchestrator does at section 2's
 #: filing step; the sentence that said how a decision is filed says it once.
-WORKFLOW_TIER_CEILING_BYTES = 28_478
+#: Raised deliberately by KYO-735 from 28,478 to 28,592 (+114 bytes, the tier was at
+#: 28,478): `kyo serve` shows a session's scratchpad files only for the directory the
+#: session reports, and only the orchestrator knows its scratchpad directory, so section 1
+#: says once to run `kyo sessions scratch <dir>`.
+WORKFLOW_TIER_CEILING_BYTES = 28_592
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -1062,14 +1066,6 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
         "schema bump, a corrupted db) that the tool's own refusal message names on the "
         "spot, and that section 0 reaches through `kyo where` for the store that will not "
         "open. A controller does not choose to rebuild; it is told to"
-    ),
-    "sessions": (
-        "reads and writes kyosei/sessions.json: `--hook` is how the packaged session hooks "
-        "record a session, and the plain listing answers an operator question (which Claude "
-        "Code sessions this project has had, and their Remote Control links) that nothing "
-        "in the dispatch loop consults. docs/reference/topics/store.md, 'Reading the store', "
-        "names it for the "
-        "human who does ask it (KYO-302.c3)"
     ),
     "pre-tool-use": (
         "a hook entry point, not a controller step: it runs check-push and check-command "

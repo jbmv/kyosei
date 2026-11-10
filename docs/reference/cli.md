@@ -1467,7 +1467,11 @@ Needs a Kyosei project: **optional** — it runs, and says so, where there is no
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo sessions [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--hook]`
+Usage: `kyo sessions [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--hook] [scratch DIR ...]`
+
+### Positional arguments
+
+- `[scratch DIR ...]` — optional. `scratch <dir>` records <dir> as the scratchpad directory of the session named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's `scratch` root; refused for a directory that is `/`, a home directory, either served root, or holds or lies inside a git repository (KYO-735)
 
 ### Options
 

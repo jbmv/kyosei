@@ -468,6 +468,118 @@ def write_sessions(path: Path, entries: list[dict]) -> str | None:
     return None
 
 
+# ------------------------------------------------------- the scratchpad directory
+#
+# KYO-735. The file routes of `kyo serve` can show a session's scratchpad directory, and no
+# hook payload says where that is: it is named to the agent in its own instructions. So the
+# agent reports it, with `kyo sessions scratch <dir>`, and the server serves exactly that
+# directory for that session and guesses no path from a pattern.
+
+#: The environment variable the harness sets to the running session's id.
+SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
+
+#: How far below a directory a nested git repository is looked for, and how many directories
+#: the look visits before it stops. A repository deeper than the first or past the second is
+#: not seen; the bound keeps a request for a very large directory from walking all of it.
+SCRATCH_REPOSITORY_DEPTH = 4
+SCRATCH_REPOSITORY_VISITS = 20_000
+
+#: The directories whose children are home directories, on the two platforms this runs on.
+_HOME_PARENTS = ("/Users", "/home")
+
+
+def _is_under(base: Path, path: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def _holds_repository(directory: Path) -> bool:
+    """Whether a git repository lies in ``directory`` or within a few levels below it."""
+    base_depth = len(directory.parts)
+    for visited, (current, dirnames, filenames) in enumerate(os.walk(directory), start=1):
+        if ".git" in dirnames or ".git" in filenames:
+            return True
+        if visited >= SCRATCH_REPOSITORY_VISITS:
+            return False
+        if len(Path(current).parts) - base_depth >= SCRATCH_REPOSITORY_DEPTH:
+            dirnames[:] = []
+    return False
+
+
+def scratch_dir_problem(real: Path, served_roots: list[Path]) -> str | None:
+    """Why ``real`` may not be a session's scratch root, or None when it may.
+
+    A directory an agent names could be anything, so the refusals are the ones that would
+    turn a file route into a way to read a machine: the filesystem root, a home directory
+    (or one that holds it), either served root and anything that holds or lies inside one,
+    and any directory that holds or lies inside a git repository, since a repository is
+    served by what git shows and not by this root's every-file rule.
+    """
+    home = Path(os.path.realpath(Path.home()))
+    if real == Path(real.anchor):
+        return "it is the filesystem root"
+    if _is_under(real, home) or str(real.parent) in _HOME_PARENTS:
+        return f"it is a home directory, or holds one ({real})"
+    for root in served_roots:
+        real_root = Path(os.path.realpath(root))
+        if _is_under(real_root, real) or _is_under(real, real_root):
+            return f"it is, holds or lies inside the served root {real_root}"
+    for ancestor in (real, *real.parents):
+        if (ancestor / ".git").exists():
+            return f"it lies inside the git repository at {ancestor}"
+    if _holds_repository(real):
+        return "it holds a git repository, which is served by what git shows"
+    return None
+
+
+def record_scratch_dir(
+    store_root: Path, served_roots: list[Path], session_id: str | None, directory: str
+) -> tuple[Path, Path]:
+    """Store ``directory`` as the session's scratchpad; ``(sessions file, real path)``.
+
+    Refused with the sentence naming its remedy for a missing session id, a session this
+    project does not record, a path that is not an existing directory, and a directory
+    :func:`scratch_dir_problem` rules out.
+    """
+    from .errors import UsageError
+
+    if not session_id:
+        raise UsageError(
+            f"no session to record the directory for: ${SESSION_ID_ENV} is not set. Run "
+            "`kyo sessions scratch <dir>` inside the Claude Code session whose scratchpad "
+            f"it is, where the harness sets ${SESSION_ID_ENV}"
+        )
+    path = sessions_path(store_root)
+    current = read_sessions(path)
+    if not any(entry.get("session_id") == session_id for entry in current.entries):
+        raise UsageError(
+            f"session {session_id} is not recorded for this project in {path}. The session "
+            "hooks record a session at its start; run `kyo sessions --hook` with that "
+            "session's SessionStart payload on stdin, or start the session again in this "
+            "project, and rerun this command"
+        )
+    candidate = Path(os.path.expanduser(directory))
+    if not candidate.is_dir():
+        raise UsageError(
+            f"{directory} is not an existing directory; create it, or name the scratchpad "
+            "directory the session was given, and rerun this command"
+        )
+    real = Path(os.path.realpath(candidate))
+    problem = scratch_dir_problem(real, served_roots)
+    if problem is not None:
+        raise UsageError(
+            f"{real} cannot be served as a scratch root: {problem}. Name the directory the "
+            "session was given for its scratch files instead"
+        )
+    entries = [
+        {**entry, "scratchpad_dir": str(real)} if entry.get("session_id") == session_id else entry
+        for entry in current.entries
+    ]
+    problem = write_sessions(path, entries)
+    if problem is not None:
+        raise UsageError(problem)
+    return path, real
+
+
 # ------------------------------------------------------------- the events
 #
 # Three events, each with a job the other two cannot do. KYO-186's task asks for
@@ -629,6 +741,9 @@ def apply_event(
         # KYO-643: where the harness said this session's transcript is, home-relative.
         # Kept from an earlier event when this one names none, as the process is.
         "transcript_path": home_relative(transcript_path) or previous.get("transcript_path"),
+        # KYO-735: the scratchpad directory the session reported with `kyo sessions
+        # scratch`. No hook event can learn it, so every event keeps what was recorded.
+        "scratchpad_dir": previous.get("scratchpad_dir"),
     }
     if not lookup.found:
         # A later event that cannot see the record must not erase one an earlier
@@ -764,6 +879,29 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
     could not write says one line. Run by hand, it says everything.
     """
     path = sessions_path(ctx.root)
+    words = list(getattr(args, "words", None) or [])
+    if words and not getattr(args, "hook", False):
+        if words[0] != "scratch" or len(words) != 2:
+            from .errors import UsageError
+
+            raise UsageError(
+                "`kyo sessions` takes no argument, or `scratch <dir>`: it records the "
+                "scratchpad directory of the session named by "
+                f"${SESSION_ID_ENV}, which `kyo serve` then serves as that session's "
+                "`scratch` root"
+            )
+        written, real = record_scratch_dir(
+            Path(ctx.root),
+            [Path(ctx.code_root), Path(ctx.root)],
+            os.environ.get(SESSION_ID_ENV),
+            words[1],
+        )
+        session = os.environ[SESSION_ID_ENV]
+        return Output(
+            lines=[f"session {session}: scratchpad directory recorded as {real} in {written}"],
+            data={"ok": True, "session_id": session, "scratchpad_dir": str(real),
+                  "path": str(written)},  # fmt: skip
+        )
     if not getattr(args, "hook", False):
         file = read_sessions(path)
         url, why = resolve_pane_url(file)
@@ -788,6 +926,7 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
                 )
             )
             lines.append(f"      transcript: {entry.get('transcript_path') or 'not recorded'}")
+            lines.append(f"      scratchpad: {entry.get('scratchpad_dir') or 'not recorded'}")
             lines.append(
                 f"      remote control: {entry.get('url') or '—'} "
                 f"[{entry.get('remote_control_outcome')}]"

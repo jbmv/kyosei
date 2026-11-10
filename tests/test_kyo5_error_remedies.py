@@ -3860,6 +3860,20 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-735.d2: `kyo sessions` remedies, each run by the test the reason names.
+    "cmd_sessions.py:record_scratch_dir#0": (
+        "the same command run inside the session, where the harness sets "
+        "$CLAUDE_CODE_SESSION_ID; proved by "
+        "test_kyo735_scratch_without_a_session_id_is_cleared_by_running_it_in_a_session"
+    ),
+    "cmd_sessions.py:record_scratch_dir#1": (
+        "recording the session with `kyo sessions --hook`, then the same command; proved by "
+        "test_kyo735_scratch_for_an_unrecorded_session_is_cleared_by_recording_it"
+    ),
+    "cmd_sessions.py:cmd_sessions#0": (
+        "the same command as `kyo sessions` or `kyo sessions scratch <dir>`; proved by "
+        "test_kyo735_sessions_takes_nothing_but_scratch_and_a_directory"
+    ),
     # KYO-658: `decision-requires-discussion`; each named remedy is run by the test cited.
     "cmd_discuss.py:filing_discussion#5": (
         "the same command with --opened-late, or with --discussion naming the discussion "
@@ -4424,6 +4438,17 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-735.d2: `kyo sessions scratch <dir>`, each refusal's re-invocation run by the
+    # test the reason names.
+    "cmd_sessions.py:record_scratch_dir#2": (
+        "creating the directory, then the same command; proved by "
+        "test_kyo735_scratch_of_a_missing_directory_is_cleared_by_creating_it"
+    ),
+    "cmd_sessions.py:record_scratch_dir#3": (
+        "the same command naming a directory of the session's own; proved by "
+        "test_kyo735_scratch_refuses_the_root_a_home_and_a_served_root_naming_the_reason and "
+        "test_kyo735_scratch_refuses_a_directory_in_or_holding_a_repository"
+    ),
     # KYO-658: `kyo discuss` and the filing flags, each refusal's re-invocation or edit run
     # by the test the reason names (tests/test_kyo658_discussions.py).
     "cmd_discuss.py:_match_at#0": (
@@ -7601,3 +7626,122 @@ def test_kyo670_superseding_a_withdrawn_credit_is_cleared_by_dropping_supersede(
     refused = kyo(*line, "--basis", approval, "--supersede", credit)
     assert refused.code == 64 and "rerun this command without --supersede" in refused.err
     assert kyo(*line, "--basis", approval).code == 0
+
+
+# ---- KYO-735.d2: `kyo sessions scratch <dir>` ------------------------------------------
+
+_K735_SESSION = "11111111-2222-3333-4444-555555555555"
+
+
+def _k735_recorded(kyo, monkeypatch) -> None:
+    """A project whose sessions.json holds _K735_SESSION, run as that session."""
+    payload = json.dumps(
+        {"session_id": _K735_SESSION, "hook_event_name": "SessionStart", "cwd": "/x"}
+    )
+    assert kyo("sessions", "--hook", stdin=payload).code == 0
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _K735_SESSION)
+
+
+def _k735_recorded_dir(kyo) -> str | None:
+    entries = kyo("sessions", "--json").json["sessions"]
+    return next(e for e in entries if e["session_id"] == _K735_SESSION).get("scratchpad_dir")
+
+
+def test_kyo735_scratch_without_a_session_id_is_cleared_by_running_it_in_a_session(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    pad = tmp_path / "pad"
+    pad.mkdir()
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    refused = kyo("sessions", "scratch", str(pad))
+    assert refused.code == 64 and "inside the Claude Code session" in refused.err
+    _k735_recorded(kyo, monkeypatch)
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+    assert _k735_recorded_dir(kyo) == os.path.realpath(pad)
+
+
+def test_kyo735_scratch_for_an_unrecorded_session_is_cleared_by_recording_it(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    pad = tmp_path / "pad"
+    pad.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", _K735_SESSION)
+    refused = kyo("sessions", "scratch", str(pad))
+    assert refused.code == 64 and "not recorded for this project" in refused.err
+    payload = json.dumps(
+        {"session_id": _K735_SESSION, "hook_event_name": "SessionStart", "cwd": "/x"}
+    )
+    assert kyo("sessions", "--hook", stdin=payload).code == 0
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+
+
+def test_kyo735_scratch_of_a_missing_directory_is_cleared_by_creating_it(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    _k735_recorded(kyo, monkeypatch)
+    pad = tmp_path / "later"
+    refused = kyo("sessions", "scratch", str(pad))
+    assert refused.code == 64 and "is not an existing directory" in refused.err
+    pad.mkdir()
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+
+
+def test_kyo735_scratch_refuses_the_root_a_home_and_a_served_root_naming_the_reason(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    _k735_recorded(kyo, monkeypatch)
+    home = tmp_path / "home" / "someone"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    pad = tmp_path / "pad"
+    pad.mkdir()
+    (project / "src").mkdir(exist_ok=True)
+    for given, reason in (
+        ("/", "it is the filesystem root"),
+        (str(home), "it is a home directory"),
+        (str(tmp_path / "home"), "it is a home directory"),
+        (str(project / "src"), "served root"),
+        (str(tmp_path), "holds one"),
+    ):
+        refused = kyo("sessions", "scratch", given)
+        assert refused.code == 64 and reason in refused.err, (given, refused.err)
+        assert "Name the directory the session was given" in refused.err
+    assert _k735_recorded_dir(kyo) is None
+    # The remedy the sentence names: a directory of the session's own.
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+
+
+def test_kyo735_scratch_refuses_a_directory_in_or_holding_a_repository(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    _k735_recorded(kyo, monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    inside = elsewhere / "repo" / "notes"
+    inside.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(elsewhere / "repo")], check=True)
+    refused = kyo("sessions", "scratch", str(inside))
+    assert refused.code == 64 and "lies inside the git repository" in refused.err
+    refused = kyo("sessions", "scratch", str(elsewhere))
+    assert refused.code == 64 and "holds a git repository" in refused.err
+    pad = tmp_path / "pad"
+    pad.mkdir()
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+
+
+def test_kyo735_a_later_hook_event_keeps_the_recorded_directory(
+    kyo, project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    _k735_recorded(kyo, monkeypatch)
+    pad = tmp_path / "pad"
+    pad.mkdir()
+    assert kyo("sessions", "scratch", str(pad)).code == 0
+    stop = json.dumps({"session_id": _K735_SESSION, "hook_event_name": "Stop", "cwd": "/x"})
+    assert kyo("sessions", "--hook", stdin=stop).code == 0
+    assert _k735_recorded_dir(kyo) == os.path.realpath(pad)
+    assert "scratchpad: " + os.path.realpath(pad) in kyo("sessions").out
+
+
+def test_kyo735_sessions_takes_nothing_but_scratch_and_a_directory(kyo) -> None:
+    for words in (("scratch",), ("scratch", "a", "b"), ("other", "a")):
+        refused = kyo("sessions", *words)
+        assert refused.code == 64 and "takes no argument, or `scratch <dir>`" in refused.err

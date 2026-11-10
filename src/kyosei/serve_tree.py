@@ -18,18 +18,23 @@ own: a token issued to type into a session or to file notes was not issued to re
 THE ROOTS. ``code`` is the project's code repository and ``store`` its store repository, the
 two directories ``kyo where`` names. Under the in-repo layout they are one directory, and the
 ``store`` root is refused with a sentence naming ``code``, so that one tree is not served
-under two names. ``scratch``, a session's scratchpad directory, is a name this module knows
-and refuses: nothing a session hook records says where that directory is (see
-:func:`_scratch_refusal`), and a path is not guessed from a pattern.
+under two names. ``scratch`` is a session's scratchpad directory, one per session, reached as
+``files/scratch/{session}/tree[/{relpath}]`` and ``files/scratch/{session}/blob/{relpath}``.
+The directory is the one the session reported with ``kyo sessions scratch <dir>``, stored as
+``scratchpad_dir`` on that session's entry in the project's ``sessions.json`` (nothing a hook
+is given names it, and a path is not guessed from a pattern). A session this project does not
+record, one with no directory recorded, and a recorded directory that no longer passes
+:func:`kyosei.cmd_sessions.scratch_dir_problem` are each refused with a reason.
 
-WHAT IS VISIBLE. What git shows in the root, asked of git on every request: tracked files
-and untracked files that no ignore rule covers
+WHAT IS VISIBLE. In ``code`` and ``store``, what git shows in the root, asked of git on every
+request: tracked files and untracked files that no ignore rule covers
 (``git ls-files --cached --others --exclude-standard``). So an ignored file, ``.git`` and
 the contents of a nested repository are absent from a listing and refused by name, and a
 root that is not inside a git work tree serves nothing. Nothing is cached: a file added a
 moment ago is in the next listing, at the cost of one git process per request. A file and
 its directory are both checked with the same command, so the tree cannot list what the blob
-route refuses.
+route refuses. The ``scratch`` root is not a repository: it shows every entry in its
+directory, and the text and real-path checks below apply to it unchanged.
 
 HOW A PATH IS CHECKED, in order, each before a byte of any file is read:
 
@@ -37,8 +42,8 @@ HOW A PATH IS CHECKED, in order, each before a byte of any file is read:
    ``.`` or ``..`` segment, and no ``.git`` segment;
 2. by its real path, resolved through every symlink, which must lie inside the root's real
    path. A symlink inside the root that points outside it is refused;
-3. by git, as above. When the real path is another path inside the root (a symlink to a
-   file there), that path must be one git shows too.
+3. by git, as above (not for ``scratch``, which has no git). When the real path is another
+   path inside the root (a symlink to a file there), that path must be one git shows too.
 
 This module reads and writes nothing else: no route here creates, changes or removes a
 file, and ``tests/test_kyo_serve_files.py`` fails if it calls a file-writing function. A
@@ -59,7 +64,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import device_tokens, serve_files, serve_send
+from . import cmd_sessions, device_tokens, serve_files, serve_send
 from .git_queries import run_git
 from .serve import API_PREFIX, Refusal
 from .transcript_archive import enclosing_git_repository
@@ -220,6 +225,8 @@ class Root:
 
     name: str
     path: Path
+    #: Whether what is visible is what git shows. False for ``scratch``: every entry.
+    git: bool = True
 
     @property
     def real(self) -> Path:
@@ -239,29 +246,70 @@ def served_roots(paths: serve_files.ProjectPaths) -> list[Root]:
     return roots
 
 
-def _scratch_refusal() -> Refusal:
-    """The refusal for the ``scratch`` root, which this build cannot serve.
+def _recorded_scratch(paths: serve_files.ProjectPaths, session: str) -> Path:
+    """The scratchpad directory this project's ``sessions.json`` holds for ``session``."""
+    entries = cmd_sessions.read_sessions(paths.sessions).entries
+    entry = next((item for item in entries if item.get("session_id") == session), None)
+    if entry is None:
+        raise Refusal(
+            404,
+            f"session {session} is not recorded for this project, so it has no `{ROOT_SCRATCH}` "
+            f"root here (GET {API_PREFIX}/projects/{{project}}/{ROUTE} lists the sessions that "
+            "have one)",
+            reason="no-such-session",
+            root=ROOT_SCRATCH,
+            session=session,
+        )
+    directory = entry.get("scratchpad_dir")
+    if not isinstance(directory, str) or not directory:
+        raise Refusal(
+            404,
+            f"session {session} has not reported a scratchpad directory, and the server "
+            "does not guess one; run `kyo sessions scratch <dir>` in that session, with the "
+            "directory its instructions name",
+            reason="scratch-not-recorded",
+            root=ROOT_SCRATCH,
+            session=session,
+        )
+    return Path(directory)
 
-    A session's scratchpad directory is named to the agent in its instructions and is not
-    in what a session hook is given (a session id, a working directory and a transcript
-    path), so ``kyosei/sessions.json`` does not hold it. Serving it needs the hook to record
-    it first; until then the directory is unknown here and none is derived from a session id.
-    """
-    return Refusal(
-        404,
-        "kyo serve does not serve a session's scratchpad directory: the session hooks record "
-        "a session's id, working directory and transcript, and not that directory, so this "
-        "build cannot tell which directory is the named session's. The roots it serves are "
-        f"`{ROOT_CODE}` and `{ROOT_STORE}`",
-        reason="scratch-not-recorded",
-        root=ROOT_SCRATCH,
-    )
+
+def _scratch_root(paths: serve_files.ProjectPaths, session: str) -> Root:
+    """The ``scratch`` root of ``session``: its recorded directory, if it still may be one."""
+    directory = _recorded_scratch(paths, session)
+    if not directory.is_dir():
+        raise Refusal(
+            404,
+            f"the scratchpad directory {directory} that session {session} reported is not a "
+            "directory now; run `kyo sessions scratch <dir>` again with the current one",
+            reason="scratch-gone",
+            root=ROOT_SCRATCH,
+            session=session,
+        )
+    real = Path(os.path.realpath(directory))
+    problem = cmd_sessions.scratch_dir_problem(real, [paths.code_root, paths.store_root])
+    if problem is not None:
+        raise Refusal(
+            403,
+            f"the scratchpad directory {real} that session {session} reported is not served: "
+            f"{problem}; run `kyo sessions scratch <dir>` with another directory",
+            reason="scratch-unfit",
+            root=ROOT_SCRATCH,
+            session=session,
+        )
+    return Root(ROOT_SCRATCH, real, git=False)
 
 
 def _root(paths: serve_files.ProjectPaths, name: str) -> Root:
-    """The served root ``name``, or the refusal saying why it is not one."""
+    """The served git root ``name``, or the refusal saying why it is not one."""
     if name == ROOT_SCRATCH:
-        raise _scratch_refusal()
+        raise Refusal(
+            404,
+            f"name a session after `{ROOT_SCRATCH}/`: {ROUTE}/{ROOT_SCRATCH}/{{session}}/"
+            f"{TREE} or {ROUTE}/{ROOT_SCRATCH}/{{session}}/{BLOB}/{{relpath}}",
+            reason="bad-request",
+            root=ROOT_SCRATCH,
+        )
     if name == ROOT_STORE and _same_tree(paths):
         raise Refusal(
             404,
@@ -277,8 +325,8 @@ def _root(paths: serve_files.ProjectPaths, name: str) -> Root:
             return root
     raise Refusal(
         404,
-        f"{name!r} is not a root; a project's roots are `{ROOT_CODE}` and `{ROOT_STORE}` "
-        f"(GET {API_PREFIX}/projects/{{project}}/{ROUTE} lists them)",
+        f"{name!r} is not a root; a project's roots are `{ROOT_CODE}`, `{ROOT_STORE}` and "
+        f"`{ROOT_SCRATCH}` (GET {API_PREFIX}/projects/{{project}}/{ROUTE} lists them)",
         reason="no-such-root",
         root=name,
     )
@@ -375,6 +423,14 @@ def _real_inside(root: Root, relpath: str, segments: list[str]) -> tuple[Path, s
 
 
 def _not_shown(root: Root, relpath: str, what: str) -> Refusal:
+    if not root.git:
+        return Refusal(
+            404,
+            f"{relpath} is not a {what} in {_where(root)}",
+            reason="not-shown",
+            root=root.name,
+            path=relpath,
+        )
     return Refusal(
         404,
         f"{relpath} is not a {what} git shows in {_where(root)}: it is absent, ignored, or "
@@ -411,6 +467,19 @@ def _file_target(root: Root, relpath: str) -> Path:
     """The real path of the file ``relpath`` names, checked in the module's three steps."""
     segments = _check_text(root, relpath)
     real, real_rel = _real_inside(root, relpath, segments)
+    if not root.git:
+        if real.is_dir():
+            raise Refusal(
+                409,
+                f"{relpath} is a directory in {_where(root)}; GET "
+                f"{ROUTE}/{ROOT_SCRATCH}/{{session}}/{TREE}/{relpath} for its entries",
+                reason="is-a-directory",
+                root=root.name,
+                path=relpath,
+            )
+        if not real.exists():
+            raise _not_shown(root, relpath, "file")
+        return real
     shown = _git_shows(root, relpath)
     if relpath not in shown:
         if any(item.startswith(relpath + "/") for item in shown):
@@ -434,13 +503,24 @@ def _file_target(root: Root, relpath: str) -> Path:
 def roots_document(paths: serve_files.ProjectPaths) -> dict[str, Any]:
     """The roots: which are served, where each is, and why the others are not."""
     same = _same_tree(paths)
+    reported = [
+        str(entry["session_id"])
+        for entry in cmd_sessions.read_sessions(paths.sessions).entries
+        if entry.get("scratchpad_dir")
+    ]
     return {
         "ok": True,
         "roots": [
             {"name": ROOT_CODE, "path": str(paths.code_root), "served": True},
             {"name": ROOT_STORE, "path": str(paths.store_root), "served": not same}
             | ({"same_as": ROOT_CODE} if same else {}),
-            {"name": ROOT_SCRATCH, "served": False, "reason": "scratch-not-recorded"},
+            {
+                "name": ROOT_SCRATCH,
+                "served": bool(reported),
+                "per_session": True,
+                "sessions": reported,
+                **({} if reported else {"reason": "scratch-not-recorded"}),
+            },
         ],
         "max_file_bytes": MAX_FILE_BYTES,
     }
@@ -460,6 +540,8 @@ def tree(root: Root, relpath: str) -> dict[str, Any]:
                 root=root.name,
                 path=relpath,
             )
+    if not root.git:
+        return _scratch_tree(root, relpath)
     shown = _git_shows(root, relpath)
     prefix = f"{relpath}/" if relpath else ""
     if relpath and relpath in shown:
@@ -485,6 +567,29 @@ def tree(root: Root, relpath: str) -> dict[str, Any]:
         entry = _entry(root, prefix + name, directory=children[name])
         if entry is not None:
             entries.append(entry)
+    return {"ok": True, "root": root.name, "path": relpath, "entries": entries}
+
+
+def _scratch_tree(root: Root, relpath: str) -> dict[str, Any]:
+    """Every entry of one directory of the ``scratch`` root, in name order; git is not asked."""
+    target = root.path / relpath if relpath else root.path
+    if relpath and target.is_file():
+        raise Refusal(
+            409,
+            f"{relpath} is a file in {_where(root)}; GET {ROUTE}/{ROOT_SCRATCH}/{{session}}/"
+            f"{BLOB}/{relpath} for its bytes",
+            reason="is-a-file",
+            root=root.name,
+            path=relpath,
+        )
+    try:
+        names = sorted(os.listdir(target))
+    except OSError as exc:
+        raise _not_shown(root, relpath, "directory") from exc
+    prefix = f"{relpath}/" if relpath else ""
+    entries = [
+        entry for name in names if (entry := _entry(root, prefix + name, directory=False))
+    ]
     return {"ok": True, "root": root.name, "path": relpath, "entries": entries}
 
 
@@ -674,7 +779,9 @@ def not_served(rest: list[str]) -> Refusal:
         f"`{ROUTE}/{'/'.join(rest)}` is not a route; kyo serve answers GET {ROUTE} (the "
         f"roots), GET {ROUTE}/{{root}}/{TREE}[/{{relpath}}] (a directory), GET "
         f"{ROUTE}/{{root}}/{BLOB}/{{relpath}} (a file's bytes) and GET "
-        f"{ROUTE}/{RESOLVE}?path=<text>, {{root}} being `{ROOT_CODE}` or `{ROOT_STORE}`",
+        f"{ROUTE}/{RESOLVE}?path=<text>, {{root}} being `{ROOT_CODE}` or `{ROOT_STORE}`; "
+        f"a session's scratchpad is {ROUTE}/{ROOT_SCRATCH}/{{session}}/{TREE} and "
+        f"{ROUTE}/{ROOT_SCRATCH}/{{session}}/{BLOB}/{{relpath}}",
         reason="not-served",
     )
 
@@ -709,12 +816,20 @@ def respond(
     if not rest:
         _no_query(query_pairs, f"`{ROUTE}`")
         return 200, roots_document(serve_files.project_paths(root_of(), environ)), None, {}
-    if len(rest) < 2 or rest[1] not in (TREE, BLOB):
+    if rest[0] != ROOT_SCRATCH and (len(rest) < 2 or rest[1] not in (TREE, BLOB)):
         raise not_served(rest)
-    _no_query(query_pairs, f"`{ROUTE}/{{root}}/{rest[1]}`")
-    root = _root(serve_files.project_paths(root_of(), environ), rest[0])
-    relpath = "/".join(rest[2:])
-    if rest[1] == TREE:
+    paths = serve_files.project_paths(root_of(), environ)
+    if rest[0] == ROOT_SCRATCH:
+        if len(rest) < 3 or rest[2] not in (TREE, BLOB):
+            raise _root(paths, ROOT_SCRATCH)
+        _no_query(query_pairs, f"`{ROUTE}/{ROOT_SCRATCH}/{{session}}/{rest[2]}`")
+        root = _scratch_root(paths, rest[1])
+        operation, relpath = rest[2], "/".join(rest[3:])
+    else:
+        _no_query(query_pairs, f"`{ROUTE}/{{root}}/{rest[1]}`")
+        root = _root(paths, rest[0])
+        operation, relpath = rest[1], "/".join(rest[2:])
+    if operation == TREE:
         return 200, tree(root, relpath), None, {}
     status, data, kind, headers = blob(root, relpath, if_none_match)
     return status, data, kind, headers
