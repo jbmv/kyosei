@@ -21,8 +21,12 @@ struct KyoseiMacApp: App {
     @State private var feed = SessionFeed.fromEnvironment()
 
     var body: some Scene {
+        // One window, and no File > New Window: the feed drives one web view, so a second
+        // window would take every frame from the first, whose composer would go on working
+        // over a chat that no longer updates (KYO-725's report). Another machine's copy of
+        // the app is its own process with its own stream, and is unaffected.
         // The window's title, and with it its entry in the Window menu, is the project's.
-        WindowGroup {
+        Window("Kyosei", id: "main") {
             ChatView(feed: feed)
                 .frame(minWidth: 560, minHeight: 400)
                 .navigationTitle(feed.project)
