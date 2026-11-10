@@ -286,10 +286,21 @@ Nothing is reconstructed for an omitted block.
 first reply:
 
 ```
-facts:   at, model, effort, git_branch, permission_mode, context, lines
+facts:   at, model, effort, git_branch, permission_mode, context, lines, limits
 context: tokens, window, percent
 lines:   added, removed
+limits:  five_hour, seven_day, read_at    (each window: used_percentage, resets_at)
 ```
+
+`limits` is the subscription's usage limits as `kyo statusline` last saved them. Claude Code
+passes them to its status line command after each reply, and `kyo statusline --install` makes
+that command `kyo statusline`, which writes them to `$KYOSEI_HOME/usage-limits.json`. The
+limits belong to the account, so the figure is the same in every session's facts and comes
+from whichever session replied last. `used_percentage` is from 0 to 100, `resets_at` and
+`read_at` are ISO times, and a window whose `resets_at` has passed is left out, since its
+figure describes a window that has ended. Either window can be absent on its own, and
+`limits` is `null` when there is no file or no window left, which is the case for an account
+without a subscription. The file is read each time the facts are built.
 
 `lines` is the running total of lines added and removed by the session and all of its
 subagents, summed from the patches its Edit and Write results record. A Write that creates a
@@ -385,7 +396,7 @@ naming one of:
 |---|---|
 | `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`: the state when the stream opened |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
-| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode or a line changed by the session or a subagent changes them |
+| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, or new usage limits saved by any session change them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
 | `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |

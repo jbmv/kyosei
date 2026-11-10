@@ -83,6 +83,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo show`](#kyo-show) | yes | no | print a record, a criterion, an evidence artifact, a flag, a dispatch or a shift note, by the id that names it |
 | [`kyo spawn`](#kyo-spawn) | yes | yes | create a record of another kind from an existing one; the kind-to-kind edge the registry declares (KYO-50) |
 | [`kyo split`](#kyo-split) | yes | yes | split unmet criteria to a new successor record, back-linked both ways (M5) |
+| [`kyo statusline`](#kyo-statusline) | no | no | Claude Code's status line command: reads the session JSON on stdin, saves the account's usage limits to $KYOSEI_HOME/usage-limits.json for kyo serve, and prints `5-hour NN% · weekly NN%`; exits 0 and prints nothing on any error (KYO-714) |
 | [`kyo sweep`](#kyo-sweep) | yes | yes | flag stale touches and near-duplicate criteria; never edits (M6) |
 | [`kyo touch-drift`](#kyo-touch-drift) | yes | no | compare a dispatch's declared touches against what its branch actually changed (KYO-71) — reports, never refuses |
 | [`kyo turns`](#kyo-turns) | optional | no | the turn index: one line per prompt, with no text, in a project that opted in to reading transcripts (KYO-657) |
@@ -1546,6 +1547,24 @@ Usage: `kyo split [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 ### Options
 
 - `--to-successor CRITERION_ID [CRITERION_ID ...]` — **required**. unmet criterion id(s) to carry to the successor; a met or void one is refused
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo statusline`
+
+Claude Code's status line command: reads the session JSON on stdin, saves the account's usage limits to $KYOSEI_HOME/usage-limits.json for kyo serve, and prints `5-hour NN% · weekly NN%`; exits 0 and prints nothing on any error (KYO-714)
+
+Needs a Kyosei project: **no** — it never searches for one.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo statusline [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--install | --uninstall] [--print]`
+
+### Options
+
+- `--install` — optional. set statusLine in Claude Code's user settings (~/.claude/settings.json, or $CLAUDE_CONFIG_DIR's) to run `kyo statusline`; refuses when a different status line is set
+- `--uninstall` — optional. remove the statusLine entry --install set, and no other
+- `--print` — optional. with --install or --uninstall: show the change and write nothing
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

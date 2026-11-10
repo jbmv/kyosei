@@ -266,6 +266,7 @@ def _facts_json(facts: Any) -> dict | None:
             "percent": facts.context.percent,
         },
         "lines": _lines_json(facts.lines),
+        "limits": facts.limits,
     }
 
 
@@ -858,6 +859,11 @@ class _Sampler:
             or followed
             or live.transcript.latest_permission_mode != held.get("permission_mode")
             or _lines_json(live.lines_changed()) != held.get("lines")
+            # KYO-714: the account's limits move with any session's reply, not only this one's.
+            or (
+                self._facts is not None
+                and session_layer.read_limits(live.environ) != held.get("limits")
+            )
         ):
             now_facts = _facts_json(live.facts())
             if now_facts != self._facts:
