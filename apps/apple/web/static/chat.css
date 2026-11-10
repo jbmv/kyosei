@@ -710,11 +710,11 @@ body.terminal-open .view-pane { bottom: 46%; }
 /* ---------------------------------------------------------------------------- Records */
 
 /* Bare text in the accent colour, as the composer's Send is. */
-#records-home, #files-back { padding: 0; border: 0; background: none; color: var(--link); font-size: 13.5px; font-weight: 600; cursor: pointer; }
-#records-home::before, #files-back::before { content: "\2039\00a0"; }
-#records-home:hover, #files-back:hover { color: var(--pastel-blue); text-decoration: underline; }
-#records-home[hidden], #files-back[hidden] { display: none; }
-#records-home:not([hidden]) + #records-count { margin-left: 14px; }
+.nav-icons { display: inline-flex; align-items: center; gap: 2px; margin-right: 12px; flex: none; }
+.nav-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.nav-icon .icon { width: 17px; height: 17px; vertical-align: 0; }
+.nav-icon:hover:not(:disabled) { color: var(--link); }
+.nav-icon:disabled { opacity: 0.35; cursor: default; }
 #records-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .records-search {
@@ -840,7 +840,6 @@ a[data-local] { color: inherit; text-decoration: none; cursor: text; }
 .text-button:hover { color: var(--pastel-blue); text-decoration: underline; }
 .text-button[hidden] { display: none; }
 
-#files-back:not([hidden]) + #files-path { margin-left: 14px; }
 #files-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; user-select: text; -webkit-user-select: text; }
 #files-meta { margin-left: 14px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #files-path:empty + #files-meta { margin-left: 0; }
