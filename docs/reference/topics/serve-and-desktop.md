@@ -904,7 +904,7 @@ The stream's events:
 | `event: ready` | `session_id`, `connection` (the id an input or a resize names), `device`, `pane` |
 | `event: screen` | `cols`, `rows`, `data`: the whole pane, repainted. `data` is base64 of the bytes to write to an emulator that has been reset and sized to `cols` by `rows`. It holds up to 1000 lines of history above the visible screen, then the screen, the cursor's position and the modes the program had set. Sent when the stream opens and whenever the pane's size changes |
 | `event: output` | `data`: base64 of the bytes the pane's program wrote since the last event, colours and cursor movement included |
-| `event: closed` | `reason`, `text`: the pane has closed (`pane-closed`), the tmux client has ended (`tmux-exited`), or the connection is no longer allowed (`revoked-token`, `no-terminal-permission`, `send-disabled`). The stream then ends |
+| `event: closed` | `reason`, `text`: the pane has closed (`pane-closed`), the tmux client has ended (`tmux-exited`), or the token or the machine's setting does not allow the connection (`revoked-token`, `no-terminal-permission`, `send-disabled`). The stream then ends |
 
 A `: keepalive` comment is sent on an idle stream, as on the other streams. A client that
 reconnects is sent `ready` and `screen` afresh.
