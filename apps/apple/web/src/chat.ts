@@ -23,6 +23,7 @@ import {
   type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
 } from "./history";
 import { SendGate } from "./sending";
+import { findSpans, fold, queryTerms, step, tally } from "./search";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -199,6 +200,8 @@ const ICONS = {
   home: '<path d="M4 11.2L12 4l8 7.2"/><path d="M6 10v9.5h4.5V14h3v5.5H18V10"/>',
   back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
   forward: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
+  up: '<path d="M5.5 14.5L12 8l6.5 6.5"/>',
+  down: '<path d="M5.5 9.5L12 16l6.5-6.5"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -1448,6 +1451,11 @@ const kyo = {
     drawAgents();
   },
 
+  /** Command-F, when the app's menu takes the key before the page's own handler sees it. */
+  find(): void {
+    openSearch();
+  },
+
   apply(batch: Batch): void {
     keepingPlace(() => {
       if (batch.reset) kyo.clear();
@@ -1488,6 +1496,7 @@ const kyo = {
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
       paintAnchors();
+      refreshSearch();
     });
     if (batch.facts) facts = batch.facts;
     // The final text has arrived, so the in-progress copy goes at once.
@@ -2252,6 +2261,177 @@ function paintAnchors(): void {
   if (sentRanges.length) highlights.set("anchored-sent", new (window as any).Highlight(...sentRanges));
   else highlights.delete("anchored-sent");
 }
+
+// ------------------------------------------------------------ search in the chat (KYO-741)
+
+/**
+ * What is searched is the drawn text of each prompt and reply, not its source, so that every
+ * hit marked is words the person can see; a markdown mark exists only in the source. A
+ * reply's thinking and the tool calls are not searched. The drawn text and its folded copy
+ * are kept for each element, which is replaced when its text changes, so a key typed walks
+ * the elements' texts and not the document.
+ */
+const searchIndex = new WeakMap<HTMLElement, { drawn: Drawn; folded: string }>();
+const SEARCH_DEBOUNCE_MS = 120;
+const findBar = document.getElementById("find")!;
+const findField = document.getElementById("find-field") as HTMLInputElement;
+const findCount = document.getElementById("find-count")!;
+interface Hit { key: string; from: number; range: Range }
+let hits: Hit[] = [];
+let currentHit = -1;
+let searchTimer: number | undefined;
+
+function searchable(): HTMLElement[] {
+  return Array.from(chat.children).filter((node): node is HTMLElement => {
+    const key = (node as HTMLElement).dataset?.key;
+    return !!key && (key.startsWith("t:") || key.startsWith("r:"));
+  });
+}
+
+function indexed(element: HTMLElement) {
+  let entry = searchIndex.get(element);
+  if (!entry) {
+    const drawn = drawnOf(element);
+    entry = { drawn, folded: fold(drawn.text) };
+    searchIndex.set(element, entry);
+  }
+  return entry;
+}
+
+/** The range that the drawn characters `from` to `to` of an element's text make. */
+function drawnRange(drawn: Drawn, from: number, to: number): Range | null {
+  const first = drawn.nodes.findLast((held) => held.from <= from);
+  const last = drawn.nodes.findLast((held) => held.from < to);
+  if (!first || !last) return null;
+  const range = document.createRange();
+  range.setStart(first.node, Math.min(from - first.from, first.node.length));
+  range.setEnd(last.node, Math.min(to - last.from, last.node.length));
+  return range;
+}
+
+/** Marks every hit of the query and the current one, and shows the count. */
+function runSearch(keep?: { key: string; from: number }): void {
+  const terms = queryTerms(findField.value);
+  const found: Hit[] = [];
+  if (terms.length) {
+    for (const element of searchable()) {
+      const { drawn, folded } = indexed(element);
+      for (const [from, to] of findSpans(drawn.text, terms, folded)) {
+        const range = drawnRange(drawn, from, to);
+        if (range) found.push({ key: element.dataset.key!, from, range });
+      }
+    }
+  }
+  // Newest first: the last hit of the page is the first.
+  hits = found.reverse();
+  const kept = keep ? hits.findIndex((hit) => hit.key === keep.key && hit.from === keep.from) : -1;
+  currentHit = kept >= 0 ? kept : hits.length ? Math.min(Math.max(currentHit, 0), hits.length - 1) : -1;
+  if (keep && kept < 0 && hits.length) currentHit = 0;
+  paintHits();
+}
+
+function paintHits(): void {
+  findCount.textContent = tally(currentHit, hits.length, !findBar.hidden && findField.value.trim() !== "");
+  const highlights = (CSS as any).highlights;
+  if (!highlights) return;
+  const rest = hits.filter((_, index) => index !== currentHit).map((hit) => hit.range);
+  if (rest.length) highlights.set("found", new (window as any).Highlight(...rest));
+  else highlights.delete("found");
+  if (currentHit >= 0) {
+    const current = new (window as any).Highlight(hits[currentHit].range);
+    current.priority = 1;
+    highlights.set("found-current", current);
+  } else {
+    highlights.delete("found-current");
+  }
+}
+
+/** New text has been drawn: the marks are laid again, the current hit staying where it was. */
+function refreshSearch(): void {
+  if (findBar.hidden) return;
+  const at = hits[currentHit];
+  runSearch(at ? { key: at.key, from: at.from } : undefined);
+}
+
+function moveToHit(forward: boolean): void {
+  if (searchTimer !== undefined) {
+    window.clearTimeout(searchTimer);
+    searchTimer = undefined;
+    runSearch();
+    if (currentHit >= 0) {
+      showHit();
+      return;
+    }
+  }
+  currentHit = step(currentHit, hits.length, forward);
+  paintHits();
+  showHit();
+}
+
+function showHit(): void {
+  const hit = hits[currentHit];
+  if (!hit) return;
+  const rect = hit.range.getBoundingClientRect();
+  const top = (document.getElementById("top")?.getBoundingClientRect().bottom ?? 0) + 24;
+  const bottom = window.innerHeight - 24;
+  if (rect.top < top || rect.bottom > bottom) {
+    scroller.scrollTop += rect.top - (top + bottom) / 2 + rect.height / 2;
+  }
+}
+
+function openSearch(): void {
+  if (currentView !== "chat") return;
+  findBar.hidden = false;
+  findField.focus();
+  findField.select();
+  if (findField.value) runSearch();
+}
+
+function closeSearch(): void {
+  if (findBar.hidden) return;
+  if (searchTimer !== undefined) window.clearTimeout(searchTimer);
+  searchTimer = undefined;
+  findBar.hidden = true;
+  hits = [];
+  currentHit = -1;
+  paintHits();
+}
+
+for (const [id, forward] of [["find-prev", false], ["find-next", true]] as const) {
+  const button = document.getElementById(id)!;
+  button.replaceChildren(icon(forward ? "down" : "up"));
+  // The click leaves the focus in the field, where Return and Shift-Return go on stepping.
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", () => moveToHit(forward));
+}
+findField.addEventListener("input", () => {
+  if (searchTimer !== undefined) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    searchTimer = undefined;
+    currentHit = -1;
+    runSearch();
+    showHit();
+  }, SEARCH_DEBOUNCE_MS);
+});
+findField.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    moveToHit(!event.shiftKey);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeSearch();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() === "f" && event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (currentView !== "chat") return;
+    if (event.target instanceof Node && terminalPane.contains(event.target)) return;
+    event.preventDefault();
+    openSearch();
+  } else if (event.key === "Escape" && !findBar.hidden && currentView === "chat") {
+    closeSearch();
+  }
+});
 
 const markTip = document.createElement("div");
 markTip.id = "mark-tip";
