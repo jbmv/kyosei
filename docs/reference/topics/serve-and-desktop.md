@@ -879,7 +879,7 @@ until the project sets `read_transcripts: true`.
 
 After a note's turn anchors come its records and files, each with a `kind` where a turn has a
 `role`. A record or element is `{"kind": "record", "id"}`, with `"stale": true` when the store
-no longer holds the id. A file is `{"kind", "root", "path", "lines"}` with its `commit` or
+does not hold the id. A file is `{"kind", "root", "path", "lines"}` with its `commit` or
 `session` and its `chars` when it has them, and `"stale": true` when the file as served now
 does not hold the same text at those lines, which the digest decides. A later commit that
 leaves the lines as they were does not make it stale; an edit to them does, committed or not,
