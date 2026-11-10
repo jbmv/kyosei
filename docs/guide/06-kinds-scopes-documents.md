@@ -11,7 +11,7 @@ declares what a record must carry, what it may lead to, whether it counts as wor
 board, and how it is dispatched. That is what stops a question from being closed as if it
 were a build, or a design from being treated as approved because someone wrote it down.
 
-The defaults, in `kyosei/kinds.yml`, are ten kinds in two groups.
+The defaults, in `kyosei/kinds.yml`, are eleven kinds in two groups.
 
 **Work kinds** have a status and move toward done.
 
@@ -30,7 +30,8 @@ The defaults, in `kyosei/kinds.yml`, are ten kinds in two groups.
 
 | Kind | For |
 |---|---|
-| `decision` | a choice that shapes the architecture, citing its evidence. One you made in conversation is filed directly with your words attached as evidence (`kyo new decision --evidence-file`); one that needs design work first comes from an approved proposal, and one can also come from a finished investigation or a reminder. |
+| `decision` | a choice that shapes the architecture, citing its evidence. One you made in conversation is filed directly with your words attached as evidence (`kyo new decision --evidence-file`); one that needs design work first comes from an approved proposal, and one can also come from a finished investigation or a reminder. Where `people:` declares you, it is filed from the discussion it came from, or marked as opened late. |
+| `discussion` | a conversation in which you are asked to choose. The orchestrator opens it when it starts (`kyo discuss open`), stamped at your message from the turn index, and it closes when the decision, proposal, plan or task it led to is filed from it. |
 | `evidence` | a recorded fact other records cite. |
 
 **How they relate.** Kinds connect along fixed edges, and the edges are the planning
@@ -39,7 +40,9 @@ process:
 - an investigation can produce a decision, a task, a bug, an experiment or evidence;
 - a proposal you approve can produce a decision, a plan or an experiment;
 - a plan groups the tasks and bugs that carry it out, and reports how far along they are;
-- a reminder is settled, or turned into a task, bug, investigation, proposal or decision.
+- a reminder is settled, or turned into a task, bug, investigation, proposal or decision;
+- a discussion produces a decision, a proposal, a plan or a task, or is closed as having
+  produced nothing.
 
 `kyo spawn` follows those edges and refuses any other. A decision filed directly instead has
 your words behind it: `kyo new decision` refuses without `--evidence-file`.
@@ -47,7 +50,7 @@ your words behind it: `kyo new decision` refuses without `--evidence-file`.
 **Changing them.** Adding a kind, or changing what one accepts, is easy. Removing a kind
 that records still use is not refused, but those records stop counting and `kyo doctor`
 reports each one at every session stop. Move them first with `kyo edit <id> --kind <kind>`.
-Most projects keep the ten; the only setup question is whether the project has a recurring
+Most projects keep the eleven; the only setup question is whether the project has a recurring
 kind of work they do not fit.
 
 ## Statuses and gates

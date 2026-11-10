@@ -293,7 +293,7 @@ decides, and how a setup agent can find the answer before asking.
 
 ### D6. Kinds
 
-- **Default:** ten kinds in `kyosei/kinds.yml`, in two groups.
+- **Default:** eleven kinds in `kyosei/kinds.yml`, in two groups.
 - **Work kinds** carry a status; all but `plan` and `reminder` can be dispatched:
   - `bug`, `task`, `chore`: building things.
   - `investigation`: answering a question without modifying production code.
@@ -307,7 +307,10 @@ decides, and how a setup agent can find the answer before asking.
 - **Knowledge kinds** are current or void, never done:
   - `decision`: shapes architecture and cites its evidence. Filed directly only with the
     operator's words as evidence (`kyo new decision --evidence-file`); one that needs
-    design work first is spawned from an approved proposal.
+    design work first is spawned from an approved proposal. Where `people:` declares
+    someone, it names the discussion it came from, or is filed `--opened-late`.
+  - `discussion`: a conversation in which the operator is asked to choose, opened by `kyo
+    discuss open` at their turn in the turn index and closed by what it produces.
   - `evidence`: a recorded fact that other records cite.
 - **Why kinds exist:** each one declares what it accepts, what it can produce, whether it
   counts toward the board, and its own policy (worker model, carried). That is what stops a
@@ -324,7 +327,7 @@ decides, and how a setup agent can find the answer before asking.
   them. Nothing warns at the moment `kinds.yml` is edited; the `kind_registry` problem names
   the re-kind as its remedy afterwards.
 - **Decides:** usually leave the defaults. Ask only whether the project has a recurring kind
-  of work the ten don't fit.
+  of work the eleven don't fit.
 
 ### D7. Scopes (for a repository with several components)
 

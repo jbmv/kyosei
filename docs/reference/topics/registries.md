@@ -8,7 +8,7 @@ governs: src/kyosei/kinds.py, src/kyosei/defaults/kinds.yml
 
 Every record has a **kind**, defined in `kyosei/kinds.yml` — bug, task, chore,
 investigation, experiment, proposal, plan, reminder (archetype `work`: has criteria, a status
-flow, dispatches), or decision, evidence (archetype `knowledge`: claim-bearing, no
+flow, dispatches), or decision, discussion, evidence (archetype `knowledge`: claim-bearing, no
 status flow — `kyo move`/`kyo wont-do` refuse them, naming `kyo void` instead).
 Claims, verifications, and evidence artifacts (`kyo claim` / `kyo verify` /
 `kyo attach`) attach to a record of any kind, `work` or `knowledge` alike, and ship
