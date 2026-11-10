@@ -83,6 +83,9 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
   rendered.set(key, version);
 }
 
+/** The text each prompt and reply was drawn from, by its key, which an anchor measures against. */
+const sources = new Map<string, string>();
+
 const imageData = new Map<string, string>();
 
 function drawImage(turn: Turn, index: number): HTMLElement {
@@ -906,6 +909,7 @@ const kyo = {
       if (batch.reset) kyo.clear();
       for (const turn of batch.turns ?? []) {
         const version = `${turn.text}|${turn.images?.length ?? 0}`;
+        sources.set(`t:${turn.id}`, turn.text ?? "");
         place(`t:${turn.id}`, turn.at, version, () => drawTurn(turn));
       }
       for (const reply of batch.replies ?? []) {
@@ -913,6 +917,7 @@ const kyo = {
         // A record with only tool use has nothing to show.
         if (reply.text || reply.thinking) {
           const version = `${reply.text}|${reply.thinking ?? ""}`;
+          sources.set(`r:${reply.message_id}`, reply.text ?? "");
           place(`r:${reply.message_id}`, reply.at, version, () => drawReply(reply));
         }
       }
@@ -930,6 +935,7 @@ const kyo = {
       }
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
+      paintAnchors();
     });
     if (batch.facts) facts = batch.facts;
     // The final text has arrived, so the in-progress copy goes at once.
@@ -1054,8 +1060,16 @@ function boxButton(className: string, label: string, act: () => void): HTMLButto
 
 // ---- marks: the gutter [+] beside a paragraph, which holds what is attached to it
 
-/** One thing a mark holds. Anchors and attachments join tags here as they are built. */
-interface Item { kind: "tag"; name: string }
+/** One thing a mark holds. Attachments join these when they are built. */
+interface TagItem { kind: "tag"; name: string }
+/**
+ * A place in the chat: the prompt or reply by its key, and a range of its text counted in
+ * code points, as the store counts a span. `words` is what the chip shows.
+ */
+interface AnchorItem {
+  kind: "anchor"; key: string; session: string; start: number; end: number; words: string;
+}
+type Item = TagItem | AnchorItem;
 interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
 
 interface Marks {
@@ -1126,6 +1140,7 @@ function drawMarks(area: HTMLTextAreaElement): void {
   });
   marks.ghost.hidden = true;
   marks.gutter.replaceChildren(marks.ghost, ...held);
+  paintAnchors();
   if (openMark?.area === area) {
     if (marks.ids.includes(openMark.id)) showMark(area, openMark.id);
     else hideMark();
@@ -1165,7 +1180,12 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
   const chips = held.map((item, index) => {
     const chip = document.createElement("span");
     chip.className = "mark-item";
-    chip.textContent = `#${item.name}`;
+    if (item.kind === "tag") {
+      chip.textContent = `#${item.name}`;
+    } else {
+      // An anchor's chip goes to the place it names.
+      chip.append(boxButton("mark-anchor", `↗ ${item.words}`, () => reveal(item)));
+    }
     chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
     return chip;
   });
@@ -1180,7 +1200,8 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     const name = field.value.trim().replace(/^#/, "");
     if (event.key !== "Enter" || !name) return;
     event.preventDefault();
-    if (!held.some((item) => item.name === name)) change([...held, { kind: "tag", name }]);
+    const has = held.some((item) => item.kind === "tag" && item.name === name);
+    if (!has) change([...held, { kind: "tag", name }]);
   });
   markPanel.replaceChildren(...chips, field);
   markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
@@ -1191,7 +1212,148 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
 document.addEventListener("mousedown", (event) => {
   const target = event.target as HTMLElement;
   if (openMark && !markPanel.contains(target) && !target.closest(".mark")) hideMark();
+  if (!anchorMenu.contains(target)) anchorMenu.remove();
 });
+
+// ---- anchors: a right-click in the chat attaches that place to a paragraph of a prompt
+
+const ANCHOR_WORDS = 6;
+const anchorMenu = document.createElement("div");
+anchorMenu.id = "anchor-menu";
+/** The prompt last typed in, which a new anchor goes to. */
+let lastArea: HTMLTextAreaElement | null = null;
+
+function firstWords(text: string, count: number): string {
+  const words = text.trim().split(/\s+/);
+  return words.slice(0, count).join(" ") + (words.length > count ? "…" : "");
+}
+
+/** The text range a right-click names: the selection if the text holds it, else its blocks. */
+function spanAt(holder: HTMLElement, key: string, target: HTMLElement): Omit<AnchorItem, "kind" | "key" | "session"> | null {
+  if (target.closest(".thinking")) return null;
+  const source = sources.get(key)!;
+  const points = (index: number) => Array.from(source.slice(0, index)).length;
+  const span = (from: number, to: number, words: string) =>
+    ({ start: points(from), end: points(to), words: firstWords(words, ANCHOR_WORDS) });
+  const selection = window.getSelection();
+  const selected = selection && !selection.isCollapsed
+    && holder.contains(selection.anchorNode) && holder.contains(selection.focusNode);
+  const picked = selected ? selection.toString().trim() : "";
+  const found = picked ? source.indexOf(picked) : -1;
+  if (found >= 0) return span(found, found + picked.length, picked);
+  // Formatted text reads differently from its source, so the blocks it lies in are named.
+  const block = (node: Node | null) =>
+    (node instanceof HTMLElement ? node : node?.parentElement)?.closest<HTMLElement>("[data-source-line]");
+  const range = selected ? selection.getRangeAt(0) : null;
+  const first = range ? block(range.startContainer) : block(target);
+  const last = range ? block(range.endContainer) : first;
+  if (!first || !last || !holder.contains(first)) {
+    return source.trim() ? span(0, source.length, picked || source) : null;
+  }
+  const lines = source.split("\n");
+  const offset = (line: number) => lines.slice(0, line).reduce((sum, text) => sum + text.length + 1, 0);
+  const from = offset(Number(first.dataset.sourceLine));
+  const to = Math.min(offset(Number(last.dataset.sourceEnd)), source.length);
+  const text = source.slice(from, to).trimEnd();
+  return span(from, from + text.length, picked || first.textContent || text);
+}
+
+/** Puts an anchor on a paragraph of a prompt, or on a new paragraph at its end. */
+function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem): void {
+  const marks = marksOf.get(area)!;
+  area.focus();
+  if (line === null && area.value) replaceRange(area, area.value.length, area.value.length, "\n");
+  const id = marks.ids[line ?? marks.ids.length - 1];
+  const held = marks.items.get(id) ?? [];
+  const same = (other: Item) => other.kind === "anchor" && other.key === item.key
+    && other.start === item.start && other.end === item.end;
+  if (!held.some(same)) marks.items.set(id, [...held, item]);
+  if (line === null) area.setSelectionRange(area.value.length, area.value.length);
+  remember();
+  drawMarks(area);
+}
+
+function showAnchorMenu(x: number, y: number, item: AnchorItem): void {
+  const areas = textAreas();
+  const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
+  const entry = (label: string, line: number | null, className = "") => {
+    const button = boxButton(className, label, () => {
+      anchorMenu.remove();
+      addAnchor(area, line, item);
+    });
+    return button;
+  };
+  const caretLine = area.value.slice(0, area.selectionStart).split("\n").length - 1;
+  const lines = area.value.split("\n")
+    .map((text, line) => ({ text, line }))
+    .filter(({ text }) => text.trim())
+    .sort((a, b) => Number(b.line === caretLine) - Number(a.line === caretLine));
+  const heading = document.createElement("div");
+  heading.className = "anchor-heading";
+  heading.textContent = "Anchor to";
+  anchorMenu.replaceChildren(
+    entry("Anchor", null, "anchor-new"),
+    ...(lines.length ? [heading] : []),
+    ...lines.map(({ text, line }) => entry(firstWords(text, 3), line)),
+  );
+  document.body.append(anchorMenu);
+  anchorMenu.style.left = `${Math.min(x, window.innerWidth - anchorMenu.offsetWidth - 8)}px`;
+  anchorMenu.style.top = `${Math.min(y, window.innerHeight - anchorMenu.offsetHeight - 8)}px`;
+}
+
+chat.addEventListener("contextmenu", (event) => {
+  const target = event.target as HTMLElement;
+  const holder = target.closest<HTMLElement>("#chat > [data-key]");
+  const key = holder?.dataset.key;
+  const session = menu?.current;
+  if (!holder || !key || !sources.has(key) || !session) return;
+  const span = spanAt(holder, key, target);
+  if (!span) return;
+  event.preventDefault();
+  showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") anchorMenu.remove();
+});
+
+function anchorsHeld(): AnchorItem[] {
+  return textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
+    .filter((item): item is AnchorItem => item.kind === "anchor");
+}
+
+/** The blocks of a drawn prompt or reply that an anchor's range covers. */
+function anchoredBlocks(item: AnchorItem): HTMLElement[] {
+  const holder = elements.get(item.key);
+  const source = sources.get(item.key);
+  if (!holder || source === undefined) return [];
+  if (item.key.startsWith("t:")) return [holder];
+  const lineAt = (point: number) => Array.from(source).slice(0, point).join("").split("\n").length - 1;
+  const from = lineAt(item.start);
+  const to = lineAt(Math.max(item.start, item.end - 1));
+  const blocks = Array.from(holder.querySelectorAll<HTMLElement>("[data-source-line]"))
+    .filter((block) => !block.querySelector("[data-source-line]"))
+    .filter((block) => Number(block.dataset.sourceLine) <= to && Number(block.dataset.sourceEnd) > from);
+  return blocks.length ? blocks : [holder];
+}
+
+/** A quiet bar beside whatever in the chat an unsent prompt is anchored to. */
+function paintAnchors(): void {
+  for (const block of chat.querySelectorAll(".anchored")) block.classList.remove("anchored");
+  for (const item of anchorsHeld()) {
+    for (const block of anchoredBlocks(item)) block.classList.add("anchored");
+  }
+}
+
+/** Brings an anchor's place into view and shows which it is. */
+function reveal(item: AnchorItem): void {
+  const blocks = anchoredBlocks(item);
+  blocks[0]?.scrollIntoView({ block: "center", behavior: "smooth" });
+  for (const block of blocks) {
+    block.classList.add("revealed");
+    window.setTimeout(() => block.classList.remove("revealed"), 1600);
+  }
+}
 
 /** A box for one prompt: the whole of one message, with its own Send and Clear. */
 function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
@@ -1224,6 +1386,7 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   body.addEventListener("mouseleave", () => { ghost.hidden = true; });
   new ResizeObserver(() => drawMarks(area)).observe(words);
   area.addEventListener("keydown", (event) => listKeys(area, event));
+  area.addEventListener("focus", () => { lastArea = area; });
   area.addEventListener("paste", (event) => {
     const text = event.clipboardData?.getData("text/plain");
     if (text) pasted.set(area, [...(pasted.get(area) ?? []), text]);

@@ -515,3 +515,28 @@ body.terminal-open #terminal { display: block; }
 
 #live:empty { display: none; }
 #live { margin-top: 12px; }
+
+.mark-anchor { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: none; color: var(--text); font-size: 13px; padding: 0; }
+
+#anchor-menu {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  max-width: 280px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+}
+#anchor-menu button { padding: 5px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); font-size: 13px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#anchor-menu button:hover { background: var(--pastel-blue); color: #fff; }
+#anchor-menu .anchor-new { font-weight: 600; }
+.anchor-heading { margin-top: 4px; padding: 5px 9px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+
+/* What an unsent prompt is anchored to. */
+.anchored { box-shadow: -3px 0 0 var(--pastel-blue); margin-left: -10px; padding-left: 10px; }
+.revealed { background: color-mix(in srgb, var(--pastel-blue) 22%, transparent); transition: background 0.4s; }

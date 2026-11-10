@@ -55,6 +55,7 @@ md.core.ruler.push("source-line", (state) => {
   for (const token of state.tokens) {
     if (token.map && token.type.endsWith("_open")) {
       token.attrSet("data-source-line", String(token.map[0]));
+      token.attrSet("data-source-end", String(token.map[1]));
     }
   }
 });
@@ -63,7 +64,7 @@ const ADD_TAGS = [
   "math", "mrow", "mi", "mo", "mn", "msup", "msub", "mfrac", "mover", "munder", "msqrt",
   "mtable", "mtr", "mtd", "annotation", "semantics", "mspace", "mtext", "mpadded",
 ];
-const ADD_ATTR = ["class", "style", "aria-hidden", "mathvariant", "encoding", "data-source-line"];
+const ADD_ATTR = ["class", "style", "aria-hidden", "mathvariant", "encoding", "data-source-line", "data-source-end"];
 const ALLOWED_URI_REGEXP = /^(?:https?|mailto|kyosei):/i;
 
 export function render(source: string): string {
