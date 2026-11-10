@@ -895,11 +895,11 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 .file-code code, .file-code code.hljs { display: inline; padding: 0; overflow: visible; background: none; font: inherit; white-space: inherit; }
 .file-line-mark { position: absolute; left: 0; right: 0; height: 19px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); pointer-events: none; }
 
-/* Each view tints the page lightly, so that the mode is seen at a glance: Records bluish,
-   Files purplish. The chat keeps the plain background, and the composer its own. */
-body.view-records { --background: #f1f5fb; }
-body.view-files { --background: #f5f1fb; }
-@media (prefers-color-scheme: dark) {
-  body.view-records { --background: #21262e; }
-  body.view-files { --background: #28242f; }
-}
+/* Each view tints its two bars, and nothing a person reads on: Records bluish, Files purplish
+   (KYO-732, KYO-736). The page, the side bar and the composer keep the plain background. */
+body.view-records { --view-tint: color-mix(in srgb, var(--kind-task) 16%, var(--background)); }
+body.view-files { --view-tint: color-mix(in srgb, var(--kind-plan) 16%, var(--background)); }
+body.view-records #views, body.view-records #top,
+body.view-files #views, body.view-files #top { background: var(--view-tint); }
+body.view-records .view-item[aria-current="page"] { color: var(--kind-task); }
+body.view-files .view-item[aria-current="page"] { color: var(--kind-plan); }
