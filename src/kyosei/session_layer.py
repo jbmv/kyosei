@@ -21,6 +21,7 @@ READING A TRANSCRIPT IS OPT-IN PER PROJECT (KYO-656). :func:`open_session` asks
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import shutil
@@ -167,6 +168,18 @@ def context_use(usage: transcript.Usage, window: int | None) -> ContextUse:
     return ContextUse(tokens, window, min(100, (tokens * 100 + window // 2) // window))
 
 
+def _joined(
+    first: transcript.TranscriptDelta, second: transcript.TranscriptDelta
+) -> transcript.TranscriptDelta:
+    """Two deltas read one after the other, as the one a single read would have returned."""
+    return transcript.TranscriptDelta(
+        **{
+            part.name: getattr(first, part.name) + getattr(second, part.name)
+            for part in dataclasses.fields(first)
+        }
+    )
+
+
 @dataclass(frozen=True)
 class SessionUpdate:
     """What one :meth:`LiveSession.refresh` learned."""
@@ -244,6 +257,9 @@ class LiveSession:
         self.log_dir = log_dir
         self.live_reply = LiveReply()
         self.pane_lookup = self._find_pane()
+        #: Rows a refresh read before its reading of the pane raised, and whether that
+        #: refresh followed a ``/clear``; the next refresh returns them (KYO-728).
+        self._unreported: tuple[transcript.TranscriptDelta, bool] | None = None
 
     def _tmux_binary(self) -> str | None:
         return find_tmux(self.environ)
@@ -331,12 +347,41 @@ class LiveSession:
             self.tmux(), self._pane_id(), log_unrecognised_screen=self._unrecognised
         )
 
+    @property
+    def unreported(self) -> bool:
+        """Whether a refresh that raised left rows for the next refresh to return."""
+        return self._unreported is not None
+
     def refresh(self) -> SessionUpdate:
-        """Follow any ``/clear``, read new transcript rows, then read the screen."""
+        """Follow any ``/clear``, read new transcript rows, then read the screen.
+
+        The transcript's reader keeps its place, so rows read here are not read again. When
+        reading the screen then raises, the rows are kept and the next refresh returns them
+        ahead of its own (KYO-728); before that they were lost to the caller.
+        """
         followed = self._follow_clear()
         delta = self.transcript.read()
         for reply in delta.replies:
             self.live_reply.observe_record(reply.text)
+        if self._unreported is not None:
+            kept, was_followed = self._unreported
+            self._unreported = None
+            if not followed:  # rows of a transcript this session has since left are dropped
+                delta = _joined(kept, delta)
+                followed = was_followed
+        try:
+            screen, background, in_progress, words = self._read_pane()
+        except BaseException:
+            self._unreported = (delta, followed)
+            raise
+        return SessionUpdate(
+            self.session_id, delta, screen, in_progress, background, followed, words
+        )
+
+    def _read_pane(
+        self,
+    ) -> tuple[pane.Screen | None, pane.BackgroundWork | None, str | None, pane.Terminal | None]:
+        """The screen, its background work, the reply in progress and the pane's words."""
         screen, background, in_progress, words = None, None, None, None
         raw = self._capture()
         if raw is not None:
@@ -348,9 +393,7 @@ class LiveSession:
                 in_progress = self.live_reply.observe_screen(raw)
             else:
                 self.live_reply.text = None
-        return SessionUpdate(
-            self.session_id, delta, screen, in_progress, background, followed, words
-        )
+        return screen, background, in_progress, words
 
     def screen(self) -> pane.Screen | None:
         """What the pane shows now, without reading the transcript; None with no pane."""
