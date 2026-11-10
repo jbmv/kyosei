@@ -15,7 +15,9 @@ WHAT IS WRITABLE. Exactly two things per project:
 And for this machine rather than a project: the send log, and the composer's unsent text
 (KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json`` (and, KYO-709,
 ``unfiled/<message id>.json``), private to this account and refused if it would lie inside a
-git repository.
+git repository. KYO-715 adds the files a prompt attaches,
+``$KYOSEI_HOME/composer/attachments/<project>/<session id>/<sha256>.<extension>``, written
+once by :func:`write_attachment` under a name it checks itself and never replaced.
 
 HOW IT HOLDS. One resolver, :func:`ideas_target`, for every idea route, read or
 write: the relative path is checked as text first (no absolute path, no NUL, no empty,
@@ -708,3 +710,93 @@ def remove_private(path: Path) -> None:
     """Remove a file of unsent text; one already gone is the wanted outcome."""
     with _WRITE_LOCK, contextlib.suppress(FileNotFoundError):
         path.unlink()
+
+
+# ------------------------------------------------- the files a prompt attaches (KYO-715)
+
+
+#: KYO-715: ``attachments/<project>/<session id>/<sha256>.<extension>``.
+ATTACHMENTS = "attachments"
+
+#: An attachment's file name: the hex sha256 of its bytes and the extension of its type.
+_ATTACHMENT_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|gif|webp|pdf)$")
+
+
+def _segment_refusal(value: str, what: str) -> Refusal | None:
+    if (
+        not value
+        or len(value) > 128
+        or value in (".", "..")
+        or value.startswith(".")
+        or any(char in value for char in "/\\\x00")
+    ):
+        return Refusal(
+            400,
+            f"{value!r} cannot name a directory of attachments: a {what} that names one is "
+            "not empty, holds no slash or NUL, and does not begin with a dot",
+            reason="bad-request",
+        )
+    return None
+
+
+def attachment_directory(
+    environ: dict[str, str], project: str, session_id: str, *, create: bool
+) -> Path:
+    """The directory of one project's session's attachments, or the refusal to use it.
+
+    With ``create`` it is made private and outside any git repository (as the other
+    composer files are); without, nothing is created. Its real path must lie inside the
+    real path of the attachments directory, so a planted symlink cannot move it.
+    """
+    for value, what in ((project, "project name"), (session_id, "session id")):
+        refusal = _segment_refusal(value, what)
+        if refusal is not None:
+            raise refusal
+    base = (
+        composer_directory(environ, ATTACHMENTS)
+        if create
+        else composer_kind_directory(environ, ATTACHMENTS)
+    )
+    directory = base / project / session_id
+    if create:
+        try:
+            (base / project).mkdir(mode=0o700, exist_ok=True)
+            directory.mkdir(mode=0o700, exist_ok=True)
+        except OSError as exc:
+            raise _composer_refusal(directory, str(exc)) from exc
+    real_base = Path(os.path.realpath(base))
+    real = Path(os.path.realpath(directory))
+    if real == real_base or not _within(real_base, real):
+        raise _composer_refusal(
+            directory, f"it resolves to {real}, outside {real_base}; remove the link"
+        )
+    return real
+
+
+def write_attachment(directory: Path, name: str, data: bytes) -> bool:
+    """Write an attachment once; True when it was created, False when it was there.
+
+    The name is checked here, whatever the caller did, so this function cannot write
+    outside ``directory`` or under a name a client chose. A file already at that name
+    holds the same bytes, because the name is their digest, so it is kept as it is.
+    """
+    if not _ATTACHMENT_NAME.match(name):
+        raise ValueError(f"{name!r} is not an attachment's name")
+    target = directory / name
+    with _WRITE_LOCK:
+        if os.path.lexists(target):
+            return False
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=f".{name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(tmp, target)
+            except FileExistsError:
+                return False
+        finally:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+    return True

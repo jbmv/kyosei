@@ -61,6 +61,10 @@ permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is t
 THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
 composer boxes (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
 message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device token.
+``sessions/{id}/attachments`` (POST) and ``sessions/{id}/attachments/{attachment}`` (GET,
+KYO-715) are the files a prompt attaches (:mod:`kyosei.serve_attachments`); that POST is the
+one that carries a file's own bytes and type rather than JSON, and only the types that module
+accepts, none of which a cross-site form can send.
 
 THE NOTE ROUTES (KYO-706). ``notes`` (GET, POST), ``notes/{id}`` (GET), ``notes/{id}/tags``
 (POST) and ``sessions/{id}/send-notes`` (POST) are :mod:`kyosei.serve_notes`, and need a device
@@ -297,6 +301,9 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     # KYO-709: one composer prompt with its marks in place (serve_notes).
     "send-prompt": ("POST",),
 }
+
+#: KYO-715: ``sessions/{id}/attachments`` (POST) and ``.../attachments/{id}`` (GET).
+SESSION_ATTACHMENTS_ROUTE = "attachments"
 
 #: KYO-706: the note routes, under ``/v1/projects/{project}/``.
 NOTES_ROUTE = "notes"
@@ -674,7 +681,12 @@ class ServeHandler(BaseHTTPRequestHandler):
                 f"page is a viewer you trust, start the server with --allow-origin "
                 f"{origin}",
             )
-        if method == "POST":
+        if method == "POST" and _is_attachment_upload(self.path):
+            from . import serve_attachments
+
+            # KYO-715: a file's own type, and only one no HTML form can send.
+            serve_attachments.declared_type(self.headers.get("Content-Type"))
+        elif method == "POST":
             content_type = (self.headers.get("Content-Type") or "").split(";")[0]
             if content_type.strip().lower() != "application/json":
                 raise Refusal(
@@ -730,6 +742,13 @@ class ServeHandler(BaseHTTPRequestHandler):
             and rest[4] in SESSION_COMPOSER_ROUTES
         ):
             allowed = SESSION_COMPOSER_ROUTES[rest[4]]
+        elif (
+            len(rest) in (5, 6)
+            and rest[0] == "projects"
+            and rest[2] == "sessions"
+            and rest[4] == SESSION_ATTACHMENTS_ROUTE
+        ):
+            allowed = ("POST",) if len(rest) == 5 else ("GET",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
             if not (
                 len(rest) == 3
@@ -763,6 +782,8 @@ class ServeHandler(BaseHTTPRequestHandler):
                 return self._session_send(rest[1], rest[3], rest[4], split.query)
             if len(rest) == 5 and rest[4] in SESSION_COMPOSER_ROUTES:
                 return self._session_composer(method, rest[1], rest[3], rest[4], split.query)
+            if len(rest) >= 5 and rest[4] == SESSION_ATTACHMENTS_ROUTE:
+                return self._session_attachments(rest[1], rest[3], rest[5:], split.query)
             return self._session_route(rest[1], rest[3:], split.query)
         return self._file_route(method, rest[1], rest[2], "/".join(rest[3:]))
 
@@ -974,6 +995,51 @@ class ServeHandler(BaseHTTPRequestHandler):
         return 200, _json_bytes(
             held.retract(root_of, session_id, authorization, self.headers.get("If-Match"))
         )
+
+    def _session_attachments(
+        self, name: str, session_id: str, rest: list[str], query: str
+    ) -> tuple:
+        """Save an attachment, or read one back. :mod:`kyosei.serve_attachments` decides."""
+        from . import serve_attachments
+
+        if query:
+            raise Refusal(
+                400,
+                "the attachments route takes no query string; send the token as "
+                "`Authorization: Bearer <token>`",
+            )
+
+        def root_of() -> str:
+            return self.server.project(name).root
+
+        environ, authorization = self.server.environ, self.headers.get("Authorization")
+        if rest:
+            media_type, data = serve_attachments.read(
+                environ, name, root_of, session_id, authorization, rest[0]
+            )
+            return (
+                200,
+                data,
+                media_type,
+                {"Cache-Control": _IMAGE_CACHE, "X-Content-Type-Options": "nosniff"},
+            )
+        try:
+            status, document = serve_attachments.upload(
+                environ,
+                name,
+                root_of,
+                session_id,
+                authorization,
+                self.headers.get("Content-Type"),
+                self.headers.get("Content-Length"),
+                self.rfile.read,
+            )
+        except Refusal as refusal:
+            if serve_attachments.too_large(refusal):
+                # The body was left unread, so what follows on the socket is not a request.
+                self.close_connection = True
+            raise
+        return status, _json_bytes(document)
 
     def _note_route(self, method: str, name: str, rest: list[str], query: str) -> tuple:
         """Every note route. Everything it decides is :mod:`kyosei.serve_notes`'s."""
@@ -1291,7 +1357,7 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
         f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, POST "
         f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "
-        f".../send-prompt, GET/POST "
+        f".../send-prompt or .../attachments, GET .../attachments/{{attachment}}, GET/POST "
         f"{project}/notes, GET {project}/notes/{{id}}, POST {project}/notes/{{id}}/tags, "
         f"GET {project}/tags and GET {project}/sessions/{{id}}/marks",
     )
@@ -1302,6 +1368,20 @@ def _field(document: dict, key: str) -> str:
     if not isinstance(value, str):
         raise Refusal(400, f'the JSON body needs "{key}": a path relative to ideas/')
     return value
+
+
+def _is_attachment_upload(path: str) -> bool:
+    """Whether a request path is ``/v1/projects/{p}/sessions/{id}/attachments``."""
+    parts = [urllib.parse.unquote(s) for s in urllib.parse.urlsplit(path).path.split("/")[1:]]
+    if len(parts) > 1 and parts[-1] == "":
+        parts = parts[:-1]
+    return (
+        len(parts) == 6
+        and parts[0] == "v1"
+        and parts[1] == "projects"
+        and parts[3] == "sessions"
+        and parts[5] == SESSION_ATTACHMENTS_ROUTE
+    )
 
 
 def _json_bytes(document: dict) -> bytes:

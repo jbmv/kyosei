@@ -13,7 +13,7 @@ permission (:mod:`kyosei.device_tokens`):
   also needs the ``send`` permission and ``serve_send: true``;
 - ``POST sessions/{id}/send-prompt`` -- ``{"segments": [...], "marks": [...]}`` sends one
   composer prompt with its marks in place (below). It needs the ``send`` permission, and the
-  ``notes`` permission as well when ``marks`` is not empty.
+  ``notes`` permission as well when a mark holds an anchor or a tag.
 - ``GET sessions/{id}/marks`` -- every sent note with a turn anchor in that session, its
   anchors given as a client draws the turns (KYO-710, below);
 - ``GET tags`` -- each tag now on a note, with how many notes carry it (KYO-710).
@@ -65,6 +65,18 @@ unchanged, with the ``on`` lines of a marked line (the form above) typed directl
 A marked line with no text is sent as its ``on`` lines alone. There is no ``[kyo-message]``
 header and no ``Note N`` heading, and a prompt without marks is the typed text exactly.
 
+ATTACHMENTS (KYO-715). A mark may also carry ``"attachments": [ids]``, each the id of a file
+saved by this session's attachments route (:mod:`kyosei.serve_attachments`), checked to exist
+when the message is held. Each becomes one typed line ``attached <absolute path>`` directly
+above the marked line, after that mark's ``on`` lines:
+
+    on note KYO-N41
+    attached /Users/me/.kyosei/composer/attachments/proj/<session>/<sha256>.png
+    this is what the screen shows
+
+A mark holding attachments and no anchor or tag files no note, and needs no ``notes``
+permission. A note filed for a mark does not record its attachments.
+
 Its anchors are validated when it is held, so a bad one is refused and nothing is held. Its
 notes are filed only when it is delivered, one for each marked line, with the line's text,
 anchors and tags, the token's device, ``entered`` as ``pasted`` for a line wholly inside a
@@ -96,7 +108,7 @@ import unicodedata
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from . import cmd_notes, commands, device_tokens, serve_send, session_layer
+from . import cmd_notes, commands, device_tokens, serve_attachments, serve_send, session_layer
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .errors import KyoseiError, NotFound, UsageError
 from .export import person_note_document
@@ -116,7 +128,7 @@ _NOTE_KEYS = frozenset({"text", "anchors", "tags", "entered"})
 _TAG_KEYS = frozenset({"add", "remove"})
 _SEND_KEYS = frozenset({"notes"})
 _PROMPT_KEYS = frozenset({"segments", "marks"})
-_MARK_KEYS = frozenset({"line", "anchors", "tags"})
+_MARK_KEYS = frozenset({"line", "anchors", "tags", "attachments"})
 
 #: The filters of ``GET notes``. Only ``tag`` may repeat.
 _FILTERS = ("tag", "on", "anchored-to", "session", "person", "sent")
@@ -561,11 +573,29 @@ def _marks(document: dict, line_count: int) -> list[dict]:
             normalised = sorted({cmd_notes.normalise_tag(tag) for tag in tags})
         except UsageError as exc:
             raise serve_send.bad_request(f"{where}: {exc}") from exc
-        if not anchors and not normalised:
+        attachments = mark.get("attachments", [])
+        if not isinstance(attachments, list) or not all(
+            isinstance(item, str) for item in attachments
+        ):
             raise serve_send.bad_request(
-                f"{where} holds no anchor and no tag, so there is nothing to mark; leave it out"
+                f'{where}: "attachments" must be a list of the ids the attachments route gave'
             )
-        marks.append({"line": line, "anchors": anchors, "tags": normalised, "given": mark})
+        if len(set(attachments)) != len(attachments):
+            raise serve_send.bad_request(f'{where}: "attachments" names an attachment twice')
+        if not anchors and not normalised and not attachments:
+            raise serve_send.bad_request(
+                f"{where} holds no anchor, no tag and no attachment, so there is nothing to "
+                "mark; leave it out"
+            )
+        marks.append(
+            {
+                "line": line,
+                "anchors": anchors,
+                "tags": normalised,
+                "attachments": attachments,
+                "given": mark,
+            }
+        )
     return marks
 
 
@@ -591,8 +621,13 @@ def _with_marks(
     return _merged(pieces)
 
 
+def _files_a_note(mark: dict) -> bool:
+    """Whether a mark becomes a note: one holding attachments alone does not (KYO-715)."""
+    return bool(mark["anchors"] or mark["tags"])
+
+
 def _prompt_message(
-    ctx: commands.Context,
+    ctx: commands.Context | None,
     segments: list[dict[str, str]],
     marks: list[dict],
     session_id: str,
@@ -606,9 +641,12 @@ def _prompt_message(
     for mark in sorted(marks, key=lambda m: m["line"]):
         start, end, entered = lines[mark["line"]]
         on = [_anchor_line(ctx, anchor, records, session_id) for anchor in mark["rows"]]
+        on += [f"attached {attachment['path']}" for attachment in mark["attached"]]
         if on:
             # An empty line's own line break follows, so it becomes its `on` lines alone.
             insertions[start] = "\n".join(on) + ("\n" if end > start else "")
+        if not _files_a_note(mark):
+            continue
         filing.append(
             {
                 "line": mark["line"],
@@ -645,8 +683,17 @@ def send_prompt(
         )
     segments = serve_send.message_segments(document)
     marks = _marks(document, len(_lines_of(segments)))
+    for index, mark in enumerate(marks):
+        mark["attached"] = serve_attachments.resolve(
+            server.environ,
+            project_name,
+            session_id,
+            mark["attachments"],
+            f"marks[{index}].attachments",
+        )
+        mark["rows"] = []
     filing: list[dict] = []
-    if marks:
+    if any(_files_a_note(mark) for mark in marks):
         # A mark becomes a note, so marking needs what filing a note needs.
         _device(server, authorization)
         with _context(server, root_of(), None, read_only=True) as ctx:
@@ -661,6 +708,9 @@ def send_prompt(
                     # malformed body here rather than a missing note or record.
                     raise serve_send.bad_request(str(exc)) from exc
             segments_sent, filing = _prompt_message(ctx, segments, marks, session_id)
+    elif marks:
+        # Attachments alone: no anchor to read, so no store is opened.
+        segments_sent, filing = _prompt_message(None, segments, marks, session_id)
     else:
         segments_sent = segments
     prompt = {

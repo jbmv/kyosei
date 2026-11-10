@@ -715,7 +715,7 @@ def test_a_prompt_without_marks_is_its_typed_text_exactly(
         ([{"line": 5, "tags": ["x"]}], "marks[0]: line 5 is outside the text"),
         ([{"line": -1, "tags": ["x"]}], "marks[0]: line -1"),
         ([{"line": 0, "tags": ["x"]}, {"line": 0, "tags": ["y"]}], "marks[1] marks line 0"),
-        ([{"line": 0}], "marks[0] holds no anchor and no tag"),
+        ([{"line": 0}], "marks[0] holds no anchor, no tag and no attachment"),
         ([{"line": "0", "tags": ["x"]}], "marks[0]"),
         ([{"line": 0, "tags": ["x"], "text": "copied"}], "marks[0] takes no 'text'"),
         ({"line": 0}, '"marks" must be a list'),
