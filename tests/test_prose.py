@@ -83,6 +83,8 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--add",  # a tag for `kyo notes tag`, checked by normalise_tag (KYO-705.c5)
         "--remove",  # a tag for `kyo notes tag`, checked by normalise_tag (KYO-705.c5)
         "--permission",  # a name from device_tokens.PERMISSIONS, not prose (KYO-699)
+        "--discussion",  # a discussion record id (KYO-658)
+        "--at",  # a prompt id or transcript record uuid from the turn index (KYO-658)
         "--kind",
         "--status",
         "--level",

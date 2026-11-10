@@ -115,8 +115,14 @@ WORK_POLICY_KEYS: frozenset[str] = frozenset(
 #: KYO-644: ``policy.requires_credit`` (optional, either archetype) -- filing a record of
 #: this kind, by `kyo new` or `kyo spawn`, needs a ``decided`` credit naming the person who
 #: decided it (``credits.filing_credit``). Set on the shipped ``decision``.
+#:
+#: KYO-658: ``policy.requires_discussion`` (optional, either archetype) -- filing a record
+#: of this kind names the discussion it came from, by spawning from it, ``--discussion``, or
+#: ``--opened-late``, which opens one at the filing and marks it late for good
+#: (``cmd_discuss.filing_discussion``, contract ``decision-requires-discussion``). Set on the
+#: shipped ``decision``; enforced where ``people:`` declares someone, as credits are.
 WORK_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset(
-    {"worker_model", "carried", "requires_credit"}
+    {"worker_model", "carried", "requires_credit", "requires_discussion"}
 )
 WORK_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
     {
@@ -127,6 +133,7 @@ WORK_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
         "counted",
         "carried",
         "requires_credit",
+        "requires_discussion",
     }
 )
 
@@ -138,7 +145,12 @@ KNOWLEDGE_POLICY_REQUIRED_KEYS: frozenset[str] = frozenset({"amendable", "swept"
 #: KYO-554 adds ``raises_docs_obligations``: a record of such a kind raises a standing docs
 #: obligation on each section it names (``cmd_records.raise_standing_obligations``).
 KNOWLEDGE_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset(
-    {"requires_evidence_links", "raises_docs_obligations", "requires_credit"}
+    {
+        "requires_evidence_links",
+        "raises_docs_obligations",
+        "requires_credit",
+        "requires_discussion",
+    }
 )
 KNOWLEDGE_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
     {
@@ -148,8 +160,15 @@ KNOWLEDGE_POLICY_BOOL_KEYS: frozenset[str] = frozenset(
         "requires_evidence_links",
         "raises_docs_obligations",
         "requires_credit",
+        "requires_discussion",
     }
 )
+
+#: KYO-658: the kind `kyo discuss open` files, by name. A discussion is a record of its own
+#: (decision KYO-654, DC2), and the commands that open, note and close one, and the filing
+#: rule that asks a decision for one, all need to know which kind it is. A name rather than
+#: a policy key because there is exactly one such kind and nothing else to configure.
+DISCUSSION_KIND = "discussion"
 
 #: ``accepts_from`` may name these in addition to another defined kind; ``produces`` may not
 #: target either: they are promotion *sources*, not kinds anything can produce
@@ -235,6 +254,12 @@ class Kind:
         """``policy.requires_credit`` (KYO-644): `kyo new` and `kyo spawn` refuse to file
         this kind without a ``decided`` credit; false when absent."""
         return self.policy.get("requires_credit", False) is True
+
+    @property
+    def requires_discussion(self) -> bool:
+        """``policy.requires_discussion`` (KYO-658): `kyo new` and `kyo spawn` refuse to
+        file this kind without naming its discussion; false when absent."""
+        return self.policy.get("requires_discussion", False) is True
 
     @property
     def raises_docs_obligations(self) -> bool:

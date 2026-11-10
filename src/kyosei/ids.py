@@ -71,6 +71,9 @@ CHILD_KIND_BY_LETTER = {
     # KYO-642: a credit -- the person whose judgement a verification, a gate clearing or
     # a decision rests on. ``p`` reads as *person*; ``c`` was the criterion.
     "p": "credit",
+    # KYO-658: a discussion's reference to one of the person's turns as the turn index
+    # stamped it. ``s`` reads as *stamp*; ``t`` was the touch.
+    "s": "turn-ref",
 }
 CHILD_LETTER_BY_KIND = {v: k for k, v in CHILD_KIND_BY_LETTER.items()}
 

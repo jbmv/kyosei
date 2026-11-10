@@ -111,7 +111,11 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: 28,154): crediting a person changes what an orchestrator types at five steps (verify,
 #: confirm, ungate, filing a decision, a late credit), and the workflow names each once;
 #: the flags themselves are left to the command reference below.
-WORKFLOW_TIER_CEILING_BYTES = 28_279
+#: Raised deliberately by KYO-658 from 28,279 to 28,478 (+199 bytes, the tier was at
+#: 28,279): a decision is now filed from the discussion `kyo discuss open` stamped when the
+#: choice was put, or opened late, which changes what an orchestrator does at section 2's
+#: filing step; the sentence that said how a decision is filed says it once.
+WORKFLOW_TIER_CEILING_BYTES = 28_478
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -1140,6 +1144,16 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-658: the discussion flags the workflow does not type by heart.
+    ("discuss", "--dropped"): (
+        "closes a discussion that produced nothing; the refusal of a bare `close` names it"
+    ),
+    ("new", "--discussion"): (
+        "names an open discussion; the workflow spawns from it, and the refusal names this"
+    ),
+    ("spawn", "--discussion"): (
+        "names a discussion the source did not come from; the refusal names it"
+    ),
     # KYO-644: the flags a credit is given by. The workflow names the act at each step and
     # the refusals name the flags they need, so the skill names none of them by heart.
     ("confirm", "--person"): CREDIT_DEFAULTED,

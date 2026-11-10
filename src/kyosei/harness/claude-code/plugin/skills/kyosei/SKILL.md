@@ -144,8 +144,10 @@ individually (`kyo edit <id> --plan <plan-id>`, `--plan` on `kyo new`, `--no-pla
 
 Consult `kyosei/kinds.yml` for what a kind accepts and produces. All three write paths enforce
 it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo spawn` the source
-record's own kind (KYO-50). A decision made in conversation is filed directly, `kyo new decision
---quote-file words.md --decision-file d.yml`, credited (KYO-644); one needing
+record's own kind (KYO-50). Before answering a turn that puts a choice to the person, run
+`kyo discuss open --title "<topic>"`, which stamps it (KYO-658); file the decision from it, `kyo
+spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
+(KYO-644). With none opened, `kyo new decision` takes `--opened-late --at <prompt>`. One needing
 design work first is a proposal.
 
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing

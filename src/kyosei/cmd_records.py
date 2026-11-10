@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from . import (
+    cmd_discuss,
     commands,
     credits,
     docs_obligations,
@@ -795,6 +796,14 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
     credit = credits.filing_credit(
         ctx, store, registry.require(kind), args, evidence_text, f"kyo new {kind}"
     )
+    # KYO-658: after the credit, so a filing missing both is told about the credit first.
+    discussion = cmd_discuss.filing_discussion(
+        ctx, store, registry.require(kind), args, command=f"kyo new {kind}"
+    )
+    if credit is not None and discussion is not None:
+        credits.apply_discussion_span(
+            ctx, store, args, credit, discussion.refs, discussion.current.store_fields()
+        )
 
     # KYO-330: `--from FILE` is an alternative to the six flags below, not a second
     # write path -- it parses to exactly what they would have produced and falls
@@ -942,16 +951,25 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         )
         # KYO-644: the decided credit, in the record's own transaction and stamp.
         credit_id = _write_filing_credit(ctx, store, record_id, credit, evidence, args, stamp)
+        # KYO-658: the discussion it came from, opened here when late, linked and closed.
+        discussed_before = {
+            rid: export.record_document(store, rid)
+            for rid in (discussion.record_ids() if discussion else [])
+        }
+        discussed = (
+            discussion.write(ctx, store, record_id, title, stamp) if discussion else None
+        )
+        discussion_ids = [discussed["discussion_id"]] if discussed else []
         # KYO-554: inside the same transaction, so the export carries them.
         standing_summary = raise_standing_obligations(ctx, store, record_id, stamp=stamp)
         after, events = commands._commit_and_export(
             store,
             command=f"new {kind}",
             actor=ctx.actor,
-            record_ids=[record_id],
-            before={record_id: None},
+            record_ids=[record_id, *discussion_ids],
+            before={record_id: None, **{rid: discussed_before.get(rid) for rid in discussion_ids}},
         )
-    commands._finish_mutation(store, [record_id], events)
+    commands._finish_mutation(store, [record_id, *discussion_ids], events)
 
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added)
@@ -993,6 +1011,7 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         lines.append(echo_value("sha256", evidence[1]))
     if credit is not None and credit_id is not None:
         lines += credits.lines(store, credit_id, credit)
+    lines += cmd_discuss.filing_lines(store, discussed)
     lines += standing_obligation_receipt(standing_summary)
     scope_lines, scope_data = _scope_suggestion(scopes, declared=scope, touches=touches)
     lines += scope_lines
@@ -1011,6 +1030,8 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             # KYO-538: the new record's id under the key every receipt shares.
             "id": record_id,
             "credit_id": credit_id,  # KYO-644
+            # KYO-658: the discussion it was filed from, or null.
+            "discussion_id": discussed["discussion_id"] if discussed else None,
             "record_id": record_id,
             # KYO-521: the evidence `--evidence-file` attached, or null.
             "evidence_id": evidence[0] if evidence is not None else None,
@@ -2249,6 +2270,19 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     credit = credits.filing_credit(
         ctx, store, target, args, evidence_text, f"kyo spawn {source_id} --kind {args.kind}"
     )
+    # KYO-658: a spawn from a discussion closes it; a kind that requires one names it.
+    discussion = cmd_discuss.filing_discussion(
+        ctx,
+        store,
+        target,
+        args,
+        command=f"kyo spawn {source_id} --kind {args.kind}",
+        spawn_source=source_id,
+    )
+    if credit is not None and discussion is not None:
+        credits.apply_discussion_span(
+            ctx, store, args, credit, discussion.refs, discussion.current.store_fields()
+        )
 
     # KYO-330: `--from FILE` stands in for --title/--description-file/--criteria-file/
     # --touches-file -- `kyo spawn` has no --plan, so a file's `plan:` is refused
@@ -2384,6 +2418,20 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             " VALUES (?, ?, ?, ?, ?, ?)",
             (link_id, lseq, record_id, "produced-by", source_id, stamp),
         )
+        # KYO-658: the discussion it came from, opened here when late, and closed.
+        discussed_before = {
+            rid: export.record_document(store, rid)
+            for rid in (discussion.record_ids() if discussion else [])
+            if rid != source_id
+        }
+        discussed = (
+            discussion.write(ctx, store, record_id, title, stamp) if discussion else None
+        )
+        discussion_ids = (
+            [discussed["discussion_id"]]
+            if discussed and discussed["discussion_id"] != source_id
+            else []
+        )
         # KYO-554: inside the transaction, so the export carries them.
         standing_summary = raise_standing_obligations(ctx, store, record_id, stamp=stamp)
 
@@ -2392,10 +2440,14 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             store,
             command=f"spawn {source_id} -> {record_id} ({source_kind} -> {args.kind})",
             actor=ctx.actor,
-            record_ids=[source_id, record_id],
-            before={**before, record_id: None},
+            record_ids=[source_id, record_id, *discussion_ids],
+            before={
+                **before,
+                record_id: None,
+                **{rid: discussed_before.get(rid) for rid in discussion_ids},
+            },
         )
-    commands._finish_mutation(store, [source_id, record_id], events)
+    commands._finish_mutation(store, [source_id, record_id, *discussion_ids], events)
 
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added_criteria)
@@ -2424,6 +2476,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         lines.append(echo_value("sha256", evidence[1]))
     if credit is not None and credit_id is not None:
         lines += credits.lines(store, credit_id, credit)
+    lines += cmd_discuss.filing_lines(store, discussed)
     # KYO-50.c2, decision 2: said out loud, because "the source is now settled" is
     # the assumption a spawn invites and the one thing this command does not do.
     unchanged = (
@@ -2451,6 +2504,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             "prior_art": prior_art_data,
             "id": record_id,  # KYO-538
             "credit_id": credit_id,  # KYO-644
+            # KYO-658: the discussion it was filed from (and closed), or null.
+            "discussion_id": discussed["discussion_id"] if discussed else None,
             "record_id": record_id,
             "standing_obligations": standing_summary,  # KYO-554
             "link_id": link_id,

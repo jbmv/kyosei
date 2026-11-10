@@ -88,7 +88,7 @@ def test_spawn_refuses_a_source_kind_the_target_does_not_accept(kyo, write_file)
     result = _work_spawn(kyo, bug, "proposal", write_file)
     assert result.code == 2, result
     assert CONTRACT_KIND_NOT_SPAWNABLE_FROM in result.err
-    assert "its accepts_from is [intake, idea, reminder]" in result.err
+    assert "its accepts_from is [intake, idea, reminder, discussion]" in result.err
     # Law 6: the caller is told every door that IS open, not just the closed one.
     assert "can spawn: evidence, investigation, task" in result.err
     assert "kyo promote <idea-file> --kind proposal" in result.err
@@ -280,7 +280,8 @@ def test_spawn_refuses_a_retired_source_and_names_a_live_one(kyo, write_file) ->
     assert refused.code == 2, refused
     assert CONTRACT_SPAWN_SOURCE_IS_RETIRED in refused.err
     # KYO-521 added `intake` and `reminder` to `decision`.
-    assert "other sources 'decision' accepts: [intake, investigation, reminder]" in refused.err
+    accepted = "[intake, investigation, reminder, discussion]"  # KYO-658: discussion
+    assert f"other sources 'decision' accepts: {accepted}" in refused.err
 
     investigation = new_record(kyo, kind="investigation", title="Which cache?")
     allowed = _spawn(
@@ -323,6 +324,7 @@ def test_a_decision_is_reachable_from_a_proposal_without_intake(kyo, write_file)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     raw["kinds"]["decision"]["accepts_from"] = ["proposal", "investigation"]
     raw["kinds"]["reminder"]["produces"].remove("decision")
+    raw["kinds"]["discussion"]["produces"].remove("decision")  # KYO-658
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     refused = kyo("new", "decision", "--title", "We adopt the new cache")
     assert refused.code == 2

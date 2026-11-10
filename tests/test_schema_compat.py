@@ -735,6 +735,9 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # sent state as a field set once, in place of the `sent` tag. A real DDL change, so
         # a real new hash.
         31: "1bd4e138ed4cda1f98f15e5e37d6b3bc602fdacff57246848e9a78d12b6543bd",
+        # KYO-658: the turn_refs table -- a discussion's references to the person's turns
+        # as the turn index stamped them. A real DDL change, so a real new hash.
+        32: "aaf2d2ee3bb1aca4306f80e59278015eecf3455cc38e02326eeef8c32b2e34be",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2620,6 +2623,7 @@ def test_every_new_column_has_a_consumer_and_the_doctor_check_passes(kyo, projec
 
     assert len(COLUMN_CONSUMERS["credits"]) == 35  # KYO-670 adds the three withdrawn_*
     assert len(COLUMN_CONSUMERS["credit_subjects"]) == 3
+    assert len(COLUMN_CONSUMERS["turn_refs"]) == 16  # KYO-658
     assert COLUMN_CONSUMERS["gates"]["cleared_as"]
     assert CONFIG_CONSUMERS["people"]
     store = open_store(project)
@@ -2789,3 +2793,91 @@ def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -
     assert kyo("rebuild").code == 0
     shown = kyo("notes", "show", note.json["note"]["id"], "--json").json["note"]
     assert shown["sent"] is None and shown["text"] == "a"
+
+
+# --------------------------------------------------------------------- KYO-658.c5
+
+
+def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
+    """KYO-658 was built on schema 31 (KYO-709) and bumps it by one, to 32."""
+    from kyosei.schema import EXPORT_FIELD_DEFAULTS
+
+    assert SCHEMA_VERSION == 32
+    assert EXPORT_FIELD_DEFAULTS[32] == {"turn_refs": []}
+
+
+def _a_discussion(kyo, project: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A discussion opened with no turn index, then closed with nothing produced."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "7c1d2e3f-1111-4a2b-9c3d-0123456789ab")
+    opened = kyo("discuss", "open", "--title", "Whether to keep the cache", "--json")
+    assert opened.code == 0, opened
+    record = opened.json["id"]
+    closed = kyo("discuss", "close", record, "--dropped", "--why", "decided elsewhere")
+    assert closed.code == 0, closed
+    return record
+
+
+def test_rebuild_accepts_a_schema_31_export_with_no_turn_references(
+    kyo, project: Path
+) -> None:
+    """`turn_refs` arrived at schema_version 32. A record exported under 31 has no such key,
+    and that absence must rebuild as "no discussion was ever opened on it", the empty list,
+    never as a turn reference derived from a credit's span."""
+    record = new_record(kyo, criteria=["a"])
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    assert doc["turn_refs"] == [], "this build writes the key"
+    doc["schema_version"] = 31
+    del doc["turn_refs"]
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        assert conn.execute("SELECT count(*) FROM turn_refs").fetchone()[0] == 0
+        version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        assert version == (str(SCHEMA_VERSION),)
+    finally:
+        conn.close()
+    assert kyo("show", record, "--json").json["turn_refs"] == []
+
+
+def test_a_schema_31_db_is_refused_and_rebuilt_at_32(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store whose db says 31 is refused with the rebuild remedy, and `kyo rebuild --force`
+    brings it to 32 with its discussions' turn references intact."""
+    record = _a_discussion(kyo, project, monkeypatch)
+    before = kyo("show", record, "--json").json["turn_refs"]
+    assert [r["role"] for r in before] == ["opened", "closed"]
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        conn.execute("UPDATE meta SET value = '31' WHERE key = 'schema_version'")
+        conn.commit()
+    finally:
+        conn.close()
+    refused = kyo("show", record)
+    assert refused.code != 0 and "kyo rebuild --force" in refused.err
+    assert kyo("rebuild", "--force").code == 0
+    assert kyo("show", record, "--json").json["turn_refs"] == before
+
+
+def test_a_discussion_round_trips_through_export_and_rebuild(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _a_discussion(kyo, project, monkeypatch)
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    before = json.loads(export_path.read_text(encoding="utf-8"))
+    assert before["turn_refs"][0]["id"] == f"{record}.s1"
+    assert before["turn_refs"][1]["why"] == "decided elsewhere"
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    after = json.loads(export_path.read_text(encoding="utf-8"))
+    assert after["turn_refs"] == before["turn_refs"]
+    # The counter is seeded above the loaded references, so the next one is s3.
+    noted = kyo("discuss", "note", record, "--file", "-", "--json", stdin="A or B.\n")
+    assert noted.code == 0, noted
+    assert noted.json["turn_ref"] == f"{record}.s3"
+    assert kyo("doctor").code in (0, 1)

@@ -451,8 +451,35 @@ def decided(project: Path, words: str = "the person's words deciding it") -> lis
     decision.write_text(DECISION_FILE, encoding="utf-8")
     return [
         "--quote-file", str(quote), "--decision-file", str(decision), "--person", TEST_PERSON,
-        *CREDIT_ELSEWHERE,
+        *CREDIT_ELSEWHERE, *opened_late(project, "decision"),
     ]  # fmt: skip
+
+
+def requires_discussion(project: Path, kind: str) -> bool:
+    """Does this project's registry make `kyo new` refuse ``kind`` without naming its
+    discussion? (KYO-658: ``policy.requires_discussion``)"""
+    raw = yaml.safe_load(kinds_yml(project).read_text(encoding="utf-8"))
+    policy = (raw["kinds"].get(kind) or {}).get("policy") or {}
+    return policy.get("requires_discussion") is True
+
+
+def drop_discussion_requirement(project: Path, kind: str = "decision") -> None:
+    """Remove ``requires_discussion`` from ``kind``'s policy in this project's registry.
+
+    For a test file about credits, whose decisions are filed for the credit and not for
+    the discussion they came from; KYO-658's rule has its own tests
+    (``tests/test_kyo658_discussions.py`` and the remedy tests), as KYO-656's opt-in does."""
+    path = kinds_yml(project)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    (raw["kinds"][kind].get("policy") or {}).pop("requires_discussion", None)
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def opened_late(project: Path, kind: str) -> list[str]:
+    """KYO-658: ``--opened-late`` for a test filing a decision about something else, where
+    the kind requires a discussion; the suite's projects keep no turn index, so it records
+    the opening as index absent."""
+    return ["--opened-late"] if requires_discussion(project, kind) else []
 
 
 def requires_credit(project: Path, kind: str) -> bool:
@@ -503,6 +530,9 @@ def new_record(
                 args += ["--quote-file", handle.name]
         if project is not None and requires_credit(project, kind):
             args += decision_credit_args(project)
+        # KYO-658: a record of the kind, not its discussion, which would be a second record.
+        if project is not None and requires_discussion(project, kind):
+            drop_discussion_requirement(project, kind)
         result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result.json["record"]["id"]

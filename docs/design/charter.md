@@ -324,10 +324,10 @@ kinds:
   decision:
     archetype: knowledge                 # amendable-in-place, claim-bearing, no status flow
     summary: Shapes architecture. Cites the evidence that supports it.
-    accepts_from: [intake, proposal, investigation, reminder]   # intake, reminder: KYO-521
+    accepts_from: [intake, proposal, investigation, reminder, discussion]   # KYO-521, KYO-658
     produces: []
     policy: { amendable: true, requires_evidence_links: true, requires_credit: true,   # KYO-644
-              swept: false, counted: false }
+              requires_discussion: true, swept: false, counted: false }               # KYO-658
   evidence:
     archetype: knowledge
     summary: Captured observations with method and instrument. Can be marked wrong.
@@ -390,6 +390,23 @@ kinds:
   `kyo spawn` asks for none; its `produced-by` link names the record the decision came from.
   KYO-644 adds `requires_credit`, consumed by both: a decision is filed only with a `decided`
   credit naming the declared person who decided it, their words, and what was recommended.
+- **A decision names the discussion it came from** (KYO-658, decision KYO-654 DC2 and DC3).
+  Reconstructing where a discussion began from the transcript after the decision proved both
+  unreliable and a cost the person could not carry, so its start is recorded when it starts. A
+  `discussion` is a knowledge kind, not counted and swept, filed only by `kyo discuss open`
+  (its `accepts_from` is empty), which stamps a turn reference at the person's latest confirmed
+  turn in the turn index: session, prompt id, transcript record uuid and the hook's time, none
+  of it typed by an agent (law 16). `kyo discuss note` keeps what was put to the person.
+  Spawning a decision, proposal, plan or task from it closes it, and `kyo discuss close
+  --dropped --why` closes one that produced nothing; open and closed are read from its turn
+  references, since a knowledge kind has no status flow. `requires_discussion`, set on the
+  shipped `decision`, is consumed by `kyo new` and `kyo spawn`: a decision is filed from its
+  discussion (spawned from it, from a record it produced, or `--discussion`), or with
+  `--opened-late`, which opens one in the same transaction at the turn `--at` names and marks
+  it late for good, `index_state: absent` where there is no index. Otherwise the filing is
+  refused (`decision-requires-discussion`). It applies where `people:` declares someone, as
+  credits do, so an upgrade refuses nothing before the operator has chosen. A decided credit
+  filed from a discussion takes its span from the discussion's turn references.
 
 ### Status and gates are orthogonal dimensions
 
@@ -509,6 +526,14 @@ governs: src/kyosei/schema.py
   (schema_version 29, KYO-670): `withdrawn_at`, `withdrawn_by` and `withdrawn_why` record when,
   by whom and why, the row and its words stay, and a credit is current only while it is neither
   superseded nor withdrawn.
+- **turn_refs** (schema_version 32, KYO-658): a discussion's references to the person's turns,
+  `KYO-n.sN`, with a role (`opened | note | closed`), the session, prompt id, transcript record
+  uuid, time and source copied from the turn index line, `index_state` (`indexed | absent`),
+  `late` on an opening written after its decision, and the note, the produced record or the
+  reason a closing carries. No transcript text is stored. A turn reference is not a note's
+  turn anchor: an anchor addresses characters inside one record and digests them from the
+  transcript, while a turn reference addresses a whole prompt from the index, which holds no
+  text and outlives the transcript.
 - **links** (typed edges): `blocks`, `duplicates`, `supersedes`, `same-question-as`,
   `needs-same-change-as`, `depends-on-decision <record#claim>`, `produced-by`. Cycle-checked
   at write time.
@@ -554,6 +579,7 @@ kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload
 kyo ungate <id> [--why]          # a gate waiting on a person: their credit, or --withdrawn (KYO-644)
 kyo credit <id>... --basis <credit>   # a credit for rows that already exist (KYO-644)
 kyo credit --withdraw <credit> --why  # retract a credit that should not exist, kept readable (KYO-670)
+kyo discuss open --title ...      # a discussion, stamped at the person's turn from the turn index (KYO-658)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --criteria c3,c7   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles

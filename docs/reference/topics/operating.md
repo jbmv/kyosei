@@ -775,6 +775,9 @@ kyo new decision --title "Use SQLite" \
             --evidence-file words.md      # a decision made in conversation, the operator's
                                            # words stored as evidence in the same act;
                                            # refused without it (KYO-521)
+kyo discuss open --title "Which store"     # a discussion, stamped at the person's turn
+                                           # from the turn index; a decision spawned from
+                                           # it closes it (KYO-658)
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
                                            # date; the brief shows its age (KYO-497)
 kyo show KYO-1

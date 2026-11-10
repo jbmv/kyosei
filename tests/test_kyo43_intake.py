@@ -74,6 +74,10 @@ def _decision_without_intake(project: Path) -> None:
     kinds = _registry(project)
     kinds["decision"]["accepts_from"] = ["proposal", "investigation"]
     kinds["reminder"]["produces"] = [k for k in kinds["reminder"]["produces"] if k != "decision"]
+    # KYO-658: nor does the `discussion` kind exist yet.
+    kinds.pop("discussion", None)
+    for entry in kinds.values():
+        entry["accepts_from"] = [k for k in entry.get("accepts_from") or [] if k != "discussion"]
     _write_registry(project, kinds)
 
 

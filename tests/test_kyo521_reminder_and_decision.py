@@ -248,6 +248,11 @@ def _pre_kyo521(project: Path) -> None:
         ]
     kinds["decision"]["accepts_from"] = ["proposal", "investigation"]
     kinds["carry"] = carry
+    # KYO-658: nor did the `discussion` kind exist.
+    kinds.pop("discussion", None)
+    for entry in kinds.values():
+        entry["accepts_from"] = [k for k in entry["accepts_from"] if k != "discussion"]
+    kinds["decision"]["policy"].pop("requires_discussion", None)
     _write_kinds(project, kinds)
 
 

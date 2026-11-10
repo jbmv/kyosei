@@ -211,8 +211,8 @@ Ask these together, in one message. Propose an answer for each from what you rea
   older spelling, which every `kyo` reads; write that one instead if a `kyo` older than
   KYO-519 also reads this store, because that build refuses the new spelling.
 - **[D6] Kinds.** Ask only: "Is there a recurring kind of work that bug, task, chore,
-  investigation, experiment, proposal, plan, reminder, decision and evidence do not fit?
-  (Default: keep the ten.)" Removing a kind that records use is not refused, so move those
+  investigation, experiment, proposal, plan, reminder, decision, discussion and evidence do
+  not fit? (Default: keep the eleven.)" Removing a kind that records use is not refused, so move those
   records first with `kyo edit <id> --kind <kind>`, or retire them.
 - **[D7] Scopes.** Ask only when Step 2 found several components: "Shall I declare scopes
   <names from the layout> in `kyosei/scopes.yml`? (Scope filters the board and groups the

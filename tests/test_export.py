@@ -162,6 +162,9 @@ def test_the_export_carries_the_full_record(kyo, project: Path, write_file) -> N
         "flags",
         # KYO-642: the credits filed on the record, subjects inline; empty when none.
         "credits",
+        # KYO-658: a discussion's turn references; empty on every other record, and
+        # absent in a pre-32 document (schema.EXPORT_FIELD_DEFAULTS[32]).
+        "turn_refs",
     }
 
 

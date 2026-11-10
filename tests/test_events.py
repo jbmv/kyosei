@@ -119,6 +119,8 @@ def test_every_mutating_command_writes_an_event(kyo, db, write_file, project) ->
         "notes": (
             "notes", "add", "--entered", "typed", "--file", write_file("a-note.md", "my words"),
         ),
+        # KYO-658: `open` files a discussion record; `note` and `close` write on it.
+        "discuss": ("discuss", "open", "--title", "Which cache"),
     }
     # `flag resolve` needs an existing flag id, so — like dispatch/report/split
     # below — it gets its own bespoke setup rather than a fixed tuple above.

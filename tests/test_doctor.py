@@ -1795,7 +1795,9 @@ def test_a_pre_kyo228_task_is_a_notice_naming_the_kind_the_entry_and_the_edit(
     kyo, project: Path
 ) -> None:
     """c1 and c2: a consumer store's shape, the notice, and its remedy clearing it."""
-    _set_kind_line(project, "task", "accepts_from", "[idea, bug, investigation, reminder]")
+    _set_kind_line(
+        project, "task", "accepts_from", "[idea, bug, investigation, reminder, discussion]"
+    )
     refused = kyo("new", "task", "--title", "t", "--json")
     assert refused.code != 0, refused  # the refusal the notice exists to foretell
     assert "kind-does-not-accept-intake" in refused.err, refused
@@ -1808,7 +1810,8 @@ def test_a_pre_kyo228_task_is_a_notice_naming_the_kind_the_entry_and_the_edit(
     assert "'task'" in finding and "'intake'" in finding, finding
     assert "`kyo new task` is refused" in finding, finding
     assert (
-        "under `task:` write `accepts_from: [idea, bug, investigation, reminder, intake]`"
+        "under `task:` write `accepts_from: "
+        "[idea, bug, investigation, reminder, discussion, intake]`"
     ) in finding
     assert "kind_grants_notice: false" in finding, finding
     assert len(finding) < doctor_module.MAX_FINDING_CHARS, len(finding)
@@ -1823,7 +1826,9 @@ def test_a_pre_kyo228_task_is_a_notice_naming_the_kind_the_entry_and_the_edit(
 def test_every_narrowed_kind_is_named_once_with_only_what_it_lacks(
     kyo, project: Path
 ) -> None:
-    _set_kind_line(project, "task", "accepts_from", "[idea, bug, investigation, reminder]")
+    _set_kind_line(
+        project, "task", "accepts_from", "[idea, bug, investigation, reminder, discussion]"
+    )
     _set_kind_line(project, "chore", "accepts_from", "[]")
     findings = _findings(kyo, "kind_grants_missing")
     assert len(findings) == 2, findings
@@ -1857,7 +1862,9 @@ def test_a_missing_kind_grant_prints_the_reciprocal_produces_edit_too(
 def test_a_project_can_decline_the_notice_with_one_config_line(kyo, project: Path) -> None:
     """c3: a kind narrowed on purpose is silenced by `kind_grants_notice: false`, and
     stays silenced — the key is read on every run, so the notice does not recur."""
-    _set_kind_line(project, "task", "accepts_from", "[idea, bug, investigation, reminder]")
+    _set_kind_line(
+        project, "task", "accepts_from", "[idea, bug, investigation, reminder, discussion]"
+    )
     assert _findings(kyo, "kind_grants_missing") != []
 
     _set_config_key(project, "kind_grants_notice", False)
@@ -1913,7 +1920,9 @@ def test_in_the_package_source_repo_the_source_default_is_the_comparison(
     source.parent.mkdir(parents=True, exist_ok=True)
     packaged = _kinds_path(project).read_text(encoding="utf-8")
     source.write_text(packaged, encoding="utf-8")
-    _set_kind_line(project, "task", "accepts_from", "[idea, bug, investigation, reminder]")
+    _set_kind_line(
+        project, "task", "accepts_from", "[idea, bug, investigation, reminder, discussion]"
+    )
     # Now make the SOURCE default agree with the narrowed project: no notice.
     source.write_text(_kinds_path(project).read_text(encoding="utf-8"), encoding="utf-8")
     assert _findings(kyo, "kind_grants_missing") == []

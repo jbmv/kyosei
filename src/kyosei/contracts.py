@@ -735,6 +735,13 @@ CREDIT_OUTCOME_REFINED = "refined"
 CREDIT_WORDS_FORMS: tuple[str, ...] = ("typed", "mid-turn", "choice", "accepted-suggestion")
 CREDIT_SUBJECT_KINDS: tuple[str, ...] = ("verification", "gate", "record")
 
+#: KYO-658: ``turn_refs.role``, what a discussion did at a turn of the person's.
+TURN_REF_ROLES: tuple[str, ...] = ("opened", "note", "closed")
+#: ``turn_refs.index_state``: stamped from a confirmed line of the turn index, or not.
+TURN_REF_INDEXED = "indexed"
+TURN_REF_ABSENT = "absent"
+TURN_REF_INDEX_STATES: tuple[str, ...] = (TURN_REF_INDEXED, TURN_REF_ABSENT)
+
 #: ``gates.cleared_as``: ``answered`` (the person answered and a credit names the gate) or
 #: ``withdrawn`` (the wait stopped mattering). NULL on a clearing written before schema 28.
 GATE_CLEARED_AS: tuple[str, ...] = ("answered", "withdrawn")

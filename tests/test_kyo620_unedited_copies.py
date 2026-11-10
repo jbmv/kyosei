@@ -221,11 +221,25 @@ def test_the_scrub_left_each_registry_s_values_unchanged(name: str) -> None:
         for part in parents:
             holder = holder[part]
         holder.pop(key)
+    # KYO-658 added a kind, and the token naming it to the kinds that accept it.
+    for kind, token in LATER_KINDS.get(name, ()):
+        new["kinds"].pop(kind)
+        for entry in new["kinds"].values():
+            entry["accepts_from"] = [t for t in entry.get("accepts_from") or [] if t != token]
     assert new == yaml.safe_load(old)
 
 
 #: Keys a later record added to a packaged registry on purpose, as paths into the YAML:
 #: KYO-644 sets `requires_credit` on the shipped `decision` kind.
 LATER_VALUE_CHANGES: dict[str, tuple[tuple[str, ...], ...]] = {
-    "kinds.yml": (("kinds", "decision", "policy", "requires_credit"),),
+    "kinds.yml": (
+        ("kinds", "decision", "policy", "requires_credit"),
+        ("kinds", "decision", "policy", "requires_discussion"),  # KYO-658
+    ),
+}
+
+#: Kinds a later record added to a packaged kinds.yml, with the token other kinds accept
+#: them by: KYO-658 adds `discussion`.
+LATER_KINDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "kinds.yml": (("discussion", "discussion"),),
 }
