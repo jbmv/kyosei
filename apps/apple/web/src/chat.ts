@@ -6,6 +6,11 @@ import {
   drawnSpan, heldLine, lineOf, nearest, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan,
 } from "./marks";
 import { render } from "./pipeline";
+import {
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind,
+  dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
+  recordPage, refParts, visit,
+} from "./records";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
@@ -176,6 +181,8 @@ const ICONS = {
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   held: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
+  chat: '<path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 16h-7.5L7 19.5V16H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 5z"/>',
+  records: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -2631,4 +2638,510 @@ document.addEventListener("keydown", (event) => {
 
 document.getElementById("start-button")!.addEventListener("click", () => post("start", {}));
 
-(window as any).kyo = kyo;
+// ------------------------------------------------------------------- the views (KYO-732)
+
+/**
+ * The views of the bar above the top bar. Each replaces the pane below it. A view is one
+ * entry here, a pane in the page marked `data-view`, and whatever it shows in the top bar and
+ * the side bar, marked the same way. The chat's pane is the page itself, which every other
+ * pane lies over, so the transcript stays drawn and keeps filling while another view shows.
+ */
+const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () => void }[] = [
+  { id: "chat", name: "Chat", icon: "chat" },
+  { id: "records", name: "Records", icon: "records", entered: () => enterRecords() },
+];
+let currentView = "chat";
+/** Where the transcript was when another view replaced it. */
+let chatPlace: { top: number; following: boolean } | null = null;
+
+function drawViews(): void {
+  document.getElementById("views")!.replaceChildren(...VIEWS.map((view) => {
+    const item = document.createElement("button");
+    item.className = "view-item";
+    if (view.id === currentView) item.setAttribute("aria-current", "page");
+    item.append(icon(view.icon), view.name);
+    item.addEventListener("click", () => showView(view.id));
+    return item;
+  }));
+}
+
+function showView(id: string): void {
+  if (id === currentView) return;
+  if (currentView === "chat") chatPlace = { top: scroller.scrollTop, following: atBottom() };
+  for (const view of VIEWS) document.body.classList.toggle(`view-${view.id}`, view.id === id);
+  currentView = id;
+  document.querySelectorAll<HTMLElement>("[data-view]").forEach((element) => {
+    element.hidden = element.dataset.view !== id;
+  });
+  drawViews();
+  if (id === "chat" && chatPlace) {
+    // Nothing was redrawn, so the transcript is where it was left: at its end if it was
+    // being followed, which the stream kept extending, and otherwise at the same place.
+    scroller.scrollTop = chatPlace.following ? scroller.scrollHeight : chatPlace.top;
+  }
+  VIEWS.find((view) => view.id === id)?.entered?.();
+}
+
+// --------------------------------------------------------------------- Records (KYO-732)
+
+const FILTERS_KEY = "records-filters";
+const FOLDS_KEY = "records-folds";
+const REVEAL_MS = 1600;
+const recordsPane = document.getElementById("view-records")!;
+const recordsNote = document.getElementById("records-note")!;
+const recordsLanding = document.getElementById("records-landing")!;
+const recordArticle = document.getElementById("record")!;
+const recordsList = document.getElementById("records-list")!;
+const recordsHistoryList = document.getElementById("records-history")!;
+const recordsHome = document.getElementById("records-home")!;
+
+let recordRows: RecordRow[] = [];
+let readyRecords = new Set<string>();
+let awaitingRecords = new Set<string>();
+/** Whether the lists have been asked for, and whether an answer has come. */
+let listsAsked = false;
+let listsRead = false;
+let listsProblem: string | null = null;
+const narrowing: Narrowing = {
+  open: false, dispatchable: false, awaiting: false, search: "",
+  ...stored<Partial<Narrowing>>(FILTERS_KEY, {}),
+};
+narrowing.search = "";
+let kindFolds = stored<Record<string, boolean>>(FOLDS_KEY, {});
+let viewedRecords: string[] = [];
+/** The one record that is open, or null on the landing page. */
+let openRecordId: string | null = null;
+/** The open record as the server last sent it, and the text it was sent as. */
+let openRecordDoc: Record<string, unknown> | null = null;
+let openRecordText = "";
+let openRecordProblem: string | null = null;
+/** An element of the open record to scroll to once it is drawn, such as a criterion. */
+let revealRef: string | null = null;
+/** The folded texts a reader has opened on the record's page, by item and label. */
+const openFolds = new Set<string>();
+let landingPlace = 0;
+
+function recordPrefixes(): Set<string> {
+  const prefixes = new Set<string>();
+  for (const id of [openRecordId, recordRows[0]?.id, recordRows.at(-1)?.id]) {
+    const prefix = id ? prefixOf(id) : null;
+    if (prefix) prefixes.add(prefix);
+  }
+  return prefixes;
+}
+
+function recordHref(ref: string): string {
+  return `kyosei://${encodeURIComponent(menu?.project ?? "project")}/${ref}`;
+}
+
+/** A text with the record ids in it drawn as links. */
+function linked(text: string, prefixes = recordPrefixes()): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  for (const part of refParts(text, prefixes)) {
+    if (!part.link) {
+      fragment.append(part.text);
+      continue;
+    }
+    const link = document.createElement("a");
+    link.className = "ref";
+    link.href = recordHref(part.link.ref);
+    link.textContent = part.text;
+    fragment.append(link);
+  }
+  return fragment;
+}
+
+/** Markdown drawn as the chat draws it, with the record ids in its text made links. */
+function prose(source: string): HTMLElement {
+  const holder = document.createElement("div");
+  holder.className = "reply";
+  holder.innerHTML = render(source);
+  addCopyButtons(holder);
+  const prefixes = recordPrefixes();
+  const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!(node.parentElement?.closest("a, button"))) texts.push(node as Text);
+  }
+  for (const text of texts) {
+    const parts = refParts(text.data, prefixes);
+    if (parts.some((part) => part.link)) text.replaceWith(linked(text.data, prefixes));
+  }
+  return holder;
+}
+
+function kindLabel(kind: string): HTMLElement {
+  const label = document.createElement("span");
+  label.className = "kind";
+  label.dataset.kind = kind;
+  label.textContent = kind;
+  return label;
+}
+
+function span(className: string, text: string): HTMLElement {
+  const element = document.createElement("span");
+  element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+/** One record in a list. In the side bar the id and kind stand over the title. */
+function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "rec-row";
+  if (row.id === openRecordId) item.classList.add("current");
+  if (row.status && row.status !== "open") item.classList.add("closed");
+  item.dataset.open = row.id;
+  const id = span("rec-id", row.id);
+  const title = span("rec-title", row.title);
+  if (place === "side") {
+    const head = document.createElement("div");
+    head.className = "rec-row-head";
+    head.append(id, kindLabel(row.kind));
+    item.append(head, title);
+  } else {
+    item.append(id, title);
+    if (row.status && row.status !== "open") item.append(span("rec-status", row.status));
+  }
+  return item;
+}
+
+function emptyRow(text: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "rec-empty";
+  row.textContent = text;
+  return row;
+}
+
+/** Replaces a list's rows and leaves it scrolled where it was. */
+function fill(holder: HTMLElement, rows: HTMLElement[]): void {
+  const place = holder.scrollTop;
+  holder.replaceChildren(...rows);
+  holder.scrollTop = place;
+}
+
+/** The side bar's list and history, the landing page's groups, and the filters' state. */
+function drawRecordLists(): void {
+  document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip) => {
+    const name = chip.dataset.filter as "open" | "dispatchable" | "awaiting";
+    chip.setAttribute("aria-pressed", String(narrowing[name]));
+  });
+  document.querySelectorAll<HTMLInputElement>(".records-search").forEach((field) => {
+    if (field.value !== narrowing.search) field.value = narrowing.search;
+  });
+  const shown = narrow(newestFirst(recordRows), narrowing, readyRecords, awaitingRecords);
+  const nothing = !listsRead ? "Reading the records." : "No record matches.";
+  fill(recordsList, shown.length ? shown.map((row) => recordRow(row, "side")) : [emptyRow(nothing)]);
+  fill(
+    recordsHistoryList,
+    viewedRecords.length
+      ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
+      : [emptyRow("No record has been viewed.")]);
+
+  const groups: HTMLElement[] = [];
+  for (const group of byKind(shown)) {
+    const folded = isFolded(group.kind, group.rows.length, kindFolds);
+    const head = document.createElement("div");
+    head.className = folded ? "kind-head" : "kind-head open";
+    head.setAttribute("role", "button");
+    head.setAttribute("aria-expanded", String(!folded));
+    head.append(span("chevron", "›"), kindLabel(group.kind), span("kind-count", String(group.rows.length)));
+    head.addEventListener("click", () => {
+      kindFolds = { ...kindFolds, [group.kind]: !folded };
+      store(FOLDS_KEY, kindFolds);
+      drawRecordLists();
+    });
+    groups.push(head);
+    if (!folded) groups.push(...group.rows.map((row) => recordRow(row, "landing")));
+  }
+  document.getElementById("records-groups")!.replaceChildren(
+    ...(groups.length ? groups : [emptyRow(nothing)]));
+
+  recordsNote.hidden = !listsProblem;
+  recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";
+  recordsHome.hidden = openRecordId === null;
+  document.getElementById("records-count")!.textContent = openRecordId !== null || !listsRead
+    ? ""
+    : shown.length === recordRows.length
+      ? plural(recordRows.length, "record")
+      : `${shown.length} of ${plural(recordRows.length, "record")}`;
+}
+
+function recordLine(line: Line, wide: boolean): HTMLElement {
+  const row = document.createElement("div");
+  row.className = wide ? "rec-line wide" : "rec-line";
+  const label = span("rec-label", "");
+  label.append(linked(line.label));
+  const text = span("rec-line-text", "");
+  text.append(linked(line.text));
+  row.append(label, text);
+  return row;
+}
+
+function recordItem(section: string, item: Item): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "rec-item";
+  // What a prompt can cite carries its id, for the composer to anchor to.
+  if (item.ref && item.citable) element.dataset.recordRef = item.ref;
+  if (item.ref) element.dataset.ref = item.ref;
+  const head = document.createElement("div");
+  head.className = "rec-item-head";
+  if (item.ref) head.append(span("ref-id", item.ref));
+  if (item.state) head.append(span(`rec-state ${item.tone ?? "plain"}`, item.state));
+  if (item.meta?.length) {
+    const meta = span("rec-meta", "");
+    meta.append(linked(item.meta.join(" · ")));
+    head.append(meta);
+  }
+  if (head.childNodes.length) element.append(head);
+  if (item.text) {
+    // Paths and one-line names are drawn as they are; sentences are markdown, as written.
+    const plain = section === "Touches" || section === "Members" || section === "Links";
+    const text = plain ? document.createElement("div") : prose(item.text);
+    if (plain) text.append(linked(item.text));
+    text.classList.add("rec-text");
+    if (plain) text.classList.add("plain");
+    element.append(text);
+  }
+  for (const line of item.lines ?? []) {
+    element.append(recordLine(line, section === "Reports" && line.label.includes(" · ")));
+  }
+  for (const folded of item.folded ?? []) {
+    const key = `${item.ref ?? section}/${folded.label}`;
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = folded.label;
+    details.append(summary);
+    // A brief is long, so it is drawn when it is first opened.
+    const draw = () => {
+      if (details.open && details.childElementCount === 1) details.append(prose(folded.text));
+      if (details.open) openFolds.add(key);
+      else openFolds.delete(key);
+    };
+    details.addEventListener("toggle", draw);
+    if (openFolds.has(key)) {
+      details.open = true;
+      draw();
+    }
+    element.append(details);
+  }
+  return element;
+}
+
+function drawRecord(): void {
+  recordsLanding.hidden = openRecordId !== null;
+  recordArticle.hidden = openRecordId === null;
+  if (openRecordId === null) {
+    recordArticle.replaceChildren();
+    return;
+  }
+  const place = recordsPane.scrollTop;
+  if (!openRecordDoc) {
+    recordArticle.replaceChildren(emptyRow(
+      openRecordProblem
+        ? `${openRecordId} could not be read. ${openRecordProblem}`
+        : `Reading ${openRecordId}.`));
+    return;
+  }
+  const titles = new Map(recordRows.map((row) => [row.id, row.title]));
+  const page = recordPage(openRecordDoc, titles);
+  const head = document.createElement("div");
+  head.className = "record-head";
+  head.dataset.recordRef = page.id;
+  head.append(span("ref-id", page.id), kindLabel(page.kind), span("rec-status", page.status));
+  const title = document.createElement("h1");
+  title.textContent = page.title;
+  const facts = document.createElement("dl");
+  facts.className = "record-facts";
+  for (const fact of page.facts) {
+    const term = document.createElement("dt");
+    term.textContent = fact.label;
+    const value = document.createElement("dd");
+    value.append(linked(fact.text));
+    facts.append(term, value);
+  }
+  const parts: HTMLElement[] = [head, title, facts];
+  if (page.description) parts.push(prose(page.description));
+  for (const section of page.sections) {
+    const heading = document.createElement("h2");
+    const count = document.createElement("small");
+    count.textContent = section.count;
+    heading.append(section.name, count);
+    parts.push(heading, ...section.items.map((item) => recordItem(section.name, item)));
+  }
+  if (page.none.length) {
+    const none = document.createElement("div");
+    none.className = "record-none";
+    none.textContent = `This record has no ${page.none.join(", ").toLowerCase()}.`;
+    parts.push(none);
+  }
+  recordArticle.replaceChildren(...parts);
+  recordsPane.scrollTop = place;
+  if (revealRef) {
+    const target = [...recordArticle.querySelectorAll<HTMLElement>("[data-ref]")]
+      .find((element) => element.dataset.ref === revealRef);
+    revealRef = null;
+    if (target) {
+      target.scrollIntoView({ block: "center" });
+      target.classList.add("revealed");
+      setTimeout(() => target.classList.remove("revealed"), REVEAL_MS);
+    }
+  }
+}
+
+function enterRecords(): void {
+  if (!listsAsked) {
+    listsAsked = true;
+    post("records", { want: "lists" });
+  }
+  drawRecordLists();
+  drawRecord();
+}
+
+/**
+ * Opens a record in the Records view, in place of the one that was open: one record is
+ * open at a time, whichever list, page or chat link it was opened from.
+ */
+function openRecord(target: LinkTarget): void {
+  if (openRecordId === null) landingPlace = recordsPane.scrollTop;
+  const changed = openRecordId !== target.record;
+  if (changed) {
+    openRecordId = target.record;
+    openRecordDoc = null;
+    openRecordText = "";
+    openRecordProblem = null;
+    openFolds.clear();
+  }
+  revealRef = target.ref !== target.record ? target.ref : null;
+  viewedRecords = visit(viewedRecords, target.record);
+  post("records", { want: "history", ids: viewedRecords });
+  post("records", { want: "record", id: target.record });
+  showView("records");
+  drawRecordLists();
+  drawRecord();
+  if (changed) recordsPane.scrollTop = 0;
+}
+
+/** Back to the landing page, where it was left. */
+function closeRecord(): void {
+  openRecordId = null;
+  openRecordDoc = null;
+  openRecordText = "";
+  openRecordProblem = null;
+  revealRef = null;
+  drawRecordLists();
+  drawRecord();
+  recordsPane.scrollTop = landingPlace;
+}
+
+const recordFrames = {
+  /** The project the Records view shows, and the history the app kept for it. */
+  records(frame: { project?: string; history?: unknown }): void {
+    recordRows = [];
+    readyRecords = new Set();
+    awaitingRecords = new Set();
+    listsRead = false;
+    listsProblem = null;
+    viewedRecords = historyFrom(frame.history);
+    openRecordId = null;
+    openRecordDoc = null;
+    openRecordText = "";
+    landingPlace = 0;
+    // A view already showing reads the new project; one not yet opened reads when it is.
+    listsAsked = currentView === "records";
+    if (listsAsked) post("records", { want: "lists" });
+    drawRecordLists();
+    drawRecord();
+  },
+
+  /** `kyo list`, `kyo next` and the gates waiting on the person, each null when unread. */
+  recordLists(frame: {
+    list?: { records?: RecordRow[] } | null; next?: unknown; gates?: unknown; error?: string | null;
+  }): void {
+    listsProblem = frame.error ?? null;
+    // A read that failed leaves the lists as they were.
+    if (Array.isArray(frame.list?.records)) {
+      recordRows = frame.list.records;
+      listsRead = true;
+    }
+    if (frame.next) readyRecords = dispatchableIds(frame.next);
+    if (frame.gates) awaitingRecords = awaitingIds(frame.gates);
+    drawRecordLists();
+    // A link or a member on the open page is named by the list's titles.
+    if (openRecordDoc) drawRecord();
+  },
+
+  /** One record as `kyo show --json` prints it, or why it could not be read. */
+  record(frame: { id: string; document?: Record<string, unknown> | null; error?: string | null }): void {
+    if (frame.id !== openRecordId) return;
+    if (!frame.document) {
+      // A refresh that failed leaves the page as it was.
+      if (!openRecordDoc) {
+        openRecordProblem = frame.error ?? "The server sent no record.";
+        drawRecord();
+      }
+      return;
+    }
+    const text = JSON.stringify(frame.document);
+    if (text === openRecordText && !revealRef) return;
+    openRecordDoc = frame.document;
+    openRecordText = text;
+    openRecordProblem = null;
+    drawRecord();
+  },
+
+  /** The project's event stream reported a change: read again what is being shown. */
+  recordsChanged(frame: { kind?: string }): void {
+    if (frame.kind && frame.kind !== "store") return;
+    if (listsAsked) post("records", { want: "lists" });
+    if (openRecordId !== null) post("records", { want: "record", id: openRecordId });
+  },
+};
+
+document.querySelectorAll<HTMLInputElement>(".records-search").forEach((field) => {
+  field.addEventListener("input", () => {
+    narrowing.search = field.value;
+    drawRecordLists();
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") field.blur();
+  });
+});
+
+document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    const name = chip.dataset.filter as "open" | "dispatchable" | "awaiting";
+    narrowing[name] = !narrowing[name];
+    store(FILTERS_KEY, {
+      open: narrowing.open, dispatchable: narrowing.dispatchable, awaiting: narrowing.awaiting,
+    });
+    drawRecordLists();
+  });
+});
+
+recordsHome.addEventListener("click", closeRecord);
+
+// A record is opened by a row of a list, a link on a record's page, or a kyosei:// link in
+// the chat, which the page would otherwise have nowhere to follow.
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const link = target?.closest<HTMLAnchorElement>("a[href]");
+  const href = link?.getAttribute("href") ?? "";
+  if (/^\s*kyosei:/i.test(href)) {
+    event.preventDefault();
+    const found = parseLink(href);
+    if (found) openRecord(found);
+    return;
+  }
+  const row = target?.closest<HTMLElement>("[data-open]");
+  if (!row?.dataset.open) return;
+  // Dragging across a row to select its id is not a press of the row.
+  const selection = getSelection();
+  if (selection && !selection.isCollapsed && row.contains(selection.anchorNode)) return;
+  openRecord({ record: row.dataset.open, ref: row.dataset.open });
+});
+
+drawViews();
+drawRecordLists();
+
+(window as any).kyo = Object.assign(kyo, recordFrames);

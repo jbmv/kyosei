@@ -50,6 +50,8 @@ final class SessionFeed {
     private var current: String?
     private var task: Task<Void, Never>?
     private var menuTask: Task<Void, Never>?
+    /// Follows the project's change events for the Records view (KYO-732).
+    private var recordsTask: Task<Void, Never>?
     @ObservationIgnored weak var webView: WKWebView?
 
     private(set) var project: String
@@ -113,9 +115,11 @@ final class SessionFeed {
         UserDefaults.standard.set(project, forKey: Self.projectKey)
         task?.cancel()
         menuTask?.cancel()
+        recordsTask?.cancel()
         startWatch?.cancel()
         task = nil
         menuTask = nil
+        recordsTask = nil
         startWatch = nil
         closeTerminal()
         terminalSession = nil
@@ -168,6 +172,8 @@ final class SessionFeed {
                 try? await Task.sleep(for: Self.menuRefresh)
             }
         }
+        sendRecordsStart()
+        recordsTask = Task { await followProject() }
     }
 
     /// Show another session of this window's project. A window stays on one project, so that
@@ -718,6 +724,129 @@ final class SessionFeed {
                 : bytes.starts(with: [0x47, 0x49]) ? "image/gif" : "image/webp"
             let data = "data:\(type);base64,\(reply.data.base64EncodedString())"
             send("image", #"{"key": \#(quoted("a:" + id)), "data": \#(quoted(data))}"#)
+        }
+    }
+
+    // MARK: The Records view (KYO-732)
+
+    private static let recordsHistoryKey = "recordsHistory"
+    private static let recordsHistoryLimit = 30
+    /// The gates that wait on the person, which the Awaiting you filter shows.
+    private static let awaitingTypes = ["awaiting:human-run", "awaiting:human-review"]
+
+    /// The records viewed most recently are kept in the app's own defaults, under the server
+    /// and project they belong to. They are what one person looked at on one machine, so they
+    /// are not written to the project's store, and reading them needs no server.
+    private var recordsHistoryName: String { "\(client.base.absoluteString) \(project)" }
+
+    private var recordsHistory: [String] {
+        let all = UserDefaults.standard.dictionary(forKey: Self.recordsHistoryKey)
+        return all?[recordsHistoryName] as? [String] ?? []
+    }
+
+    private func saveRecordsHistory(_ ids: [String]) {
+        var all = UserDefaults.standard.dictionary(forKey: Self.recordsHistoryKey) ?? [:]
+        all[recordsHistoryName] = Array(ids.prefix(Self.recordsHistoryLimit))
+        UserDefaults.standard.set(all, forKey: Self.recordsHistoryKey)
+    }
+
+    /// Tells the page which project its Records view shows, and the history kept for it. The
+    /// page drops what it held of another project.
+    private func sendRecordsStart() {
+        let history =
+            (try? JSONSerialization.data(withJSONObject: recordsHistory)).map {
+                String(decoding: $0, as: UTF8.self)
+            } ?? "[]"
+        send("records", #"{"project": \#(quoted(project)), "history": \#(history)}"#)
+    }
+
+    /// What the page's Records view asks: the lists, one record, or to keep its history.
+    func records(body: [String: Any]) {
+        switch body["want"] as? String {
+        case "lists":
+            loadRecordLists()
+        case "record":
+            if let id = body["id"] as? String { loadRecord(id) }
+        case "history":
+            if let ids = body["ids"] as? [String] { saveRecordsHistory(ids) }
+        default:
+            break
+        }
+    }
+
+    /// A served command's JSON for the page, or `null` when it was refused or is not JSON.
+    private func document(_ reply: (data: Data, status: Int)?) -> String {
+        guard let reply, reply.status == 200,
+            (try? JSONSerialization.jsonObject(with: reply.data)) != nil
+        else { return "null" }
+        return String(decoding: reply.data, as: UTF8.self)
+    }
+
+    /// Reads `kyo list`, `kyo next` and the gates that wait on the person, and hands the page
+    /// all three. These are reads any viewer may make, so no device token is sent.
+    private func loadRecordLists() {
+        let project = project
+        let client = client
+        Task {
+            async let list = try? client.command(project: project, "list")
+            async let next = try? client.command(project: project, "next")
+            async let gates = try? client.command(
+                project: project, "gates",
+                flags: Self.awaitingTypes.map { (name: "type", value: $0) })
+            let (listed, ready, waiting) = await (list, next, gates)
+            guard project == self.project else { return }
+            var problem = "null"
+            if listed == nil {
+                problem = quoted("The server could not be reached.")
+            } else if let listed, listed.status != 200 {
+                problem = quoted(refusal(listed.data))
+            }
+            send(
+                "recordLists",
+                #"{"project": \#(quoted(project)), "list": \#(document(listed)), "next": "#
+                    + #"\#(document(ready)), "gates": \#(document(waiting)), "error": \#(problem)}"#)
+        }
+    }
+
+    /// Reads one record as `kyo show --json` prints it. A refusal is the server's sentence.
+    private func loadRecord(_ id: String) {
+        let project = project
+        let client = client
+        Task {
+            let reply = try? await client.command(project: project, "show", positionals: [id])
+            guard project == self.project else { return }
+            var problem = "null"
+            if reply == nil {
+                problem = quoted("The server could not be reached.")
+            } else if let reply, reply.status != 200 {
+                problem = quoted(refusal(reply.data))
+            }
+            send(
+                "record",
+                #"{"id": \#(quoted(id)), "document": \#(document(reply)), "error": \#(problem)}"#)
+        }
+    }
+
+    /// Follows the project's change events and tells the page of each, so that the Records
+    /// view reads again what changed. After a lost connection the page is told once more,
+    /// since a change made meanwhile was not heard.
+    private func followProject() async {
+        let project = project
+        var retry = Backoff()
+        var lost = false
+        while !Task.isCancelled {
+            if lost { send("recordsChanged", #"{"kind": "store"}"#) }
+            do {
+                for try await event in client.projectEvents(project: project)
+                where event.name == "changed" {
+                    retry.reset()
+                    send("recordsChanged", event.data)
+                }
+            } catch {
+                if Task.isCancelled { return }
+            }
+            lost = true
+            try? await Task.sleep(for: retry.next())
         }
     }
 

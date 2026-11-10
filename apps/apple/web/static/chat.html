@@ -14,10 +14,32 @@
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
-    <header id="top"><span id="top-title"></span><span id="top-activity"></span></header>
+    <!-- The views, each of which replaces the pane below; chat.ts fills this from its list. -->
+    <nav id="views"></nav>
+
+    <!-- An element with data-view is shown only while that view is the current one. -->
+    <header id="top">
+      <span class="top-part" data-view="chat"><span id="top-title"></span><span id="top-activity"></span></span>
+      <span class="top-part" data-view="records" hidden>
+        <button id="records-home" hidden>All records</button>
+        <span id="records-count"></span>
+      </span>
+    </header>
 
     <nav id="menu">
       <div id="menu-panel">
+        <div id="records-side" data-view="records" hidden>
+          <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+          <div class="records-filters">
+            <button class="chip" data-filter="open" aria-pressed="false">Open</button>
+            <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>
+            <button class="chip" data-filter="awaiting" aria-pressed="false">Awaiting you</button>
+          </div>
+          <div id="records-list"></div>
+          <h4>History</h4>
+          <div id="records-history"></div>
+        </div>
+        <div data-view="chat">
         <h4>Sessions</h4>
         <div id="sessions"></div>
         <div id="sessions-more" class="session" hidden></div>
@@ -34,6 +56,7 @@
             <div id="side-finished" class="clickable"></div>
             <div id="side-tasks-done"></div>
           </section>
+        </div>
         </div>
       </div>
       <div id="menu-icon" aria-hidden="true">
@@ -86,6 +109,23 @@
         </div>
       </main>
     </div>
+    <section id="view-records" class="view-pane" data-view="records" hidden>
+      <div class="records-inner">
+        <div id="records-note" hidden></div>
+        <div id="records-landing">
+          <div class="records-tools">
+            <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+            <div class="records-filters">
+              <button class="chip" data-filter="open" aria-pressed="false">Open</button>
+              <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>
+            <button class="chip" data-filter="awaiting" aria-pressed="false">Awaiting you</button>
+            </div>
+          </div>
+          <div id="records-groups"></div>
+        </div>
+        <article id="record" hidden></article>
+      </div>
+    </section>
     <script src="chat.js"></script>
   </body>
 </html>

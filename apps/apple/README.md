@@ -14,6 +14,22 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
 kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
 
+## Views
+
+A bar above the top bar lists the views, and choosing one replaces the pane under it. The
+chat stays drawn beneath the others and keeps following its session, so returning to it
+reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
+`web/static/chat.html` marked with its `data-view`.
+
+Records shows the project's records, one at a time. With none open it lists them all by
+kind; the side bar lists them newest first above the records viewed most recently. Search
+and the three filters (Open, Dispatchable, Awaiting you) apply to both lists. A
+`kyosei://` link in the chat opens its record there. The view reads `cmd/list`, `cmd/next`,
+`cmd/gates` and `cmd/show/<id>`, which need no device token, and reads them again when the
+project's event stream reports a change to the store. Its logic is in `web/src/records.ts`.
+The viewing history is kept in the app's own defaults for each server and project, not in
+the store.
+
 ## Running it
 
 ```

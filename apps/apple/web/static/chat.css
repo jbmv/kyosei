@@ -12,6 +12,19 @@
   --failed: #b3362b;
   --link: #2f62b5;
   --apple-green: #34c759;
+  /* The bar of views above the top bar (KYO-732). */
+  --views-height: 34px;
+  /* One pastel for each kind of record, drawn as bare text. */
+  --kind-task: #5f93d2;
+  --kind-bug: #d27f76;
+  --kind-chore: #93929f;
+  --kind-plan: #9482d2;
+  --kind-proposal: #bf85c4;
+  --kind-decision: #c9923f;
+  --kind-investigation: #49a898;
+  --kind-discussion: #4fa7ba;
+  --kind-evidence: #79a858;
+  --kind-reminder: #d0829e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -27,6 +40,16 @@
     --failed: #e8796e;
     --link: #82aeef;
     --apple-green: #30d158;
+    --kind-task: #8fb8e8;
+    --kind-bug: #eba39b;
+    --kind-chore: #b5b4c0;
+    --kind-plan: #b7a6ea;
+    --kind-proposal: #d9a8dc;
+    --kind-decision: #e5b873;
+    --kind-investigation: #7fcdbf;
+    --kind-discussion: #86cbdb;
+    --kind-evidence: #a3cb85;
+    --kind-reminder: #e8a8be;
   }
 }
 
@@ -158,7 +181,7 @@ a { color: var(--link); }
 #top {
   position: fixed;
   z-index: 1;
-  top: 0;
+  top: var(--views-height);
   left: 0;
   right: 0;
   height: 46px;
@@ -171,7 +194,7 @@ a { color: var(--link); }
   font-size: 14px;
 }
 
-#page { padding-top: 46px; margin-right: var(--composer-width); }
+#page { padding-top: calc(46px + var(--views-height)); margin-right: var(--composer-width); }
 
 #composer {
   position: fixed;
@@ -321,7 +344,7 @@ a { color: var(--link); }
 
 #menu-icon, #side-toggle {
   position: fixed;
-  top: 10px;
+  top: calc(10px + var(--views-height));
   z-index: 3;
   width: 30px;
   height: 26px;
@@ -337,7 +360,7 @@ a { color: var(--link); }
 #menu-icon { left: 10px; }
 #terminal-toggle {
   position: fixed;
-  top: 10px;
+  top: calc(10px + var(--views-height));
   right: calc(var(--composer-width) + 18px);
   z-index: 3;
   width: 30px;
@@ -413,7 +436,7 @@ body.terminal-open #terminal { display: flex; }
 #menu-panel {
   position: fixed;
   z-index: 2;
-  top: 0;
+  top: var(--views-height);
   bottom: 0;
   left: 0;
   width: 300px;
@@ -637,3 +660,162 @@ body.terminal-open #terminal { display: flex; }
 body.ended #chat,
 body.ended #live { opacity: 0.55; }
 .copy-code .icon { width: 16px; height: 16px; vertical-align: 0; }
+
+/* ------------------------------------------------------------------ the views (KYO-732) */
+
+[data-view][hidden] { display: none !important; }
+
+/* The bar of views ends at the composer's separator. Each view is a bare icon with its name:
+   the accent colour marks the current one, and the others darken under the pointer. */
+#views {
+  position: fixed;
+  z-index: 4;
+  top: 0;
+  left: 0;
+  right: calc(var(--composer-width) + 6px);
+  height: var(--views-height);
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 16px;
+  background: var(--background);
+  border-bottom: 1px solid var(--soft-line);
+}
+.view-item { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
+.view-item:hover { color: var(--text); }
+.view-item[aria-current="page"] { color: var(--link); font-weight: 600; }
+.view-item .icon { width: 15px; height: 15px; vertical-align: 0; }
+
+.top-part { display: flex; align-items: center; min-width: 0; }
+#top-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A view's pane lies over the transcript, which stays in the page and keeps its place. */
+.view-pane {
+  position: fixed;
+  z-index: 1;
+  top: calc(46px + var(--views-height));
+  left: 0;
+  right: calc(var(--composer-width) + 6px);
+  bottom: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  background: var(--background);
+}
+body.terminal-open .view-pane { bottom: 46%; }
+.records-inner { max-width: 780px; margin: 0 auto; padding: 22px 28px 40px; }
+
+/* ---------------------------------------------------------------------------- Records */
+
+/* Bare text in the accent colour, as the composer's Send is. */
+#records-home { padding: 0; border: 0; background: none; color: var(--link); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+#records-home::before { content: "\2039\00a0"; }
+#records-home:hover { color: var(--pastel-blue); text-decoration: underline; }
+#records-home[hidden] { display: none; }
+#records-home:not([hidden]) + #records-count { margin-left: 14px; }
+#records-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.records-search {
+  width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--background);
+  color: var(--text);
+  font: 13.5px -apple-system, system-ui, sans-serif;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.records-search:focus { border-color: var(--muted); }
+.records-search::placeholder { color: var(--muted); }
+
+/* The filters are the view's only chips. */
+.records-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 2px 11px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.chip:hover { color: var(--text); border-color: var(--muted); }
+.chip[aria-pressed="true"] { border-color: var(--pastel-blue); background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); color: var(--text); }
+
+.kind { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.kind[data-kind="task"] { color: var(--kind-task); }
+.kind[data-kind="bug"] { color: var(--kind-bug); }
+.kind[data-kind="chore"] { color: var(--kind-chore); }
+.kind[data-kind="plan"] { color: var(--kind-plan); }
+.kind[data-kind="proposal"] { color: var(--kind-proposal); }
+.kind[data-kind="decision"] { color: var(--kind-decision); }
+.kind[data-kind="investigation"] { color: var(--kind-investigation); }
+.kind[data-kind="discussion"] { color: var(--kind-discussion); }
+.kind[data-kind="evidence"] { color: var(--kind-evidence); }
+.kind[data-kind="reminder"] { color: var(--kind-reminder); }
+
+/* An id is text: it can be selected and copied wherever it is drawn. */
+.rec-id, .ref-id { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: nowrap; user-select: text; -webkit-user-select: text; cursor: text; }
+
+.rec-row { padding: 6px 10px; border-radius: 7px; font-size: 14px; line-height: 1.35; cursor: default; }
+.rec-row:hover { background: var(--panel); }
+.rec-row.current { background: var(--line); }
+.rec-row.closed .rec-title { color: var(--muted); }
+.rec-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rec-title { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.rec-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.rec-empty { padding: 6px 10px; color: var(--muted); font-size: 13.5px; }
+
+/* The side bar in Records: the list takes two thirds, and History the last. It stays out
+   while its search box is being typed in. */
+#menu:focus-within #menu-panel { transform: none; }
+body.view-records #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
+#records-side { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+#records-side > .records-search { flex: none; width: auto; margin: 0 4px; }
+#records-side > .records-filters { flex: none; margin: 0 4px; }
+#records-list { flex: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#records-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
+#records-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* The landing page: one line for each record, under its kind. */
+.records-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.records-tools .records-search { flex: 1; min-width: 200px; }
+.kind-head { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 4px; padding: 2px 10px; cursor: default; }
+.kind-head:hover .chevron { color: var(--text); }
+.kind-head .chevron { display: inline-block; color: var(--muted); }
+.kind-head.open .chevron { transform: rotate(90deg); }
+.kind-head .kind { font-size: 13.5px; }
+.kind-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+#records-groups .rec-row { display: flex; align-items: baseline; gap: 12px; }
+#records-groups .rec-id { flex: none; min-width: 64px; }
+#records-groups .rec-title { flex: 1; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
+#records-note { margin-bottom: 14px; color: var(--muted); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+#records-note[hidden] { display: none; }
+
+/* A record's page. */
+#record[hidden], #records-landing[hidden] { display: none; }
+.record-head { display: flex; align-items: baseline; gap: 12px; }
+.record-head .ref-id { font-size: 13px; }
+.record-head .kind { font-size: 13px; }
+#record h1 { margin: 6px 0 12px; font-size: 1.35em; line-height: 1.3; }
+.record-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0 0 18px; font-size: 13.5px; }
+.record-facts dt { color: var(--muted); }
+.record-facts dd { margin: 0; overflow-wrap: anywhere; }
+#record h2 { display: flex; align-items: baseline; gap: 8px; margin: 28px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--soft-line); font-size: 1.04em; }
+#record h2 small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.rec-item { margin: 0 -10px; padding: 9px 10px; border-radius: 7px; }
+.rec-item + .rec-item { border-top: 1px solid var(--soft-line); border-radius: 0; }
+.rec-item.revealed { border-radius: 7px; }
+.rec-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.rec-state { font-size: 12.5px; font-weight: 600; }
+.rec-state.quiet { color: var(--muted); font-weight: 500; }
+.rec-state.running { color: var(--apple-green); }
+.rec-meta { color: var(--muted); font-size: 12.5px; }
+.rec-text { margin-top: 3px; }
+.rec-text.plain { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rec-text > :last-child { margin-bottom: 0; }
+.rec-line { display: grid; grid-template-columns: 132px 1fr; gap: 12px; margin-top: 4px; font-size: 13.5px; line-height: 1.5; }
+.rec-line.wide { display: block; }
+.rec-line.wide .rec-label { display: block; }
+.rec-label { color: var(--muted); overflow-wrap: anywhere; }
+.rec-line-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rec-item details { margin-top: 6px; font-size: 13.5px; }
+.rec-item summary { color: var(--link); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-item summary:hover { color: var(--pastel-blue); }
+.rec-item details > .reply { margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--line); font-size: 14px; }
+.record-none { margin-top: 26px; color: var(--muted); font-size: 13px; }
+a.ref { text-decoration: none; }
+a.ref:hover { text-decoration: underline; }
