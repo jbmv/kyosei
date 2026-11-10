@@ -184,7 +184,7 @@
         "worked_from_sha": "<SHA>"
       }
     ],
-    "schema_version": 30,
+    "schema_version": 31,
     "scope": null,
     "since_note": null,
     "status": "open",

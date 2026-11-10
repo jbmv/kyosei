@@ -170,8 +170,9 @@ def test_no_schema_bump_ships_with_this() -> None:
     # (docs_obligations.dispatch_id nullable, for a record's standing obligations).
     # The bump to 28 is KYO-642's (credits, credit_subjects, gates.cleared_as). The bump
     # to 29 is KYO-670's (a credit's withdrawal columns). The bump to 30 is KYO-705's (a
-    # person's notes, their anchors, tags and tag changes).
-    assert SCHEMA_VERSION == 30
+    # person's notes, their anchors, tags and tag changes). The bump to 31 is KYO-709's (a
+    # note's sent state).
+    assert SCHEMA_VERSION == 31
 
 
 # ------------------------------------------------------------------------- c7, c8
