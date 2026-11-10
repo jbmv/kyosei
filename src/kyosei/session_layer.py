@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from .cmd_controller import Tmux, controller_env, find_tmux
 from .cmd_sessions import recorded_transcript_path
-from .cmd_statusline import read_limits
+from .cmd_statusline import read_cache, read_limits
 from .config import READ_TRANSCRIPTS_KEY, Config, store_home, transcripts_opted_in
 from .errors import KyoseiError
 from .harness import claude_code_pane as pane
@@ -135,6 +135,9 @@ class SessionFacts:
     #: The account's usage limits as `kyo statusline` last saved them, read at each build
     #: of the facts; None with no file or no window left (KYO-714).
     limits: dict | None = None
+    #: This session's prompt cache as `kyo statusline` last saved it, read at each build of
+    #: the facts; None when nothing was saved for it (KYO-715).
+    cache: dict | None = None
 
 
 def read_line_totals(path: Path) -> transcript.LinesChanged:
@@ -280,6 +283,7 @@ class LiveSession:
             self.transcript.latest_permission_mode,
             self.lines_changed(),
             read_limits(self.environ),
+            read_cache(self.session_id, self.environ),
         )
 
     def lines_changed(self) -> transcript.LinesChanged:

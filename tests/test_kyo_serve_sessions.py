@@ -529,6 +529,60 @@ def test_a_changed_limits_file_is_read_again_without_a_restart(
     assert event["facts"]["limits"]["five_hour"]["used_percentage"] == 61.0
 
 
+# ------------------------------------------- KYO-715: the session's prompt cache
+
+
+def save_cache(store_home: Path, session_id: str, *, warm: bool, expires_at: int | None) -> None:
+    store_home.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "warm": warm,
+        "expires_at": expires_at,
+        "recache_tokens_if_cold": 45000,
+        "read_at": "2026-11-09T12:00:00.000Z",
+    }
+    (store_home / "prompt-cache.json").write_text(
+        json.dumps({"sessions": {session_id: entry}}), encoding="utf-8"
+    )
+
+
+def test_facts_carry_the_sessions_saved_cache_with_an_iso_expiry(
+    bed: Bed, store_home: Path
+) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    save_cache(store_home, OLD, warm=True, expires_at=LIMITS_RESET)
+    cache = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["cache"]
+    assert cache == {
+        "warm": True,
+        "expires_at": "2033-05-18T03:33:19.000Z",
+        "recache_tokens_if_cold": 45000,
+        "read_at": "2026-11-09T12:00:00.000Z",
+    }
+
+
+def test_facts_state_no_cache_for_a_session_with_nothing_saved(
+    bed: Bed, store_home: Path
+) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["cache"] is None
+    save_cache(store_home, NEW, warm=True, expires_at=LIMITS_RESET)
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["cache"] is None
+
+
+def test_a_changed_cache_is_read_again_without_a_restart(
+    bed: Bed, store_home: Path, stream
+) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    save_cache(store_home, OLD, warm=True, expires_at=LIMITS_RESET)
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["cache"]["warm"] is True
+    opened = stream()
+    assert opened.event("ready")["facts"]["cache"]["warm"] is True
+    save_cache(store_home, OLD, warm=False, expires_at=None)
+    second = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["cache"]
+    assert second["warm"] is False and second["expires_at"] is None
+    # The stream says so too, though the transcript did not change.
+    assert opened.event("facts")["facts"]["cache"]["warm"] is False
+
+
 def test_a_session_with_no_reply_has_no_facts(bed: Bed) -> None:
     bed.write_transcript(bed.rows(1, source=FACTS_FILE))
     assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"] is None
