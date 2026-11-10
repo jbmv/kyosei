@@ -324,7 +324,19 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: changes, and a prior export simply has no ledger file, which reads as no notes
 #: (``ledgers.read_person_notes_in``) and is what was true of it. A real DDL change, so a
 #: real new hash.
-SCHEMA_VERSION = 30
+#: Bumped to 31 for KYO-709: ``person_notes.sent_at``, ``sent_session`` and
+#: ``sent_message``, a note's sent state as a field set once and never edited: when the
+#: message holding it was delivered, to which session, and which held message it was. It
+#: was a ``sent`` tag, which a person could remove. A note's ledger line carries ``sent`` as
+#: it was filed (a note filed by ``send-prompt`` is sent when it is filed); a note sent
+#: later, by ``send-notes``, gets the field from a ``notes sent`` event, because its own
+#: line is never rewritten. A line written at 30 carries no ``sent``
+#: (:data:`PERSON_NOTE_FIELD_DEFAULTS` [31]), and a ``sent`` tag a line written at 30 or
+#: earlier gave a note is migrated by the rebuild: the note's field takes the time of the
+#: tag's own change (or the note's filing, if it was filed with the tag), with no session
+#: and no message, which nothing recorded, and the tag is gone
+#: (:func:`kyosei.rebuild._load`). A real DDL change, so a real new hash.
+SCHEMA_VERSION = 31
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -939,6 +951,11 @@ CREATE TABLE docs_obligations (
 -- wrote nothing. `person` is a key under `people:` in kyosei/config.yml, or NULL where the
 -- project declares nobody; `author` is the actor that ran the write. `device` names the
 -- machine it was written on, and `entered` is typed, pasted, dictated or drawn.
+--
+-- KYO-709: `sent_at`, `sent_session` and `sent_message` are the note's sent state, set
+-- once, when the message holding it was delivered, and never changed or cleared: the
+-- time, the session it went to and the held message's id. NULL in all three for a note
+-- never sent. A note migrated from the schema 30 `sent` tag has the time alone.
 CREATE TABLE person_notes (
     id           TEXT PRIMARY KEY,
     seq          INTEGER NOT NULL UNIQUE,
@@ -949,7 +966,10 @@ CREATE TABLE person_notes (
     entered      TEXT NOT NULL,
     created_at   TEXT NOT NULL,
     redacted_at  TEXT,
-    redacted_why TEXT
+    redacted_why TEXT,
+    sent_at      TEXT,
+    sent_session TEXT,
+    sent_message TEXT
 );
 
 -- KYO-705.c2: the places one note addresses, in the order given, each by address alone.
@@ -1805,6 +1825,15 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
             "cmd_redact.cmd_redact",
             "doctor_records.check_redactions",
         ),
+        # KYO-709: the sent state, shown by `kyo notes show` and filtered on by
+        # `kyo notes list --sent/--unsent` and `GET notes?sent=`.
+        "sent_at": (
+            "export.person_note_document",
+            "cmd_notes.note_lines",
+            "cmd_notes.find_note_ids",
+        ),
+        "sent_session": ("export.person_note_document", "cmd_notes.note_lines"),
+        "sent_message": ("export.person_note_document", "cmd_notes.note_lines"),
     },
     "person_note_anchors": {
         "note_id": ("export.person_note_document", "cmd_notes.find_note_ids"),
@@ -2224,6 +2253,22 @@ CREDIT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     29: {"withdrawn_at": None, "withdrawn_by": None, "withdrawn_why": None},
 }
 
+#: KYO-709: a field of a ``_person_notes.jsonl`` line, keyed by the line's own stamp. A
+#: note filed before the sent state was a field carries no ``sent`` on its line, and None
+#: is what its filing said; a ``sent`` tag it had is migrated separately, by the rebuild,
+#: because that is a tag and not a missing key (see :data:`SCHEMA_VERSION` at 31).
+SENT_FIELD_SCHEMA_VERSION = 31
+
+PERSON_NOTE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
+    SENT_FIELD_SCHEMA_VERSION: {"sent": None},
+}
+
+#: The tag that meant "sent" until the sent state became a field (schema 31).
+LEGACY_SENT_TAG = "sent"
+
+#: The event that sets a filed note's sent state, from which a rebuild sets it again.
+NOTE_SENT_COMMAND = "notes sent"
+
 #: KYO-63: the same per-version defaults idea applied to a **ledger** file rather than a
 #: record document — ``kyosei/export/_sweeps.jsonl``. One difference decides its shape:
 #: absence of the KEY is the version signal, so the table is applied by ``setdefault``
@@ -2325,6 +2370,18 @@ def apply_sweep_run_defaults(row: dict) -> dict:
     """
     for version in sorted(SWEEP_RUN_FIELD_DEFAULTS):
         for field, default in SWEEP_RUN_FIELD_DEFAULTS[version].items():
+            row.setdefault(field, default)
+    return row
+
+
+def apply_person_note_defaults(row: dict) -> dict:
+    """Fill in the ``_person_notes.jsonl`` fields an earlier export format did not write.
+
+    Mutates and returns ``row``. Keyed by absence, as :func:`apply_sweep_run_defaults` is:
+    a line written by this build always carries every key.
+    """
+    for version in sorted(PERSON_NOTE_FIELD_DEFAULTS):
+        for field, default in PERSON_NOTE_FIELD_DEFAULTS[version].items():
             row.setdefault(field, default)
     return row
 

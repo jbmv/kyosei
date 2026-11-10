@@ -19,9 +19,16 @@ session every :data:`HELD_POLL_SECONDS`, and ends when nothing that can be deliv
 nothing reads a pane while nothing is held. One look costs what a sampler's tick does for the
 pane: the pane lookup and one ``capture-pane``.
 
-A SET OF NOTES (KYO-706) is held like any other message, with the ids of its notes in ``notes``.
-They are tagged as sent when it is delivered (:func:`kyosei.serve_notes.file_as_sent`), and not
-when it is held, refused or retracted, because only then has the agent received them.
+A SET OF NOTES (KYO-706) is held like any other message, with the ids of its notes in ``notes``,
+and A PROMPT WITH MARKS (KYO-709) with its own segments, its marks and what each marked line
+files in ``prompt``. What either files -- the notes' sent state, the prompt's notes -- is
+filed when it is delivered (:func:`kyosei.serve_notes.file_delivered`), and not when it is
+held, refused or retracted, because only then has the agent received it.
+
+IF THAT FILING FAILS the message stays delivered: the agent has it, so it is not held again or
+sent twice. It is kept in ``$KYOSEI_HOME/composer/unfiled/<message id>.json``, the log names
+it, and the filing is tried again each time the server resumes its held messages, at start
+(:meth:`HeldMessages.resume`), until it succeeds and the file is removed.
 
 DELIVERY goes through :func:`kyosei.serve_send.deliver_held`, because that module is the only one
 that can reach the sending half. A message that cannot go yet stays held with a reason: a screen
@@ -86,7 +93,18 @@ def _public(message: dict, *, text: bool) -> dict:
         "detail": message["detail"],
         "retrying": message["retrying"],
         "notes": message.get("notes", []),
+        "prompt": _prompt(message, text=text),
     }
+
+
+def _prompt(message: dict, *, text: bool) -> dict | None:
+    """A prompt's own segments and marks, which restore a composer; without text, a count."""
+    prompt = message.get("prompt")
+    if prompt is None:
+        return None
+    if not text:
+        return {"marks": len(prompt["marks"])}
+    return {"segments": prompt["segments"], "marks": prompt["marks"]}
 
 
 class HeldMessages:
@@ -144,10 +162,12 @@ class HeldMessages:
         read_body: Callable[[], bytes],
         *,
         notes: list[str] | None = None,
+        prompt: dict | None = None,
     ) -> dict[str, Any]:
         """Keep a message for ``session_id``, past every check a send makes.
 
-        ``notes`` names the notes the message was made from, if it was.
+        ``notes`` names the notes the message was made from, if it was, and ``prompt`` is a
+        marked prompt's segments, marks and filing (:func:`kyosei.serve_notes.send_prompt`).
         """
 
         def store(device: dict, automatic: bool, segments: list[dict]) -> dict:
@@ -175,6 +195,7 @@ class HeldMessages:
                     "retrying": True,
                     "delivering": False,
                     "notes": notes or [],
+                    "prompt": prompt,
                 }
                 self._save(path, message)
             self._announce(session_id, "held", message)
@@ -254,6 +275,7 @@ class HeldMessages:
             "automatic": message["automatic"],
             "segments": _public(message, text=True)["segments"],
             "notes": message.get("notes", []),
+            "prompt": _prompt(message, text=True),
         }
 
     # ------------------------------------------------------------------- what a stream says
@@ -286,7 +308,8 @@ class HeldMessages:
     # ----------------------------------------------------------------------- the watching
 
     def resume(self) -> None:
-        """At start: pick up what a previous server held."""
+        """At start: pick up what a previous server held, and file what it could not."""
+        self._file_unfiled()
         try:
             paths = self._held_paths()
         except (Refusal, OSError):
@@ -310,6 +333,47 @@ class HeldMessages:
             )
             self._save(path, message)
         self._ensure_watching()
+
+    # ---------------------------------------------------------- filing after delivery
+
+    def _file(self, message: dict) -> None:
+        """File what a delivered message files, or keep it to be filed at the next start."""
+        problem = serve_notes.file_delivered(self.server, message)
+        if problem is None:
+            return
+        try:
+            path = serve_files.composer_target(self.environ, serve_files.UNFILED, message["id"])
+            self._save(path, message)
+            kept = f"it is kept in {path} and filed when kyo serve next starts"
+        except (Refusal, OSError) as exc:
+            kept = f"and it could not be kept to be filed later ({exc})"
+        self.server.log_stream.write(
+            f"kyo serve: message {message['id']} was delivered to session "
+            f"{message['session_id']}, but what it files could not be filed ({problem}); "
+            f"{kept}\n"
+        )
+
+    def _file_unfiled(self) -> None:
+        """Try again to file each delivered message whose filing failed."""
+        directory = serve_files.composer_kind_directory(self.environ, serve_files.UNFILED)
+        if not directory.is_dir():
+            return
+        for path in sorted(p for p in directory.glob("*.json") if p.is_file()):
+            try:
+                message = self._load(path)
+            except Refusal:
+                continue
+            if message is None:
+                continue
+            problem = serve_notes.file_delivered(self.server, message)
+            if problem is None:
+                serve_files.remove_private(path)
+                continue
+            self.server.log_stream.write(
+                f"kyo serve: message {message['id']}, delivered to session "
+                f"{message['session_id']}, still could not be filed ({problem}); it stays in "
+                f"{path} and is tried again when kyo serve next starts\n"
+            )
 
     def _ensure_watching(self) -> None:
         with self._lock:
@@ -384,6 +448,7 @@ class HeldMessages:
             )
             changed = False
             if result.outcome == "delivered":
+                message["delivered_at"] = clock.now()
                 serve_files.remove_private(path)
                 self._idle_once.discard(session_id)
                 if result.log_problem:
@@ -411,7 +476,7 @@ class HeldMessages:
                     )
                     self._save(path, message)
         if result.outcome == "delivered":
-            serve_notes.file_as_sent(self.server, message)
+            self._file(message)
             self._announce(session_id, "delivered", None, message_id=message["id"])
         elif changed:
             self._announce(session_id, "held", message)

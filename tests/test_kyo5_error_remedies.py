@@ -4380,6 +4380,12 @@ RECORDED: dict[str, str] = {
         "by test_a_turn_anchor_with_nothing_to_read_is_cleared_by_opting_in and "
         "test_a_turn_anchor_with_nothing_to_read_names_its_remedy"
     ),
+    # KYO-709: a turn anchor by reply message with no reply to read; its remedy is giving
+    # the anchor by record uuid with digest and role, run in tests/test_kyo_notes.py.
+    "cmd_notes.py:_message_anchors#3": (
+        "giving the anchor by 'uuid' with 'digest' and 'role'; proved by "
+        "test_a_span_by_message_with_nothing_to_read_is_cleared_by_giving_it_by_uuid"
+    ),
     # KYO-688: the session layer's opt-in refusal; its remedy is the project's own
     # `read_transcripts: true`, proved by clearing it in tests/test_session_layer.py.
     "session_layer.py:_transcripts_of#0": (

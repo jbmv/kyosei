@@ -1039,7 +1039,7 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Usage: `kyo notes [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--file FILE] [--on TARGET] [--anchors-file FILE] [--tag TAG] [--person KEY] [--device NAME] [--entered {typed,pasted,dictated,drawn}] [--anchored-to {document,file,note,output,prompt,record,turn}] [--add TAG] [--remove TAG] {add,list,show,tag} [id]`
+Usage: `kyo notes [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--file FILE] [--on TARGET] [--anchors-file FILE] [--tag TAG] [--person KEY] [--device NAME] [--entered {typed,pasted,dictated,drawn}] [--anchored-to {document,file,note,output,prompt,record,turn}] [--sent | --unsent] [--add TAG] [--remove TAG] {add,list,show,tag} [id]`
 
 ### Positional arguments
 
@@ -1050,12 +1050,14 @@ Usage: `kyo notes [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 
 - `--file FILE` — optional. add: the note's text from a file, or '-' for stdin (law 5)
 - `--on TARGET` — optional. add: a record, criterion, gate or note id this note is on, repeatable. list: the notes on this target, a record id also matching its criteria and gates; a transcript session or record uuid, or a path, also serves here
-- `--anchors-file FILE` — optional. add: a JSON array of anchors, for turns, documents and files. Each is {"kind": "turn", "session", "uuid", "start", "end", "digest", "role"}, {"kind": "document" or "file", "path", "commit", "lines": [first, last] or (document) "chars": [first, last]}, or {"kind": "record" or "note", "id"}. An anchor holds no words from what it addresses; a turn's digest is computed from the transcript where the project may read it, otherwise it and the role must be given. '-' reads stdin
+- `--anchors-file FILE` — optional. add: a JSON array of anchors, for turns, documents and files. Each is {"kind": "turn", "session", "uuid", "start", "end", "digest", "role"}, {"kind": "turn", "session", "message", "start", "end"} for a span of a reply as kyo serve's session API joins it, stored as one anchor per transcript record, {"kind": "document" or "file", "path", "commit", "lines": [first, last] or (document) "chars": [first, last]}, or {"kind": "record" or "note", "id"}. An anchor holds no words from what it addresses; a turn's digest is computed from the transcript where the project may read it, otherwise it and the role must be given. '-' reads stdin
 - `--tag TAG` — optional. add: a tag on the note, repeatable, lower-cased and without a leading #. list: only notes carrying this tag, repeatable (all of them)
 - `--person KEY` — optional. add: who wrote it, a key under people: in kyosei/config.yml (default: the only person declared). list: only that person's notes. tag: who is changing the tags, with the same default
 - `--device NAME` — optional. add: the device it was written on (default: this machine's name)
 - `--entered {typed,pasted,dictated,drawn}` — optional. add: how the text reached kyo; required, because only the caller knows
 - `--anchored-to {document,file,note,output,prompt,record,turn}` — optional. list: only notes on this kind of place; prompt is a person's turn and output an agent's
+- `--sent` — optional. list: only notes that were sent to a session in a delivered message (KYO-709)
+- `--unsent` — optional. list: only notes never sent to a session
 - `--add TAG` — optional. tag: a tag to add to this filed note, repeatable. Each change is kept and attributed; a note's text and anchors stay as filed
 - `--remove TAG` — optional. tag: a tag to remove from this filed note, repeatable
 

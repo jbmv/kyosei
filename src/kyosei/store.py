@@ -924,6 +924,21 @@ class Store:
             )
         return written
 
+    def mark_person_note_sent(
+        self, note_id: str, *, at: str, session: str | None, message: str | None
+    ) -> bool:
+        """KYO-709: set a note's sent state, once; call inside a transaction.
+
+        The one writer of the field after filing. A note already sent keeps the state it
+        has and False is returned, so a second delivery of the same note changes nothing.
+        """
+        cursor = self.conn.execute(
+            "UPDATE person_notes SET sent_at = ?, sent_session = ?, sent_message = ?"
+            " WHERE id = ? AND sent_at IS NULL",
+            (at, session, message, note_id),
+        )
+        return cursor.rowcount == 1
+
     def add_person_note(
         self,
         *,
@@ -934,14 +949,32 @@ class Store:
         entered: str,
         anchors: Sequence[Mapping[str, object]],
         tags: Sequence[str],
+        sent: Mapping[str, str | None] | None = None,
     ) -> str:
         """KYO-705: the one writer of a note, its anchors and its tags. Call inside a
-        transaction; ``anchors`` are rows already validated by :mod:`kyosei.cmd_notes`."""
+        transaction; ``anchors`` are rows already validated by :mod:`kyosei.cmd_notes`.
+
+        KYO-709: ``sent`` (``at``, ``session``, ``message``) files a note that is sent as it
+        is filed, as ``send-prompt``'s are."""
         note_id, seq = self.new_person_note_id()
+        sent = sent or {}
         self.conn.execute(
             "INSERT INTO person_notes (id, seq, text, person, author, device, entered,"
-            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (note_id, seq, text, person, author, device, entered, now()),
+            " created_at, sent_at, sent_session, sent_message)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                note_id,
+                seq,
+                text,
+                person,
+                author,
+                device,
+                entered,
+                now(),
+                sent.get("at"),
+                sent.get("session"),
+                sent.get("message"),
+            ),
         )
         for position, anchor in enumerate(anchors, start=1):
             self.conn.execute(

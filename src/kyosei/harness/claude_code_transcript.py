@@ -149,7 +149,7 @@ import json
 import os
 import re
 import unicodedata
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1436,13 +1436,72 @@ class _Message:
             self.uuid,
             self.at,
             self.message_id,
-            "\n\n".join(self.text_parts),
+            reply_text(self.text_parts),
             self.usage,
             self.model,
             tuple(self.record_uuids),
             "\n\n".join(self.thinking_parts) or None,
             self.thinking_omitted,
         )
+
+
+#: What a reply's text blocks are joined with in :attr:`Reply.text` (KYO-709).
+REPLY_BLOCK_SEPARATOR = "\n\n"
+
+
+def is_text_block(block: object) -> bool:
+    """A content block whose text a reply carries and a note may anchor to."""
+    return (
+        isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
+def reply_text(parts: Sequence[str]) -> str:
+    """A reply's text from its text blocks in order: the one joining of them (KYO-709)."""
+    return REPLY_BLOCK_SEPARATOR.join(parts)
+
+
+def reply_layout(parts: Sequence[str]) -> list[tuple[int, int]]:
+    """Where each text block lies in :func:`reply_text` of ``parts``, as (start, end).
+
+    A client that measures a span against the text the session API returns finds each
+    block's records through this, which is why it sits beside the joining.
+    """
+    layout: list[tuple[int, int]] = []
+    position = 0
+    for part in parts:
+        layout.append((position, position + len(part)))
+        position += len(part) + len(REPLY_BLOCK_SEPARATOR)
+    return layout
+
+
+def reply_blocks(records: Iterable[dict], message_id: str) -> list[tuple[str, str]]:
+    """The text blocks of one reply, each with its record's uuid, in the order the session
+    reader takes them (:meth:`SessionTranscript._take_assistant`): the main thread's
+    assistant records of that message, each record once."""
+    blocks: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for record in records:
+        message = record.get("message")
+        uuid = record.get("uuid")
+        if (
+            record.get("type") != "assistant"
+            or record.get("isSidechain")
+            or not isinstance(uuid, str)
+            or not isinstance(record.get("timestamp"), str)
+            or not isinstance(message, dict)
+            or message.get("id") != message_id
+            or uuid in seen
+        ):
+            continue
+        seen.add(uuid)
+        content = message.get("content")
+        for block in content if isinstance(content, list) else []:
+            if is_text_block(block):
+                blocks.append((uuid, block["text"]))
+    return blocks
 
 
 def _usage_of(raw: object) -> Usage | None:
@@ -1891,7 +1950,7 @@ class SessionTranscript:
                     usage,
                 )
         for block in blocks:
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
+            if is_text_block(block):
                 if not held.has_text:
                     held.uuid, held.at, held.has_text = uuid, stamp, True
                 held.text_parts.append(block["text"])

@@ -7,6 +7,7 @@ under a fake ``CLAUDE_CONFIG_DIR``, so no session is read.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -629,3 +630,218 @@ def test_a_redacted_notes_tags_can_still_change(kyo, project: Path) -> None:
     assert result.json["note"]["text"] == REDACTION_MARKER
     ledger = project / "kyosei" / "export" / PERSON_NOTES_FILENAME
     assert "a secret I typed" not in ledger.read_text(encoding="utf-8")
+
+
+# ------------------------------------------------- KYO-709.c6: the sent state is a field
+
+
+def _mark_sent(project: Path, note_ids: list[str], session: str, message: str) -> list[str]:
+    """What `kyo serve` does when a message holding these notes is delivered."""
+    from kyosei import commands
+
+    ctx = commands.build_context(
+        str(project), "kyo-serve:ipad", {}, ["serve"], project=commands.PROJECT_REQUIRED
+    )
+    try:
+        return cmd_notes.mark_sent(
+            ctx, note_ids, at="2026-11-09T12:00:00.000Z", session=session, message=message
+        )
+    finally:
+        ctx.close()
+
+
+def test_a_note_is_unsent_until_a_message_holding_it_is_delivered(kyo, project: Path) -> None:
+    note = _add(kyo).json["note"]
+    assert note["sent"] is None
+    assert "  not sent" in kyo("notes", "show", note["id"]).out
+    assert _ids(kyo("notes", "list", "--unsent", "--json")) == [note["id"]]
+    assert _ids(kyo("notes", "list", "--sent", "--json")) == []
+
+
+def test_the_sent_state_is_set_once_shown_filtered_on_and_rebuilt(kyo, project: Path) -> None:
+    sent, kept = _add(kyo).json["note"]["id"], _add(kyo).json["note"]["id"]
+    assert _mark_sent(project, [sent], SESSION, "held-1") == [sent]
+    state = {"at": "2026-11-09T12:00:00.000Z", "session": SESSION, "message": "held-1"}
+    assert kyo("notes", "show", sent, "--json").json["note"]["sent"] == state
+    shown = kyo("notes", "show", sent).out
+    assert f"sent at 2026-11-09T12:00:00.000Z to session {SESSION} in message held-1" in shown
+    # Set once: a second delivery of the same note changes nothing.
+    assert _mark_sent(project, [sent], "another-session", "held-2") == []
+    assert kyo("notes", "show", sent, "--json").json["note"]["sent"] == state
+    assert _ids(kyo("notes", "list", "--sent", "--json")) == [sent]
+    assert _ids(kyo("notes", "list", "--unsent", "--json")) == [kept]
+    # The note's own line stays as filed; the event that set the field is what rebuilds it.
+    assert [line["sent"] for line in _ledger(project)] == [None, None]
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert kyo("notes", "show", sent, "--json").json["note"]["sent"] == state
+    assert kyo("notes", "show", kept, "--json").json["note"]["sent"] is None
+    doctor = kyo("doctor")
+    assert doctor.code == 0, doctor
+
+
+def test_a_note_filed_as_sent_carries_the_state_on_its_own_line(kyo, project: Path) -> None:
+    from kyosei import commands
+
+    ctx = commands.build_context(
+        str(project), "kyo-serve:ipad", {}, ["serve"], project=commands.PROJECT_REQUIRED
+    )
+    state = {"at": "2026-11-09T12:00:00.000Z", "session": SESSION, "message": "held-3"}
+    try:
+        note = cmd_notes.file_note(
+            ctx,
+            text="",
+            tags=[],
+            anchors_of=lambda store: [{"kind": "note", "target": "TST-N1"}],
+            device="ipad",
+            entered="typed",
+            sent=state,
+        )
+    finally:
+        ctx.close()
+    assert note["sent"] == state and note["text"] == ""
+    assert _ledger(project)[0]["sent"] == state
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    assert kyo("notes", "show", note["id"], "--json").json["note"]["sent"] == state
+
+
+def test_no_command_changes_or_clears_the_sent_state(kyo, project: Path) -> None:
+    note = _add(kyo).json["note"]["id"]
+    _mark_sent(project, [note], SESSION, "held-1")
+    before = kyo("notes", "show", note, "--json").json["note"]["sent"]
+    # A `sent` tag is now a tag like any other, and neither adding nor removing it moves
+    # the field.
+    assert _retag(kyo, note, "--add", "sent").code == 0
+    assert _retag(kyo, note, "--remove", "sent").code == 0
+    assert kyo("notes", "show", note, "--json").json["note"]["sent"] == before
+    for action in (["add", "--entered", "typed", "--file", "-"], ["show", note]):
+        refused = kyo("notes", *action, "--sent", stdin="x\n")
+        assert refused.code != 0 and "no command sets it" in refused.err
+    refused = kyo("notes", "tag", note, "--add", "x", "--unsent")
+    assert refused.code != 0 and "--unsent" in refused.err
+
+
+# ------------------------------------------- KYO-709.c8: a turn anchor given by message
+
+SPLIT_MESSAGE = "msg_split_reply"
+FIRST_RECORD = "44444444-4444-4444-8444-444444444444"
+SECOND_RECORD = "55555555-5555-4555-8555-555555555555"
+
+
+@pytest.fixture
+def split_reply(transcript, tmp_path: Path) -> str:
+    """One reply written as two records, the first holding two text blocks; returns the
+    reply's text as the session API joins it."""
+    path = tmp_path / "claude-config" / "projects" / "-p" / f"{SESSION}.jsonl"
+
+    def record(uuid: str, stamp: str, blocks: list[str]) -> dict:
+        return {
+            "type": "assistant",
+            "uuid": uuid,
+            "timestamp": stamp,
+            "sessionId": SESSION,
+            "message": {
+                "id": SPLIT_MESSAGE,
+                "role": "assistant",
+                "content": [{"type": "text", "text": text} for text in blocks],
+            },
+        }
+
+    rows = [
+        record(FIRST_RECORD, "2026-11-09T10:01:00.000Z", ["alpha beta", "gamma"]),
+        record(SECOND_RECORD, "2026-11-09T10:01:01.000Z", ["delta epsilon"]),
+    ]
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("".join(json.dumps(row) + "\n" for row in rows))
+    from kyosei.harness.claude_code_transcript import SessionTranscript
+
+    replies = SessionTranscript(path).read().replies
+    return [r for r in replies if r.message_id == SPLIT_MESSAGE][-1].text
+
+
+def _by_message(text: str, words: str, **extra) -> dict:
+    start = text.index(words)
+    anchor = {
+        "kind": "turn",
+        "session": SESSION,
+        "message": SPLIT_MESSAGE,
+        "start": start,
+        "end": start + len(words),
+    }
+    return {**anchor, **extra}
+
+
+def _words_of(project: Path, anchors: list[dict]) -> list[str | None]:
+    from kyosei import commands
+
+    ctx = commands.build_context(
+        str(project),
+        None,
+        dict(os.environ),
+        ["notes"],
+        project=commands.PROJECT_REQUIRED,
+        read_only=True,
+    )
+    try:
+        records = cmd_notes.read_records(ctx, SESSION, {a["target"] for a in anchors})
+        return [cmd_notes.span_text(ctx, anchor, records) for anchor in anchors]
+    finally:
+        ctx.close()
+
+
+def test_a_span_across_two_records_becomes_one_anchor_per_record(
+    kyo, project: Path, write_file, split_reply: str
+) -> None:
+    assert split_reply == "alpha beta\n\ngamma\n\ndelta epsilon"
+    result = _anchored(kyo, write_file, [_by_message(split_reply, "gamma\n\ndelta")])
+    assert result.code == 0, result
+    anchors = result.json["note"]["anchors"]
+    assert [a["target"] for a in anchors] == [FIRST_RECORD, SECOND_RECORD]
+    # Each lies within its own record's text ("alpha beta\ngamma", "delta epsilon").
+    assert [(a["char_start"], a["char_end"]) for a in anchors] == [(11, 16), (0, 5)]
+    assert all(a["digest_check"] == "computed" and a["role"] == "agent" for a in anchors)
+    assert _words_of(project, anchors) == ["gamma", "delta"]
+
+
+def test_a_span_over_two_blocks_of_one_record_is_one_anchor(
+    kyo, project: Path, write_file, split_reply: str
+) -> None:
+    result = _anchored(kyo, write_file, [_by_message(split_reply, "beta\n\ngamma")])
+    assert result.code == 0, result
+    (anchor,) = result.json["note"]["anchors"]
+    assert anchor["target"] == FIRST_RECORD
+    assert _words_of(project, [anchor]) == ["beta\ngamma"]
+
+
+def test_a_span_by_message_outside_the_reply_is_refused(
+    kyo, project: Path, write_file, split_reply: str
+) -> None:
+    past = {**_by_message(split_reply, "epsilon"), "end": len(split_reply) + 1}
+    refused = _anchored(kyo, write_file, [past])
+    assert refused.code != 0 and f"past the reply's {len(split_reply)} characters" in refused.err
+    between = {**_by_message(split_reply, "beta"), "start": 10, "end": 12}
+    refused = _anchored(kyo, write_file, [between])
+    assert refused.code != 0 and "between two of the reply's blocks" in refused.err
+    unknown = {**_by_message(split_reply, "beta"), "message": "msg_nowhere"}
+    refused = _anchored(kyo, write_file, [unknown])
+    assert refused.code != 0 and "no reply msg_nowhere" in refused.err
+    extra = _by_message(split_reply, "beta", digest="x")
+    refused = _anchored(kyo, write_file, [extra])
+    assert refused.code != 0 and "'digest'" in refused.err
+    assert kyo("notes", "list", "--json").json["notes"] == []
+
+
+def test_a_span_by_message_with_nothing_to_read_is_cleared_by_giving_it_by_uuid(
+    kyo, project: Path, write_file
+) -> None:
+    """No transcript to read: the refusal names giving the anchor by uuid with its digest and
+    role, and that anchor is filed."""
+    by_message = {"kind": "turn", "session": SESSION, "message": "msg_x", "start": 0, "end": 4}
+    refused = _anchored(kyo, write_file, [by_message])
+    assert refused.code != 0
+    assert "give the anchor by 'uuid' with 'digest' and 'role'" in refused.err
+    digest = cmd_notes.span_digest(REPLY_TEXT, 0, 4)
+    given = _anchored(kyo, write_file, [_turn(start=0, end=4, digest=digest, role="agent")])
+    assert given.code == 0, given
+    assert given.json["note"]["anchors"][0]["digest_check"] == "given"

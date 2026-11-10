@@ -490,7 +490,10 @@ governs: src/kyosei/schema.py
   An anchor is an address (a transcript record and character range with a digest, a record,
   criterion or gate id, a document or file at a commit, or another note) and holds no transcript
   text, so the words stay out of git while a reader with the transcript can confirm the span.
-  Exported to the `_person_notes.jsonl` ledger.
+  Exported to the `_person_notes.jsonl` ledger. A note's sent state (schema_version 31, KYO-709)
+  is a field set once, when the message holding it is delivered, with the time, the session and
+  the held message; it replaced a `sent` tag, which a person could remove. A note sent after
+  filing gets the field from a `notes sent` event, so its own ledger line is not rewritten.
 - **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a
   verification, a gate clearing or a decision record rests on, as a row of its own rather than
   columns on the rows it credits, so crediting a historical verdict updates nothing already

@@ -2868,6 +2868,8 @@ def build_parser() -> KyoseiParser:
         metavar="FILE",
         help="add: a JSON array of anchors, for turns, documents and files. Each is "
         '{"kind": "turn", "session", "uuid", "start", "end", "digest", "role"}, '
+        '{"kind": "turn", "session", "message", "start", "end"} for a span of a reply as '
+        "kyo serve's session API joins it, stored as one anchor per transcript record, "
         '{"kind": "document" or "file", "path", "commit", "lines": [first, last] or (document) '
         '"chars": [first, last]}, or {"kind": "record" or "note", "id"}. An anchor holds no '
         "words from what it addresses; a turn's digest is computed from the transcript where "
@@ -2902,6 +2904,15 @@ def build_parser() -> KyoseiParser:
         choices=sorted(cmd_notes.ANCHORED_TO),
         help="list: only notes on this kind of place; prompt is a person's turn and output "
         "an agent's",
+    )
+    sent_or_not = p_notes.add_mutually_exclusive_group()
+    sent_or_not.add_argument(
+        "--sent",
+        action="store_true",
+        help="list: only notes that were sent to a session in a delivered message (KYO-709)",
+    )
+    sent_or_not.add_argument(
+        "--unsent", action="store_true", help="list: only notes never sent to a session"
     )
     p_notes.add_argument(
         "--add",

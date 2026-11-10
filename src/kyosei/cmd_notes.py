@@ -37,6 +37,19 @@ other case the caller supplies digest and role, and kyo records that it took the
 (``digest_check: given``). A span's characters are code points of the record's text, the
 ``text`` blocks joined by one newline, so a client measuring UTF-16 units must convert.
 
+A TURN ANCHOR BY MESSAGE (KYO-709). A reply the session API returns joins the text blocks of
+every record of one message, while a turn anchor lies within one record. A client that knows
+only a reply's text gives ``{"kind": "turn", "session", "message", "start", "end"}``, with
+offsets into that joined text, and kyo stores one ordinary turn anchor for each record the
+span covers, each within its own record. The joining is the transcript reader's own
+(:func:`kyosei.harness.claude_code_transcript.reply_layout`), so an offset the client measured
+lands on the record it measured. It needs the transcript, as a computed anchor does.
+
+THE SENT STATE (KYO-709) is a field, ``sent``: the time the message holding the note was
+delivered, the session and the held message. It is set once (:func:`mark_sent`, or
+:func:`file_note` for a note sent as it is filed) and nothing changes or clears it. Until
+schema 31 it was a ``sent`` tag; a rebuild migrates that tag to the field.
+
 TWO WRITERS, ONE WRITE PATH (KYO-706). ``kyo notes`` and ``kyo serve``'s note routes
 (:mod:`kyosei.serve_notes`) file a note with :func:`file_note` and change its tags with
 :func:`change_tags`, so the transaction, the event and the ledger lines cannot differ.
@@ -66,6 +79,7 @@ from .errors import NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .prose import read_prose, single_line
 from .render import echo_block
+from .schema import NOTE_SENT_COMMAND
 from .store import Store
 
 #: How a note reached the store. What the composer observes (a paste, say) is written here.
@@ -100,6 +114,10 @@ ANCHOR_KEYS: dict[str, frozenset[str]] = {
     ANCHOR_NOTE: frozenset({"kind", "id"}),
 }
 
+#: KYO-709: the keys of a turn anchor given by message, a span of a reply as the session API
+#: joins it. Stored as one ``turn`` anchor per record the span covers.
+TURN_MESSAGE_KEYS = frozenset({"kind", "session", "message", "start", "end"})
+
 #: ``--anchored-to``: what a note is on, in the words a person would use. A prompt and a
 #: reply are both turns, told apart by role.
 ANCHORED_TO: dict[str, tuple[str, str | None]] = {
@@ -132,14 +150,38 @@ def record_text(record: dict) -> str | None:
         return content
     if not isinstance(content, list):
         return None
-    parts = [
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
-    ]
+    parts = [block["text"] for block in content if transcript.is_text_block(block)]
     return "\n".join(parts) if parts else None
+
+
+def _transcript_paths(ctx: Context, session: str) -> list[Path]:
+    """The session's transcript files, or none when this project may not read them."""
+    if not transcripts_opted_in(ctx.store().config):
+        return []
+    try:
+        return list(
+            transcript.candidate_transcripts(
+                session,
+                config=transcript.config_dir(ctx.environ),
+                recorded=recorded_transcript_path(ctx.root, session),
+                archive=_archive(ctx),
+            )
+        )
+    except ValueError as exc:
+        raise UsageError(f"{exc}; a turn anchor's session is the session's UUID") from exc
+
+
+def read_reply_blocks(ctx: Context, session: str, message_id: str) -> list[tuple[str, str]]:
+    """One reply's text blocks with their records' uuids, from the first of the session's
+    files that holds the reply (:func:`kyosei.harness.claude_code_transcript.reply_blocks`).
+
+    Empty when this project may not read the transcript, it is gone, or no reply has that id.
+    """
+    for path in _transcript_paths(ctx, session):
+        blocks = transcript.reply_blocks(transcript._parse_lines(path), message_id)
+        if blocks:
+            return blocks
+    return []
 
 
 def read_records(ctx: Context, session: str, uuids: set[str]) -> dict[str, dict]:
@@ -147,17 +189,7 @@ def read_records(ctx: Context, session: str, uuids: set[str]) -> dict[str, dict]
 
     Empty when this project may not read the transcript or it is gone.
     """
-    if not transcripts_opted_in(ctx.store().config):
-        return {}
-    try:
-        paths = transcript.candidate_transcripts(
-            session,
-            config=transcript.config_dir(ctx.environ),
-            recorded=recorded_transcript_path(ctx.root, session),
-            archive=_archive(ctx),
-        )
-    except ValueError as exc:
-        raise UsageError(f"{exc}; a turn anchor's session is the session's UUID") from exc
+    paths = _transcript_paths(ctx, session)
     found: dict[str, dict] = {}
     for path in paths:
         for record in transcript._parse_lines(path):
@@ -238,6 +270,70 @@ def _turn_anchor(ctx: Context, raw: dict, where: str) -> dict:
     return {**fields, "role": read_role, "digest": computed, "digest_check": DIGEST_COMPUTED}
 
 
+def _message_anchors(ctx: Context, raw: dict, where: str) -> list[dict]:
+    """A span of one reply, as the session API joins it, as one anchor per record covered.
+
+    A record's text joins its own blocks with one newline (:func:`record_text`) and the
+    reply joins every block with :data:`~kyosei.harness.claude_code_transcript
+    .REPLY_BLOCK_SEPARATOR`, so a block's place in its record is counted afresh here. A span
+    covering two blocks of one record becomes one anchor over both, separator included.
+    """
+    extra = sorted(set(raw) - TURN_MESSAGE_KEYS)
+    if extra:
+        raise UsageError(
+            f"{where}: a turn anchor given by 'message' takes no "
+            f"{', '.join(repr(key) for key in extra)}; it takes "
+            f"{', '.join(sorted(TURN_MESSAGE_KEYS))}, and kyo reads the role and computes "
+            "the digest of each record it covers"
+        )
+    session, message = raw.get("session"), raw.get("message")
+    if not isinstance(session, str) or not isinstance(message, str) or not session or not message:
+        raise UsageError(f"{where}: a turn anchor by message needs 'session' and 'message'")
+    start, end = _int(raw, "start", where), _int(raw, "end", where)
+    if not 0 <= start < end:
+        raise UsageError(f"{where}: the range {start}-{end} is empty or negative")
+    blocks = read_reply_blocks(ctx, session, message)
+    if not blocks:
+        raise UsageError(
+            f"{where}: no reply {message} with text was found in the transcript of session "
+            f"{session}, or this project may not read it. A span given by message is "
+            "measured against that reply's text, so it needs the transcript; give the "
+            "anchor by 'uuid' with 'digest' and 'role' instead: nothing was written"
+        )
+    parts = [text for _, text in blocks]
+    length = len(transcript.reply_text(parts))
+    if end > length:
+        raise UsageError(
+            f"{where}: the range ends at {end}, past the reply's {length} characters"
+        )
+    spans: dict[str, list[int]] = {}
+    offset_in_record: dict[str, int] = {}
+    for (uuid, text), (block_start, block_end) in zip(
+        blocks, transcript.reply_layout(parts), strict=True
+    ):
+        before = offset_in_record.get(uuid)
+        first = 0 if before is None else before + 1  # the newline record_text joins with
+        offset_in_record[uuid] = first + len(text)
+        low, high = max(start, block_start), min(end, block_end)
+        if low >= high:
+            continue
+        span = spans.setdefault(uuid, [first + low - block_start, first + high - block_start])
+        span[1] = first + high - block_start
+    if not spans:
+        raise UsageError(
+            f"{where}: the range {start}-{end} covers only the space between two of the "
+            "reply's blocks, which no record holds"
+        )
+    return [
+        _turn_anchor(
+            ctx,
+            {"kind": ANCHOR_TURN, "session": session, "uuid": uuid, "start": low, "end": high},
+            where,
+        )
+        for uuid, (low, high) in spans.items()
+    ]
+
+
 def _id_anchor(store: Store, kind: str, target: object, where: str) -> dict:
     if not isinstance(target, str) or not target:
         raise UsageError(f"{where}: a {kind} anchor needs 'id'")
@@ -308,6 +404,14 @@ def _path_anchor(ctx: Context, kind: str, raw: dict, where: str) -> dict:
     return {**fields, "char_start": first, "char_end": last}
 
 
+def validate_anchors(ctx: Context, store: Store, raw: object, where: str) -> list[dict]:
+    """One given anchor as the rows to store: one, or for a turn given by message, one per
+    record the span covers (module docstring). A refusal names what is wrong."""
+    if isinstance(raw, dict) and raw.get("kind") == ANCHOR_TURN and "message" in raw:
+        return _message_anchors(ctx, raw, where)
+    return [validate_anchor(ctx, store, raw, where)]
+
+
 def validate_anchor(ctx: Context, store: Store, raw: object, where: str) -> dict:
     """One ``--anchors-file`` entry as the row to store, or a refusal naming what is wrong."""
     if not isinstance(raw, dict):
@@ -343,7 +447,7 @@ def _anchors(ctx: Context, store: Store, args: Namespace) -> list[dict]:
         if not isinstance(listed, list):
             raise UsageError("--anchors-file must hold a JSON array of anchors")
         for index, item in enumerate(listed, start=1):
-            anchors.append(validate_anchor(ctx, store, item, f"anchor {index}"))
+            anchors.extend(validate_anchors(ctx, store, item, f"anchor {index}"))
     return anchors
 
 
@@ -390,6 +494,16 @@ def note_lines(note: dict) -> list[str]:
     else:
         lines.extend(f"  | {line}" for line in note["text"].split("\n"))
     lines.extend(f"  on {anchor_label(anchor)}" for anchor in note["anchors"])
+    sent = note["sent"]
+    if sent is None:
+        lines.append("  not sent")
+    else:
+        where = (
+            f" to session {sent['session']} in message {sent['message']}"
+            if sent["session"]
+            else " (recorded by a sent tag, before the session was kept)"
+        )
+        lines.append(f"  sent at {sent['at']}{where}")
     for change in note["tag_changes"]:
         sign = "+" if change["action"] == "add" else "-"
         who = change["person"] or change["author"]
@@ -405,15 +519,19 @@ def find_note_ids(
     anchored_to: str | None,
     person: str | None,
     session: str | None = None,
+    sent: bool | None = None,
 ) -> list[str]:
     """Every note matching all the filters, oldest first.
 
     ``target`` matches an anchor's target or its session, and a record id also matches the
     criteria and gates of that record. ``session`` matches a turn anchor's session alone.
-    ``target``, ``session`` and ``anchored_to`` must hold of one anchor together.
+    ``target``, ``session`` and ``anchored_to`` must hold of one anchor together. ``sent``
+    True or False keeps the notes that were or were never sent.
     """
     sql = "SELECT n.id FROM person_notes n WHERE 1=1"
     params: list[object] = []
+    if sent is not None:
+        sql += " AND n.sent_at IS NOT NULL" if sent else " AND n.sent_at IS NULL"
     for tag in tags:
         sql += (
             " AND EXISTS (SELECT 1 FROM person_note_tags t"
@@ -483,40 +601,111 @@ def file_note(
     device: str,
     entered: str,
     person: str | None = None,
+    sent: dict[str, str] | None = None,
 ) -> dict:
     """File one note and return its document: the one write path (module docstring).
 
     ``anchors_of`` is called inside the transaction, so what an anchor names is checked
-    under the store's write lock.
+    under the store's write lock. ``sent`` (``at``, ``session``, ``message``) files a note
+    already sent, as ``send-prompt`` does once its message is delivered.
+    """
+    return file_notes(
+        ctx,
+        [
+            {
+                "text": text,
+                "tags": tags,
+                "anchors_of": anchors_of,
+                "device": device,
+                "entered": entered,
+                "person": person,
+                "sent": sent,
+            }
+        ],
+    )[0]
+
+
+def file_notes(ctx: Context, notes: list[dict]) -> list[dict]:
+    """File several notes in one transaction, all or none, and return their documents.
+
+    Each entry holds :func:`file_note`'s keyword arguments. ``send-prompt`` files a
+    delivered prompt's notes this way, so a failure leaves none of them filed and the whole
+    set can be filed again (KYO-709).
     """
     store = ctx.store()
+    documents: list[dict] = []
+    lines: list[dict] = []
+    events: list[dict] = []
     with store.transaction():
-        who = _person(store, person)
-        anchors = anchors_of(store)
-        note_id = store.add_person_note(
-            text=text,
-            person=who,
-            author=ctx.actor,
-            device=device,
-            entered=entered,
-            anchors=anchors,
-            tags=tags,
-        )
-        document = export.person_note_document(store, note_id)
-        line = export.person_note_line(store, note_id)
-        # Names the note and carries no text: its words live on its own ledger line
-        # alone, which is the one place `kyo redact` then has to reach.
-        event = store.record_event(
-            actor=ctx.actor,
-            command="notes add",
-            record_id=None,
-            before=None,
-            after={"person_note_id": note_id},
-        )
-    events_ledger.append_events(store, [event])
-    ledgers.append_person_note(store, line)
+        for note in notes:
+            who = _person(store, note.get("person"))
+            anchors = note["anchors_of"](store)
+            note_id = store.add_person_note(
+                text=note["text"],
+                person=who,
+                author=ctx.actor,
+                device=note["device"],
+                entered=note["entered"],
+                anchors=anchors,
+                tags=note["tags"],
+                sent=note.get("sent"),
+            )
+            documents.append(export.person_note_document(store, note_id))
+            lines.append(export.person_note_line(store, note_id))
+            # Names the note and carries no text: its words live on its own ledger line
+            # alone, which is the one place `kyo redact` then has to reach.
+            events.append(
+                store.record_event(
+                    actor=ctx.actor,
+                    command="notes add",
+                    record_id=None,
+                    before=None,
+                    after={"person_note_id": note_id},
+                )
+            )
+    events_ledger.append_events(store, events)
+    for line in lines:
+        ledgers.append_person_note(store, line)
     ledgers.write_allocations(store)
-    return document
+    return documents
+
+
+def mark_sent(
+    ctx: Context, note_ids: list[str], *, at: str, session: str, message: str
+) -> list[str]:
+    """Set the sent state of filed notes, once each, in one transaction (KYO-709).
+
+    Returns the notes it was set on. A note already sent keeps its state, so a note
+    delivered twice records the first delivery. Each note set gets a ``notes sent`` event,
+    which is where a rebuild finds the state, because the note's own line is not rewritten.
+    """
+    store = ctx.store()
+    for note_id in note_ids:
+        if store.person_note(note_id) is None:
+            raise NotFound(f"no note {note_id!r}: ids are printed when a note is added and listed")
+    events: list[dict] = []
+    marked: list[str] = []
+    with store.transaction():
+        for note_id in note_ids:
+            if not store.mark_person_note_sent(note_id, at=at, session=session, message=message):
+                continue
+            marked.append(note_id)
+            events.append(
+                store.record_event(
+                    actor=ctx.actor,
+                    command=NOTE_SENT_COMMAND,
+                    record_id=None,
+                    before=None,
+                    after={
+                        "person_note_id": note_id,
+                        "sent": {"at": at, "session": session, "message": message},
+                    },
+                )
+            )
+    if events:
+        events_ledger.append_events(store, events)
+        ledgers.write_allocations(store)
+    return marked
 
 
 def _add(ctx: Context, args: Namespace) -> Output:
@@ -554,6 +743,14 @@ def _add(ctx: Context, args: Namespace) -> Output:
     return Output(lines, {"ok": True, "command": "notes add", "note": document})
 
 
+def _sent_filter(args: Namespace) -> bool | None:
+    if getattr(args, "sent", False):
+        return True
+    if getattr(args, "unsent", False):
+        return False
+    return None
+
+
 def _list(ctx: Context, args: Namespace) -> Output:
     if args.on and len(args.on) > 1:
         raise UsageError("kyo notes list takes one --on TARGET")
@@ -564,6 +761,7 @@ def _list(ctx: Context, args: Namespace) -> Output:
         target=args.on[0] if args.on else None,
         anchored_to=args.anchored_to,
         person=args.person,
+        sent=_sent_filter(args),
     )
     notes = [export.person_note_document(store, note_id) for note_id in note_ids]
     lines: list[str] = []
@@ -639,6 +837,8 @@ def _tag(ctx: Context, args: Namespace) -> Output:
             ("--device", args.device),
             ("--entered", args.entered),
             ("--anchored-to", args.anchored_to),
+            ("--sent", getattr(args, "sent", False)),
+            ("--unsent", getattr(args, "unsent", False)),
         )
         if value
     ]
@@ -680,6 +880,13 @@ def _tag(ctx: Context, args: Namespace) -> Output:
 
 def cmd_notes(ctx: Context, args: Namespace) -> Output:
     """``kyo notes add|list|show|tag`` (module docstring)."""
+    if args.action in ("add", "show") and (
+        getattr(args, "sent", False) or getattr(args, "unsent", False)
+    ):
+        raise UsageError(
+            "--sent and --unsent filter kyo notes list; a note's sent state is set when the "
+            "message holding it is delivered, and no command sets it"
+        )
     if args.action != "tag" and (args.add or args.remove):
         raise UsageError(
             "--add and --remove change a filed note's tags, so they belong to the tag "

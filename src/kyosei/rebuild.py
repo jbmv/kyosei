@@ -66,10 +66,14 @@ from .errors import (
 )
 from .schema import (
     DDL,
+    LEGACY_SENT_TAG,
+    NOTE_SENT_COMMAND,
     SCHEMA_VERSION,
+    SENT_FIELD_SCHEMA_VERSION,
     apply_brief_run_defaults,
     apply_event_defaults,
     apply_export_defaults,
+    apply_person_note_defaults,
     apply_sweep_run_defaults,
     stored_path_from_export,
 )
@@ -1113,10 +1117,19 @@ def _load(
             )
         # KYO-705: a prior export has no such ledger, which reads as no lines. A note's
         # anchors and tags travel on its own line, each anchor with the keys its kind uses.
+        # KYO-709: a `sent` tag written at schema 30 or earlier is the sent state as it was
+        # then recorded. Followed through every such line, it gives each note that still
+        # carried it when the format changed, with the time it was given; those notes get
+        # the field and lose the tag (schema.SCHEMA_VERSION at 31). A `sent` tag from a
+        # later line is a tag like any other.
+        legacy_sent: dict[str, str | None] = {}
         for row in ledgers[ledgers_module.PERSON_NOTES_FILENAME]:
+            row = apply_person_note_defaults(row)
+            sent = row["sent"] or {}
             conn.execute(
                 "INSERT INTO person_notes (id, seq, text, person, author, device, entered,"
-                " created_at, redacted_at, redacted_why) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " created_at, redacted_at, redacted_why, sent_at, sent_session, sent_message)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     row["id"],
                     row["seq"],
@@ -1128,8 +1141,14 @@ def _load(
                     row["created_at"],
                     row["redacted_at"],
                     row["redacted_why"],
+                    sent.get("at"),
+                    sent.get("session"),
+                    sent.get("message"),
                 ),
             )
+            legacy = _before_the_sent_field(row, ledgers_module.PERSON_NOTES_FILENAME)
+            if legacy and LEGACY_SENT_TAG in row["tags"]:
+                legacy_sent[row["id"]] = row["created_at"]
             for position, anchor in enumerate(row["anchors"], start=1):
                 conn.execute(
                     "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
@@ -1152,6 +1171,8 @@ def _load(
                     ),
                 )
             for tag in row["tags"]:
+                if legacy and tag == LEGACY_SENT_TAG:
+                    continue
                 conn.execute(
                     "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)", (row["id"], tag)
                 )
@@ -1175,6 +1196,14 @@ def _load(
                     row["changed_at"],
                 ),
             )
+            if row["tag"] == LEGACY_SENT_TAG and _before_the_sent_field(
+                row, ledgers_module.PERSON_NOTE_TAG_CHANGES_FILENAME
+            ):
+                # The change stays in the history; what it moved is now the field.
+                legacy_sent[row["note_id"]] = (
+                    row["changed_at"] if row["action"] == "add" else None
+                )
+                continue
             if row["action"] == "add":
                 conn.execute(
                     "INSERT INTO person_note_tags (note_id, tag) VALUES (?, ?)",
@@ -1184,6 +1213,25 @@ def _load(
                 conn.execute(
                     "DELETE FROM person_note_tags WHERE note_id = ? AND tag = ?",
                     (row["note_id"], row["tag"]),
+                )
+
+        # KYO-709: a note sent after it was filed has its sent state in the event that set
+        # it, because its own ledger line is never rewritten. A note's line that already
+        # states one (re-made by a repair after the send) states the same, and is kept.
+        for event in ledgers[events_ledger_module.EVENTS_FILENAME]:
+            after = event.get("after") if event.get("command") == NOTE_SENT_COMMAND else None
+            sent = after.get("sent") if isinstance(after, dict) else None
+            if isinstance(sent, dict):
+                conn.execute(
+                    "UPDATE person_notes SET sent_at = ?, sent_session = ?, sent_message = ?"
+                    " WHERE id = ? AND sent_at IS NULL",
+                    (sent["at"], sent.get("session"), sent.get("message"), after["person_note_id"]),
+                )
+        for note_id, sent_at in legacy_sent.items():
+            if sent_at is not None:
+                conn.execute(
+                    "UPDATE person_notes SET sent_at = ? WHERE id = ? AND sent_at IS NULL",
+                    (sent_at, note_id),
                 )
 
         # KYO-414: each counter is seeded at max(snapshot, highest
@@ -1207,6 +1255,11 @@ def _load(
         conn.execute("ROLLBACK")
         raise
     return len(documents)
+
+
+def _before_the_sent_field(row: dict, where: str) -> bool:
+    """KYO-709: whether a note ledger line was written while ``sent`` was still a tag."""
+    return export_module.ledger_schema_version(row, where=where) < SENT_FIELD_SCHEMA_VERSION
 
 
 __all__ = ["read_ledger_rows", "read_record_documents", "rebuild_from_export"]

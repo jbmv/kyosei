@@ -369,6 +369,15 @@ def _message_segments(document: dict) -> list[_Segment]:
     return segments
 
 
+def message_segments(document: dict) -> list[dict[str, str]]:
+    """A body's ``segments`` checked as a message's are, as plain objects, or the refusal.
+
+    For a route that builds a message from them (``send-prompt``, KYO-709) before holding
+    it, which checks the message it was given again.
+    """
+    return [{"kind": s.kind, "text": s.text} for s in _message_segments(document)]
+
+
 def _command_segment(document: dict) -> _Segment:
     command = document.get("command")
     if not isinstance(command, str) or not command.startswith("/"):

@@ -583,6 +583,10 @@ def person_note_document(store: Store, note_id: str) -> dict:
         "created_at": row["created_at"],
         "redacted_at": row["redacted_at"],
         "redacted_why": row["redacted_why"],
+        # KYO-709: set once, when the message holding the note was delivered.
+        "sent": None
+        if row["sent_at"] is None
+        else {"at": row["sent_at"], "session": row["sent_session"], "message": row["sent_message"]},
         "tags": store.person_note_tags(note_id),
         "anchors": [
             {
@@ -611,6 +615,11 @@ def person_note_line(store: Store, note_id: str) -> dict:
 
     The line is never rewritten, so its ``tags`` are the filing's, found by undoing each
     recorded change on the current set, and the changes are ledger lines of their own.
+
+    KYO-709: ``sent`` is the note's sent state, which is the filing's when this is called as
+    the note is filed. A note sent later gets the field from its ``notes sent`` event
+    (:data:`kyosei.cmd_notes.SENT_COMMAND`), and a line re-made for a note since sent, by
+    ``kyo doctor --repair``, states the same value the event does.
     """
     line = person_note_document(store, note_id)
     filed = set(line["tags"])
