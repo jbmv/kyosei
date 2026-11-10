@@ -611,6 +611,14 @@ def _span(ctx: Context, store, args: Namespace, credit: Credit) -> tuple[dict, s
             "--span-first and --span-last name records of a Claude Code session, and this "
             "credit names none: give --span-session"
         )
+    return _measured(ctx, store, session, first, last)
+
+
+def _measured(
+    ctx: Context, store, session: str, first: str, last: str, *, derived: bool = False
+) -> tuple[dict, str]:
+    """A span's ids and what kyo measured of it, with why (KYO-640.n1). ``derived`` words
+    a refusal for a span read from a discussion's turn references (KYO-658)."""
     fields = {"span_session": session, "span_first_turn": first, "span_last_turn": last}
     if not transcripts_opted_in(store.config):
         fields.update(transcript.SpanMeasure(CHECK_NOT_APPLICABLE, NOT_OPTED_IN_WHY).store_fields())
@@ -627,9 +635,60 @@ def _span(ctx: Context, store, args: Namespace, credit: Credit) -> tuple[dict, s
     except ValueError as exc:
         raise UsageError(f"{exc}; --span-session takes the session's UUID") from exc
     if measure.outcome in (transcript.SPAN_TURN_NOT_FOUND, transcript.SPAN_REVERSED):
+        if derived:
+            raise UsageError(
+                "the span this credit takes from its discussion's turn references cannot be "
+                f"measured: {measure.why}; cite it with --span-first and --span-last"
+            )
         raise UsageError(f"the discussion span cannot be measured: {measure.why}")
     fields.update(measure.store_fields())
     return fields, measure.why
+
+
+def discussion_span(
+    refs: list[dict], credit: Credit, current: dict | None
+) -> tuple[tuple[str, str, str] | None, str]:
+    """KYO-658 (decision KYO-654, DC3): the span a decided credit takes from the discussion
+    it was filed from, as ``(session, first turn, last turn)``, or None with why.
+
+    ``refs`` are the discussion's turn references (export shape; a late opening made in the
+    filing's own transaction included), and ``current`` is the person's latest confirmed
+    turn as the index holds it now, in the same shape, or None. The first turn is where the
+    discussion was opened. The last is, in the opening's session, the turn holding the
+    credited words when the transcript check found one; else the person's latest turn;
+    else the latest turn the discussion's references name. A span lies in one session, so
+    a later turn in another session does not end it.
+    """
+    opened = next((r for r in refs if r.get("role") == "opened"), None)
+    if opened is None or not opened.get("turn"):
+        return None, (
+            "the discussion's opening names no transcript record (index absent), so it "
+            "gives the span no first turn"
+        )
+    session = opened["session"]
+    last = None
+    if credit.source_session == session and credit.check.get("source_turn"):
+        last = credit.check["source_turn"]
+    elif current and current.get("session") == session and current.get("turn"):
+        last = current["turn"]
+    else:
+        named = [r for r in refs if r.get("session") == session and r.get("turn") and r.get("at")]
+        last = max(named, key=lambda r: r["at"])["turn"] if named else opened["turn"]
+    return (session, opened["turn"], last), ""
+
+
+def apply_discussion_span(
+    ctx: Context, store, args: Namespace, credit: Credit, refs: list[dict], current: dict | None
+) -> None:
+    """Give ``credit`` the span its discussion's turn references derive, measured as an
+    explicit span is, unless ``--span-first``/``--span-last`` already cited one."""
+    if credit.span or getattr(args, "span_first", None) or getattr(args, "span_last", None):
+        return
+    span, why = discussion_span(refs, credit, current)
+    if span is None:
+        credit.span_why = why
+        return
+    credit.span, credit.span_why = _measured(ctx, store, *span, derived=True)
 
 
 # ------------------------------------------------------------------------- writing

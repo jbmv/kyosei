@@ -412,6 +412,28 @@ def _credit(store: Store, row: sqlite3.Row) -> dict:
     }
 
 
+def _turn_ref(row: sqlite3.Row) -> dict:
+    """KYO-658: one turn reference of a discussion. ``late`` is a boolean; every other
+    column is exported as it is stored, nulls included."""
+    return {
+        "id": row["id"],
+        "seq": row["seq"],
+        "role": row["role"],
+        "session": row["session"],
+        "prompt_id": row["prompt_id"],
+        "turn": row["turn"],
+        "at": row["at"],
+        "source": row["source"],
+        "index_state": row["index_state"],
+        "late": bool(row["late"]),
+        "note_id": row["note_id"],
+        "produced_id": row["produced_id"],
+        "why": row["why"],
+        "author": row["author"],
+        "created_at": row["created_at"],
+    }
+
+
 def _gate(row: sqlite3.Row) -> dict:
     return {
         "id": row["id"],
@@ -560,6 +582,8 @@ def record_document(store: Store, record_id: str) -> dict:
         "reports": [_report(r) for r in store.reports(record_id)],
         "flags": [_flag(f) for f in store.flags(record_id)],
         "credits": [_credit(store, c) for c in store.credits(record_id)],
+        # KYO-658: present on every record, `[]` on all but a discussion.
+        "turn_refs": [_turn_ref(r) for r in store.turn_refs(record_id)],
     }
 
 

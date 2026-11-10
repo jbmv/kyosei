@@ -39,6 +39,7 @@ from . import (
     cmd_close_wave,
     cmd_confirm,
     cmd_controller,
+    cmd_discuss,
     cmd_dispatch,
     cmd_evidence,
     cmd_flags,
@@ -219,6 +220,8 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     "note": (cmd_brief.cmd_note, PROJECT_REQUIRED),
     # KYO-705: what a person wrote, on the places it addresses. `kyo note` is the shift log.
     "notes": (cmd_notes.cmd_notes, PROJECT_REQUIRED),
+    # KYO-658: a discussion opened when it starts, at a turn the turn index stamped.
+    "discuss": (cmd_discuss.cmd_discuss, PROJECT_REQUIRED),
     "docs": (cmd_views.cmd_docs, PROJECT_REQUIRED),
     # KYO-138.c1: the command-and-option reference, generated from the parser below
     # rather than written. PROJECT_NONE on `report-schema`'s reasoning exactly: this
@@ -391,6 +394,8 @@ MUTATING_COMMANDS = (
     # KYO-705: `kyo notes add` and `tag` write rows and an event; `list`, `show` and `tags`
     # are pure reads, on `docs`' reasoning below: the entry names the command.
     "notes",
+    # KYO-658: every `kyo discuss` action files a record or a turn reference and an event.
+    "discuss",
     # KYO-137: `kyo docs settle` writes the verdict that clears a docs obligation, and
     # writes an events row and a fresh export like every other mutation. The command's
     # other actions (`check`, `obligations`, `preview`) are pure reads, which is why this
@@ -807,6 +812,9 @@ def build_parser() -> KyoseiParser:
     # KYO-644: a kind with policy.requires_credit (the default `decision`) names the
     # person who decided it; --quote-file alone also serves as the evidence.
     credits.add_credit_flags(p_new, decision=True, span=True)
+    # KYO-658: a kind with policy.requires_discussion (the default `decision`) names its
+    # discussion, or opens one late.
+    cmd_discuss.add_filing_flags(p_new)
     p_new.add_argument(
         "--from",
         dest="from_file",
@@ -974,6 +982,7 @@ def build_parser() -> KyoseiParser:
         "source (KYO-522)",
     )
     credits.add_credit_flags(p_spawn, decision=True, span=True)
+    cmd_discuss.add_filing_flags(p_spawn)  # KYO-658
     p_spawn.add_argument(
         "--check",
         action="store_true",
@@ -2970,6 +2979,40 @@ def build_parser() -> KyoseiParser:
         metavar="TAG",
         help="tag: a tag to remove from this filed note, repeatable",
     )
+
+    p_discuss = sub.add_parser(
+        "discuss",
+        parents=[common],
+        help="a discussion in which the person is asked to choose: open one when it starts, "
+        "stamped at the person's turn from the turn index; note what was put to them; close "
+        "one that produced nothing (KYO-658). Spawning from it closes it too",
+    )
+    p_discuss.add_argument(
+        "action",
+        choices=["open", "note", "close"],
+        help="open files a discussion at the person's latest confirmed turn; note keeps what "
+        "was put to the person; close --dropped closes one with nothing produced",
+    )
+    p_discuss.add_argument("id", nargs="?", help="note and close: the discussion, PREFIX-N")
+    p_discuss.add_argument("--title", help="open: the topic, one line")
+    p_discuss.add_argument(
+        "--at",
+        metavar="PROMPT",
+        help="the person's turn to stamp, a prompt id or transcript record uuid from the turn "
+        "index (a unique prefix will do); defaults to their latest confirmed turn",
+    )
+    p_discuss.add_argument(
+        "--file",
+        metavar="FILE",
+        help="note: what was put to the person, the options and the recommendation, from a "
+        "file or '-' for stdin (law 5)",
+    )
+    p_discuss.add_argument(
+        "--dropped",
+        action="store_true",
+        help="close: the discussion produced nothing; needs --why",
+    )
+    p_discuss.add_argument("--why", help="close --dropped: why nothing was produced, one line")
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and
     # every part of it is in the payload, so there is nothing to select. `--root` and

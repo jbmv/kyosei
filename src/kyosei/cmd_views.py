@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import (
     bases,
+    cmd_discuss,
     commands,
     currency,
     docs_check,
@@ -2091,6 +2092,8 @@ def _show(ctx: Context, args: Namespace) -> Output:
     standings = _standings(store, [doc, *members])
     covered_by = _covered_by_dispatches(store, args.id)
     carried = _carried_standing(store, doc)
+    # KYO-658: the discussion this record was filed from, read over its produced-by links.
+    discussion = cmd_discuss.discussion_summary(store, args.id)
     # KYO-225.c3: the new-file touches whose file is not in this checkout yet. Asked
     # here, where the project root is, so `kyo show` stops annotating a touch the moment
     # the work it declared has landed — without anyone editing the stored touch.
@@ -2111,6 +2114,7 @@ def _show(ctx: Context, args: Namespace) -> Output:
                 pending_touches=pending_touches,
                 covered_by=covered_by,
                 carried=carried,
+                discussion=discussion,
             )
         ],
         # `standing` rides beside `status`, never instead of it: a JSON consumer
@@ -2152,6 +2156,11 @@ def _show(ctx: Context, args: Namespace) -> Output:
             # KYO-497: present only on a record of a `policy.carried` kind, so every
             # other record's --json is byte-for-byte what it was.
             **({"carried": carried} if carried is not None else {}),
+            # KYO-658: present only on a record filed from a discussion, on `carried`'s
+            # terms: which one, whether it is open, and whether its opening was late or
+            # unstamped. A read of the links and the discussion's turn references; the
+            # export carries the facts on the discussion's own document.
+            **({"discussion": discussion} if discussion is not None else {}),
         },
     )
 

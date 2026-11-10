@@ -29,6 +29,9 @@
 #       requires_credit: bool   # optional, either archetype; true = `kyo new`/`kyo spawn` of
 #                               # this kind needs a decided credit: --person, --quote-file,
 #                               # --decision-file, --session or --source-other (KYO-644)
+#       requires_discussion: bool   # optional, either archetype; true = `kyo new`/`kyo spawn`
+#                                   # of this kind names its discussion: spawned from one,
+#                                   # --discussion ID, or --opened-late (KYO-658)
 #       raises_docs_obligations: bool   # optional, default false; true = filing or editing a
 #                                       # record raises a standing docs obligation on each ssot
 #                                       # section it names by id, and on each doc-ref (KYO-554)
@@ -51,8 +54,8 @@
 #
 # `bug`, `investigation`, `decision`, `evidence` below are the four kinds the Kyosei charter
 # (docs/design/charter.md, "The kind registry") spells out as illustrative defaults, kept in
-# the charter's policy shape. `task`, `chore`, `experiment`, `proposal`, `plan` and `reminder`
-# are authored here on the same schema. The charter's example is internally inconsistent in
+# the charter's policy shape. `task`, `chore`, `experiment`, `proposal`, `plan`, `reminder`
+# and `discussion` are authored here on the same schema. The charter's example is internally inconsistent in
 # two places, and the registry departs from it there: see `bug.produces` and
 # `evidence.accepts_from` below.
 
@@ -101,8 +104,8 @@ kinds:
     # KYO-228: `intake` added to every archetype: work kind. `intake` lets a record be
     # filed directly, and `kyo new` takes criteria and touches, so nothing is lost but the
     # idea file. `ideas/` is for a thought that is not being filed in that session.
-    accepts_from: [intake, idea, bug, investigation, reminder]   # idea: the core promotion path (Law 13);
-                                                           # bug, investigation, reminder: mirrors their `produces: [..., task]`
+    accepts_from: [intake, idea, bug, investigation, reminder, discussion]   # idea: the core promotion path (Law 13);
+                                                           # bug, investigation, reminder, discussion: mirrors their `produces: [..., task]`
     produces: []                      # deliberately empty (Law 2): splitting a task (`kyo split`) makes
                                        # more tasks through a different mechanism, not kind-promotion;
                                        # nothing needs a task to spawn a kind-record
@@ -182,7 +185,7 @@ kinds:
       before it becomes binding. Structure (its criteria: e.g. "cites >=2 evidence-backed
       alternatives") is authored at promotion, per Law 13.
     # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
-    accepts_from: [intake, idea, reminder]   # nothing but `reminder` (KYO-497) produces `proposal`
+    accepts_from: [intake, idea, reminder, discussion]   # only `reminder` (KYO-497) and `discussion` (KYO-658) produce `proposal`
     produces: [decision, plan, experiment]   # symmetric with experiment.accepts_from including proposal
     policy:
       requires_criteria: true
@@ -206,7 +209,7 @@ kinds:
       A record that owns a set of member records (task, bug, ... — assigned by membership, not
       by promotion) and reports their status distribution. There is no separate milestone entity.
     # KYO-228: `intake` added -- see the `task` entry above for the reasoning.
-    accepts_from: [intake, idea, proposal]
+    accepts_from: [intake, idea, proposal, discussion]   # discussion: KYO-658
     produces: []                      # a plan's downstream is member-record assignment, a separate
                                        # mechanism (`kyo new ... --plan <id>`), not a promotion edge
     policy:
@@ -254,17 +257,39 @@ kinds:
     # without `--evidence-file` because of `requires_evidence_links` below. A decision that
     # needs design work first still goes through a `proposal`. Symmetric with
     # `reminder.produces` above.
-    accepts_from: [intake, proposal, investigation, reminder]
+    # KYO-658: `discussion` added, symmetric with `discussion.produces` below. A decision
+    # spawned from the discussion it came from closes that discussion.
+    accepts_from: [intake, proposal, investigation, reminder, discussion]
     produces: []
     policy:
       amendable: true
       requires_evidence_links: true   # consumed by `kyo new`: filing directly needs --evidence-file
       requires_credit: true           # KYO-644: `kyo new`/`kyo spawn` need the person's decided
                                       # credit; --quote-file can serve as the evidence
+      requires_discussion: true       # KYO-658: `kyo new`/`kyo spawn` name the discussion the
+                                      # decision came from, or open one late (--opened-late),
+                                      # where `people:` declares someone
       raises_docs_obligations: true   # KYO-554: a decision naming a section obliges someone to
                                       # bring that section into line, or say it needs no change
       swept: false
       counted: false
+
+  discussion:
+    archetype: knowledge
+    summary: >-
+      A conversation in which the person is asked to choose, opened when it starts, at the
+      person's turn the turn index stamped, and closed by what it produced.
+    # KYO-658 (decision KYO-654, DC2). Filed by `kyo discuss open`, which stamps the opening
+    # from the turn index, never by `kyo new`: a discussion filed directly would carry no
+    # stamp, which is why `accepts_from` is empty. Spawning a decision, proposal, plan or
+    # task from it closes it; `kyo discuss close <id> --dropped --why ...` closes it with
+    # nothing produced. `kyo discuss note <id>` records what was put to the person.
+    accepts_from: []
+    produces: [decision, proposal, plan, task]
+    policy:
+      amendable: true
+      swept: true                     # an open discussion can go stale
+      counted: false                  # not work in the queue-count sense
 
   evidence:
     archetype: knowledge

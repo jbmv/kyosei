@@ -566,6 +566,7 @@ ALLOCATED_CHILD_TABLES: tuple[tuple[str, str], ...] = (
     ("reports", "report"),
     ("flags", "flag"),
     ("credits", "credit"),
+    ("turn_refs", "turn-ref"),
     ("doc_refs", "doc-ref"),
     ("docs_obligations", "docs-obligation"),
 )
@@ -891,6 +892,32 @@ def _load(
                         " VALUES (?, ?, ?)",
                         (credit["id"], subject["kind"], subject["id"]),
                     )
+            # KYO-658: a discussion's turn references, verbatim. A document written before
+            # schema 32 has none (schema.EXPORT_FIELD_DEFAULTS[32]).
+            for ref in doc["turn_refs"]:
+                conn.execute(
+                    "INSERT INTO turn_refs (id, record_id, seq, role, session, prompt_id, turn,"
+                    " at, source, index_state, late, note_id, produced_id, why, author,"
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        ref["id"],
+                        doc["id"],
+                        ref["seq"],
+                        ref["role"],
+                        ref["session"],
+                        ref["prompt_id"],
+                        ref["turn"],
+                        ref["at"],
+                        ref["source"],
+                        ref["index_state"],
+                        1 if ref["late"] else 0,
+                        ref["note_id"],
+                        ref["produced_id"],
+                        ref["why"],
+                        ref["author"],
+                        ref["created_at"],
+                    ),
+                )
             # Milestone 5 (KYO-7): dispatches and reports point at each other
             # (dispatch.report_id -> reports, reports.dispatch_id -> dispatches);
             # foreign keys are OFF for the whole load (see module docstring), so

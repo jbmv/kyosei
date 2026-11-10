@@ -718,6 +718,78 @@ def decision_header_lines(doc: dict, evidence: dict[str, str]) -> list[str]:
     return out
 
 
+# ------------------------------------------------------- KYO-658: turn references
+
+
+def lag_seconds(ref: dict) -> int | None:
+    """Seconds from the turn a reference names to the moment the reference was written;
+    None for a reference with no indexed time."""
+    if not ref.get("at") or not ref.get("created_at"):
+        return None
+    at, made = _instant(ref["at"]), _instant(ref["created_at"])
+    if at is None or made is None:
+        return None
+    return int(round(made - at))
+
+
+def turn_ref_lines(refs: list[dict]) -> list[str]:
+    """One line for each of a discussion's turn references (export shape), plus the note or
+    reason it carries. A reference that names a turn says which and when the index stamped
+    it, and how long after that it was written; one that does not says the index was absent."""
+    out: list[str] = []
+    for ref in refs:
+        head = f"{ref.get('id') or '(at this filing)'}  {ref['role']}"
+        if ref.get("late"):
+            head += " LATE"
+        if ref["index_state"] == "indexed":
+            prompt = ref.get("prompt_id") or f"mid-turn {ref.get('turn')}"
+            head += f"  prompt {prompt} at {ref['at']} ({ref.get('source')})"
+            head += f", session {(ref.get('session') or '?')[:8]}"
+            lag = lag_seconds(ref)
+            if lag is not None and lag >= 60:
+                head += f", written {_duration(lag)} later"
+        else:
+            head += "  index absent"
+            if ref.get("session"):
+                head += f", session {ref['session'][:8]}"
+            if ref.get("created_at"):
+                head += f", written {ref['created_at']}"
+        out.append(head)
+        if ref.get("note_id"):
+            out.append(f"    what was put to the person: {ref['note_id']}")
+        if ref.get("produced_id"):
+            out.append(f"    produced {ref['produced_id']}")
+        if ref.get("why"):
+            out.append(f"    dropped: {ref['why']}")
+    return out
+
+
+def discussion_header_lines(doc: dict, discussion: dict | None) -> list[str]:
+    """The header line of a discussion record (open or closed), or of a record filed from
+    one (which discussion, and whether its opening was late or unstamped)."""
+    if doc["kind"] == "discussion" and doc.get("turn_refs"):
+        closed = [r for r in doc["turn_refs"] if r["role"] == "closed"]
+        opened = next((r for r in doc["turn_refs"] if r["role"] == "opened"), None)
+        state = "closed" if closed else "open"
+        if closed and closed[0].get("produced_id"):
+            state += f", produced {closed[0]['produced_id']}"
+        elif closed:
+            state += ", nothing produced"
+        if opened and opened.get("late"):
+            state += "; opened late, after its decision"
+        return [f"  discussion: {state}"]
+    if discussion is None:
+        return []
+    marks = []
+    if discussion["late"]:
+        marks.append("opened late, after the decision")
+    if discussion["index_state"] == "absent":
+        marks.append("index absent")
+    elif discussion.get("opened_at"):
+        marks.append(f"opened {discussion['opened_at']}")
+    return [f"  discussed in: {discussion['id']} ({', '.join(marks) or 'opened'})"]
+
+
 def _verification_credit_lines(
     doc: dict, verification: dict, quotes: dict[str, str], overrides: dict[str, dict]
 ) -> list[str]:
@@ -748,6 +820,7 @@ def show_text(
     pending_touches: frozenset[str] | set[str] | None = None,
     covered_by: list[dict] | None = None,
     carried: dict | None = None,
+    discussion: dict | None = None,
 ) -> str:
     """Full record rendering for ``kyo show`` without ``--json``.
 
@@ -773,6 +846,10 @@ def show_text(
     ``carried`` is KYO-497's (``cmd_views._carried_standing``): on a record of a
     ``policy.carried`` kind, when it was filed and how many whole days it has been
     carried; ``None`` on every other record, which prints no line for it.
+
+    ``discussion`` is KYO-658's (``cmd_discuss.discussion_summary``): the discussion a
+    record was filed from, read over its ``produced-by`` links; ``None`` when there is none.
+    A discussion record's own turn references are its document's ``turn_refs``.
     """
     out: list[str] = []
     pending = set(pending_touches or ())
@@ -794,6 +871,7 @@ def show_text(
     out.append(f"  created: {doc['created_at']}")
     out.append(f"  updated: {doc['updated_at']}")
     out.extend(decision_header_lines(doc, quotes))
+    out.extend(discussion_header_lines(doc, discussion))
     if doc["wont_do_reason"]:
         # The column is one column; the label is the archetype's own word for what
         # happened to the record (KYO-44).
@@ -805,6 +883,12 @@ def show_text(
         out.append("  (empty)")
     else:
         out.extend(f"  | {line}" for line in doc["description"].split("\n"))
+
+    # KYO-658: only a discussion has turn references, so only its page has the block.
+    if doc.get("turn_refs"):
+        out.append("")
+        out.append(f"turn references ({len(doc['turn_refs'])}):")
+        out.extend(f"  {line}" for line in turn_ref_lines(doc["turn_refs"]))
 
     out.append("")
     out.append(f"criteria ({len(doc['criteria'])}):")

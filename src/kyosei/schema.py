@@ -336,7 +336,14 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: tag's own change (or the note's filing, if it was filed with the tag), with no session
 #: and no message, which nothing recorded, and the tag is gone
 #: (:func:`kyosei.rebuild._load`). A real DDL change, so a real new hash.
-SCHEMA_VERSION = 31
+#: Bumped to 32 for KYO-658 (decision KYO-654, DC2 and DC3): the ``turn_refs`` table, a
+#: discussion record's references to the person's turns as the turn index stamped them
+#: (``KYO-n.sN``): where it was opened, where options were put, where it closed. A record
+#: document written at 31 or earlier carries no ``turn_refs`` (:data:`EXPORT_FIELD_DEFAULTS`
+#: [32]); the empty list is what was true of it, since no discussion could be opened, and
+#: nothing is derived from a credit's span, which cites a discussion by transcript id and
+#: says nothing about when it was declared open. A real DDL change, so a real new hash.
+SCHEMA_VERSION = 32
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -883,6 +890,42 @@ CREATE TABLE credits (
     UNIQUE (record_id, seq)
 );
 
+-- KYO-658: a discussion record's turn references (`KYO-n.sN`). Each names one of the
+-- person's turns as the turn index (`kyosei/turns.jsonl`, KYO-657) recorded it, and what
+-- the discussion did there. No column holds transcript words, and none is typed by an
+-- agent: `session` is the session's own id ($CLAUDE_CODE_SESSION_ID), and `prompt_id`,
+-- `turn` (the transcript record's uuid), `at` (the hook's clock, or the transcript's for a
+-- line the Stop hook added) and `source` (hook | transcript) are copied from the index line.
+--   role         opened | note | closed
+--   index_state  indexed, or absent when there was no confirmed index line to stamp from
+--                (no session, a project that has not opted in, or no line for the
+--                session); `prompt_id`, `turn`, `at` and `source` are then NULL, and
+--                `created_at` is the only time
+--   late         1 on an `opened` reference written after the decision it led to
+--                (`--opened-late`); never cleared
+--   note_id      for `note`, the record note holding what was put to the person
+--   produced_id  for `closed` by spawning, the record spawned from the discussion
+--   why          for `closed` with nothing produced (`--dropped`), the reason
+CREATE TABLE turn_refs (
+    id          TEXT PRIMARY KEY,
+    record_id   TEXT NOT NULL REFERENCES records(id),
+    seq         INTEGER NOT NULL,
+    role        TEXT NOT NULL CHECK (role IN ('opened', 'note', 'closed')),
+    session     TEXT,
+    prompt_id   TEXT,
+    turn        TEXT,
+    at          TEXT,
+    source      TEXT,
+    index_state TEXT NOT NULL CHECK (index_state IN ('indexed', 'absent')),
+    late        INTEGER NOT NULL DEFAULT 0 CHECK (late IN (0, 1)),
+    note_id     TEXT,
+    produced_id TEXT,
+    why         TEXT,
+    author      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (record_id, seq)
+);
+
 -- KYO-642: the rows one credit answers. `subject_kind` is verification | gate | record
 -- and `subject_id` the id of that row. No foreign key on `subject_id`: it points into
 -- three tables, and `kyo rebuild` loads the records one at a time.
@@ -1348,6 +1391,27 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "credit_id": ("export.record_document", "store.Store.credit_subjects"),
         "subject_kind": ("export.record_document", "store.Store.credit_subjects"),
         "subject_id": ("export.record_document", "store.Store.credit_subjects"),
+    },
+    # KYO-658: a discussion's turn references. `kyo show` draws them, a decision's header
+    # names its discussion and whether it was opened late, and a decided credit filed
+    # from the discussion takes its span from them.
+    "turn_refs": {
+        "id": ("export.record_document", "store.Store.turn_refs"),
+        "record_id": ("export.record_document", "doctor_exports.check_orphans"),
+        "seq": ("export.record_document", "doctor_exports.check_allocations"),
+        "role": ("export.record_document", "cmd_discuss.discussion_state"),
+        "session": ("export.record_document", "credits.discussion_span"),
+        "prompt_id": ("export.record_document", "render.turn_ref_lines"),
+        "turn": ("export.record_document", "credits.discussion_span"),
+        "at": ("export.record_document", "render.turn_ref_lines", "credits.discussion_span"),
+        "source": ("export.record_document", "render.turn_ref_lines"),
+        "index_state": ("export.record_document", "render.turn_ref_lines"),
+        "late": ("export.record_document", "cmd_discuss.discussion_state"),
+        "note_id": ("export.record_document", "render.turn_ref_lines"),
+        "produced_id": ("export.record_document", "cmd_discuss.discussion_state"),
+        "why": ("export.record_document", "render.turn_ref_lines"),
+        "author": ("export.record_document",),
+        "created_at": ("export.record_document", "render.turn_ref_lines"),
     },
     # KYO-137.c1: the back path. Every column has a reader in the
     # same commit as the column (law 2) — the export, the `kyo show` rendering, and the
@@ -2176,6 +2240,11 @@ EXPORT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     #: manufacturing it across the whole store at once would invent that claim silently
     #: (the move KYO-100 refused for `scope`). The backfill is KYO-639's, and approved first.
     28: {"credits": []},
+    #: KYO-658: a record exported before discussions existed has no turn references, which
+    #: is exactly what the empty list says. Never derived from a decided credit's span: a
+    #: span cites the discussion by transcript id after the fact, while a turn reference
+    #: says when the discussion was declared open, and nobody declared it.
+    32: {"turn_refs": []},
 }
 
 #: Milestone 4 also adds a field *within* each criterion (its verification history),
