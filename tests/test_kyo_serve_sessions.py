@@ -344,7 +344,8 @@ def test_turns_are_the_session_layers_objects_and_never_a_row(bed: Bed) -> None:
     assert len({c["call_id"] for c in calls}) == len(calls)
     resulted = [c["result"] for c in calls if c["result"]]
     assert resulted and all(set(r) == {"uuid", "at", "text", "is_error"} for r in resulted)
-    assert all(set(s) == {"agent_id", "tool_call_uuid", "description", "agent_type"}
+    assert all(set(s) == {"agent_id", "tool_call_uuid", "description", "agent_type",
+                          "model", "effort"}
                for s in document["subagents"])  # fmt: skip
 
 
@@ -1738,3 +1739,53 @@ def test_the_stream_states_lines_a_running_subagent_wrote(bed: Bed, stream) -> N
     with agent.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row) + "\n")
     assert opened.event("facts")["facts"]["lines"] == {"added": 12, "removed": 4}
+
+
+# ------------------------------------------ KYO-726: a subagent's model and effort, from its file
+
+
+def _agent_with_effort(bed: Bed, effort: str | None) -> None:
+    directory = bed.transcripts / OLD / "subagents"
+    directory.mkdir(parents=True, exist_ok=True)
+    row = json.loads(_agent_row("assistant", 2, _reply("msg_1", 3, 1, 10, 20)))
+    row["message"]["model"] = "claude-fable-5-2"
+    if effort is not None:
+        row["effort"] = effort
+    (directory / f"agent-{USAGE_AGENT}.jsonl").write_text(
+        _agent_row("user", 1, {"role": "user", "content": "Count"}) + json.dumps(row) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_the_subagent_route_states_the_model_and_effort_its_transcript_records(bed: Bed) -> None:
+    _agent_with_effort(bed, "medium")
+    document = json_body(bed.get(USAGE_ROUTE))
+    assert document["model"] == "claude-fable-5-2"
+    assert document["effort"] == "medium"
+
+
+def test_a_transcript_without_an_effort_states_none_and_one_without_a_reply_neither(
+    bed: Bed,
+) -> None:
+    _agent_with_effort(bed, None)
+    document = json_body(bed.get(USAGE_ROUTE))
+    assert document["model"] == "claude-fable-5-2"
+    assert document["effort"] is None
+    path = bed.transcripts / OLD / "subagents" / f"agent-{USAGE_AGENT}.jsonl"
+    path.write_text(_agent_row("user", 1, {"role": "user", "content": "Count"}), encoding="utf-8")
+    document = json_body(bed.get(USAGE_ROUTE))
+    assert (document["model"], document["effort"]) == (None, None)
+
+
+def test_turns_state_a_listed_subagents_model_and_effort(bed: Bed) -> None:
+    from kyosei.harness import claude_code_transcript as transcript
+
+    # The pair fixture lists AGENT; its file is placed by the earlier KYO-693 tests' helper.
+    place_agent = bed.transcripts / OLD / "subagents"
+    place_agent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(AGENT_FILE, place_agent / AGENT_FILE.name)
+    turns = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    listed = {item["agent_id"]: item for item in turns["subagents"]}
+    expected = transcript.subagent_model_effort(place_agent / AGENT_FILE.name)
+    assert expected[0] == "claude-haiku-5-5"
+    assert (listed[AGENT]["model"], listed[AGENT]["effort"]) == expected

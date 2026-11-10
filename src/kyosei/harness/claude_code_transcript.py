@@ -2049,6 +2049,36 @@ def subagent_transcript(session_path: Path, agent_id: str) -> Path | None:
     return directory / wanted if wanted in names else None
 
 
+def subagent_model_effort(path: Path) -> tuple[str | None, str | None]:
+    """The model and effort a subagent's transcript records, from its first assistant row.
+
+    Every assistant row of a subagent's file carries ``message.model`` and ``effort``, so the
+    first one answers, and the file is read only as far as it. Either is None when no row
+    states it yet (a subagent that has not replied), when the file cannot be read, or on an
+    older release's row without it. A synthetic message is not a model's reply and is passed.
+    """
+    try:
+        with path.open("rb") as handle:
+            for raw in handle:
+                if b'"assistant"' not in raw:
+                    continue
+                try:
+                    record = json.loads(raw)
+                except ValueError:
+                    continue
+                message = record.get("message") if isinstance(record, dict) else None
+                if record.get("type") != "assistant" or not isinstance(message, dict):
+                    continue
+                model = message.get("model")
+                if not isinstance(model, str) or model == _SYNTHETIC_MODEL:
+                    continue
+                effort = record.get("effort")
+                return model, effort if isinstance(effort, str) and effort else None
+    except OSError:
+        return None, None
+    return None, None
+
+
 # ------------------------------------------------------------- lines a session changed (KYO-701)
 
 #: Only a row holding this is parsed, since most rows of a long transcript are not edits.

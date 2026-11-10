@@ -24,10 +24,11 @@ struct ChatView: View {
                     }
                 }
                 if let facts = feed.facts {
-                    Text(facts.model ?? "model unknown")
-                    if let effort = facts.effort { Text("effort \(effort)") }
+                    // The effort follows the model's name, as in `claude-opus-5 high`.
+                    Text(
+                        [facts.model ?? "model unknown", facts.effort]
+                            .compactMap { $0 }.joined(separator: " "))
                 }
-                RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 if let mode = feed.facts?.permission_mode { Text(mode) }
                 if let lines = feed.facts?.lines {
                     HStack(spacing: 4) {
@@ -36,6 +37,7 @@ struct ChatView: View {
                     }
                     .monospacedDigit()
                 }
+                RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 Spacer()
                 if feed.status != "connected" { Text(feed.status) }
                 if let remote = feed.remote {
@@ -124,21 +126,41 @@ struct LimitLabel: View {
     }
 }
 
-/// The count of running subagents, which opens a list of them when clicked.
+/// `Subagents: N`, which opens a list of the running ones when clicked.
 struct RunningAgentsLabel: View {
     let agents: [RunningAgent]
     let count: Int
     @State private var shown = false
+    /// The glow's phase, which only moves while a subagent runs and Reduce Motion is off.
+    @State private var glowing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var running: Bool { count > 0 }
 
     var body: some View {
-        Text("\(count) subagent\(count == 1 ? "" : "s") running")
+        Text("Subagents: \(count)")
             .monospacedDigit()
-            // Green with a soft glow while any subagent runs, so it is seen at a glance.
-            .foregroundStyle(count > 0 ? Color.green : Color.secondary)
-            .shadow(color: count > 0 ? Color.green.opacity(0.7) : .clear, radius: 3)
+            // Green with a soft glow that pulses slowly while any subagent runs; with
+            // Reduce Motion on the glow holds at its middle strength.
+            .foregroundStyle(running ? Color.green : Color.secondary)
+            .shadow(
+                color: running ? Color.green.opacity(reduceMotion ? 0.6 : (glowing ? 0.9 : 0.25)) : .clear,
+                radius: reduceMotion ? 3 : (glowing ? 5 : 2)
+            )
+            .animation(
+                running && !reduceMotion
+                    ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true) : .default,
+                value: glowing
+            )
+            .onAppear { glowing = running }
+            .onChange(of: running) { _, now in glowing = now }
             .contentShape(Rectangle())
             .onTapGesture { if !agents.isEmpty { shown.toggle() } }
-            .help(agents.isEmpty ? "No subagent is running" : agents.map(\.name).joined(separator: "\n"))
+            .help(
+                agents.isEmpty
+                    ? "No subagent is running"
+                    : agents.map { "\($0.name): \($0.kind)" }.joined(separator: "\n")
+            )
             .popover(isPresented: $shown, arrowEdge: .top) {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(agents) { agent in
@@ -146,7 +168,7 @@ struct RunningAgentsLabel: View {
                             Text(agent.name).fontWeight(.semibold)
                             HStack(spacing: 8) {
                                 if let record = agent.record { Text(record) }
-                                Text(agent.type)
+                                Text(agent.kind)
                                 if let since = agent.since {
                                     Text(since, style: .timer).monospacedDigit()
                                 }
@@ -288,6 +310,8 @@ struct ChatWebView: NSViewRepresentable {
                         id: index,
                         name: agent["name"] as? String ?? "",
                         type: agent["type"] as? String ?? "",
+                        model: agent["model"] as? String ?? "",
+                        effort: agent["effort"] as? String ?? "",
                         since: stamps.date(from: agent["since"] as? String ?? ""),
                         tokens: agent["tokens"] as? String ?? "")
                 }

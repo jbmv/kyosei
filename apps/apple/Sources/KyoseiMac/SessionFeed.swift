@@ -8,9 +8,20 @@ struct RunningAgent: Identifiable, Equatable {
     let id: Int
     let name: String
     let type: String
+    /// The short model name and the effort its transcript records, such as `fable` and
+    /// `medium`; empty before the subagent's first reply (KYO-726).
+    var model = ""
+    var effort = ""
     let since: Date?
     /// Its tokens so far, in words, or empty before the server has been asked.
     var tokens = ""
+
+    /// What the status bar and its list call the agent: `fable medium`, and its type until it
+    /// has replied and the transcript states them.
+    var kind: String {
+        let words = [model, effort].filter { !$0.isEmpty }
+        return words.isEmpty ? type : words.joined(separator: " ")
+    }
 
     /// The record a dispatched worker is on, read from its description.
     var record: String? {
