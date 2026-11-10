@@ -607,7 +607,8 @@ def _file_line(
         return f"{line} {quote}{f' ({label})' if label else ''}"
     selected = text[anchor["char_start"] : anchor["char_end"]]
     quote, label = _place(text, anchor["char_start"], markdown)
-    if len(_clean_words(selected)) >= ANCHOR_WORDS:
+    if len(_clean_words(selected)) >= ANCHOR_WORDS or "\n" in selected:
+        # A selection over several lines is in no one sentence, and is quoted itself.
         quote = _words(selected)
     elif _words(selected) != quote:
         quote = f"{quote} at {_words(selected)}"

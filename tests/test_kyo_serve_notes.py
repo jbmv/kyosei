@@ -1525,6 +1525,7 @@ def test_c2_a_short_selection_quotes_its_sentence_and_a_long_one_is_quoted_itsel
             served("docs/plan.md", 5, 5, chars=chars_of(PLAN, long)),
             served("docs/plan.md", 1, 1, chars=chars_of(PLAN, "The plan")),
             served("src/tidy.py", 5, 5, chars=chars_of(SOURCE, "strip")),
+            served("src/tidy.py", 4, 5, chars=chars_of(SOURCE, "reformat(text):\n    return")),
         ),
         with_files,
     )
@@ -1537,6 +1538,8 @@ def test_c2_a_short_selection_quotes_its_sentence_and_a_long_one_is_quoted_itsel
         'on file docs/plan.md lines 1-1 "The plan" (heading)',
         # A source file has no blocks: the line is the sentence, and nothing is labelled.
         'on file src/tidy.py lines 5-5 "return text.strip()" at "strip"',
+        # A few words over two lines are in no one sentence, and are quoted themselves.
+        'on file src/tidy.py lines 4-5 "reformat(text): return"',
     ]
     bed.show(IDLE)
     wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)

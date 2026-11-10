@@ -236,6 +236,17 @@ Search your reply for the sentence and read the `at` words within it. A selectio
 more is quoted alone. A trailing `(heading)`, `(list item)`, `(table cell)` or `(code block)`
 names the block, and a heading's line means the section under it.
 
+### An `on record ...` or `on file ...` line names a record element or lines of a file (KYO-737)
+
+`on record KYO-717.c4 "first words..."` is anchored to that record or element; run `kyo show`
+on the record the id begins with (`kyo show KYO-717`) and read the element under its id, or on
+the id itself for a record or a dispatch. `on file <path> lines 333-345 "first words..."` is
+anchored to those lines of that file, counted from 1 in its source: the path is relative to
+the code repository unless the line says `in the store repository` (`kyo where` prints it) or
+`in the scratchpad`, which is your session's own. Read the lines, check that the quoted words
+are there, since the file may have changed since, and read `at "..."` as the selection within
+them. Neither line is the operator's words.
+
 ### Why the symbol form of a touch line matters (KYO-301)
 
 The symbol is any phrase found in the file -- a function or type name in code, a **section
