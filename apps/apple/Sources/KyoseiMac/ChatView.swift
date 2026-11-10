@@ -91,11 +91,19 @@ struct LimitLabel: View {
         return "Resets \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 
+    @State private var shown = false
+
     var body: some View {
         Text("\(name): \(Int(window.used_percentage.rounded()))%")
             .monospacedDigit()
             .foregroundStyle(window.used_percentage >= 90 ? Color.red : window.used_percentage >= 75 ? Color.orange : Color.secondary)
-            .help(resets)
+            .contentShape(Rectangle())
+            // A tooltip did not appear over the status bar, so the reset time opens on its own.
+            .onHover { shown = $0 }
+            .onTapGesture { shown.toggle() }
+            .popover(isPresented: $shown, arrowEdge: .top) {
+                Text(resets).font(.system(size: 12)).padding(10)
+            }
     }
 }
 
