@@ -74,6 +74,12 @@ and so are ``sessions/{id}/marks`` and ``tags`` (GET, KYO-710), which only read.
 They are the one exception to a read-only store: each write opens its own connection and goes
 through the transaction ``kyo notes`` uses.
 
+THE START ROUTE (KYO-719, decision KYO-718). ``orchestrator/start`` (POST) starts the
+project's orchestrator session as ``kyo orchestrator start`` does, and is the one process
+this server starts. It needs a device token holding the ``start`` permission and is logged;
+:mod:`kyosei.serve_orchestrator` holds that. Nothing else is served under ``orchestrator/``,
+and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
+
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
 it binds, ``kyo serve`` asks its port who is there (:func:`serve_install.refuse_if_held`)
@@ -240,7 +246,8 @@ NOT_SERVED: dict[str, str] = {
     "install-procedures": _WRITES_FILES,
     "install-agents": _WRITES_FILES,
     "serve": "it is this server",
-    # Machine changes and orchestrator starts go over SSH, never through a route.
+    # Machine changes go over SSH, never through a route. A start alone has a route of its
+    # own (KYO-719), which is not this command: nothing served stops a session.
     "orchestrator": "it starts and ends processes on this machine (over SSH only)",
     # KYO-519 (KYO-513): the same command under its pre-rename alias.
     "controller": "it is `orchestrator` under its old name (KYO-513), never served",
@@ -313,6 +320,12 @@ _NOTE_TAGS_ROUTE = "tags"
 #: ``tags`` (GET), the tags in use; both :mod:`kyosei.serve_notes`.
 SESSION_MARKS_ROUTE = "marks"
 TAGS_ROUTE = "tags"
+
+#: KYO-719: ``orchestrator/start`` (POST), the one process this server starts.
+#: :data:`kyosei.serve_orchestrator.ROUTE` and ``START``, spelled here because that module
+#: imports this one.
+ORCHESTRATOR_ROUTE = "orchestrator"
+ORCHESTRATOR_START = "start"
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -712,6 +725,12 @@ class ServeHandler(BaseHTTPRequestHandler):
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
+        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == ORCHESTRATOR_ROUTE:
+            if rest[3:] != [ORCHESTRATOR_START]:
+                from . import serve_orchestrator
+
+                raise serve_orchestrator.not_served("/".join(rest[3:]))
+            allowed = ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == NOTES_ROUTE:
             if len(rest) == 3:
                 allowed = ("GET", "POST")
@@ -773,6 +792,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(self._projects())
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
+        if rest[2] == ORCHESTRATOR_ROUTE:
+            return self._orchestrator_start(rest[1], split.query)
         if rest[2] == NOTES_ROUTE:
             return self._note_route(method, rest[1], rest[3:], split.query)
         if rest[2] == TAGS_ROUTE or (len(rest) == 5 and rest[4] == SESSION_MARKS_ROUTE):
@@ -943,6 +964,25 @@ class ServeHandler(BaseHTTPRequestHandler):
             lambda: self.server.project(name).root,
             session_id,
             action,
+            self.headers.get("Authorization"),
+            self._body,
+        )
+        return 200, _json_bytes(document)
+
+    def _orchestrator_start(self, name: str, query: str) -> tuple:
+        """The start route. Everything it decides is :mod:`kyosei.serve_orchestrator`'s."""
+        from . import serve_orchestrator
+
+        if query:
+            raise Refusal(
+                400,
+                "the start route takes no query string; send the token as "
+                "`Authorization: Bearer <token>` and `{}` as the JSON body",
+            )
+        document = serve_orchestrator.perform(
+            self.server.environ,
+            name,
+            lambda: self.server.project(name).root,
             self.headers.get("Authorization"),
             self._body,
         )
@@ -1359,7 +1399,8 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "
         f".../send-prompt or .../attachments, GET .../attachments/{{attachment}}, GET/POST "
         f"{project}/notes, GET {project}/notes/{{id}}, POST {project}/notes/{{id}}/tags, "
-        f"GET {project}/tags and GET {project}/sessions/{{id}}/marks",
+        f"GET {project}/tags, GET {project}/sessions/{{id}}/marks and POST "
+        f"{project}/orchestrator/start",
     )
 
 

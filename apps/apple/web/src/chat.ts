@@ -3,6 +3,7 @@
 // version replaces it in place.
 import { shiftLines } from "./marks";
 import { render } from "./pipeline";
+import { type StartFrame, startView } from "./start";
 
 interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
 interface Reply { message_id: string; uuid?: string; at: string; text: string; thinking?: string | null }
@@ -78,6 +79,20 @@ function drawEnded(): void {
   document.body.classList.toggle("ended", sessionEnded);
   if (sessionEnded) document.getElementById("interrupt")!.hidden = true;
   drawWorking();
+}
+
+/** What the last press of Start orchestrator came to, until a session is live again. */
+let startFrame: StartFrame | null = null;
+
+/** KYO-719: the Start orchestrator panel, offered when the project has no live session. */
+function drawStart(): void {
+  const live = menu ? menu.sessions.sessions.some((row) => row.live) : null;
+  // A later session that ends is offered a fresh button, not the last press's words.
+  if (live) startFrame = null;
+  const view = startView(live, startFrame);
+  document.getElementById("start")!.hidden = !view.shown;
+  document.getElementById("start-text")!.textContent = view.text;
+  (document.getElementById("start-button") as HTMLButtonElement).disabled = !view.enabled;
 }
 const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
 const ACTIVITY_RED_MS = 45 * 60 * 1000;
@@ -1033,9 +1048,12 @@ const kyo = {
   },
 
   menu(data: Menu): void {
+    // Another project's press says nothing about this one.
+    if (menu && menu.project !== data.project) startFrame = null;
     menu = data;
     drawMenu();
     drawEnded();
+    drawStart();
     drawSide();
     // A subagent still running has more tool calls each time.
     for (const id of openAgents) {
@@ -1210,6 +1228,12 @@ const kyo = {
 
   note(frame: { text: string }): void {
     composerNote.textContent = frame.text;
+  },
+
+  /** What a press of Start orchestrator came to (KYO-719). */
+  start(frame: StartFrame): void {
+    startFrame = frame;
+    drawStart();
   },
 
   screen(frame: ScreenFrame): void {
@@ -2126,5 +2150,7 @@ document.addEventListener("keydown", (event) => {
   event.preventDefault();
   attemptSend(target);
 });
+
+document.getElementById("start-button")!.addEventListener("click", () => post("start", {}));
 
 (window as any).kyo = kyo;

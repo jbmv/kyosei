@@ -1261,6 +1261,9 @@ ERROR_CLASS_NAMES = frozenset(
         # command, by `tests/test_atomic_writes.py`.
         "ExportFileUnreadable",
         "PaneNotReady",
+        # KYO-719: `start`'s refusal of a session already running, a class of its own so
+        # that kyo serve's start route answers it as a conflict.
+        "AlreadyRunning",
         "SessionNotFound",
         # KYO-187: `kyo check-branch`/`check-clean`/`check-push`, and `kyo doctor`/
         # `docs check`. Those five refusals carry the command's own `--json` envelope,
@@ -4663,6 +4666,14 @@ RECORDED: dict[str, str] = {
         "a login shell on which claude resolves (`zsh -lc 'command -v claude'`); the "
         "user's shell profile is out of reach here. Proved by "
         "tests/test_kyo_controller.py::test_claude_that_exits_at_once_is_reported_and_a_working_claude_clears_it"
+    ),
+    # KYO-719: the start route's project, when its config names no session.
+    "cmd_controller.py:start_registered#0": (
+        "a hand edit of the project's config.yml, setting `project_prefix`; reached only "
+        "through kyo serve's start route, which this walk has no server for. Proved by "
+        "tests/test_kyo_serve_orchestrator.py::"
+        "test_a_project_with_no_usable_prefix_is_refused_and_setting_one_clears_it, "
+        "which restores the prefix and starts"
     ),
     "cmd_controller.py:install#0": (
         "running the printed `launchctl bootstrap` line from a terminal in the desktop "

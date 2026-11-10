@@ -501,6 +501,13 @@ body.terminal-open #terminal { display: block; }
 
 #working[hidden] { display: none; }
 
+/* KYO-719: shown when the project has no live session. */
+#start { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
+#start[hidden] { display: none; }
+#start-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+#start-button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); color: var(--text); font-size: 13px; }
+#start-button:disabled { opacity: 0.5; }
+
 .pulse {
   width: 9px;
   height: 9px;

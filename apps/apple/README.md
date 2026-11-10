@@ -20,7 +20,9 @@ swift run KyoseiMac
 
 The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name another server
 and project, which `KYOSEI_SERVE_URL` and `KYOSEI_PROJECT` override. Sending needs a device
-token from `kyo devices issue`, entered in Settings and kept in the Keychain.
+token from `kyo devices issue`, entered in Settings and kept in the Keychain. A project with
+no live session is shown a Start orchestrator button, which needs the token to hold the `start`
+permission.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.

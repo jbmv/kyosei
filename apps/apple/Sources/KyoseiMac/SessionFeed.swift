@@ -42,6 +42,7 @@ final class SessionFeed {
     private var draftSession: String?
     private var draftEtag: String?
     private var draftTask: Task<Void, Never>?
+    private var startWatch: Task<Void, Never>?
 
     init(client: ServeClient, project: String) {
         self.client = client
@@ -74,8 +75,10 @@ final class SessionFeed {
         UserDefaults.standard.set(project, forKey: Self.projectKey)
         task?.cancel()
         menuTask?.cancel()
+        startWatch?.cancel()
         task = nil
         menuTask = nil
+        startWatch = nil
         client = ServeClient(base: server)
         self.project = project
         selected = nil
@@ -363,6 +366,72 @@ final class SessionFeed {
                 send("note", #"{"text": "The interrupt was refused."}"#)
                 return
             }
+        }
+    }
+
+    private static let startWatchPoll = Duration.seconds(2)
+    private static let startWatchLimit = Duration.seconds(600)
+
+    /// Asks the server to start this project's orchestrator session (KYO-719), and tells the
+    /// page what came of it. The page puts the reply into words; a refusal is the server's
+    /// own sentence, which names the remedy.
+    func startOrchestrator() {
+        guard let token = Self.deviceToken() else {
+            let why =
+                "Starting a session needs a device token holding the start permission. Issue "
+                + "one on the server's machine with `kyo devices issue <name> --permission "
+                + "start`, repeating --permission for send and notes, and enter it in Settings."
+            send("start", #"{"phase": "failed", "text": \#(quoted(why))}"#)
+            return
+        }
+        send("start", #"{"phase": "starting"}"#)
+        let project = project
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "POST", "v1/projects/\(project)/orchestrator/start", token: token,
+                    body: Data("{}".utf8))
+            else {
+                send("start", #"{"phase": "failed", "text": "The server could not be reached."}"#)
+                return
+            }
+            guard project == self.project else { return }
+            let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+            let document = object == nil ? "null" : String(decoding: reply.data, as: UTF8.self)
+            send(
+                "start",
+                #"{"phase": "answered", "status": \#(reply.status), "reply": \#(document)}"#)
+            // A session already running may not be listed yet, so it is watched for as well.
+            let running = object?["reason"] as? String == "already-running"
+            if reply.status == 200 || running { followStartedSession() }
+        }
+    }
+
+    /// Shows the project's live session once the server lists one. A session is listed when
+    /// Claude Code has begun in it, which waits on the trust prompt when there is one, so the
+    /// watch is long and ends by itself.
+    private func followStartedSession() {
+        startWatch?.cancel()
+        let project = project
+        startWatch = Task {
+            let deadline = ContinuousClock.now + Self.startWatchLimit
+            while ContinuousClock.now < deadline {
+                try? await Task.sleep(for: Self.startWatchPoll)
+                guard !Task.isCancelled, project == self.project else { return }
+                guard let rows = try? await client.sessions(project: project),
+                    let row = rows.first(where: { $0.live && $0.has_pane })
+                        ?? rows.first(where: { $0.live })
+                else { continue }
+                guard !Task.isCancelled else { return }
+                if current != row.session_id { select(session: row.session_id) }
+                await sendMenu()
+                return
+            }
+            // The button is given back, so that a session that never began can be started.
+            let why =
+                "The session was started, but the server has not listed it after ten minutes. "
+                + "`kyo orchestrator list` on the server's machine says what is running."
+            send("start", #"{"phase": "failed", "text": \#(quoted(why))}"#)
         }
     }
 

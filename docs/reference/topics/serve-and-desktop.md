@@ -106,9 +106,11 @@ on loopback. The projects are the ones `kyo projects list` shows
 project it creates, and `kyo projects add|remove` edits the list. A viewer can read
 everything the CLI's `--json` reads. It can write exactly two things in each project:
 files under its `ideas/`, and its session scratchpad. Nothing else is writable: no
-record, no promotion, no export, and the server starts no process. One
+record, no promotion, no export. One
 module holds that line, `src/kyosei/serve_files.py`. The exception is sending input to a live
-session, which is off by default (see "Sending input" below). Beside the command reads, it serves
+session, which is off by default (see "Sending input" below). The server starts one kind of
+process and no other: a project's orchestrator session, for a device whose token allows it
+(see "Starting an orchestrator session" below, KYO-718). Beside the command reads, it serves
 one more thing read-only: a governed document's text, at
 `/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
 (KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
@@ -807,6 +809,57 @@ Refusals carry a `reason`: `no-token`, `unknown-token`, `revoked-token`, `no-not
 `bad-request`, `not-found`, `store-locked`, `store-refused`, and on `send-notes` also
 `note-redacted` and `note-unsendable` (a control character in a filed note), on
 `send-prompt` `no-send-permission`, plus those of the held route.
+
+### Starting an orchestrator session: the start route (KYO-719)
+
+`kyo serve` starts a project's orchestrator session on request, so that a device with no SSH
+path to the machine can start one (decision KYO-718). This is the one process `kyo serve`
+starts.
+
+```
+POST /v1/projects/<name>/orchestrator/start      body: {}
+```
+
+The route does what `kyo orchestrator start <name>` does, on the server's machine, and answers
+with what `kyo orchestrator start <name> --json` prints: `state` (`started` or
+`waiting-for-trust`), `waiting_for_trust`, `trust_folder`, `session`, `socket`, `pid`, `cwd`,
+`attach`, `started_with`, `remote_control_name` and the project's `project`, `prefix` and
+`root`, with `at` and `device` added. When `state` is `waiting-for-trust`, Claude Code is asking
+whether to trust `trust_folder`, and the session does not register with Remote Control until
+a person answers in its terminal (see "Starting an orchestrator from another machine" above). The route answers after the
+same wait the command makes, which is several seconds.
+
+The request needs a device token holding the `start` permission, sent as for the send routes:
+
+```
+kyo devices issue my-ipad --permission start --permission send --permission notes
+```
+
+`start` is a permission of its own, so a token issued to type into a session or to file notes
+does not start a process. A token is changed by revoking it and issuing another. The route
+does not ask for the `serve_send` setting, which governs keys sent to a session.
+
+Nothing else is served under `orchestrator/`. No route stops a session, attaches to one or
+lists them, and the `orchestrator` command is refused by name on the command route. A session
+ends with `/exit` in its terminal, or with `kyo orchestrator stop <name>` on the machine.
+
+The session is created on the tmux server `kyo orchestrator start` uses (`tmux -L kyosei`),
+and its program is a login shell, so it has your login `PATH` whatever the server's own is. A
+server installed with `kyo serve --install --apply` runs in your desktop login, carries no
+`TMUX_TMPDIR` and no SSH variables, and therefore reaches the same socket as a command typed
+in a shell. A `kyo serve` started by hand over SSH refuses a start when that tmux server is
+not running, as the command does.
+
+A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
+`no-token`, `unknown-token`, `revoked-token`, `no-start-permission`, `bad-request`,
+`already-running` (409: the project's session is running, and no second one is started),
+`start-failed` (502: tmux, the orchestrator command or the project's prefix; the sentence
+says which), `not-served` (404: any other path under `orchestrator/`), `tokens-unreadable` and
+`send-log-unusable`.
+
+Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `orchestrator-start`:
+its time, project, device, and its outcome (`started`, `refused`, `failed`) with status and
+reason. A start that cannot be recorded is not made.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 
