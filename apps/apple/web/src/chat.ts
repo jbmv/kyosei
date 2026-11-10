@@ -4,6 +4,10 @@
 import { shiftLines } from "./marks";
 import { render } from "./pipeline";
 import { type StartFrame, startView } from "./start";
+import { Terminal } from "@xterm/xterm";
+import {
+  TERMINAL_FONT, type TerminalSize, bytesOf, fontToFit, lineBreakKeys, viewSize,
+} from "./terminal";
 
 interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
 interface Reply { message_id: string; uuid?: string; at: string; text: string; thinking?: string | null }
@@ -974,12 +978,139 @@ function isOwnBackgroundTask(call: ToolCall): boolean {
   return call.name === "Monitor" || (call.name === "Bash" && call.input?.run_in_background === true);
 }
 
-// The terminal's width is the running session's and is not ours to change, so its text is
-// scaled to fit the drawer rather than scrolled sideways.
+// The terminal drawer (KYO-721) is an emulator on the session's pane. The app carries the
+// pane's bytes in from `kyo serve` and what is typed back out, since this page may reach
+// nothing itself. Where the server refuses the stream, the drawer says why and shows the
+// pane's text as it did before, scaled to fit rather than scrolled sideways.
 const terminalPane = document.getElementById("terminal")!;
+const terminalScreen = document.getElementById("terminal-screen")!;
+const terminalNote = document.getElementById("terminal-note")!;
+const terminalText = document.getElementById("terminal-text")!;
 const TERMINAL_MAX_FONT = 13;
 const TERMINAL_PADDING = 32;
+const TERMINAL_RESIZE_MS = 120;
 let terminalColumns = 0;
+let emulator: Terminal | null = null;
+/** The size of the pane as the server last painted it, or none before a first screen. */
+let paneSize: TerminalSize | null = null;
+/** The view's size as last stated to the server, so that it is stated once. */
+let statedSize = "";
+let terminalResize: number | undefined;
+
+function terminalIsOpen(): boolean {
+  return document.body.classList.contains("terminal-open");
+}
+
+function showTerminalNote(text: string): void {
+  terminalNote.textContent = text;
+  terminalNote.hidden = !text;
+}
+
+/** Shows the emulator, or the pane's plain text when there is no stream to draw. */
+function showEmulator(shown: boolean): void {
+  terminalScreen.hidden = !shown;
+  terminalText.hidden = shown;
+  if (!shown) fitTerminal();
+}
+
+function theEmulator(): Terminal {
+  if (emulator) return emulator;
+  const styles = getComputedStyle(terminalPane);
+  const made = new Terminal({
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: TERMINAL_FONT,
+    scrollback: 5000,
+    theme: {
+      background: styles.getPropertyValue("--terminal-background").trim(),
+      foreground: styles.getPropertyValue("--terminal-text").trim(),
+    },
+  });
+  made.open(terminalScreen);
+  made.onData((data) => post("terminal", { action: "input", data }));
+  made.attachCustomKeyEventHandler((event) => {
+    const keys = lineBreakKeys(event);
+    if (keys === null) return true;
+    if (event.type === "keydown") post("terminal", { action: "input", data: keys });
+    return false;
+  });
+  emulator = made;
+  return made;
+}
+
+/** The size the drawer would give the pane at the base font, once a cell can be measured. */
+function terminalViewSize(): TerminalSize | null {
+  const screen = terminalScreen.querySelector<HTMLElement>(".xterm-screen");
+  if (!emulator || !screen) return null;
+  const scale = TERMINAL_FONT / (emulator.options.fontSize ?? TERMINAL_FONT);
+  return viewSize(
+    terminalScreen.clientWidth, terminalScreen.clientHeight,
+    (screen.clientWidth / emulator.cols) * scale, (screen.clientHeight / emulator.rows) * scale,
+  );
+}
+
+/** Tells the server the view's size, when it is known and differs from the last told. */
+function stateTerminalSize(action: "open" | "resize"): void {
+  const size = terminalViewSize();
+  const key = size ? `${size.cols}x${size.rows}` : "";
+  if (action === "resize" && (!size || key === statedSize)) return;
+  statedSize = key;
+  post("terminal", { action, ...(size ?? {}) });
+}
+
+/** Draws the pane at its own size, in a font at which its columns fit the drawer. */
+function fitEmulator(): void {
+  if (!emulator || !paneSize) return;
+  const view = terminalViewSize();
+  emulator.options.fontSize = fontToFit(TERMINAL_FONT, view?.cols ?? 0, paneSize.cols);
+  if (emulator.cols !== paneSize.cols || emulator.rows !== paneSize.rows) {
+    emulator.resize(paneSize.cols, paneSize.rows);
+  }
+}
+
+function terminalResized(): void {
+  fitTerminal();
+  if (!terminalIsOpen() || !emulator) return;
+  if (terminalResize !== undefined) clearTimeout(terminalResize);
+  terminalResize = window.setTimeout(() => {
+    terminalResize = undefined;
+    fitEmulator();
+    stateTerminalSize("resize");
+  }, TERMINAL_RESIZE_MS);
+}
+
+interface TerminalFrame {
+  name: string;
+  event?: { cols?: number; rows?: number; data?: string; text?: string; error?: string } | null;
+}
+
+/** One event of the terminal stream, or the app's word that it was refused or lost. */
+function terminalEvent(frame: TerminalFrame): void {
+  const event = frame.event ?? {};
+  if (frame.name === "ready") {
+    showTerminalNote("");
+    showEmulator(true);
+  } else if (frame.name === "screen" && event.cols && event.rows && event.data !== undefined) {
+    const terminal = theEmulator();
+    paneSize = { cols: event.cols, rows: event.rows };
+    fitEmulator();
+    terminal.reset();
+    terminal.write(bytesOf(event.data));
+    // The first measure of a cell comes with the first screen, and may change what fits.
+    requestAnimationFrame(() => {
+      fitEmulator();
+      stateTerminalSize("resize");
+    });
+  } else if (frame.name === "output" && event.data !== undefined) {
+    emulator?.write(bytesOf(event.data));
+  } else if (frame.name === "closed") {
+    showTerminalNote(event.text ?? "The terminal has closed.");
+  } else if (frame.name === "refused") {
+    showTerminalNote(event.error ?? "The server refused the terminal.");
+    showEmulator(false);
+  } else if (frame.name === "note") {
+    showTerminalNote(event.text ?? "");
+  }
+}
 
 function characterWidth(): number {
   const context = document.createElement("canvas").getContext("2d")!;
@@ -990,17 +1121,18 @@ function characterWidth(): number {
 const CHARACTER_WIDTH = characterWidth();
 
 function fitTerminal(): void {
-  const width = terminalPane.clientWidth - TERMINAL_PADDING;
+  const width = terminalText.clientWidth - TERMINAL_PADDING;
   if (width <= 0 || !terminalColumns) return;
   const size = Math.min(TERMINAL_MAX_FONT, width / (terminalColumns * CHARACTER_WIDTH));
-  terminalPane.style.fontSize = `${size.toFixed(2)}px`;
+  terminalText.style.fontSize = `${size.toFixed(2)}px`;
 }
 
-window.addEventListener("resize", fitTerminal);
+window.addEventListener("resize", terminalResized);
 
 // Wheel movement over the drawer stays in the drawer, including when it has nothing to scroll.
+// The emulator scrolls its own history before this is reached.
 terminalPane.addEventListener("wheel", (event) => {
-  terminalPane.scrollTop += event.deltaY;
+  if (!terminalText.hidden) terminalText.scrollTop += event.deltaY;
   event.preventDefault();
   event.stopPropagation();
 }, { passive: false });
@@ -1016,8 +1148,15 @@ document.getElementById("side-agents-finished")!.addEventListener("click", () =>
 });
 
 document.getElementById("terminal-toggle")!.addEventListener("click", () => {
-  document.body.classList.toggle("terminal-open");
+  if (!document.body.classList.toggle("terminal-open")) {
+    post("terminal", { action: "close" });
+    return;
+  }
   fitTerminal();
+  const terminal = theEmulator();
+  // The app opens the stream, and opens it again when the window turns to another session.
+  stateTerminalSize("open");
+  terminal.focus();
 });
 
 document.getElementById("sessions-more")!.addEventListener("click", () => {
@@ -1109,11 +1248,13 @@ const kyo = {
   terminal(frame: { terminal?: { text: string; working_line: string | null } | null }): void {
     workingLine = frame.terminal?.working_line ?? null;
     const text = frame.terminal?.text ?? "This session has no terminal to show.";
-    terminalPane.textContent = text;
+    terminalText.textContent = text;
     terminalColumns = Math.max(terminalColumns, ...text.split("\n").map((line) => line.length));
     fitTerminal();
     drawWorking();
   },
+
+  terminalEvent,
 
   facts(frame: { facts?: Facts | null }): void {
     if (frame.facts) facts = frame.facts;
@@ -2194,7 +2335,7 @@ function setComposerWidth(width: number): void {
   const clamped = Math.max(COMPOSER_MIN, Math.min(width, window.innerWidth - CHAT_MIN));
   document.documentElement.style.setProperty("--composer-width", `${clamped}px`);
   store(WIDTH_KEY, clamped);
-  fitTerminal();
+  terminalResized();
 }
 
 band.addEventListener("mousedown", (event) => {
@@ -2222,6 +2363,8 @@ newPromptButton.addEventListener("click", newPrompt);
 // Cmd-Return sends the prompt being typed in, or the only one there is.
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.metaKey) return;
+  // A key typed in the terminal is the terminal's.
+  if (event.target instanceof Node && terminalPane.contains(event.target)) return;
   const areas = textAreas();
   const focused = areas.find((area) => area === document.activeElement);
   const target = focused ?? (areas.length === 1 ? areas[0] : undefined);

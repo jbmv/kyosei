@@ -43,6 +43,21 @@ final class SessionFeed {
     private var draftEtag: String?
     private var draftTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
+    /// Whether the terminal drawer is open, and the size of its view once the page has
+    /// measured one (KYO-721).
+    private var terminalOpen = false
+    private var terminalSize: (cols: Int, rows: Int)?
+    /// The session whose terminal was last asked for, so that it is asked for once.
+    private var terminalSession: String?
+    private var terminalTask: Task<Void, Never>?
+    /// Read when the drawer opens, since reading it starts a process and a key must not.
+    private var terminalToken: String?
+    /// The open stream's connection, which an input or a resize names.
+    private var terminalConnection: String?
+    private var typed = ""
+    private var typing = false
+    private var resizing: Task<Void, Never>?
+    private var currentLive = false
 
     init(client: ServeClient, project: String) {
         self.client = client
@@ -79,10 +94,13 @@ final class SessionFeed {
         task = nil
         menuTask = nil
         startWatch = nil
+        closeTerminal()
+        terminalSession = nil
         client = ServeClient(base: server)
         self.project = project
         selected = nil
         current = nil
+        currentLive = false
         draftSession = nil
         draftEtag = nil
         facts = nil
@@ -389,6 +407,191 @@ final class SessionFeed {
         }
     }
 
+    // MARK: The terminal drawer (KYO-721)
+
+    private static let terminalTokenHelp =
+        "The terminal needs a device token holding the terminal permission. Issue one on the "
+        + "server's machine with `kyo devices issue <name> --permission terminal`, repeating "
+        + "--permission for send, notes and start, and enter it in Settings."
+    /// How much one input request carries. The server takes 65536 bytes, and a scalar is at
+    /// most four.
+    private static let inputScalars = 8000
+
+    /// What the page's terminal drawer asks: to open or close the stream, to type, or to
+    /// state the size of its view.
+    func terminal(body: [String: Any]) {
+        if let cols = body["cols"] as? Int, let rows = body["rows"] as? Int {
+            terminalSize = (cols, rows)
+        }
+        switch body["action"] as? String {
+        case "open":
+            terminalOpen = true
+            terminalToken = Self.deviceToken()
+            openTerminal()
+        case "close":
+            terminalOpen = false
+            terminalSession = nil
+            closeTerminal()
+        case "input":
+            if let data = body["data"] as? String { type(data) }
+        case "resize":
+            resizeTerminal()
+        default:
+            break
+        }
+    }
+
+    private func terminalFrame(_ name: String, _ event: String) {
+        send("terminalEvent", #"{"name": \#(quoted(name)), "event": \#(event)}"#)
+    }
+
+    private func closeTerminal() {
+        terminalTask?.cancel()
+        terminalTask = nil
+        terminalConnection = nil
+        typed = ""
+    }
+
+    /// Follows the current session's terminal while the drawer is open. A session with no
+    /// live process has none, and the page then shows the pane's last text.
+    private func openTerminal() {
+        closeTerminal()
+        guard terminalOpen else { return }
+        terminalSession = current
+        guard let session = current, currentLive else {
+            terminalFrame("refused", #"{"error": "This session has no terminal to show."}"#)
+            return
+        }
+        guard let token = terminalToken else {
+            terminalFrame("refused", #"{"error": \#(quoted(Self.terminalTokenHelp))}"#)
+            return
+        }
+        terminalTask = Task { await followTerminal(session: session, token: token) }
+    }
+
+    private func followTerminal(session: String, token: String) async {
+        while !Task.isCancelled {
+            var components = URLComponents(
+                url: client.base.appending(path: sessionPath(session, "terminal")),
+                resolvingAgainstBaseURL: false)!
+            if let size = terminalSize {
+                components.queryItems = [
+                    URLQueryItem(name: "cols", value: String(size.cols)),
+                    URLQueryItem(name: "rows", value: String(size.rows)),
+                ]
+            }
+            var request = URLRequest(url: components.url!)
+            request.timeoutInterval = 120
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            do {
+                for try await event in Self.terminalEvents(request) {
+                    if event.name == "ready" {
+                        let object =
+                            try? JSONSerialization.jsonObject(with: Data(event.data.utf8))
+                            as? [String: Any]
+                        terminalConnection = object?["connection"] as? String
+                    }
+                    terminalFrame(event.name, event.data)
+                    if event.name == "closed" {
+                        terminalConnection = nil
+                        return
+                    }
+                }
+            } catch ServeError.status(_, let body) {
+                // A refusal is the server's own sentence, which names the remedy. It is not
+                // asked again until the drawer is opened again.
+                terminalConnection = nil
+                terminalFrame("refused", #"{"error": \#(quoted(refusal(Data(body.utf8))))}"#)
+                return
+            } catch {
+                if Task.isCancelled { return }
+            }
+            terminalConnection = nil
+            guard !Task.isCancelled else { return }
+            terminalFrame(
+                "note", #"{"text": "The terminal's connection was lost. Connecting again."}"#)
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// The terminal stream's events. It carries the device token, which the session's event
+    /// stream does not, and a refusal's body, which says why.
+    private nonisolated static func terminalEvents(
+        _ request: URLRequest
+    ) -> AsyncThrowingStream<ServerEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard code == 200 else {
+                        var body: [UInt8] = []
+                        for try await byte in bytes where body.count < 65536 { body.append(byte) }
+                        throw ServeError.status(code, String(decoding: body, as: UTF8.self))
+                    }
+                    var parser = ServerEventParser()
+                    var line: [UInt8] = []
+                    for try await byte in bytes {
+                        guard byte == UInt8(ascii: "\n") else {
+                            line.append(byte)
+                            continue
+                        }
+                        if let event = parser.feed(line: String(decoding: line, as: UTF8.self)) {
+                            continuation.yield(event)
+                        }
+                        line.removeAll(keepingCapacity: true)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func terminalPost(_ route: String, _ body: [String: Any]) async -> String? {
+        guard let session = terminalSession, let connection = terminalConnection,
+            let token = terminalToken
+        else { return "The terminal is not connected." }
+        var body = body
+        body["connection"] = connection
+        guard let data = try? JSONSerialization.data(withJSONObject: body),
+            let reply = try? await client.authorised(
+                "POST", sessionPath(session, "terminal/\(route)"), token: token, body: data)
+        else { return "The server could not be reached." }
+        return reply.status == 200 ? nil : refusal(reply.data)
+    }
+
+    /// Sends what was typed, one request at a time and in order. Keys typed while a request
+    /// is out go together in the next.
+    private func type(_ data: String) {
+        typed += data
+        guard !typing else { return }
+        typing = true
+        Task {
+            while !typed.isEmpty {
+                let part = String(typed.unicodeScalars.prefix(Self.inputScalars))
+                typed = String(typed.unicodeScalars.dropFirst(part.unicodeScalars.count))
+                if let problem = await terminalPost("input", ["data": part]) {
+                    typed = ""
+                    terminalFrame("note", #"{"text": \#(quoted(problem))}"#)
+                }
+            }
+            typing = false
+        }
+    }
+
+    /// States the view's size. The requests run one after another, so the last one stands.
+    private func resizeTerminal() {
+        let previous = resizing
+        resizing = Task {
+            await previous?.value
+            guard let size = terminalSize, terminalConnection != nil else { return }
+            _ = await terminalPost("resize", ["cols": size.cols, "rows": size.rows])
+        }
+    }
+
     private static let startWatchPoll = Duration.seconds(2)
     private static let startWatchLimit = Duration.seconds(600)
 
@@ -554,6 +757,8 @@ final class SessionFeed {
                         ?? sessions.first(where: { $0.live && $0.has_pane }) ?? sessions.first
                 else {
                     current = nil
+                    currentLive = false
+                    if terminalOpen, terminalSession != nil { openTerminal() }
                     send("clear", "null")
                     status = "no session"
                     try await Task.sleep(for: .seconds(3))
@@ -562,8 +767,10 @@ final class SessionFeed {
                 let turns = try await client.turns(project: project, session: row.session_id)
                 try Task.checkCancellation()
                 current = row.session_id
+                currentLive = row.live
                 send("clear", "null")
                 send("apply", String(decoding: turns, as: UTF8.self))
+                if terminalOpen, terminalSession != row.session_id { openTerminal() }
                 takeFacts(from: turns)
                 loadDraft(session: row.session_id)
                 status = "connected"
