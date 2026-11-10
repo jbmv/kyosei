@@ -163,6 +163,8 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
 const ICONS = {
   anchor: '<circle cx="12" cy="5" r="2.4"/><path d="M12 7.4V21M8 11h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
   file: '<path d="M20 11.5l-8 8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -277,10 +279,36 @@ function drawTurn(turn: Turn): HTMLElement {
   return element;
 }
 
+/**
+ * A copy button in the corner of each code block (KYO-723). It holds an icon and no text, so
+ * it adds nothing to what a selection copies or to the words an anchor measures.
+ */
+function addCopyButtons(holder: HTMLElement): void {
+  for (const block of Array.from(holder.querySelectorAll<HTMLElement>("pre"))) {
+    const code = block.querySelector("code") ?? block;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-code";
+    button.title = "Copy";
+    button.append(icon("copy"));
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const text = (code.textContent ?? "").replace(/\n$/, "");
+      const native = (window as any).webkit?.messageHandlers?.copy;
+      if (native) native.postMessage({ text });
+      else void navigator.clipboard?.writeText(text);
+      button.replaceChildren(icon("check"));
+      window.setTimeout(() => button.replaceChildren(icon("copy")), 1400);
+    });
+    block.append(button);
+  }
+}
+
 function drawReply(reply: Reply): HTMLElement {
   const element = document.createElement("article");
   element.className = "reply";
   element.innerHTML = reply.text ? render(reply.text) : "";
+  addCopyButtons(element);
   if (reply.thinking) {
     const thinking = document.createElement("div");
     thinking.className = "thinking";
