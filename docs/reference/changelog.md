@@ -621,6 +621,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-10** — `KYO-709` (task) — kyo serve: send a composer prompt with marks in place, a note's sent state as a field, and turn anchors by message (schema 31)
 - **2026-11-09** — `KYO-690` (task) — U1: a Mac window that shows the live session, read-only
 - **2026-10-14** — `KYO-636` (task) — Publish a RECX.yaml for Kyosei's own repository
 - **2026-10-12** — `KYO-590` (plan) — Kyosei's Claude Code plugin, shipped in the package (the KYO-581 decision)
