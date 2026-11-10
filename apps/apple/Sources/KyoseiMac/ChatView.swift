@@ -39,7 +39,7 @@ struct ChatView: View {
                 }
                 RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 Spacer()
-                if feed.status != "connected" { Text(feed.status) }
+                FeedStateLabel(state: feed.state)
                 if let remote = feed.remote {
                     HStack(spacing: 4) {
                         Text(remote)
@@ -60,6 +60,52 @@ struct ChatView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .frame(height: 24)
+        }
+    }
+}
+
+/// Says when the chat is not following its session, so that a stale chat is not read as a
+/// current one (KYO-725), and nothing while it is. Hovering shows why, and that the feed is
+/// connecting again.
+struct FeedStateLabel: View {
+    let state: FeedState
+    @State private var shown = false
+
+    private static func moment(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private static func sentence(_ reason: String) -> String {
+        let said = reason.hasSuffix(".") ? reason : reason + "."
+        return said + " Connecting again."
+    }
+
+    var body: some View {
+        switch state {
+        case .live:
+            EmptyView()
+        case .connecting:
+            Text("Connecting…")
+        case .noSession:
+            Text("No session")
+        case .notLive(let since, let reason):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("Not live since \(Self.moment(since))")
+            }
+            .foregroundStyle(.orange)
+            .contentShape(Rectangle())
+            .onHover { shown = $0 }
+            .onTapGesture { shown.toggle() }
+            .popover(isPresented: $shown, arrowEdge: .top) {
+                Text(Self.sentence(reason))
+                    .font(.system(size: 12))
+                    .frame(maxWidth: 320, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+            }
         }
     }
 }

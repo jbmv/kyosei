@@ -29,6 +29,16 @@ struct RunningAgent: Identifiable, Equatable {
     }
 }
 
+/// Whether the chat shows its session as the session is now (KYO-725).
+enum FeedState: Equatable {
+    case connecting
+    case live
+    case noSession
+    /// The chat has not followed its session since `since`, for `reason`, and the feed is
+    /// connecting again.
+    case notLive(since: Date, reason: String)
+}
+
 /// Reads one session from `kyo serve` and hands each response to the web view unchanged.
 @MainActor
 @Observable
@@ -43,7 +53,9 @@ final class SessionFeed {
     @ObservationIgnored weak var webView: WKWebView?
 
     private(set) var project: String
-    private(set) var status = "connecting"
+    private(set) var state = FeedState.connecting
+    /// The waits between attempts to read the session while they keep failing.
+    private var retry = Backoff()
     private(set) var facts: SessionFacts?
     private(set) var remote: String?
     /// Commits on the branch that its upstream lacks; nil without an upstream (KYO-717).
@@ -117,7 +129,8 @@ final class SessionFeed {
         facts = nil
         remote = nil
         ahead = nil
-        status = "connecting"
+        state = .connecting
+        retry.reset()
         send("clear", "null")
         start()
     }
@@ -162,7 +175,8 @@ final class SessionFeed {
     func select(session: String) {
         selected = session
         facts = nil
-        status = "connecting"
+        state = .connecting
+        retry.reset()
         task?.cancel()
         task = Task { await run() }
     }
@@ -759,6 +773,20 @@ final class SessionFeed {
         }
     }
 
+    private func becomeLive() {
+        state = .live
+        retry.reset()
+    }
+
+    /// The chat is not live, for `reason`; it stays dated from the moment it was first lost.
+    private func lose(_ reason: String, since: Date = Date()) {
+        if case .notLive(let first, _) = state {
+            state = .notLive(since: first, reason: reason)
+        } else {
+            state = .notLive(since: since, reason: reason)
+        }
+    }
+
     private func run() async {
         while !Task.isCancelled {
             do {
@@ -771,7 +799,8 @@ final class SessionFeed {
                     currentLive = false
                     if terminalOpen, terminalSession != nil { openTerminal() }
                     send("clear", "null")
-                    status = "no session"
+                    state = .noSession
+                    retry.reset()
                     try await Task.sleep(for: .seconds(3))
                     continue
                 }
@@ -784,57 +813,70 @@ final class SessionFeed {
                 if terminalOpen, terminalSession != row.session_id { openTerminal() }
                 takeFacts(from: turns)
                 loadDraft(session: row.session_id)
-                status = "connected"
                 await sendMenu()
                 guard row.live else {
-                    // An ended session has nothing to follow.
+                    // An ended session has nothing to follow, and the chat holds all of it.
+                    becomeLive()
                     send("screen", #"{"screen": null}"#)
                     send("terminal", #"{"terminal": null}"#)
                     try await Task.sleep(for: .seconds(3600))
                     continue
                 }
-                try await follow(session: row.session_id, turns: turns)
+                // The chat is live once the stream says so, not when the turns have been read.
+                await follow(session: row.session_id, turns: turns)
             } catch is CancellationError {
                 return
             } catch {
                 if Task.isCancelled { return }
-                status = "disconnected"
+                lose(ServeClient.describe(error))
                 print("[feed] \(error)")
             }
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: retry.next())
         }
     }
 
-    private func follow(session: String, turns: Data) async throws {
-        var cursor =
+    /// Follows the session's stream until it asks for the session to be read again from the
+    /// top, or is refused. The follower reconnects by itself after a lost connection, a
+    /// restarted server, an error from the server's reader and a stream that has stopped
+    /// carrying the session (KYO-725), and says each time whether the chat is live.
+    private func follow(session: String, turns: Data) async {
+        let cursor =
             (try? JSONSerialization.jsonObject(with: turns) as? [String: Any])?["cursor"] as? String
-        for try await event in client.events(project: project, session: session, cursor: cursor) {
-            switch event.name {
-            case "transcript":
-                send("apply", event.data)
-                cursor = event.id ?? cursor
-            case "reply":
-                send("live", event.data)
-            case "ready":
-                send("ready", event.data)
-                takeFacts(from: Data(event.data.utf8))
-            case "facts":
-                send("facts", event.data)
-                takeFacts(from: Data(event.data.utf8))
-            case "screen":
-                send("screen", event.data)
-            case "terminal":
-                send("terminal", event.data)
-            case "held":
-                send("held", event.data)
-                // A delivered prompt's paragraphs are filed just after its keys are sent.
-                if event.data.contains("delivered"), let session = current {
-                    loadMarks(session: session, after: .seconds(2))
+        let follower = SessionFollower(client: client, project: project, session: session)
+        for await update in follower.updates(cursor: cursor) {
+            switch update {
+            case .live:
+                becomeLive()
+            case .notLive(let since, let reason):
+                lose(reason, since: since)
+                print("[feed] not live: \(reason)")
+            case .event(let event):
+                switch event.name {
+                case "transcript":
+                    send("apply", event.data)
+                case "reply":
+                    send("live", event.data)
+                case "ready":
+                    send("ready", event.data)
+                    takeFacts(from: Data(event.data.utf8))
+                case "facts":
+                    send("facts", event.data)
+                    takeFacts(from: Data(event.data.utf8))
+                case "screen":
+                    send("screen", event.data)
+                case "terminal":
+                    send("terminal", event.data)
+                case "held":
+                    send("held", event.data)
+                    // A delivered prompt's paragraphs are filed just after its keys are sent.
+                    if event.data.contains("delivered"), let session = current {
+                        loadMarks(session: session, after: .seconds(2))
+                    }
+                case "reset", "session":
+                    return  // Read the session again from the top.
+                default:
+                    break
                 }
-            case "reset", "session":
-                return  // Read the session again from the top.
-            default:
-                break
             }
         }
     }
