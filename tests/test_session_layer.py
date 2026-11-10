@@ -1823,3 +1823,18 @@ def test_an_indented_notice_between_the_row_and_the_box_does_not_hide_it() -> No
     assert "Update installed" in raw and "esc to interrupt" not in raw
     assert pane.classify(raw).state == pane.WORKING
     assert pane.terminal(raw, pane.classify(raw)).working_line.startswith("Tempering…")
+
+
+def test_ahead_counts_commits_the_upstream_lacks_and_is_none_without_one(
+    repo: Path, tmp_path: Path
+) -> None:
+    assert changes(repo).ahead is None
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(upstream)], check=True)
+    run_git(repo, "remote", "add", "origin", str(upstream))
+    run_git(repo, "push", "-q", "-u", "origin", "HEAD")
+    assert changes(repo).ahead == 0
+    (repo / "more.txt").write_text("x\n", encoding="utf-8")
+    run_git(repo, "add", "more.txt")
+    run_git(repo, "commit", "-q", "-m", "second")
+    assert changes(repo).ahead == 1

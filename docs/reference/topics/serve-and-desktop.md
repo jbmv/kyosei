@@ -288,11 +288,13 @@ Nothing is reconstructed for an omitted block.
 first reply:
 
 ```
-facts:   at, model, effort, git_branch, permission_mode, context, lines, limits, cache
+facts:   at, model, effort, git_branch, permission_mode, context, lines, limits, cache,
+         weekly_at_start
 context: tokens, window, percent
 lines:   added, removed
 limits:  five_hour, seven_day, read_at    (each window: used_percentage, resets_at)
 cache:   warm, expires_at, recache_tokens_if_cold, read_at
+weekly_at_start: used_percentage, resets_at    (resets_at as in the limits)
 ```
 
 `limits` is the subscription's usage limits as `kyo statusline` last saved them. Claude Code
@@ -304,6 +306,12 @@ from whichever session replied last. `used_percentage` is from 0 to 100, `resets
 figure describes a window that has ended. Either window can be absent on its own, and
 `limits` is `null` when there is no file or no window left, which is the case for an account
 without a subscription. The file is read each time the facts are built.
+
+`weekly_at_start` is the weekly window's figure that `kyo statusline` first read for this
+session (KYO-717), kept in the session's entry of `$KYOSEI_HOME/prompt-cache.json` and carried
+unchanged through every later write of it. A client measures the session's own use as the
+difference between the current weekly `used_percentage` and this one, when the two windows have
+the same `resets_at`, an ISO time as in `limits`. It is `null` when none was saved.
 
 `cache` is this session's prompt cache as `kyo statusline` last saved it (KYO-715). After the
 main conversation's first response, Claude Code's status line input carries `prompt_cache`
@@ -368,11 +376,13 @@ when the store or the repository cannot be read, and `dispatch_why` then says wh
 `dispatch_why` is otherwise `null`. The route writes nothing to the store or the repository.
 
 **Uncommitted changes.** `GET .../sessions/<id>/changes` is `{"ok", "session_id", "cwd", "root",
-"remote", "why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`.
+"remote", "ahead", "why", "added", "removed", "files", "untracked": {"files", "lines", "uncounted"}}`.
 `remote` is the repository's `origin` remote as `owner/name`, read from an HTTPS, SSH or `git:`
 URL, and a host's nested groups stay in it, as `group/sub/name`. It is `null` when there is no
 `origin`, or when `origin` is a local path or cannot be read as a repository on a host. Only
-the URL's path reaches `remote`, so a user name or token in the URL does not. `added` and
+the URL's path reaches `remote`, so a user name or token in the URL does not. `ahead` is
+`git rev-list --count @{upstream}..HEAD`, the commits on `HEAD` that the branch's upstream
+lacks, and `null` when the branch has no upstream (KYO-717). `added` and
 `removed` are `git diff HEAD --numstat` summed over the repository holding the session's
 working directory, staged or not, and `files` counts the tracked files that differ. A binary
 file adds to `files` and to no line count. Before the first commit the figures are what has

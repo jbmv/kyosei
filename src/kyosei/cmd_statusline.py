@@ -230,17 +230,63 @@ def _locked(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
-def save_cache(path: Path, session_id: str, cache: Mapping, read_at: datetime) -> None:
-    """Save one session's entry, keeping the most recently read entries only."""
+def _weekly_figure(value: object) -> dict | None:
+    """A saved first weekly figure when it is well formed, else None."""
+    if not isinstance(value, dict):
+        return None
+    used, resets = _number(value.get("used_percentage")), _number(value.get("resets_at"))
+    if used is None or resets is None:
+        return None
+    return {"used_percentage": used, "resets_at": int(resets)}
+
+
+def save_cache(
+    path: Path,
+    session_id: str,
+    cache: Mapping | None,
+    read_at: datetime,
+    weekly: Mapping | None = None,
+) -> None:
+    """Save one session's entry, keeping the most recently read entries only.
+
+    ``weekly`` is the weekly window read with this write. The first one saved for the
+    session is kept as ``weekly_at_start`` and carried unchanged through every later write
+    of the entry (KYO-717), and so are the cache fields when a write carries none.
+    """
     with _locked(path):
         sessions = _saved_sessions(path)
-        sessions[session_id] = {**cache, "read_at": _iso(read_at)}
+        entry = dict(sessions.get(session_id) or {})
+        if cache is not None:
+            entry.update(cache)
+        first = _weekly_figure(entry.get("weekly_at_start")) or _weekly_figure(weekly)
+        entry.pop("weekly_at_start", None)
+        if first is not None:
+            entry["weekly_at_start"] = first
+        entry["read_at"] = _iso(read_at)
+        sessions[session_id] = entry
         recent = sorted(
             sessions.items(),
             key=lambda item: str(item[1].get("read_at") or ""),
             reverse=True,
         )[:CACHE_SESSIONS_KEPT]
         _replace_json(path, {"sessions": dict(recent)})
+
+
+def read_weekly_at_start(
+    session_id: str, environ: Mapping[str, str] | None = None
+) -> dict | None:
+    """The weekly figure first read for the session, or None when none was saved (KYO-717).
+
+    ``resets_at`` is an ISO time, as the facts' ``limits`` state it, so the two compare.
+    """
+    entry = _saved_sessions(cache_path(environ)).get(session_id)
+    figure = None if entry is None else _weekly_figure(entry.get("weekly_at_start"))
+    if figure is None:
+        return None
+    return {
+        "used_percentage": figure["used_percentage"],
+        "resets_at": _iso(datetime.fromtimestamp(figure["resets_at"], UTC)),
+    }
 
 
 def read_cache(session_id: str, environ: Mapping[str, str] | None = None) -> dict | None:
@@ -293,10 +339,16 @@ def record(raw: str, environ: Mapping[str, str] | None = None) -> str:
         return ""
     now = _now()
     cache = cache_from(document)
-    if cache is not None:
-        with contextlib.suppress(Exception):  # a status line never fails visibly (KYO-714)
-            save_cache(cache_path(environ), cache[0], cache[1], now)
     windows = windows_from(document)
+    weekly = windows.get("seven_day")
+    session_id = cache[0] if cache is not None else (
+        document.get("session_id") if isinstance(document, dict) else None
+    )
+    if isinstance(session_id, str) and session_id and (cache is not None or weekly):
+        with contextlib.suppress(Exception):  # a status line never fails visibly (KYO-714)
+            save_cache(
+                cache_path(environ), session_id, cache[1] if cache else None, now, weekly
+            )
     if not windows:
         return ""
     try:

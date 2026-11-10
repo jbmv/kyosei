@@ -34,6 +34,7 @@ interface Facts {
 interface SessionRow {
   session_id: string; title: string | null; live: boolean; first_seen: string;
   remote_control_url: string | null;
+  last_seen?: string | null; ended_at?: string | null;
 }
 interface Changes { added: number; removed: number; untracked: { files: number } }
 interface Menu {
@@ -62,6 +63,22 @@ function atBottom(): boolean {
  * background task's are not counted: they do not read the main conversation's cache.
  */
 let lastMainActivity = "";
+
+/**
+ * When the followed session is no longer running, from the session list the menu carries
+ * every few seconds (KYO-717); null while it runs or before the list is known.
+ */
+let endedAt: string | null = null;
+let sessionEnded = false;
+
+function drawEnded(): void {
+  const row = menu?.sessions.sessions.find((item) => item.session_id === menu?.current);
+  sessionEnded = !!row && !row.live;
+  endedAt = sessionEnded ? row?.ended_at ?? row?.last_seen ?? "" : null;
+  document.body.classList.toggle("ended", sessionEnded);
+  if (sessionEnded) document.getElementById("interrupt")!.hidden = true;
+  drawWorking();
+}
 const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
 const ACTIVITY_RED_MS = 45 * 60 * 1000;
 
@@ -72,6 +89,15 @@ const ACTIVITY_RED_MS = 45 * 60 * 1000;
  */
 function drawActivity(): void {
   const label = document.getElementById("top-activity")!;
+  if (sessionEnded) {
+    const when = endedAt ? new Date(endedAt) : null;
+    label.title = "";
+    label.className = "";
+    label.textContent = when && Number.isFinite(when.getTime())
+      ? `Session ended ${when.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+      : "Session ended";
+    return;
+  }
   const ago = lastMainActivity ? Date.now() - new Date(lastMainActivity).getTime() : NaN;
   const expires = facts?.cache?.expires_at;
   label.title = expires
@@ -303,6 +329,7 @@ function backgroundWords(): string {
 }
 
 function workingWords(): string {
+  if (sessionEnded) return "";
   if (screenState === "permission-prompt") return "Waiting for permission in the terminal";
   if (screenState === "ask-user-question") return "Waiting for your answer in the terminal";
   let words = "";
@@ -1008,6 +1035,7 @@ const kyo = {
   menu(data: Menu): void {
     menu = data;
     drawMenu();
+    drawEnded();
     drawSide();
     // A subagent still running has more tool calls each time.
     for (const id of openAgents) {
@@ -1189,7 +1217,7 @@ const kyo = {
     screenState = state;
     background = frame.screen?.background ?? null;
     if (changed) keepingPlace(arrange);
-    document.getElementById("interrupt")!.hidden = state !== "working";
+    document.getElementById("interrupt")!.hidden = state !== "working" || sessionEnded;
     if (heldId) showHeld(heldId);
     drawWorking();
     drawSide();

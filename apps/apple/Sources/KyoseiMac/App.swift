@@ -21,9 +21,11 @@ struct KyoseiMacApp: App {
     @State private var feed = SessionFeed.fromEnvironment()
 
     var body: some Scene {
-        WindowGroup("Kyosei") {
+        // The window's title, and with it its entry in the Window menu, is the project's.
+        WindowGroup {
             ChatView(feed: feed)
                 .frame(minWidth: 560, minHeight: 400)
+                .navigationTitle(feed.project)
         }
         .defaultSize(width: 980, height: 860)
 

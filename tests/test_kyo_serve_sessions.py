@@ -529,6 +529,23 @@ def test_a_changed_limits_file_is_read_again_without_a_restart(
     assert event["facts"]["limits"]["five_hour"]["used_percentage"] == 61.0
 
 
+# ------------------------------------------- KYO-717: the weekly figure first read
+
+
+def test_facts_carry_the_first_weekly_figure_and_null_without_one(
+    bed: Bed, store_home: Path
+) -> None:
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["weekly_at_start"] is None
+    store_home.mkdir(parents=True, exist_ok=True)
+    entry = {"weekly_at_start": {"used_percentage": 30.5, "resets_at": LIMITS_RESET}}
+    (store_home / "prompt-cache.json").write_text(
+        json.dumps({"sessions": {OLD: entry}}), encoding="utf-8"
+    )
+    found = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["weekly_at_start"]
+    assert found == {"used_percentage": 30.5, "resets_at": "2033-05-18T03:33:19.000Z"}
+
+
 # ------------------------------------------- KYO-715: the session's prompt cache
 
 
@@ -1217,6 +1234,29 @@ def test_changes_state_no_remote_for_a_repository_without_an_origin(
     record_cwd(bed, str(repo))
     document = json_body(bed.get(CHANGES_ROUTE))
     assert document["remote"] is None and document["why"] is None
+
+
+def test_changes_state_how_many_commits_the_upstream_lacks(bed: Bed, tmp_path: Path) -> None:
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(upstream)], check=True)
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    who = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+    env = {**os.environ, **dict.fromkeys(who, "t")}
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, env=env, check=True)
+
+    record_cwd(bed, str(repo))
+    assert json_body(bed.get(CHANGES_ROUTE))["ahead"] is None  # no upstream
+    git("remote", "add", "origin", str(upstream))
+    git("push", "-q", "-u", "origin", "HEAD")
+    assert json_body(bed.get(CHANGES_ROUTE))["ahead"] == 0
+    for name in ("a", "b"):
+        (repo / f"{name}.txt").write_text(name, encoding="utf-8")
+        git("add", f"{name}.txt")
+        git("commit", "-q", "-m", name)
+    assert json_body(bed.get(CHANGES_ROUTE))["ahead"] == 2
 
 
 def test_changes_for_a_working_directory_that_is_gone_say_so(bed: Bed) -> None:

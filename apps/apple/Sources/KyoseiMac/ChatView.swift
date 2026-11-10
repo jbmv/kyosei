@@ -17,7 +17,11 @@ struct ChatView: View {
                 }
                 if let limits = feed.facts?.limits {
                     if let window = limits.five_hour { LimitLabel(name: "5-hour", window: window) }
-                    if let window = limits.seven_day { LimitLabel(name: "Weekly", window: window) }
+                    if let window = limits.seven_day {
+                        LimitLabel(
+                            name: "Weekly", window: window,
+                            usedThisSession: feed.facts?.weeklyUsedThisSession)
+                    }
                 }
                 if let facts = feed.facts {
                     Text(facts.model ?? "model unknown")
@@ -34,7 +38,15 @@ struct ChatView: View {
                 }
                 Spacer()
                 if feed.status != "connected" { Text(feed.status) }
-                if let remote = feed.remote { Text(remote) }
+                if let remote = feed.remote {
+                    HStack(spacing: 4) {
+                        Text(remote)
+                        if let ahead = feed.ahead, ahead > 0 {
+                            Text("↑\(ahead)").monospacedDigit()
+                                .help("\(ahead) commit\(ahead == 1 ? "" : "s") not on the remote")
+                        }
+                    }
+                }
                 if let branch = feed.facts?.git_branch {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.branch")
@@ -80,6 +92,8 @@ struct ContextMeter: View {
 struct LimitLabel: View {
     let name: String
     let window: SessionFacts.Limits.Window
+    /// Points of this window used since the session's first reading, when known (KYO-717).
+    var usedThisSession: Int?
 
     private var resets: String {
         let stamps = ISO8601DateFormatter()
@@ -94,7 +108,10 @@ struct LimitLabel: View {
     @State private var shown = false
 
     var body: some View {
-        Text("\(name): \(Int(window.used_percentage.rounded()))%")
+        Text(
+            "\(name): \(Int(window.used_percentage.rounded()))%"
+                + (usedThisSession.map { " ↓\($0)" } ?? "")
+        )
             .monospacedDigit()
             .foregroundStyle(window.used_percentage >= 90 ? Color.red : window.used_percentage >= 75 ? Color.orange : Color.secondary)
             .contentShape(Rectangle())

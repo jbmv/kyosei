@@ -570,3 +570,7 @@ body.terminal-open #terminal { display: block; }
 .tag-suggestion:hover { color: var(--text); border-color: var(--muted); }
 .mark-thumb { width: 28px; height: 28px; margin-right: 5px; border-radius: 4px; object-fit: cover; vertical-align: middle; }
 .mark-item .icon { margin-right: 4px; }
+
+/* KYO-717: a session that has ended is shown dimmed; the text stays selectable. */
+body.ended #chat,
+body.ended #live { opacity: 0.55; }

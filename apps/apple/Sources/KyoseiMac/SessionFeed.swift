@@ -35,6 +35,8 @@ final class SessionFeed {
     private(set) var status = "connecting"
     private(set) var facts: SessionFacts?
     private(set) var remote: String?
+    /// Commits on the branch that its upstream lacks; nil without an upstream (KYO-717).
+    private(set) var ahead: Int?
     var runningSubagents = 0
     var runningAgents: [RunningAgent] = []
     private var draftSession: String?
@@ -82,6 +84,7 @@ final class SessionFeed {
         draftEtag = nil
         facts = nil
         remote = nil
+        ahead = nil
         status = "connecting"
         send("clear", "null")
         start()
@@ -421,6 +424,7 @@ final class SessionFeed {
             object.keys.contains("remote"), object["root"] is String
         else { return }
         remote = object["remote"] as? String ?? "No Remote"
+        ahead = object["ahead"] as? Int
     }
 
     private func takeFacts(from json: Data) {

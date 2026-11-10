@@ -82,7 +82,12 @@ def test_a_new_reading_replaces_the_last_whole(store_home: Path) -> None:
     statusline({"rate_limits": {"seven_day": {"used_percentage": 50, "resets_at": RESETS}}})
     saved = json.loads(limits_file(store_home).read_text(encoding="utf-8"))
     assert "five_hour" not in saved and saved["seven_day"]["used_percentage"] == 50
-    assert [p.name for p in store_home.iterdir()] == [cmd_statusline.LIMITS_FILE]
+    # No temporary file is left; the session's weekly figure (KYO-717) is the other file.
+    assert sorted(p.name for p in store_home.iterdir() if not p.name.startswith(".")) == [
+        cmd_statusline.CACHE_FILE,
+        cmd_statusline.LIMITS_FILE,
+    ]
+    assert not [p for p in store_home.iterdir() if p.name.endswith(".tmp")]
 
 
 # ------------------------------------------------- c2: silent on everything else
@@ -308,7 +313,13 @@ def test_the_prompt_cache_is_saved_for_its_session_beside_the_limits(store_home:
         "expires_at": EXPIRES,
         "recache_tokens_if_cold": 45000,
     }
-    assert set(entry) == {"warm", "expires_at", "recache_tokens_if_cold", "read_at"}
+    assert set(entry) == {
+        "warm",
+        "expires_at",
+        "recache_tokens_if_cold",
+        "read_at",
+        "weekly_at_start",
+    }
     read_at = datetime.fromisoformat(entry["read_at"].replace("Z", "+00:00"))
     assert before - timedelta(seconds=1) <= read_at <= datetime.now(UTC)
     # The limits it already saved are saved as before.
@@ -394,3 +405,29 @@ def test_read_cache_states_an_iso_expiry_and_none_for_an_unknown_session(
     assert cmd_statusline.read_cache("someone-else") is None
     cache_file(store_home).write_text("{oops", encoding="utf-8")
     assert cmd_statusline.read_cache("abc123") is None
+
+
+# ------------------------------------------- KYO-717: the weekly figure first read for a session
+
+
+def test_the_first_weekly_figure_is_kept_through_every_later_write(store_home: Path) -> None:
+    assert statusline(CACHED).code == 0
+    first = saved_sessions(store_home)["abc123"]["weekly_at_start"]
+    assert first == {"used_percentage": 41.2, "resets_at": RESETS + 3600}
+    later = json.loads(json.dumps(CACHED))
+    later["rate_limits"]["seven_day"] = {"used_percentage": 47.9, "resets_at": RESETS + 7200}
+    assert statusline(later).code == 0
+    entry = saved_sessions(store_home)["abc123"]
+    assert entry["weekly_at_start"] == first
+    # A write with no weekly window, and one with no cache, still carry it.
+    assert statusline({"session_id": "abc123", "prompt_cache": CACHED["prompt_cache"]}).code == 0
+    assert saved_sessions(store_home)["abc123"]["weekly_at_start"] == first
+    assert statusline({"session_id": "abc123", "rate_limits": later["rate_limits"]}).code == 0
+    entry = saved_sessions(store_home)["abc123"]
+    assert entry["weekly_at_start"] == first and entry["warm"] is True
+
+
+def test_a_weekly_figure_without_a_cache_is_kept_for_its_session(store_home: Path) -> None:
+    payload = {"session_id": "s2", "rate_limits": DOCUMENTED["rate_limits"]}
+    assert statusline(payload).code == 0
+    assert saved_sessions(store_home)["s2"]["weekly_at_start"]["used_percentage"] == 41.2
