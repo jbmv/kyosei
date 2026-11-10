@@ -89,6 +89,12 @@ this server starts. It needs a device token holding the ``start`` permission and
 :mod:`kyosei.serve_orchestrator` holds that. Nothing else is served under ``orchestrator/``,
 and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
 
+THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
+directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
+``files/resolve?path=`` (a path as an agent writes one), all GET. They read the code repository
+and the store repository as git shows them and nothing outside either, need a device token
+holding the ``files`` permission, and write nothing; :mod:`kyosei.serve_tree` holds that.
+
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
 it binds, ``kyo serve`` asks its port who is there (:func:`serve_install.refuse_if_held`)
@@ -346,6 +352,10 @@ SESSION_TERMINAL_ACTIONS = ("input", "resize")
 #: imports this one.
 ORCHESTRATOR_ROUTE = "orchestrator"
 ORCHESTRATOR_START = "start"
+
+#: KYO-735: ``files`` and everything beneath it (GET), a project's files as git shows them.
+#: :data:`kyosei.serve_tree.ROUTE`, spelled here because that module imports this one.
+PROJECT_FILES_ROUTE = "files"
 
 #: An image at one turn and index never changes. It is the person's, so only their browser
 #: may keep it, and a client that re-renders a chat need not read the transcript again.
@@ -796,6 +806,8 @@ class ServeHandler(BaseHTTPRequestHandler):
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
             allowed = ("POST",)
+        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE:
+            allowed = ("GET",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == NOTES_ROUTE:
             if len(rest) == 3:
                 allowed = ("GET", "POST")
@@ -868,6 +880,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._command(rest[1], rest[3], rest[4:], split.query)
         if rest[2] == ORCHESTRATOR_ROUTE:
             return self._orchestrator_start(rest[1], split.query)
+        if rest[2] == PROJECT_FILES_ROUTE:
+            return self._project_files(rest[1], rest[3:], split.query)
         if rest[2] == NOTES_ROUTE:
             return self._note_route(method, rest[1], rest[3:], split.query)
         if rest[2] == TAGS_ROUTE or (len(rest) == 5 and rest[4] == SESSION_MARKS_ROUTE):
@@ -1115,6 +1129,22 @@ class ServeHandler(BaseHTTPRequestHandler):
         return 200, _json_bytes(
             held.retract(root_of, session_id, authorization, self.headers.get("If-Match"))
         )
+
+    def _project_files(self, name: str, rest: list[str], query: str) -> tuple:
+        """A project's files, read-only. :mod:`kyosei.serve_tree` decides everything."""
+        from . import serve_tree
+
+        status, payload, content_type, headers = serve_tree.respond(
+            self.server.environ,
+            lambda: self.server.project(name).root,
+            self.headers.get("Authorization"),
+            rest,
+            _query_pairs(query),
+            self.headers.get("If-None-Match"),
+        )
+        if content_type is None:
+            return status, _json_bytes(payload)
+        return status, payload, content_type, headers
 
     def _session_attachments(
         self, name: str, session_id: str, rest: list[str], query: str
@@ -1531,7 +1561,9 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/notes, GET {project}/notes/{{id}}, POST {project}/notes/{{id}}/tags, "
         f"GET {project}/tags, GET {project}/sessions/{{id}}/marks, GET "
         f"{project}/sessions/{{id}}/terminal, POST .../terminal/input or .../terminal/resize, "
-        f"and POST {project}/orchestrator/start",
+        f"POST {project}/orchestrator/start, and GET {project}/files, "
+        f"{project}/files/{{root}}/tree[/{{relpath}}], {project}/files/{{root}}/blob/{{relpath}} "
+        f"or {project}/files/resolve?path=",
     )
 
 

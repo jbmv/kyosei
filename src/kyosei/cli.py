@@ -2280,8 +2280,9 @@ def build_parser() -> KyoseiParser:
         choices=device_tokens.PERMISSIONS,
         help="with issue: a permission the token carries (repeatable). `send` lets it use the "
         "send routes, `notes` the note routes, `start` the route that starts a "
-        "project's orchestrator session (KYO-719), and `terminal` the routes that draw a "
-        "session's pane and type into it (KYO-721); a token issued without the one a route "
+        "project's orchestrator session (KYO-719), `terminal` the routes that draw a "
+        "session's pane and type into it (KYO-721), and `files` the routes that read a "
+        "project's files (KYO-735); a token issued without the one a route "
         "asks for is refused there",
     )
 

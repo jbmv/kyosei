@@ -116,6 +116,10 @@ one more thing read-only: a governed document's text, at
 (KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
 reading transcripts also has its sessions served, read-only (see "Reading sessions" below).
 
+A device whose token holds the `files` permission can also read the files of a project's code
+and store repositories, as git shows them (see "Reading a project's files" below, KYO-735).
+Without that token the server reads no file but the ones named above.
+
 **In the foreground**, for a session or a trial:
 
 ```sh
@@ -991,6 +995,100 @@ with status and reason. A second line with the outcome `closed` and the reason i
 written when it ends. A connection that cannot be recorded is not made. What is typed is
 never logged, since it may be a password; a refused input or resize is logged, with the
 action `terminal-input` or `terminal-resize`.
+
+### Reading a project's files: the file routes (KYO-735)
+
+A plan, a proposal or a source file that an agent names in a reply is a file on the machine
+that runs the session, and a client on another device cannot open it. `kyo serve` therefore
+serves a project's files read-only, as a tree and as bytes, to a device whose token allows it.
+
+```
+GET /v1/projects/<name>/files                          the roots, and the size limit
+GET /v1/projects/<name>/files/<root>/tree[/<path>]     one directory's entries
+GET /v1/projects/<name>/files/<root>/blob/<path>       one file's bytes
+GET /v1/projects/<name>/files/resolve?path=<text>      where a path written in prose is
+```
+
+**The permission.** Every one of these needs a device token holding the `files` permission,
+sent as `Authorization: Bearer <token>`:
+
+```
+kyo devices issue my-ipad --permission files --permission send
+```
+
+`files` is a permission of its own, so a token issued to type into a session or to file notes
+does not read source. A token is changed by revoking it and issuing another. The token is
+checked before the path, so a request without the permission learns nothing about any path.
+The routes do not ask for the `serve_send` setting, and they write nothing.
+
+**The roots.** `code` is the project's code repository and `store` is its store repository,
+the two directories `kyo where` prints. Under the split layout they are two repositories and
+both are served. Under the in-repo layout the store is inside the code repository, so the
+`store` root is refused (`store-is-code`) with a sentence naming the `code` root, and the same
+tree is not served under two names. `GET .../files` lists each root with its `path` and
+whether it is `served`. No route serves a path outside these roots, with or without a token.
+
+A third root, `scratch`, is planned for a session's scratchpad directory and is refused in
+this build (`scratch-not-recorded`): the session hooks do not record where that directory is,
+and the server does not derive one from a session id.
+
+**What is visible.** What git shows in the root: tracked files, and untracked files that no
+ignore rule covers. An ignored file, the `.git` directory and the contents of a nested
+repository are absent from a listing and are refused when asked for by name, with the same
+404 an absent file gets. A file whose real path lies outside its root is refused (403,
+`outside-root`), which covers a symbolic link inside the root that points outside it; a link
+to a file inside the root is read only when git shows that file too. Dotfiles that git shows
+are listed; hiding them is the client's choice. The server asks git on every request and
+caches nothing, so a file added a moment ago is in the next listing. A root that is not
+inside a git repository serves nothing (409, `not-a-repository`).
+
+A path is relative to its root and is refused as text, before anything is looked at on disk,
+when it is absolute or holds a NUL byte, an empty segment, a `.` or `..` segment, or a `.git`
+segment.
+
+**A directory.** `tree` answers `{"ok", "root", "path", "entries"}`. Each entry has `name`,
+`path` (relative to the root), `type` (`file`, `dir` or `symlink`) and `mtime_ns`; a file also
+has `size`, `media_type` and `text`, which is true when its bytes are text. The listing is one
+directory, in name order, and is complete however many entries the directory holds. A
+directory with nothing git shows in it is not listed.
+
+**A file.** `blob` answers the file's bytes with its `Content-Type` and an `ETag`. A request
+carrying `If-None-Match` with that tag is answered `304` with no body, so a client that keeps
+a copy asks again cheaply. A file larger than 32 MiB is refused (413, `file-too-large`) with
+its `size` and the `limit`; `GET .../files` states the limit as `max_file_bytes`.
+
+The media type is decided by the file's name. Markdown is `text/markdown`, and the source and
+configuration types a browser does not know are stated by the server (`text/x-python`,
+`text/typescript`, `text/x-swift`, `application/yaml`, `application/toml` and others); the
+rest come from the standard library's table, and a name it does not know is
+`application/octet-stream`. A text type's `Content-Type` carries `charset=utf-8`, which is how
+a client tells text from other bytes on this route; in a listing the `text` field says the
+same.
+
+**A path as an agent writes one.** `resolve` takes one query, `path`, form-encoded: an
+absolute path, a path beginning `~/`, or a path relative to either repository, with or without
+a line (`src/kyosei/serve.py:120`, also `:120:7` and `:120-140`). It answers
+
+```json
+{"ok": true, "given": "src/kyosei/serve.py:120", "found": true, "root": "code",
+ "path": "src/kyosei/serve.py", "line": 120, "name": "serve.py", "type": "file",
+ "size": 61234, "media_type": "text/x-python", "text": true, "mtime_ns": 1794300000000000000}
+```
+
+or, when no root holds the path, `"found": false` with `root` and `path` null and a `reason`:
+`outside-every-root` for an absolute path written outside both roots, and `not-found` for a
+path that neither root holds as something git shows. A relative path is tried against the code
+root and then the store root. An absolute path is compared with the roots as text first, so
+nothing outside a root is looked at on disk to answer.
+
+A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
+`no-token`, `unknown-token`, `revoked-token`, `no-files-permission`, `tokens-unreadable`,
+`bad-request`, `no-such-root`, `store-is-code`, `scratch-not-recorded`, `not-served`,
+`not-shown`, `outside-root`, `is-a-file`, `is-a-directory`, `is-a-symlink`, `not-a-file`,
+`file-too-large`, `not-a-repository` and `git-failed`.
+
+A read is not written to the send log. The request line, which holds the path and no token,
+goes to the server's own log as for every route.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 
