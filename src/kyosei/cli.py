@@ -1960,6 +1960,15 @@ def build_parser() -> KyoseiParser:
         "invokes this. Silent on success, and always exit 0 — a session that could not "
         "be recorded must still start, turn and end",
     )
+    p_sessions.add_argument(
+        "words",
+        nargs="*",
+        metavar="scratch DIR",
+        help="`scratch <dir>` records <dir> as the scratchpad directory of the session "
+        "named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's "
+        "`scratch` root; refused for a directory that is `/`, a home directory, either "
+        "served root, or holds or lies inside a git repository (KYO-735)",
+    )
 
     p_turns = sub.add_parser(
         "turns",

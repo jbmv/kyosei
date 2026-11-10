@@ -61,6 +61,8 @@ Run `kyo brief` (or rely on the `SessionStart` hook): deltas since the last brie
 dispatches, gated work, stale flags, ready work, and the records finished but not moved. **Do not
 re-derive board state by reading record files.**
 
+Run `kyo sessions scratch <dir>` with your session's scratchpad directory, so the maintainer can open its files.
+
 **Read a record with `kyo show <id> --json`; a write's `--json` is a receipt** -- ids, status and
 `changed_fields`, not the document; add `--full` for the whole one. Off a terminal
 `--json` is one line (`--pretty` indents). For a short listing, `kyo list --unsettled --limit 20`;

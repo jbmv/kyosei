@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 import kyosei
-from kyosei import device_tokens, serve, serve_files, serve_tree
+from kyosei import cmd_sessions, device_tokens, serve, serve_files, serve_tree
 
 from .conftest import git_init, invoke
 from .test_kyo_serve import Client, body_json, register, running  # noqa: F401
@@ -160,6 +160,8 @@ def test_the_roots_route_names_each_root_and_the_limit(files: Served) -> None:
     assert by_name["scratch"] == {
         "name": "scratch",
         "served": False,
+        "per_session": True,
+        "sessions": [],
         "reason": "scratch-not-recorded",
     }
 
@@ -446,28 +448,164 @@ def test_the_module_writes_no_file() -> None:
 
 # ----------------------------------------------------------- c5: the scratch root
 
+SESSION = "11111111-2222-3333-4444-555555555555"
+OTHER_SESSION = "66666666-7777-8888-9999-000000000000"
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "scratch/tree",
-        "scratch/blob/notes.md",
-        "scratch/tree?session=11111111-2222-3333-4444-555555555555",
-    ],
-)
-def test_the_scratch_root_is_refused_because_no_directory_is_recorded(
-    files: Served, monkeypatch: pytest.MonkeyPatch, path: str
+
+def record_session(served: Served, session: str, scratch: Path | None) -> None:
+    """Fold a SessionStart for ``session`` into the project's sessions.json, with or
+    without the directory the session reported."""
+    paths = serve_files.project_paths(str(served.code), dict(os.environ))
+    current = cmd_sessions.read_sessions(paths.sessions)
+    lookup = cmd_sessions.find_bridge_session(None)
+    entries, _entry = cmd_sessions.apply_event(
+        current.entries, session_id=session, event="SessionStart", cwd=str(served.code),
+        lookup=lookup, stamp="2026-11-10T00:00:00Z",
+    )  # fmt: skip
+    if scratch is not None:
+        entries = [
+            {**entry, "scratchpad_dir": str(scratch)} if entry["session_id"] == session else entry
+            for entry in entries
+        ]
+    assert cmd_sessions.write_sessions(paths.sessions, entries) is None
+
+
+@pytest.fixture
+def scratch(files: Served, tmp_path: Path) -> Path:
+    """A scratchpad directory outside both repositories, reported by SESSION."""
+    directory = tmp_path / "scratchpad" / SESSION
+    write(directory, "notes.md", "# Notes\n")
+    write(directory, ".hidden", "dot\n")
+    write(directory, "ignored.log", "kept though a repository would ignore it\n")
+    write(directory, "sub/deep.py", "z = 3\n")
+    write(directory, "pic.png", PNG)
+    record_session(files, SESSION, directory)
+    return directory
+
+
+def test_the_scratch_root_lists_every_entry_without_asking_git(
+    files: Served, scratch: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    status, listing = files.json(f"scratch/{SESSION}/tree")
+    assert status == 200, listing
+    assert listing["root"] == "scratch" and listing["path"] == ""
+    assert names(listing) == [".hidden", "ignored.log", "notes.md", "pic.png", "sub"]
+    by_name = {entry["name"]: entry for entry in listing["entries"]}
+    assert by_name["sub"]["type"] == "dir"
+    assert by_name["notes.md"]["media_type"] == "text/markdown" and by_name["notes.md"]["size"]
+    status, inner = files.json(f"scratch/{SESSION}/tree/sub")
+    assert status == 200 and names(inner) == ["deep.py"]
+    assert inner["entries"][0]["path"] == "sub/deep.py"
+
+
+def test_the_scratch_root_returns_a_markdown_file_a_source_file_and_an_image(
+    files: Served, scratch: Path
+) -> None:
+    for relpath, kind, data in (
+        ("notes.md", "text/markdown", b"# Notes\n"),
+        ("sub/deep.py", "text/x-python", b"z = 3\n"),
+        ("pic.png", "image/png", PNG),
+    ):
+        status, headers, body = files.get(f"scratch/{SESSION}/blob/{relpath}")
+        assert status == 200 and body == data, relpath
+        assert headers["Content-Type"].split(";")[0] == kind
+        etag = headers["ETag"]
+        again = files.get(f"scratch/{SESSION}/blob/{relpath}", **{"If-None-Match": etag})
+        assert again[0] == 304 and again[2] == b""
+
+
+def test_the_scratch_root_refuses_a_path_outside_it_and_a_link_that_leaves_it(
+    files: Served, scratch: Path, tmp_path: Path
+) -> None:
+    write(tmp_path / "outside", "secret.md", "outside\n")
+    (scratch / "leak.md").symlink_to(tmp_path / "outside" / "secret.md")
+    status, refused = files.json(f"scratch/{SESSION}/blob/leak.md")
+    assert status == 403 and refused["reason"] == "outside-root"
+    for bad in ("../outside/secret.md", "sub/../../x", "%2e%2e/outside/secret.md"):
+        status, refused = files.json(f"scratch/{SESSION}/blob/{bad}")
+        assert status in (400, 403, 404), refused
+    status, refused = files.json(f"scratch/{SESSION}/blob//etc/passwd")
+    assert status in (400, 403, 404), refused
+    status, refused = files.json(f"scratch/{SESSION}/blob/.git/config")
+    assert status == 403 and refused["reason"] == "not-shown"
+    status, refused = files.json(f"scratch/{SESSION}/blob/sub")
+    assert status == 409 and refused["reason"] == "is-a-directory"
+    status, refused = files.json(f"scratch/{SESSION}/tree/notes.md")
+    assert status == 409 and refused["reason"] == "is-a-file"
+
+
+def test_a_session_with_no_directory_recorded_is_refused_and_reporting_one_clears_it(
+    files: Served, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_session(files, SESSION, None)
+
     def touched(*args, **kwargs):
         raise AssertionError("no directory is known, so none may be looked at")
 
     monkeypatch.setattr(serve_tree, "_real_inside", touched)
-    monkeypatch.setattr(serve_tree, "_git_shows", touched)
-    status, refused = files.json(path)
-    assert status in (400, 404), refused
-    if status == 404:
-        assert refused["reason"] == "scratch-not-recorded"
-        assert "`code` and `store`" in refused["error"]
+    for path in (f"scratch/{SESSION}/tree", f"scratch/{SESSION}/blob/notes.md"):
+        status, refused = files.json(path)
+        assert status == 404 and refused["reason"] == "scratch-not-recorded", refused
+        assert "kyo sessions scratch <dir>" in refused["error"]
+    monkeypatch.undo()
+
+    directory = tmp_path / "pad"
+    write(directory, "notes.md", "# Notes\n")
+    monkeypatch.setenv(cmd_sessions.SESSION_ID_ENV, SESSION)
+    reported = invoke(["--root", str(files.code), "sessions", "scratch", str(directory)])
+    assert reported.code == 0, reported
+    assert files.json(f"scratch/{SESSION}/tree")[0] == 200
+
+
+def test_a_session_of_another_project_is_refused(files: Served, tmp_path: Path) -> None:
+    other = tmp_path / "other-project"
+    other.mkdir()
+    pad = tmp_path / "other-pad"
+    write(pad, "theirs.md", "# Theirs\n")
+    other_sessions = cmd_sessions.sessions_path(other)
+    entries, _ = cmd_sessions.apply_event(
+        [], session_id=OTHER_SESSION, event="SessionStart", cwd=str(other),
+        lookup=cmd_sessions.find_bridge_session(None), stamp="2026-11-10T00:00:00Z",
+    )  # fmt: skip
+    entries[0]["scratchpad_dir"] = str(pad)
+    assert cmd_sessions.write_sessions(other_sessions, entries) is None
+    status, refused = files.json(f"scratch/{OTHER_SESSION}/tree")
+    assert status == 404 and refused["reason"] == "no-such-session"
+    assert files.json(f"scratch/{OTHER_SESSION}/blob/theirs.md")[0] == 404
+
+
+def test_the_scratch_route_without_a_session_names_the_form(files: Served, scratch: Path) -> None:
+    for path in ("scratch/tree", "scratch/blob/notes.md", "scratch"):
+        status, refused = files.json(path)
+        assert status == 404 and refused["reason"] == "bad-request", refused
+        assert "scratch/{session}/tree" in refused["error"]
+
+
+def test_the_roots_route_lists_the_sessions_that_reported_a_directory(
+    files: Served, scratch: Path
+) -> None:
+    record_session(files, OTHER_SESSION, None)
+    status, document = files.json("")
+    entry = {root["name"]: root for root in document["roots"]}["scratch"]
+    assert status == 200 and entry["served"] is True and entry["per_session"] is True
+    assert entry["sessions"] == [SESSION]
+
+
+def test_a_recorded_directory_that_became_a_repository_is_no_longer_served(
+    files: Served, scratch: Path
+) -> None:
+    assert files.json(f"scratch/{SESSION}/tree")[0] == 200
+    git_init(scratch)
+    status, refused = files.json(f"scratch/{SESSION}/tree")
+    assert status == 403 and refused["reason"] == "scratch-unfit"
+    assert "kyo sessions scratch <dir>" in refused["error"]
+
+
+def test_a_scratch_root_needs_the_files_permission(files: Served, scratch: Path) -> None:
+    other = issue("phone", "send")
+    status, _, body = files.get(f"scratch/{SESSION}/blob/notes.md", token=other)
+    assert status == 403 and body_json(body)["reason"] == "no-files-permission"
+    assert b"# Notes" not in body
 
 
 def test_an_unknown_root_and_an_unknown_route_are_refused(files: Served) -> None:

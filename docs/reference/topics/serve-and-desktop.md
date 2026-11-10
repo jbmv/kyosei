@@ -1006,6 +1006,8 @@ serves a project's files read-only, as a tree and as bytes, to a device whose to
 GET /v1/projects/<name>/files                          the roots, and the size limit
 GET /v1/projects/<name>/files/<root>/tree[/<path>]     one directory's entries
 GET /v1/projects/<name>/files/<root>/blob/<path>       one file's bytes
+GET /v1/projects/<name>/files/scratch/<session>/tree[/<path>]   a session's scratchpad, a directory
+GET /v1/projects/<name>/files/scratch/<session>/blob/<path>     and one of its files
 GET /v1/projects/<name>/files/resolve?path=<text>      where a path written in prose is
 ```
 
@@ -1028,11 +1030,30 @@ both are served. Under the in-repo layout the store is inside the code repositor
 tree is not served under two names. `GET .../files` lists each root with its `path` and
 whether it is `served`. No route serves a path outside these roots, with or without a token.
 
-A third root, `scratch`, is planned for a session's scratchpad directory and is refused in
-this build (`scratch-not-recorded`): the session hooks do not record where that directory is,
-and the server does not derive one from a session id.
+A third root, `scratch`, is a session's scratchpad directory, one per session, reached as
+`files/scratch/<session>/tree` and `files/scratch/<session>/blob/<path>`. Nothing the session
+hooks record says where that directory is, and the server does not derive one from a session
+id: the agent reports it. `kyo sessions scratch <dir>`, run in a session (the session is
+`$CLAUDE_CODE_SESSION_ID`), stores the real path of `<dir>` as `scratchpad_dir` on that
+session's entry in `sessions.json`, and the server serves exactly that directory to that
+project's session and no other directory. The command is refused without a session id, for a
+session the project does not record, and for a path that is not an existing directory. It is
+also refused, with the reason, for `/`, a home directory or a directory that holds one, either
+served root or a directory that holds or lies inside one, and any directory that lies inside a
+git repository or holds one (a repository is looked for to four levels below, in at most
+20,000 directories). The server applies the same bounds on every request, so a directory that
+became a repository since it was reported is refused (403, `scratch-unfit`). `GET .../files`
+lists `scratch` with the sessions that have reported a directory. A session this project does
+not record is refused (404, `no-such-session`), including a session id of another project; a
+session with no directory reported is refused (404, `scratch-not-recorded`) with the command
+as the remedy; a reported directory that has gone is refused (404, `scratch-gone`). The
+scratch root is not a repository: every entry in the directory is listed and served, dotfiles
+included, with the same text and real-path checks as the other roots, so a path holding `..`
+or a link that leaves the directory is refused. The `scratchpad_dir` field is local state in
+`sessions.json`, a file beside the database and not the store's schema, so `schema_version`
+does not change.
 
-**What is visible.** What git shows in the root: tracked files, and untracked files that no
+**What is visible.** In `code` and `store`, what git shows in the root: tracked files, and untracked files that no
 ignore rule covers. An ignored file, the `.git` directory and the contents of a nested
 repository are absent from a listing and are refused when asked for by name, with the same
 404 an absent file gets. A file whose real path lies outside its root is refused (403,
@@ -1083,7 +1104,8 @@ nothing outside a root is looked at on disk to answer.
 
 A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
 `no-token`, `unknown-token`, `revoked-token`, `no-files-permission`, `tokens-unreadable`,
-`bad-request`, `no-such-root`, `store-is-code`, `scratch-not-recorded`, `not-served`,
+`bad-request`, `no-such-root`, `store-is-code`, `no-such-session`, `scratch-not-recorded`,
+`scratch-gone`, `scratch-unfit`, `not-served`,
 `not-shown`, `outside-root`, `is-a-file`, `is-a-directory`, `is-a-symlink`, `not-a-file`,
 `file-too-large`, `not-a-repository` and `git-failed`.
 
