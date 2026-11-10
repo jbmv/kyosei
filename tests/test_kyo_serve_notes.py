@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import commands, serve_notes
+from kyosei import cmd_notes, commands, serve_notes
 from kyosei import store as store_module
 from kyosei.cmd_notes import mark_sent as cmd_notes_mark_sent
 from kyosei.cmd_notes import span_digest as cmd_notes_span_digest
@@ -379,7 +379,8 @@ def expected(first: dict, second: dict, third: dict) -> str:
         "\n"
         f"Note 2 ({second['id']})\n"
         f"on note {first['id']}\n"
-        f'on my prompt {PROMPT} "Write three paragraphs"\n'
+        f'on my prompt {PROMPT} "Write three paragraphs, roughly 120 words each, about how '
+        f'lighthouses..." at "Write three paragraphs"\n'
         "second thoughts\n"
         "\n"
         f"Note 3 ({third['id']})\n"
@@ -1178,3 +1179,131 @@ def test_marks_refuse_until_the_project_opts_in_and_opting_in_clears_it(
     opt_in_transcripts(project)
     status, _, body = unopted.request(path, headers={"Authorization": f"Bearer {token}"})
     assert status == 200 and body_json(body)["marks"] == []
+
+
+# ------------------------------------------------- KYO-733: a short selection's line
+
+
+def _line_for(text: str, selected: str, role: str = "agent") -> str:
+    """The line `_anchor_line` writes for `selected` within one record whose text is `text`."""
+    start = text.index(selected)
+    end = start + len(selected)
+    uuid = "11111111-1111-4111-8111-111111111111"
+    record = {"message": {"content": text}}
+    anchor = {
+        "kind": "turn",
+        "role": role,
+        "session": OLD,
+        "target": uuid,
+        "char_start": start,
+        "char_end": end,
+        "digest": cmd_notes_span_digest(text, start, end),
+    }
+    return serve_notes._anchor_line(None, anchor, {uuid: record}, OLD).replace(uuid, "<uuid>")
+
+
+PARAGRAPH = (
+    "Intro line here.\n"
+    "The count was blank because this repository's store was never opened by the reader. "
+    "Then the second sentence ends the paragraph."
+)
+
+
+def test_c1_a_short_selection_quotes_its_sentence_from_the_start_and_names_the_selection() -> None:
+    assert _line_for(PARAGRAPH, "blank") == (
+        'on your reply <uuid> "The count was blank because this repository\'s store was never..."'
+        ' at "blank"'
+    )
+    # Five words is still short; six is quoted as it always was.
+    assert _line_for(PARAGRAPH, "count was blank because this").endswith(
+        'at "count was blank because this"'
+    )
+    six = _line_for(PARAGRAPH, "count was blank because this repository's")
+    assert six == 'on your reply <uuid> "count was blank because this repository\'s"'
+    # A selection that is the whole sentence is the quote, and is not named again.
+    assert _line_for(PARAGRAPH, "Intro line here.") == 'on your reply <uuid> "Intro line here."'
+    # A sentence of ten words or fewer is quoted whole, with no ellipsis.
+    assert _line_for(PARAGRAPH, "Intro") == 'on your reply <uuid> "Intro line here." at "Intro"'
+
+
+def test_c2_the_sentence_is_bounded_by_a_stop_a_line_break_or_the_end_of_the_block() -> None:
+    # The last sentence of a paragraph: it starts after the earlier full stop, not the block.
+    assert _line_for(PARAGRAPH, "paragraph") == (
+        'on your reply <uuid> "Then the second sentence ends the paragraph." at "paragraph"'
+    )
+    # A list item is its own line, and its marker is not part of the quote.
+    listed = "Before.\n- first item reads like this. and more\n- second item ends"
+    assert _line_for(listed, "second") == (
+        'on your reply <uuid> "second item ends" at "second" (list item)'
+    )
+    assert _line_for(listed, "first") == (
+        'on your reply <uuid> "first item reads like this." at "first" (list item)'
+    )
+    numbered = "1. numbered entry text"
+    assert _line_for(numbered, "entry") == (
+        'on your reply <uuid> "numbered entry text" at "entry" (list item)'
+    )
+    # A full stop inside a word ends nothing.
+    assert _line_for("See serve_notes.py now", "now") == (
+        'on your reply <uuid> "See serve_notes.py now" at "now"'
+    )
+
+
+def test_c3_a_heading_a_list_item_a_cell_and_code_are_named_and_a_paragraph_is_not() -> None:
+    text = (
+        "# The Install\n"
+        "Plain paragraph words.\n"
+        "| name | value |\n"
+        "| alpha one | beta two |\n"
+        "```py\n"
+        "x = compute(1)\n"
+        "```\n"
+        "After the fence."
+    )
+    assert _line_for(text, "Install") == 'on your reply <uuid> "The Install" at "Install" (heading)'
+    assert _line_for(text, "Plain") == 'on your reply <uuid> "Plain paragraph words." at "Plain"'
+    assert _line_for(text, "beta") == 'on your reply <uuid> "beta two" at "beta" (table cell)'
+    assert _line_for(text, "alpha") == 'on your reply <uuid> "alpha one" at "alpha" (table cell)'
+    assert _line_for(text, "compute") == (
+        'on your reply <uuid> "x = compute(1)" at "compute" (code block)'
+    )
+    assert _line_for(text, "After") == 'on your reply <uuid> "After the fence." at "After"'
+    # A long selection is quoted as before and still names its block.
+    assert _line_for("# One two three four five six seven", "One two three four five six") == (
+        'on your reply <uuid> "One two three four five six" (heading)'
+    )
+
+
+def test_c4_an_anchor_sent_with_the_longer_line_is_stored_and_read_back_unchanged(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    text = reply_words()
+    word = text.split()[2]
+    start = text.index(word)
+    anchor = {**span(start=start, end=start + len(word))}
+    document = {
+        "segments": [{"kind": "typed", "text": "about this"}],
+        "marks": [{"line": 0, "anchors": [anchor]}],
+    }
+    status, sent = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 200, sent
+    first_line = sent["message"].splitlines()[0]
+    assert first_line.startswith(f'on your reply {REPLY} "')
+    assert first_line.endswith(f' at "{word}"')
+    bed.show(IDLE)
+    message_id = sent["held"]["id"]
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, message_id)
+    (stored,) = note["anchors"]
+    assert (stored["char_start"], stored["char_end"]) == (start, start + len(word))
+    assert cmd_notes.span_text(
+        None, {**stored, "kind": "turn"}, {REPLY: _fixture_record()}
+    ) == word
+
+
+def _fixture_record() -> dict:
+    for line in OLD_FILE.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if row.get("uuid") == REPLY:
+            return row
+    raise AssertionError("the fixture's reply is gone")

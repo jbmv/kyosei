@@ -195,8 +195,13 @@ function icon(kind: keyof typeof ICONS): SVGElement {
   return svg;
 }
 
-/** `on your reply <uuid> "words..."`, as `kyo serve` writes it above an anchored paragraph. */
-const ANCHOR_LINE = /^on (?:your reply|my prompt) ([0-9a-f-]{36})(?: in session [0-9a-f-]{36})? (?:"(.*)"|\(words unavailable\))$/;
+/**
+ * `on your reply <uuid> "words..."`, as `kyo serve` writes it above an anchored paragraph. A
+ * short selection (KYO-733) is `"<its sentence>..." at "<selection>"`, and a heading, list item,
+ * table cell or code block ends with `(heading)` and the like. Group 2 is the quoted words,
+ * group 3 the person's own selection when the line has one.
+ */
+const ANCHOR_LINE = /^on (?:your reply|my prompt) ([0-9a-f-]{36})(?: in session [0-9a-f-]{36})? (?:"(.*?)"(?: at "(.*)")?(?: \((?:heading|list item|table cell|code block)\))?|\(words unavailable\))$/;
 /** The drawn reply each transcript record belongs to, where the server names one. */
 const recordKeys = new Map<string, string>();
 
@@ -309,7 +314,8 @@ function drawTurn(turn: Turn): HTMLElement {
       continue;
     }
     flush(false);
-    const words = (anchor[2] ?? "").replace(/\.\.\.$/, "…");
+    // The chip shows what the person selected: the `at` words when the line has them.
+    const words = (anchor[3] ?? anchor[2] ?? "").replace(/\.\.\.$/, "…");
     const chip = document.createElement("span");
     chip.className = "turn-anchor";
     chip.append(icon("anchor"), words || "words unavailable");
