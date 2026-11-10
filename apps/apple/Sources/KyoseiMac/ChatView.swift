@@ -11,17 +11,14 @@ struct ChatView: View {
             Divider()
             HStack(spacing: 14) {
                 Text(feed.project).fontWeight(.semibold).foregroundStyle(.primary)
+                if let percent = feed.facts?.context?.percent {
+                    ContextMeter(percent: percent)
+                }
                 if let facts = feed.facts {
                     Text(facts.model ?? "model unknown")
                     if let effort = facts.effort { Text("effort \(effort)") }
-                    if let percent = facts.context?.percent {
-                        Text("context \(percent)%").monospacedDigit()
-                    }
                 }
-                Text(
-                    "\(feed.runningSubagents) subagent\(feed.runningSubagents == 1 ? "" : "s") running"
-                )
-                .monospacedDigit()
+                RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 if let mode = feed.facts?.permission_mode { Text(mode) }
                 if let lines = feed.facts?.lines {
                     HStack(spacing: 4) {
@@ -45,6 +42,67 @@ struct ChatView: View {
             .padding(.horizontal, 12)
             .frame(height: 24)
         }
+    }
+}
+
+/// How full the context is: the number, and a bar coloured by how near the limit it is.
+struct ContextMeter: View {
+    let percent: Int
+
+    private var colour: Color {
+        switch percent {
+        case ..<40: .green
+        case ..<60: .blue
+        case ..<85: .orange
+        default: .red
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("context \(percent)%").monospacedDigit()
+            Capsule().fill(.quaternary)
+                .frame(width: 64, height: 6)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(colour)
+                        .frame(width: 64 * CGFloat(min(max(percent, 0), 100)) / 100)
+                }
+        }
+    }
+}
+
+/// The count of running subagents, which opens a list of them when clicked.
+struct RunningAgentsLabel: View {
+    let agents: [RunningAgent]
+    let count: Int
+    @State private var shown = false
+
+    var body: some View {
+        Text("\(count) subagent\(count == 1 ? "" : "s") running")
+            .monospacedDigit()
+            .contentShape(Rectangle())
+            .onTapGesture { if !agents.isEmpty { shown.toggle() } }
+            .help(agents.isEmpty ? "No subagent is running" : agents.map(\.name).joined(separator: "\n"))
+            .popover(isPresented: $shown, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(agents) { agent in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(agent.name).fontWeight(.semibold)
+                            HStack(spacing: 8) {
+                                if let record = agent.record { Text(record) }
+                                Text(agent.type)
+                                if let since = agent.since {
+                                    Text(since, style: .timer).monospacedDigit()
+                                }
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .font(.system(size: 12))
+                .padding(12)
+                .frame(minWidth: 220, alignment: .leading)
+            }
     }
 }
 
@@ -137,6 +195,16 @@ struct ChatWebView: NSViewRepresentable {
                 let running = body["subagents"] as? Int
             {
                 feed.runningSubagents = running
+                let stamps = ISO8601DateFormatter()
+                stamps.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let agents = body["agents"] as? [[String: Any]] ?? []
+                feed.runningAgents = agents.enumerated().map { index, agent in
+                    RunningAgent(
+                        id: index,
+                        name: agent["name"] as? String ?? "",
+                        type: agent["type"] as? String ?? "",
+                        since: stamps.date(from: agent["since"] as? String ?? ""))
+                }
                 return
             }
             if message.name == "agent", let body = message.body as? [String: Any],

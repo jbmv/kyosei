@@ -540,3 +540,5 @@ body.terminal-open #terminal { display: block; }
 /* What an unsent prompt is anchored to. */
 .anchored { box-shadow: -3px 0 0 var(--pastel-blue); margin-left: -10px; padding-left: 10px; }
 .revealed { background: color-mix(in srgb, var(--pastel-blue) 22%, transparent); transition: background 0.4s; }
+::highlight(anchored) { background-color: color-mix(in srgb, var(--pastel-blue) 38%, transparent); }
+.mark.held { font-size: 12px; }

@@ -703,7 +703,15 @@ function drawAgents(): void {
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
   setText("side-agents-finished", `${finished.length} finished ${showFinishedAgents ? "⌄" : "›"}`);
-  (window as any).webkit?.messageHandlers?.strip?.postMessage({ subagents: running.length });
+  // The status bar lists the running ones: what each is, and since when.
+  (window as any).webkit?.messageHandlers?.strip?.postMessage({
+    subagents: running.length,
+    agents: running.map((agent) => ({
+      name: agent.description,
+      type: agent.agent_type,
+      since: [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? "",
+    })),
+  });
 }
 
 function requestAgent(agent: string): void {
@@ -1009,7 +1017,7 @@ const kyo = {
     }
     loadingDraft = true;
     // The server's draft carries each prompt's marks, so a prompt opens the same on any device.
-    const saved = frame.boxes.filter((box) => box.text);
+    const saved = frame.boxes.filter((box) => box.text || box.marks?.length);
     showTexts(saved.map((box) => box.text), saved);
     loadingDraft = false;
     store(CURRENT_KEY, currentBoxes());
@@ -1068,6 +1076,8 @@ interface TagItem { kind: "tag"; name: string }
  */
 interface AnchorItem {
   kind: "anchor"; key: string; session: string; start: number; end: number; words: string;
+  /** The range is the words that were selected, not the whole of the blocks they lie in. */
+  exact?: boolean;
 }
 type Item = TagItem | AnchorItem;
 interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
@@ -1090,6 +1100,18 @@ let nextLine = 1;
 let openMark: { area: HTMLTextAreaElement; id: number } | null = null;
 const markPanel = document.createElement("div");
 markPanel.className = "mark-panel";
+
+const TAGS_KEY = "composer-tags";
+const tagList = document.createElement("datalist");
+tagList.id = "tag-list";
+document.body.append(tagList);
+
+/** Tags to suggest: those on the prompts now, then those used on this device, newest first. */
+function knownTags(): string[] {
+  const here = textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
+    .flatMap((item) => (item.kind === "tag" ? [item.name] : []));
+  return Array.from(new Set([...here, ...stored<string[]>(TAGS_KEY, [])]));
+}
 
 /** Carries each mark to where its paragraph went in an edit. */
 function trackEdit(area: HTMLTextAreaElement): void {
@@ -1132,9 +1154,12 @@ function drawMarks(area: HTMLTextAreaElement): void {
     return line;
   }));
   const held = marks.ids.flatMap((id, line) => {
-    const count = marks.items.get(id)?.length ?? 0;
-    if (!count) return [];
-    const mark = boxButton("mark held", String(count), () => showMark(area, id));
+    const items = marks.items.get(id) ?? [];
+    if (!items.length) return [];
+    // One thing shows as what it is, and several as their number.
+    const label = items.length > 1 ? String(items.length) : items[0].kind === "tag" ? "#" : "↗";
+    const mark = boxButton("mark held", label, () => showMark(area, id));
+    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `↗ ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
     return [mark];
   });
@@ -1191,6 +1216,13 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
   });
   const field = document.createElement("input");
   field.placeholder = "Add a tag…";
+  field.setAttribute("list", "tag-list");
+  tagList.replaceChildren(...knownTags().filter((name) => !held.some((item) => item.kind === "tag" && item.name === name))
+    .map((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      return option;
+    }));
   field.addEventListener("keydown", (event) => {
     event.stopPropagation();
     if (event.key === "Escape") {
@@ -1201,6 +1233,7 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     if (event.key !== "Enter" || !name) return;
     event.preventDefault();
     const has = held.some((item) => item.kind === "tag" && item.name === name);
+    store(TAGS_KEY, [name, ...stored<string[]>(TAGS_KEY, []).filter((used) => used !== name)].slice(0, 200));
     if (!has) change([...held, { kind: "tag", name }]);
   });
   markPanel.replaceChildren(...chips, field);
@@ -1233,14 +1266,14 @@ function spanAt(holder: HTMLElement, key: string, target: HTMLElement): Omit<Anc
   if (target.closest(".thinking")) return null;
   const source = sources.get(key)!;
   const points = (index: number) => Array.from(source.slice(0, index)).length;
-  const span = (from: number, to: number, words: string) =>
-    ({ start: points(from), end: points(to), words: firstWords(words, ANCHOR_WORDS) });
+  const span = (from: number, to: number, words: string, exact = false) =>
+    ({ start: points(from), end: points(to), words: firstWords(words, ANCHOR_WORDS), exact });
   const selection = window.getSelection();
   const selected = selection && !selection.isCollapsed
     && holder.contains(selection.anchorNode) && holder.contains(selection.focusNode);
   const picked = selected ? selection.toString().trim() : "";
   const found = picked ? source.indexOf(picked) : -1;
-  if (found >= 0) return span(found, found + picked.length, picked);
+  if (found >= 0) return span(found, found + picked.length, picked, true);
   // Formatted text reads differently from its source, so the blocks it lies in are named.
   const block = (node: Node | null) =>
     (node instanceof HTMLElement ? node : node?.parentElement)?.closest<HTMLElement>("[data-source-line]");
@@ -1337,18 +1370,56 @@ function anchoredBlocks(item: AnchorItem): HTMLElement[] {
   return blocks.length ? blocks : [holder];
 }
 
-/** A quiet bar beside whatever in the chat an unsent prompt is anchored to. */
-function paintAnchors(): void {
-  for (const block of chat.querySelectorAll(".anchored")) block.classList.remove("anchored");
-  for (const item of anchorsHeld()) {
-    for (const block of anchoredBlocks(item)) block.classList.add("anchored");
+/** Where an anchor's selected words are drawn, if they lie within one of its blocks. */
+function wordsRange(item: AnchorItem): Range | null {
+  const source = sources.get(item.key);
+  if (!item.exact || source === undefined) return null;
+  const words = Array.from(source).slice(item.start, item.end).join("");
+  for (const block of anchoredBlocks(item)) {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const nodes: { node: Text; from: number }[] = [];
+    let text = "";
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      nodes.push({ node: node as Text, from: text.length });
+      text += node.nodeValue ?? "";
+    }
+    const at = text.indexOf(words);
+    if (at < 0) continue;
+    const place = (offset: number, end: boolean) => {
+      const hit = nodes.findLast(({ from }) => (end ? from < offset : from <= offset)) ?? nodes[0];
+      return [hit.node, offset - hit.from] as const;
+    };
+    const range = document.createRange();
+    range.setStart(...place(at, false));
+    range.setEnd(...place(at + words.length, true));
+    return range;
   }
+  return null;
+}
+
+/**
+ * Shows in the chat what the unsent prompts are anchored to: selected words are highlighted,
+ * and an anchor to whole blocks puts a quiet bar beside them.
+ */
+function paintAnchors(): void {
+  for (const block of Array.from(chat.querySelectorAll(".anchored"))) block.classList.remove("anchored");
+  const ranges: Range[] = [];
+  for (const item of anchorsHeld()) {
+    const range = wordsRange(item);
+    if (range) ranges.push(range);
+    else for (const block of anchoredBlocks(item)) block.classList.add("anchored");
+  }
+  const highlights = (CSS as any).highlights;
+  if (!highlights) return;
+  if (ranges.length) highlights.set("anchored", new (window as any).Highlight(...ranges));
+  else highlights.delete("anchored");
 }
 
 /** Brings an anchor's place into view and shows which it is. */
 function reveal(item: AnchorItem): void {
   const blocks = anchoredBlocks(item);
-  blocks[0]?.scrollIntoView({ block: "center", behavior: "smooth" });
+  const words = wordsRange(item)?.startContainer.parentElement;
+  (words ?? blocks[0])?.scrollIntoView({ block: "center", behavior: "smooth" });
   for (const block of blocks) {
     block.classList.add("revealed");
     window.setTimeout(() => block.classList.remove("revealed"), 1600);
@@ -1459,7 +1530,8 @@ function currentTexts(): string[] {
 
 /** Each prompt with its marks, by the line each is on. */
 function currentBoxes(): SavedBox[] {
-  return textAreas().filter((area) => area.value).map((area) => {
+  // A prompt with an anchor and no words yet is still a draft.
+  return textAreas().filter((area) => area.value || marksOf.get(area)!.items.size).map((area) => {
     const marks = marksOf.get(area)!;
     return {
       text: area.value,
@@ -1659,7 +1731,7 @@ band.addEventListener("mousedown", (event) => {
 const savedWidth = stored<number | null>(WIDTH_KEY, null);
 if (savedWidth !== null) setComposerWidth(savedWidth);
 
-const startBoxes = storedBoxes();
+const startBoxes = storedBoxes().filter((box) => box.text || box.marks?.length);
 showTexts(startBoxes.map((box) => box.text), startBoxes);
 const newPromptButton = document.getElementById("new-prompt")!;
 // Keeping the focus where it is stops the click from closing an empty box under it.

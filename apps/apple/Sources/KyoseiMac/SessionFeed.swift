@@ -3,6 +3,19 @@ import KyoseiClient
 import Observation
 import WebKit
 
+/// A subagent still at work, as the status bar lists it.
+struct RunningAgent: Identifiable, Equatable {
+    let id: Int
+    let name: String
+    let type: String
+    let since: Date?
+
+    /// The record a dispatched worker is on, read from its description.
+    var record: String? {
+        name.firstMatch(of: /[A-Z][A-Z0-9]*-\d+/).map { String($0.output) }
+    }
+}
+
 /// Reads one session from `kyo serve` and hands each response to the web view unchanged.
 @MainActor
 @Observable
@@ -21,6 +34,7 @@ final class SessionFeed {
     private(set) var facts: SessionFacts?
     private(set) var remote: String?
     var runningSubagents = 0
+    var runningAgents: [RunningAgent] = []
     private var draftSession: String?
     private var draftEtag: String?
     private var draftTask: Task<Void, Never>?
