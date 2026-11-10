@@ -5,7 +5,11 @@ Under ``/v1/projects/{project}/sessions/{id}/held``:
 - ``POST`` -- ``{"segments": [...]}`` as for the send route; the message is kept instead of sent;
 - ``GET`` -- the held message, with its text, or ``null``;
 - ``DELETE`` with ``If-Match: <its id>`` -- retract it: its segments come back and it is not
-  delivered.
+  delivered;
+- ``POST`` to ``held-now`` with ``If-Match: <its id>`` -- send it now (KYO-722), to a working
+  screen as well as an idle one. Claude Code queues what is typed during a turn and gives it
+  to the agent at its next tool call, so the turn is not interrupted. The log row of that
+  delivery has the reason ``during-turn``. Every other refusal of a delivery stands.
 
 One message per session, and it is delivered when the session's screen is idle.
 
@@ -423,16 +427,71 @@ class HeldMessages:
                     )
             stopping.wait(self.server.held_poll_seconds)
 
-    def attend(self, session_id: str) -> None:
-        """One look at a session's held message, delivering it if its screen allows."""
+    def send_now(
+        self,
+        root_of: Callable[[], str],
+        session_id: str,
+        authorization: str | None,
+        if_match: str | None,
+    ) -> dict[str, Any]:
+        """Deliver the held message at once, during a turn; refuse, naming why, if it cannot."""
+        self._authorized(root_of, session_id, authorization)
+        result = self.attend(session_id, during_turn=True, if_match=if_match or "")
+        assert result is not None
+        if result.outcome == "delivered":
+            return {"ok": True, "session_id": session_id, "outcome": "delivered"}
+        if result.outcome == "failed":
+            raise Refusal(502, result.detail or "delivery failed", reason=result.reason)
+        raise Refusal(
+            409,
+            result.detail
+            or f"session {session_id} cannot take the message now; it stays held",
+            reason=result.reason or "not-deliverable",
+        )
+
+    def attend(
+        self, session_id: str, *, during_turn: bool = False, if_match: str | None = None
+    ) -> Any:
+        """One look at a session's held message, delivering it if its screen allows.
+
+        With ``during_turn`` (Send now) the message named by ``if_match`` is delivered whatever
+        the screen's state allows, and the look's outcome is returned.
+        """
         with self._lock_of(session_id):
             try:
                 path = self._path(session_id)
                 message = self._load(path)
             except Refusal:
-                return
-            if message is None or not message["retrying"]:
-                return
+                if during_turn:
+                    raise
+                return None
+            if during_turn:
+                if message is None:
+                    raise Refusal(
+                        404,
+                        f"session {session_id} holds no message: it has been delivered or "
+                        "taken back. GET its turns route to see whether it was delivered",
+                        reason="not-held",
+                    )
+                named = (if_match or "").strip().strip('"')
+                if named != message["id"]:
+                    raise Refusal(
+                        428 if not named else 412,
+                        f"sending now needs If-Match: {message['id']}, the id of the message "
+                        "held now, so that a newer message is never sent unseen",
+                        reason="wrong-held-id",
+                        held_id=message["id"],
+                    )
+                if not message["retrying"]:
+                    raise Refusal(
+                        409,
+                        f"message {message['id']} is not tried again ({message['reason']}): "
+                        "keys may have reached the pane; retract it and send it again if the "
+                        "transcript does not show it",
+                        reason=message["reason"] or "not-retrying",
+                    )
+            elif message is None or not message["retrying"]:
+                return None
 
             def mark_delivering() -> None:
                 message["delivering"] = True
@@ -445,6 +504,7 @@ class HeldMessages:
                 lambda: self.server.project(message["project"]).root,
                 settled=settled,
                 mark_delivering=mark_delivering,
+                during_turn=during_turn,
             )
             changed = False
             if result.outcome == "delivered":
@@ -480,3 +540,4 @@ class HeldMessages:
             self._announce(session_id, "delivered", None, message_id=message["id"])
         elif changed:
             self._announce(session_id, "held", message)
+        return result

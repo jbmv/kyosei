@@ -2091,6 +2091,8 @@ let heldId: string | null = null;
 function showHeld(id: string | null): void {
   heldId = id;
   heldBox.hidden = !id;
+  // Send now (KYO-722) is offered only while the turn runs; an idle screen delivers by itself.
+  document.getElementById("held-send-now")!.hidden = !id || screenState !== "working";
   heldText.textContent = screenState === "working"
     ? "Waiting for the turn to finish"
     : "Sending…";
@@ -2098,6 +2100,10 @@ function showHeld(id: string | null): void {
 
 document.getElementById("held-edit")!.addEventListener("click", () => {
   if (heldId) post("retract", { id: heldId });
+});
+
+document.getElementById("held-send-now")!.addEventListener("click", () => {
+  if (heldId) post("sendNow", { id: heldId });
 });
 
 document.getElementById("interrupt")!.addEventListener("click", () => post("interrupt", {}));

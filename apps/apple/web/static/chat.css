@@ -198,7 +198,8 @@ a { color: var(--link); }
 #held { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; background: var(--line); font-size: 13.5px; }
 #held[hidden] { display: none; }
 #held-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#held-edit { padding: 3px 12px; border: 1px solid var(--muted); border-radius: 7px; background: none; color: var(--text); font-size: 12.5px; }
+#held-send-now[hidden] { display: none; }
+#held-send-now, #held-edit { padding: 3px 12px; border: 1px solid var(--muted); border-radius: 7px; background: none; color: var(--text); font-size: 12.5px; }
 
 .box {
   display: flex;

@@ -720,3 +720,101 @@ def test_a_retraction_racing_a_delivery_has_exactly_one_outcome(
     assert actions.count("retract") == outcomes.count("retracted")
     assert actions.count("held-delivery") == outcomes.count("delivered")
     assert set(outcomes) == {"retracted", "delivered"}, outcomes
+
+
+# ------------------------------------------------------------- KYO-722: send now, during a turn
+
+HELD_NOW = f"{SESSIONS}/{OLD}/held-now"
+
+
+def send_now(
+    bed: Bed, token: str | None, held: dict | None, *, if_match: str | None = None
+) -> tuple[int, dict]:
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    named = if_match if if_match is not None else (held["id"] if held else None)
+    if named is not None:
+        headers["If-Match"] = named
+    status, _, raw = bed.client.request(HELD_NOW, method="POST", headers=headers, body=b"{}")
+    return status, body_json(raw)
+
+
+def test_send_now_delivers_to_a_working_screen_at_once_and_clears_the_held_message(
+    bed: Bed, on: str
+) -> None:
+    held = hold(bed, on)
+    assert keys_sent(bed) == []  # the screen is working, so it waits
+
+    status, answer = send_now(bed, on, held)
+
+    assert status == 200 and answer["outcome"] == "delivered", answer
+    assert keys_sent(bed)
+    assert held_now(bed, on) is None
+    assert not held_file(bed.store_home).exists() if hasattr(bed, "store_home") else True
+
+
+def test_send_now_is_logged_as_a_held_delivery_during_a_turn(
+    bed: Bed, store_home: Path, on: str
+) -> None:
+    held = hold(bed, on)
+    assert send_now(bed, on, held)[0] == 200
+
+    rows = log_rows(store_home)
+    assert [row["action"] for row in rows] == ["hold", "held-delivery"]
+    assert rows[-1]["outcome"] == "sent" and rows[-1]["reason"] == serve_send.DURING_TURN
+    assert SECRET not in (store_home / serve_send.LOG_FILE).read_text(encoding="utf-8")
+
+
+def test_an_ordinary_delivery_is_not_marked_as_during_a_turn(
+    bed: Bed, store_home: Path, on: str
+) -> None:
+    hold(bed, on)
+    bed.show(IDLE)
+    wait_until(lambda: held_now(bed, on) is None)
+    assert log_rows(store_home)[-1]["reason"] is None
+
+
+@pytest.mark.parametrize("screen", PROMPTS)
+def test_send_now_is_refused_on_a_prompt_or_dialog_and_the_remedy_clears_it(
+    bed: Bed, on: str, screen: str
+) -> None:
+    held = hold(bed, on)
+    bed.show(screen)
+
+    status, answer = send_now(bed, on, held)
+
+    assert status == 409 and answer["reason"] == "screen-not-ready", answer
+    assert keys_sent(bed) == []
+    assert held_now(bed, on) is not None
+
+    bed.show_frame(FRAME_WORKING)  # the remedy: the screen is working again
+    assert send_now(bed, on, held)[0] == 200
+
+
+def test_send_now_keeps_the_input_box_refusal(bed: Bed, on: str) -> None:
+    held = hold(bed, on)
+    bed.show("idle.txt")  # this fixture's box reads as holding typed text
+    status, answer = send_now(bed, on, held)
+    assert status == 409 and answer["reason"] == "input-box-in-use", answer
+    assert keys_sent(bed) == []
+
+
+def test_send_now_needs_the_token_and_the_held_id_and_each_remedy_clears_it(
+    bed: Bed, on: str
+) -> None:
+    held = hold(bed, on)
+    assert send_now(bed, None, held)[0] == 401
+    status, answer = send_now(bed, on, None)
+    assert status == 428 and answer["held_id"] == held["id"]
+    status, answer = send_now(bed, on, held, if_match="not-it")
+    assert status == 412 and answer["held_id"] == held["id"]
+    assert keys_sent(bed) == []
+    assert send_now(bed, on, held, if_match=answer["held_id"])[0] == 200
+
+
+def test_send_now_with_nothing_held_is_refused(bed: Bed, on: str) -> None:
+    status, answer = send_now(bed, on, None, if_match="x")
+    assert status == 404 and answer["reason"] == "not-held", answer
+    held = hold(bed, on)
+    assert send_now(bed, on, held)[0] == 200

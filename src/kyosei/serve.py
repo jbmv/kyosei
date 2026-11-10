@@ -60,7 +60,8 @@ permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is t
 
 THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
 composer boxes (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
-message held until the turn ends (:mod:`kyosei.serve_held`). Both need a device token.
+message held until the turn ends (:mod:`kyosei.serve_held`), and ``sessions/{id}/held-now`` (POST,
+KYO-722) delivers it at once, during a turn. Both need a device token.
 ``sessions/{id}/attachments`` (POST) and ``sessions/{id}/attachments/{attachment}`` (GET,
 KYO-715) are the files a prompt attaches (:mod:`kyosei.serve_attachments`); that POST is the
 one that carries a file's own bytes and type rather than JSON, and only the types that module
@@ -303,6 +304,8 @@ SESSION_SEND_ROUTES = ("send", "slash", "interrupt")
 SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     "draft": ("GET", "PUT"),
     "held": ("GET", "POST", "DELETE"),
+    # KYO-722: deliver the held message now, to a working screen (serve_held.send_now).
+    "held-now": ("POST",),
     # KYO-706: a set of notes, sent as one held message (serve_notes).
     "send-notes": ("POST",),
     # KYO-709: one composer prompt with its marks in place (serve_notes).
@@ -1026,6 +1029,10 @@ class ServeHandler(BaseHTTPRequestHandler):
             etag = document["etag"]
             return status, _json_bytes(document), _JSON_TYPE, {"ETag": etag} if etag else {}
         held = self.server.held_messages
+        if route == "held-now":
+            return 200, _json_bytes(
+                held.send_now(root_of, session_id, authorization, self.headers.get("If-Match"))
+            )
         if method == "POST":
             return 200, _json_bytes(
                 held.hold(name, root_of, session_id, authorization, self._body)
