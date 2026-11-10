@@ -83,6 +83,20 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
   rendered.set(key, version);
 }
 
+const ICONS = {
+  anchor: '<circle cx="12" cy="5" r="2.4"/><path d="M12 7.4V21M8 11h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
+  tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
+};
+
+/** A bare line icon in the colour of the text around it. */
+function icon(kind: keyof typeof ICONS): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "icon");
+  svg.innerHTML = ICONS[kind];
+  return svg;
+}
+
 /** `on your reply <uuid> "words..."`, as `kyo serve` writes it above an anchored paragraph. */
 const ANCHOR_LINE = /^on (?:your reply|my prompt) ([0-9a-f-]{36})(?: in session [0-9a-f-]{36})? (?:"(.*)"|\(words unavailable\))$/;
 /** The drawn reply each transcript record belongs to, where the server names one. */
@@ -143,7 +157,7 @@ function drawTurn(turn: Turn): HTMLElement {
     const words = (anchor[2] ?? "").replace(/\.\.\.$/, "…");
     const chip = document.createElement("span");
     chip.className = "turn-anchor";
-    chip.textContent = `⚓\uFE0E ${words || "words unavailable"}`;
+    chip.append(icon("anchor"), words || "words unavailable");
     chip.title = line;
     chip.addEventListener("click", () => revealRecord(anchor[1], words));
     element.append(chip);
@@ -1088,6 +1102,17 @@ const kyo = {
     adoptShelf();
   },
 
+  /** The session's sent prompts' anchors, from the store, which the chat keeps showing. */
+  marks(frame: { marks?: SentMark[] }): void {
+    sentMarks_ = frame.marks ?? [];
+    paintAnchors();
+  },
+
+  /** The tags in use across the store, for the tag field to suggest. */
+  tags(frame: { tags?: { tag: string }[] }): void {
+    storeTags = (frame.tags ?? []).map((row) => row.tag);
+  },
+
   note(frame: { text: string }): void {
     composerNote.textContent = frame.text;
   },
@@ -1166,6 +1191,7 @@ const markPanel = document.createElement("div");
 markPanel.className = "mark-panel";
 
 const TAGS_KEY = "composer-tags";
+let storeTags: string[] = [];
 const tagList = document.createElement("datalist");
 tagList.id = "tag-list";
 document.body.append(tagList);
@@ -1174,7 +1200,7 @@ document.body.append(tagList);
 function knownTags(): string[] {
   const here = textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
     .flatMap((item) => (item.kind === "tag" ? [item.name] : []));
-  return Array.from(new Set([...here, ...stored<string[]>(TAGS_KEY, [])]));
+  return Array.from(new Set([...here, ...stored<string[]>(TAGS_KEY, []), ...storeTags]));
 }
 
 /** Carries each mark to where its paragraph went in an edit. */
@@ -1221,9 +1247,9 @@ function drawMarks(area: HTMLTextAreaElement): void {
     const items = marks.items.get(id) ?? [];
     if (!items.length) return [];
     // One thing shows as what it is, and several as their number.
-    const label = items.length > 1 ? String(items.length) : items[0].kind === "tag" ? "#" : "⚓\uFE0E";
-    const mark = boxButton("mark held", label, () => showMark(area, id));
-    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `⚓\uFE0E ${item.words}`)).join("\n");
+    const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(area, id));
+    if (items.length === 1) mark.append(icon(items[0].kind));
+    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `anchor: ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
     return [mark];
   });
@@ -1273,7 +1299,9 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
       chip.textContent = `#${item.name}`;
     } else {
       // An anchor's chip goes to the place it names.
-      chip.append(boxButton("mark-anchor", `⚓\uFE0E ${item.words}`, () => reveal(item)));
+      const place = boxButton("mark-anchor", item.words, () => reveal(item));
+      place.prepend(icon("anchor"));
+      chip.append(place);
     }
     chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
     return chip;
@@ -1434,6 +1462,26 @@ function anchoredBlocks(item: AnchorItem): HTMLElement[] {
   return blocks.length ? blocks : [holder];
 }
 
+/** A sent paragraph and where it was anchored, as `GET sessions/<id>/marks` gives it. */
+interface SentMark {
+  note: string; text: string | null; tags: string[];
+  anchors: { role: string; message?: string; uuid?: string; start?: number; end?: number; stale?: boolean }[];
+}
+let sentMarks_: SentMark[] = [];
+/** What is drawn for the sent marks, so the mouse can find the paragraph behind a place. */
+let sentPlaces: { mark: SentMark; range: Range | null; blocks: HTMLElement[] }[] = [];
+
+function sentItems(): { mark: SentMark; item: AnchorItem }[] {
+  return sentMarks_.flatMap((mark) => mark.anchors.flatMap((anchor) => {
+    if (anchor.stale || anchor.start === undefined || anchor.end === undefined) return [];
+    const key = anchor.message ? `r:${anchor.message}` : `t:${anchor.uuid}`;
+    const item: AnchorItem = {
+      kind: "anchor", key, session: "", start: anchor.start, end: anchor.end, words: "", exact: true,
+    };
+    return [{ mark, item }];
+  }));
+}
+
 /** Where an anchor's selected words are drawn, if they lie within one of its blocks. */
 function wordsRange(item: AnchorItem): Range | null {
   const source = sources.get(item.key);
@@ -1466,8 +1514,18 @@ function wordsRange(item: AnchorItem): Range | null {
  * and an anchor to whole blocks puts a quiet bar beside them.
  */
 function paintAnchors(): void {
-  for (const block of Array.from(chat.querySelectorAll(".anchored"))) block.classList.remove("anchored");
+  for (const block of Array.from(chat.querySelectorAll(".anchored, .anchored-sent"))) {
+    block.classList.remove("anchored", "anchored-sent");
+  }
   const ranges: Range[] = [];
+  const sentRanges: Range[] = [];
+  sentPlaces = sentItems().map(({ mark, item }) => {
+    const range = wordsRange(item);
+    const blocks = range ? [] : anchoredBlocks(item);
+    if (range) sentRanges.push(range);
+    for (const block of blocks) block.classList.add("anchored-sent");
+    return { mark, range, blocks };
+  });
   for (const item of anchorsHeld()) {
     const range = wordsRange(item);
     if (range) ranges.push(range);
@@ -1477,7 +1535,40 @@ function paintAnchors(): void {
   if (!highlights) return;
   if (ranges.length) highlights.set("anchored", new (window as any).Highlight(...ranges));
   else highlights.delete("anchored");
+  if (sentRanges.length) highlights.set("anchored-sent", new (window as any).Highlight(...sentRanges));
+  else highlights.delete("anchored-sent");
 }
+
+const markTip = document.createElement("div");
+markTip.id = "mark-tip";
+
+/** Over a place a sent prompt was anchored to, shows the paragraph written against it. */
+chat.addEventListener("mousemove", (event) => {
+  const { clientX: x, clientY: y } = event;
+  const inside = (rect: DOMRect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  const target = event.target as Node;
+  const hits = sentPlaces.filter((place) =>
+    place.range ? Array.from(place.range.getClientRects()).some(inside)
+      : place.blocks.some((block) => block.contains(target)));
+  if (!hits.length) {
+    markTip.remove();
+    return;
+  }
+  markTip.replaceChildren(...hits.map(({ mark }) => {
+    const row = document.createElement("div");
+    row.textContent = mark.text || "(no words)";
+    if (mark.tags.length) {
+      const tags = document.createElement("small");
+      tags.textContent = mark.tags.map((tag) => `#${tag}`).join(" ");
+      row.append(tags);
+    }
+    return row;
+  }));
+  document.body.append(markTip);
+  markTip.style.left = `${Math.min(x + 12, window.innerWidth - markTip.offsetWidth - 8)}px`;
+  markTip.style.top = `${Math.min(y + 16, window.innerHeight - markTip.offsetHeight - 8)}px`;
+});
+chat.addEventListener("mouseleave", () => markTip.remove());
 
 /** Brings an anchor's place into view and shows which it is. */
 function reveal(item: AnchorItem): void {

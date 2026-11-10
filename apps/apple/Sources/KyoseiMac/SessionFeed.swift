@@ -177,11 +177,33 @@ final class SessionFeed {
         }
     }
 
+    /// Reads what the store holds of this session's sent prompts: the places their paragraphs
+    /// were anchored to, which the chat keeps showing, and the tags in use, which the tag
+    /// field suggests. A token without the `notes` permission is refused, and nothing is shown.
+    private func loadMarks(session: String, after delay: Duration = .zero) {
+        guard let token = Self.deviceToken() else { return }
+        Task {
+            try? await Task.sleep(for: delay)
+            guard session == current else { return }
+            if let reply = try? await client.authorised(
+                "GET", sessionPath(session, "marks"), token: token), reply.status == 200
+            {
+                send("marks", String(decoding: reply.data, as: UTF8.self))
+            }
+            if let reply = try? await client.authorised(
+                "GET", "v1/projects/\(project)/tags", token: token), reply.status == 200
+            {
+                send("tags", String(decoding: reply.data, as: UTF8.self))
+            }
+        }
+    }
+
     /// Brings a session's saved draft into the composer, once for each session opened.
     private func loadDraft(session: String) {
         guard draftSession != session, let token = Self.deviceToken() else { return }
         draftSession = session
         draftEtag = nil
+        loadMarks(session: session)
         Task {
             guard
                 let reply = try? await client.authorised(
@@ -388,6 +410,10 @@ final class SessionFeed {
                 send("terminal", event.data)
             case "held":
                 send("held", event.data)
+                // A delivered prompt's paragraphs are filed just after its keys are sent.
+                if event.data.contains("delivered"), let session = current {
+                    loadMarks(session: session, after: .seconds(2))
+                }
             case "reset", "session":
                 return  // Read the session again from the top.
             default:
