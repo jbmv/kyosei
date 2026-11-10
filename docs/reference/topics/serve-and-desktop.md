@@ -551,6 +551,8 @@ sent as `Authorization: Bearer <token>`.
 | `notes/<id>/tags` | POST | `{"add": [...], "remove": [...]}` | Move its tags |
 | `sessions/<id>/send-notes` | POST | `{"notes": [ids]}` | Send them as one message |
 | `sessions/<id>/send-prompt` | POST | `{"segments": [...], "marks": [...]}` | Send one composer prompt with its marks in place |
+| `sessions/<id>/marks` | GET | | The session's sent notes on its turns, in reply offsets (KYO-710) |
+| `tags` | GET | | Each tag now on a note, with its count (KYO-710) |
 
 `text` may be empty if there are tags. `anchors` are the objects `kyo notes add
 --anchors-file` takes, and a note may have none. A turn anchor may also be given by reply
@@ -660,6 +662,51 @@ restore them. If the notes, or a set of notes' sent state, cannot be filed after
 message stays delivered: the server log names it, it is kept in
 `$KYOSEI_HOME/composer/unfiled/<message id>.json`, and the filing is tried again each time
 `kyo serve` starts, until it succeeds.
+
+**A session's marks (KYO-710).** After a prompt is sent, a chat can still show what each of
+its lines was anchored to. `GET sessions/<id>/marks` returns every sent note with a turn anchor
+in that session, oldest first, as `{"note", "text", "tags", "sent", "anchors"}`. Notes never
+sent are left out, and so are a note's anchors that are not turns or are turns of another
+session; a redacted note's `text` is `null`. An anchor on a reply is `{"role": "agent",
+"message", "start", "end"}`, with offsets into the reply `text` the session routes return for
+that `message_id`. It is the reverse of giving an anchor by message, by the same joining, so
+the anchors stored one per record for one span come back as one. An anchor on a prompt is
+`{"role": "person", "uuid", "start", "end"}`, with offsets into the prompt's record. An anchor
+whose record is not in the transcript, whose digest does not match the record's text, or whose
+record is not part of its reply is `{"role", "uuid", "stale": true}` and has no offsets. The
+offsets are read from the transcript, so the route is refused, as the session routes are,
+until the project sets `read_transcripts: true`.
+
+```json
+{
+  "ok": true,
+  "session": "108d6543-12e9-4ae4-85fb-f303424bfa6a",
+  "count": 1,
+  "marks": [
+    {
+      "note": "KYO-N43",
+      "text": "why don't we just reformat it ourselves?",
+      "tags": ["ask"],
+      "sent": {"at": "2026-11-09T14:12:03.120Z", "session": "108d6543-12e9-4ae4-85fb-f303424bfa6a", "message": "h-6c1d"},
+      "anchors": [
+        {"role": "agent", "message": "msg_011CgsUrszPMRurWqUwuNvoD", "start": 0, "end": 30},
+        {"role": "person", "uuid": "a740d627-9040-4847-89e2-e06b1bf18621", "start": 0, "end": 22},
+        {"role": "agent", "uuid": "9b949b65-606d-47fa-bbfd-f46f11c8635d", "stale": true}
+      ]
+    }
+  ]
+}
+```
+
+**Tags in use (KYO-710).** `GET tags` returns each tag now on at least one note with the number
+of notes carrying it, most used first and then by name. A tag removed from every note is not
+listed. `kyo notes tags` prints the same, and `--json` gives the same list.
+
+```json
+{"ok": true, "count": 2, "tags": [{"tag": "ask", "count": 4}, {"tag": "later", "count": 1}]}
+```
+
+Both routes only read, and open the store read-only as `GET notes` does.
 
 Refusals carry a `reason`: `no-token`, `unknown-token`, `revoked-token`, `no-notes-permission`,
 `bad-request`, `not-found`, `store-locked`, `store-refused`, and on `send-notes` also
