@@ -239,8 +239,8 @@ names the block, and a heading's line means the section under it.
 ### An `on record ...` or `on file ...` line names a record element or lines of a file (KYO-737)
 
 `on record KYO-717.c4 "first words..."` is anchored to that record or element; run `kyo show`
-on the record the id begins with (`kyo show KYO-717`) and read the element under its id, or on
-the id itself for a record or a dispatch. `on file <path> lines 333-345 "first words..."` is
+on that id (`kyo show KYO-717.c4`), which reads a record, a criterion, a gate, a note, a claim
+or a dispatch. `on file <path> lines 333-345 "first words..."` is
 anchored to those lines of that file, counted from 1 in its source: the path is relative to
 the code repository unless the line says `in the store repository` (`kyo where` prints it) or
 `in the scratchpad`, which is your session's own. Read the lines, check that the quoted words

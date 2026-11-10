@@ -810,6 +810,73 @@ def _verification_credit_lines(
     return out
 
 
+def gate_lines(doc: dict, gate: dict, quotes: dict[str, str]) -> list[str]:
+    """One gate as ``kyo show <record>`` prints it in its ``gates`` block, and as
+    ``kyo show <gate-id>`` prints it (KYO-739): one function, so the two cannot disagree."""
+    out: list[str] = []
+    state = "open" if gate["cleared_at"] is None else "cleared"
+    # KYO-148: the payload may now be a whole procedure. One line per gate is what
+    # keeps this block readable, so a multi-line payload is indexed by its first
+    # line and the reader is told where to read the rest — `--json`, because this
+    # rendering is the only place `kyo show` prints a gate's payload at all, and a
+    # pointer at a surface that does not exist would be worse than none.
+    if gate["do"]:
+        first, more = elided_first_line(
+            gate["do"], more_at=f"in `kyo show {doc['id']} --json`"
+        )
+        detail = f"  do: {first}{more}"
+    else:
+        detail = ""
+    # KYO-102: the tags before the payload, because the tag is what this gate has in
+    # common with every other gate someone might be searching for, and the payload
+    # is what is true of this one alone.
+    tags = f"  tags: {', '.join(gate['tags'])}" if gate["tags"] else ""
+    out.append(f"  {gate['id']}  {gate['type']}  [{state}]{tags}{detail}")
+    answered = credits_for(doc, "gate", gate["id"]) if gate.get("cleared_as") else []
+    if gate.get("cleared_as") == "withdrawn":
+        out.append(f"      cleared: withdrawn — {gate['cleared_why'] or '(no reason)'}")
+    elif gate["cleared_why"]:
+        out.append(f"      cleared because: {gate['cleared_why']}")
+    for credit in answered:
+        lines = credit_lines(
+            doc, credit, verb="cleared: answered by", indent="      ", evidence=quotes
+        )
+        out.extend(lines)
+    # KYO-88: the claims go under the OPEN gates only. A cleared gate is no
+    # longer a question, so putting the record's answers beside it would be
+    # noise in the one rendering this record exists to keep readable.
+    if state == "open":
+        out.extend(claims_beside_gate(doc["claims"]))
+    return out
+
+
+def claim_lines(claim: dict) -> list[str]:
+    """One claim as the record's ``claims`` block and ``kyo show <claim-id>`` print it
+    (KYO-739)."""
+    out = [
+        f"  {claim['id']}  {claim['level']}  {claim['author']}  {claim['created_at']}"
+        f"{_claim_marker(claim)}",
+        f"      method: {claim['method']}",
+    ]
+    out.extend(f"    | {line}" for line in claim["statement"].split("\n"))
+    return out
+
+
+def note_lines(note: dict) -> list[str]:
+    """One note as the record's ``notes`` block and ``kyo show <note-id>`` print it
+    (KYO-739)."""
+    marker = f" [superseded by {note['superseded_by']}]" if note["superseded_by"] else ""
+    out = [f"  {note['id']}  {note['created_at']}{marker}"]
+    out.extend(f"    | {line}" for line in note["text"].split("\n"))
+    return out
+
+
+def element_heading(kind: str, element_id: str, record_id: str, title: str) -> str:
+    """The one line above an element ``kyo show`` prints by its own id, naming the record
+    that owns it (KYO-739)."""
+    return f"{kind} {element_id}  on {record_id}  {title}"
+
+
 def show_text(
     doc: dict,
     *,
@@ -968,51 +1035,14 @@ def show_text(
     if not doc["gates"]:
         out.append("  (none)")
     for gate in doc["gates"]:
-        state = "open" if gate["cleared_at"] is None else "cleared"
-        # KYO-148: the payload may now be a whole procedure. One line per gate is what
-        # keeps this block readable, so a multi-line payload is indexed by its first
-        # line and the reader is told where to read the rest — `--json`, because this
-        # rendering is the only place `kyo show` prints a gate's payload at all, and a
-        # pointer at a surface that does not exist would be worse than none.
-        if gate["do"]:
-            first, more = elided_first_line(
-                gate["do"], more_at=f"in `kyo show {doc['id']} --json`"
-            )
-            detail = f"  do: {first}{more}"
-        else:
-            detail = ""
-        # KYO-102: the tags before the payload, because the tag is what this gate has in
-        # common with every other gate someone might be searching for, and the payload
-        # is what is true of this one alone.
-        tags = f"  tags: {', '.join(gate['tags'])}" if gate["tags"] else ""
-        out.append(f"  {gate['id']}  {gate['type']}  [{state}]{tags}{detail}")
-        answered = credits_for(doc, "gate", gate["id"]) if gate.get("cleared_as") else []
-        if gate.get("cleared_as") == "withdrawn":
-            out.append(f"      cleared: withdrawn — {gate['cleared_why'] or '(no reason)'}")
-        elif gate["cleared_why"]:
-            out.append(f"      cleared because: {gate['cleared_why']}")
-        for credit in answered:
-            lines = credit_lines(
-                doc, credit, verb="cleared: answered by", indent="      ", evidence=quotes
-            )
-            out.extend(lines)
-        # KYO-88: the claims go under the OPEN gates only. A cleared gate is no
-        # longer a question, so putting the record's answers beside it would be
-        # noise in the one rendering this record exists to keep readable.
-        if state == "open":
-            out.extend(claims_beside_gate(doc["claims"]))
+        out.extend(gate_lines(doc, gate, quotes))
 
     out.append("")
     out.append(f"claims ({len(doc['claims'])}):")
     if not doc["claims"]:
         out.append("  (none)")
     for claim in doc["claims"]:
-        out.append(
-            f"  {claim['id']}  {claim['level']}  {claim['author']}  {claim['created_at']}"
-            f"{_claim_marker(claim)}"
-        )
-        out.append(f"      method: {claim['method']}")
-        out.extend(f"    | {line}" for line in claim["statement"].split("\n"))
+        out.extend(claim_lines(claim))
 
     out.append("")
     out.append(f"evidence artifacts ({len(doc['evidence_artifacts'])}):")
@@ -1197,9 +1227,7 @@ def show_text(
     if not doc["notes"]:
         out.append("  (none)")
     for note in doc["notes"]:
-        marker = f" [superseded by {note['superseded_by']}]" if note["superseded_by"] else ""
-        out.append(f"  {note['id']}  {note['created_at']}{marker}")
-        out.extend(f"    | {line}" for line in note["text"].split("\n"))
+        out.extend(note_lines(note))
 
     out += withdrawn_credit_lines(doc, quotes)
     out += _members_block(members or [], standings)

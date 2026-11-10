@@ -2522,6 +2522,14 @@ def _showing_a_shift_note_that_does_not_exist(at: Path) -> Provocation:
     return Provocation(root, ("show", "TST-S9"))
 
 
+def _showing_an_element_the_record_does_not_hold(at: Path) -> Provocation:
+    # KYO-739.c2: a criterion id with the right shape and the wrong number, on a record
+    # that exists. The refusal names the record and `kyo show <record>`, which lists every
+    # element it holds.
+    root, _ = _project_with_a_record(at)
+    return Provocation(root, ("show", "TST-1.c9"))
+
+
 def _showing_a_brief_that_does_not_exist(at: Path) -> Provocation:
     # KYO-454: `kyo briefs <id>` for a brief run this store never recorded.
     root, _ = _project_with_a_record(at)
@@ -3599,6 +3607,12 @@ PROVOKED: dict[str, Expectation] = {
             "kyo brief": "named as where shift-note ids appear (the shift log and the "
             "handoff block), not as a fix",
         },
+    ),
+    # KYO-739.c2: the offered `kyo show TST-1` is the listing of the record's elements; it
+    # exits 0 and the id asked for stays absent from it, so it is offered, not a rerun.
+    "cmd_views.py:_show_element#0": Expectation(
+        _showing_an_element_the_record_does_not_hold,
+        clears_by_rerun=False,
     ),
     # KYO-454: about the INVOCATION, so `clears_by_rerun=False`. `kyo briefs` is the
     # runnable offer — the listing a caller learns a real brief id from.

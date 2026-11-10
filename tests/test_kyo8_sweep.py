@@ -1178,14 +1178,13 @@ def test_show_refuses_an_unshowable_shape_as_a_shape(kyo, project: Path, write_f
     """c3. `no record 'KYO-215.f2'` was true of the record table and useless as an
     answer. A refusal that names the shape it was handed teaches the id space."""
     record = new_record(kyo, criteria=["a"])
-    note = kyo("--full", "edit", record, "--note-file", write_file("n.txt", "a note\n"), "--json")
-    assert note.code == 0, note
-    note_id = note.json["record"]["notes"][-1]["id"]
+    # KYO-739: a note is showable now; a touch is a child id with no reader.
+    note_id = f"{record}.t1"
 
     refused = kyo("show", note_id)
     assert refused.code == 64, refused
     assert "no record" not in refused.err
-    assert f"{note_id!r} is a note id" in refused.err
+    assert f"{note_id!r} is a touch id" in refused.err
     # And it names what it does accept, every shape, in one line.
     for shape in ("PREFIX-N.cN", "PREFIX-N.eN", "PREFIX-N.fN", "PREFIX-N.dN", "PREFIX-SN"):
         assert shape in refused.err
