@@ -71,7 +71,7 @@ when the message is held. Each becomes one typed line ``attached <absolute path>
 above the marked line, after that mark's ``on`` lines:
 
     on note KYO-N41
-    attached /Users/me/.kyosei/composer/attachments/proj/<session>/<sha256>.png
+    attached ~/kyosei/composer/attachments/proj/<session>/<sha256>.png
     this is what the screen shows
 
 A mark holding attachments and no anchor or tag files no note, and needs no ``notes``

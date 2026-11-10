@@ -722,7 +722,8 @@ ATTACHMENTS = "attachments"
 _ATTACHMENT_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|gif|webp|pdf)$")
 
 
-def _segment_refusal(value: str, what: str) -> Refusal | None:
+def _check_segment(value: str, what: str) -> None:
+    """Refuse a project name or session id that could not be one directory's name."""
     if (
         not value
         or len(value) > 128
@@ -730,13 +731,12 @@ def _segment_refusal(value: str, what: str) -> Refusal | None:
         or value.startswith(".")
         or any(char in value for char in "/\\\x00")
     ):
-        return Refusal(
+        raise Refusal(
             400,
             f"{value!r} cannot name a directory of attachments: a {what} that names one is "
             "not empty, holds no slash or NUL, and does not begin with a dot",
             reason="bad-request",
         )
-    return None
 
 
 def attachment_directory(
@@ -748,10 +748,8 @@ def attachment_directory(
     composer files are); without, nothing is created. Its real path must lie inside the
     real path of the attachments directory, so a planted symlink cannot move it.
     """
-    for value, what in ((project, "project name"), (session_id, "session id")):
-        refusal = _segment_refusal(value, what)
-        if refusal is not None:
-            raise refusal
+    _check_segment(project, "project name")
+    _check_segment(session_id, "session id")
     base = (
         composer_directory(environ, ATTACHMENTS)
         if create

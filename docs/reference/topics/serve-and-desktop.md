@@ -171,7 +171,9 @@ checks stand in front of every route:
   non-browser client sends no `Origin`. A browser viewer you trust is admitted by
   naming its origin, for example `--allow-origin http://localhost:5173`.
 - **JSON posts.** A `POST` must carry `Content-Type: application/json`, which a
-  cross-site form cannot send. `PUT` and `DELETE` cannot come from a form at all.
+  cross-site form cannot send. `PUT` and `DELETE` cannot come from a form at all. The one
+  exception is the attachments route, which takes a file with its own type, and only the
+  image and PDF types listed there, none of which a form can send either.
 
 **Other accounts on this machine can reach it.** A loopback port is open to every
 user logged in to the machine, not only to you. Any process under another account can
@@ -286,10 +288,11 @@ Nothing is reconstructed for an omitted block.
 first reply:
 
 ```
-facts:   at, model, effort, git_branch, permission_mode, context, lines, limits
+facts:   at, model, effort, git_branch, permission_mode, context, lines, limits, cache
 context: tokens, window, percent
 lines:   added, removed
 limits:  five_hour, seven_day, read_at    (each window: used_percentage, resets_at)
+cache:   warm, expires_at, recache_tokens_if_cold, read_at
 ```
 
 `limits` is the subscription's usage limits as `kyo statusline` last saved them. Claude Code
@@ -301,6 +304,20 @@ from whichever session replied last. `used_percentage` is from 0 to 100, `resets
 figure describes a window that has ended. Either window can be absent on its own, and
 `limits` is `null` when there is no file or no window left, which is the case for an account
 without a subscription. The file is read each time the facts are built.
+
+`cache` is this session's prompt cache as `kyo statusline` last saved it (KYO-715). After the
+main conversation's first response, Claude Code's status line input carries `prompt_cache`
+(https://code.claude.com/docs/en/statusline, "Prompt cache fields"), and `kyo statusline`
+saves three of its fields for the input's `session_id` in `$KYOSEI_HOME/prompt-cache.json`,
+keeping the entries of the 50 most recently read sessions. `warm` is whether the cached prefix
+was within its lifetime when the status line ran, `expires_at` is the ISO time it goes cold
+(`null` when the last response reported no cache tokens), `recache_tokens_if_cold` is the
+number of tokens the next request writes to the cache again if it has gone cold by then
+(`null` just after a compaction), and `read_at` is when the figures were saved. `cache` is
+`null` for a session with nothing saved. The server reports what was saved and does not
+decide whether the cache is cold: a client compares `expires_at` with its own clock, for
+example to warn before a prompt is sent to a cold cache. The file is read each time the facts
+are built, and a change reaches a session's stream as a `facts` event.
 
 `lines` is the running total of lines added and removed by the session and all of its
 subagents, summed from the patches its Edit and Write results record. A Write that creates a
@@ -539,6 +556,41 @@ The send log records holds, retractions and deliveries with the actions `hold`, 
 held. On a session's event stream, the `ready` event carries `held` and a `held` event reports
 `outcome` (`held`, `delivered`, `retracted`), `id` and the message; neither carries text.
 
+### Attachments (KYO-715)
+
+A client on another machine attaches a file, such as an image pasted into a paragraph of a
+prompt. The session runs on the server's machine, so the file is saved there and the agent is
+given its path (see "Sending a prompt" below). The routes are under
+`/v1/projects/<name>/sessions/<id>/`, need a device token with the `send` permission, refuse a
+query string, and need a project that has opted in to reading transcripts and records the
+session. Sending need not be switched on.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `attachments` | POST | Save a file: the body is its bytes, with its own `Content-Type` |
+| `attachments/<id>` | GET | The file's bytes, with their type |
+
+The accepted types are `image/png`, `image/jpeg`, `image/gif`, `image/webp` and
+`application/pdf`, at most 20 MiB. The declared type must be one of them, and the bytes must
+begin as files of that type begin. The response is
+
+```json
+{"ok": true, "id": "3b0c…e1", "path": "~/kyosei/composer/attachments/proj/108d6543-12e9-4ae4-85fb-f303424bfa6a/3b0c…e1.png", "media_type": "image/png", "bytes": 48213}
+```
+
+with 201 for a new file and 200 when the same bytes were saved before. The file is
+`$KYOSEI_HOME/composer/attachments/<project>/<session id>/<sha256>.<extension>`, private to
+your account, named by the hex sha256 of its bytes (which is its `id`) and the extension of
+its checked type, so the same file sent twice is one file with one id and no name a client
+gives becomes part of a path. Files are kept; nothing deletes an attachment.
+
+Refusals carry a `reason`: `attachment-type-not-accepted` (415, a type not in the list, the
+list given as `accepted`), `attachment-content-mismatch` (415, bytes of another type than the
+one declared, with `declared` and `found`), `attachment-empty` (400), `attachment-too-large`
+(413, with `limit`; the body is not read and the connection is closed), and
+`attachment-not-found` (404) for an id this session has no file for, besides those of the
+token. A refused file is not saved.
+
 ### Notes: the note routes (KYO-706)
 
 A note is the person's text on the places it addresses, as `kyo notes` records it
@@ -551,8 +603,8 @@ kyo devices issue my-ipad --permission notes --permission send
 
 The two permissions are separate because `send` drives a session and `notes` writes the
 store. A device that only takes notes needs `notes` alone, and sending a set of notes needs
-both. `send-prompt` needs `send`, and `notes` as well when the prompt has marks. A token is
-sent as `Authorization: Bearer <token>`.
+both. `send-prompt` needs `send`, and `notes` as well when a mark holds an anchor or a tag. A
+token is sent as `Authorization: Bearer <token>`.
 
 | Route | Method | Body or query | What it does |
 |---|---|---|---|
@@ -661,8 +713,27 @@ why don't we just reformat it ourselves?
 
 A marked line with no text is sent as its `on` lines alone. The message is held as any other,
 and its anchors are validated when it is held: a mark whose anchor does not validate, whose
-`line` lies outside the text, that repeats a line or that holds neither an anchor nor a tag is
-refused `bad-request`, naming the mark, and nothing is held.
+`line` lies outside the text, that repeats a line or that holds no anchor, tag or attachment
+is refused `bad-request`, naming the mark, and nothing is held.
+
+**Attaching files to a line (KYO-715).** A mark may also carry `"attachments": [ids]`, the ids
+the attachments route returned for this session. Each is checked to exist when the message is
+held, and an unknown one is refused `bad-request`, naming it, with nothing held. In the
+message each becomes one typed line `attached <absolute path>`, directly above the marked line
+and after that mark's `on` lines. With the second line of the prompt above marked on a note and
+given a pasted screenshot, the agent receives
+
+```
+the transcript does not stream
+on note KYO-N41
+attached ~/kyosei/composer/attachments/proj/108d6543-12e9-4ae4-85fb-f303424bfa6a/3b0c…e1.png
+why don't we just reformat it ourselves?
+```
+
+and reads the file at that path. A mark holding attachments and no anchor or tag files no note,
+and a prompt whose marks are all of that kind needs only the `send` permission. A note filed
+for a mark with anchors or tags does not record its attachments. `GET held` and the
+retraction response give each mark as it was sent, with its `attachments`.
 
 Notes are filed only when the message is delivered: one for each marked line, with the line's
 text, its anchors and tags, the token's device, `entered` as `pasted` when the line lies wholly
