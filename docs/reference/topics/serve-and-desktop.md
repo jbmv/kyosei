@@ -870,6 +870,76 @@ Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `orches
 its time, project, device, and its outcome (`started`, `refused`, `failed`) with status and
 reason. A start that cannot be recorded is not made.
 
+### A terminal on a session's pane: the terminal routes (KYO-721)
+
+`kyo serve` streams a session's pane to a client as the pane's program draws it, and types
+what the client sends into it. A terminal emulator in the client draws the stream, so the
+session can be driven as from its own terminal: `/exit` and other slash commands with their
+menus, Escape and the arrow keys, and an answer to the trust prompt or a permission prompt.
+
+```
+GET  /v1/projects/<name>/sessions/<id>/terminal[?cols=N&rows=N]   Server-Sent Events
+POST /v1/projects/<name>/sessions/<id>/terminal/input    body: {"connection", "data"}
+POST /v1/projects/<name>/sessions/<id>/terminal/resize   body: {"connection", "cols", "rows"}
+```
+
+The send routes read the screen first and send only to an idle or working one. These routes
+send whatever is typed to whatever the screen shows, which is a larger grant, so they need a
+permission of their own:
+
+```
+kyo devices issue my-mac --permission terminal --permission send --permission notes
+```
+
+A token holding only `send` is refused with `no-terminal-permission`. A token is changed by
+revoking it and issuing another. The routes also need `serve_send: true` in
+`$KYOSEI_HOME/settings.yml`, since a connection types, and the project's opt-in to reading
+transcripts, as the read routes do. The token is sent as `Authorization: Bearer <token>`; the
+stream's query string takes only the size of the client's view.
+
+The stream's events:
+
+| Event | Data |
+|---|---|
+| `event: ready` | `session_id`, `connection` (the id an input or a resize names), `device`, `pane` |
+| `event: screen` | `cols`, `rows`, `data`: the whole pane, repainted. `data` is base64 of the bytes to write to an emulator that has been reset and sized to `cols` by `rows`. It holds up to 1000 lines of history above the visible screen, then the screen, the cursor's position and the modes the program had set. Sent when the stream opens and whenever the pane's size changes |
+| `event: output` | `data`: base64 of the bytes the pane's program wrote since the last event, colours and cursor movement included |
+| `event: closed` | `reason`, `text`: the pane has closed (`pane-closed`), the tmux client has ended (`tmux-exited`), or the connection is no longer allowed (`revoked-token`, `no-terminal-permission`, `send-disabled`). The stream then ends |
+
+A `: keepalive` comment is sent on an idle stream, as on the other streams. A client that
+reconnects is sent `ready` and `screen` afresh.
+
+`input` types `data`, a string, into the pane byte for byte as UTF-8, at most 65536 bytes in
+one request. The emulator has already encoded each key as a terminal does: Return is a
+carriage return, an arrow key its escape sequence, a paste the bracketed form when the
+program asked for it. A client sends one input at a time, so that keys arrive in the order
+typed. `resize` states the size of the client's view, from 10x3 to 500x300. Both name the
+`connection` of an open stream of the same device, project and session, and are refused with
+`no-connection` (409) otherwise; opening the stream is the remedy.
+
+Each connection is one tmux control-mode client on the server that holds the pane, attached
+with tmux's `ignore-size` flag. tmux leaves such a client out of sizing a window while any
+other client is attached, so a terminal attached to the session (`kyo orchestrator attach`,
+or the desktop app's terminal tab) keeps its size whatever a viewer's is, and the viewer draws
+the pane at that size. When no other client is attached, the window takes the viewer's size.
+Any number of viewers may be connected; each is sent the same bytes, and all of them draw the
+pane at its one size.
+
+A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
+`send-disabled`, `no-token`, `unknown-token`, `revoked-token`, `no-terminal-permission`,
+`bad-request`, `no-pane` (409), `no-connection` (409), `input-too-large` (413),
+`terminal-failed` (502: tmux did not attach or did not take the keys; the sentence says
+which), `settings-unreadable`, `tokens-unreadable` and `send-log-unusable`.
+
+Each connection is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `terminal` when it
+opens: its time, project, session, device, and its outcome (`opened`, `refused`, `failed`)
+with status and reason. A second line with the outcome `closed` and the reason it ended
+(`client-left`, `client-too-slow`, `pane-closed`, `server-stopped` and the reasons of the
+`closed` event) is
+written when it ends. A connection that cannot be recorded is not made. What is typed is
+never logged, since it may be a password; a refused input or resize is logged, with the
+action `terminal-input` or `terminal-resize`.
+
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 
 The network is Tailscale, and it replaces a VPN. `kyo serve` stays on loopback.

@@ -369,13 +369,17 @@ body.terminal-open #terminal { display: flex; }
   line-height: 1.4;
 }
 
-/* A pane sized by another terminal can be larger than the drawer, and is then scrolled. */
+/* A pane sized by another terminal can be larger than the drawer, and is then scrolled. Its
+   scroll bars are not drawn: one that took room would change the size the view states. */
 #terminal-screen {
   flex: 1;
   min-height: 0;
   margin: 8px 0 8px 12px;
   overflow: auto;
+  scrollbar-width: none;
 }
+
+#terminal-screen::-webkit-scrollbar { display: none; }
 
 #terminal-text {
   flex: 1;

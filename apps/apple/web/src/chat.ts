@@ -995,6 +995,8 @@ let emulator: Terminal | null = null;
 let paneSize: TerminalSize | null = null;
 /** The view's size as last stated to the server, so that it is stated once. */
 let statedSize = "";
+/** One cell at the base font, measured from a drawn screen; none before the first. */
+let terminalCell: { width: number; height: number } | null = null;
 let terminalResize: number | undefined;
 
 function terminalIsOpen(): boolean {
@@ -1037,14 +1039,26 @@ function theEmulator(): Terminal {
   return made;
 }
 
-/** The size the drawer would give the pane at the base font, once a cell can be measured. */
-function terminalViewSize(): TerminalSize | null {
+/**
+ * Measures a cell from the screen the emulator has drawn. Only a screen at the base font is
+ * measured, and only once it has been drawn: the emulator's first measure, made as it opens,
+ * was a quarter too narrow in a page still loading its styles.
+ */
+function measureTerminalCell(): void {
   const screen = terminalScreen.querySelector<HTMLElement>(".xterm-screen");
-  if (!emulator || !screen) return null;
-  const scale = TERMINAL_FONT / (emulator.options.fontSize ?? TERMINAL_FONT);
+  if (!emulator || !screen || emulator.options.fontSize !== TERMINAL_FONT) return;
+  if (!screen.clientWidth || !screen.clientHeight) return;
+  terminalCell = {
+    width: screen.clientWidth / emulator.cols, height: screen.clientHeight / emulator.rows,
+  };
+}
+
+/** The size the drawer would give the pane at the base font, once a cell has been measured. */
+function terminalViewSize(): TerminalSize | null {
+  if (!terminalCell) return null;
   return viewSize(
     terminalScreen.clientWidth, terminalScreen.clientHeight,
-    (screen.clientWidth / emulator.cols) * scale, (screen.clientHeight / emulator.rows) * scale,
+    terminalCell.width, terminalCell.height,
   );
 }
 
@@ -1095,8 +1109,11 @@ function terminalEvent(frame: TerminalFrame): void {
     fitEmulator();
     terminal.reset();
     terminal.write(bytesOf(event.data));
-    // The first measure of a cell comes with the first screen, and may change what fits.
+    // The cursor is nearly always at the foot of a pane too tall for the drawer.
+    terminalScreen.scrollTop = terminalScreen.scrollHeight;
+    // A cell can be measured once a screen is drawn, and the first measure says what fits.
     requestAnimationFrame(() => {
+      measureTerminalCell();
       fitEmulator();
       stateTerminalSize("resize");
     });
@@ -1128,6 +1145,19 @@ function fitTerminal(): void {
 }
 
 window.addEventListener("resize", terminalResized);
+
+// A pane larger than the drawer is moved by the wheel before the emulator's history is, since
+// the history is reached again once the pane's last line is in view.
+terminalPane.addEventListener("wheel", (event) => {
+  const room = terminalScreen.scrollHeight - terminalScreen.clientHeight;
+  const before = terminalScreen.scrollTop;
+  if (terminalScreen.hidden || room <= 0) return;
+  terminalScreen.scrollTop = Math.max(0, Math.min(room, before + event.deltaY));
+  terminalScreen.scrollLeft += event.deltaX;
+  if (terminalScreen.scrollTop === before && !event.deltaX) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, { passive: false, capture: true });
 
 // Wheel movement over the drawer stays in the drawer, including when it has nothing to scroll.
 // The emulator scrolls its own history before this is reached.
