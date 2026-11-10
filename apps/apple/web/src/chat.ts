@@ -5,7 +5,7 @@ import { shiftLines } from "./marks";
 import { render } from "./pipeline";
 
 interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
-interface Reply { message_id: string; at: string; text: string; thinking?: string | null }
+interface Reply { message_id: string; uuid?: string; at: string; text: string; thinking?: string | null }
 interface Delivery {
   uuid: string; at: string; kind: string; text: string | null; sender: string | null;
   sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
@@ -83,6 +83,26 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
   rendered.set(key, version);
 }
 
+/** `on your reply <uuid> "words..."`, as `kyo serve` writes it above an anchored paragraph. */
+const ANCHOR_LINE = /^on (?:your reply|my prompt) ([0-9a-f-]{36})(?: in session [0-9a-f-]{36})? (?:"(.*)"|\(words unavailable\))$/;
+/** The drawn reply each transcript record belongs to, where the server names one. */
+const recordKeys = new Map<string, string>();
+
+/** Goes to the place a sent anchor names: by its record, or failing that by its words. */
+function revealRecord(uuid: string, words: string): void {
+  const start = words.replace(/…$/, "");
+  const key = recordKeys.get(uuid) ?? (elements.has(`t:${uuid}`) ? `t:${uuid}` : undefined)
+    ?? [...sources].reverse().find(([, text]) => start && text.includes(start))?.[0];
+  const holder = key ? elements.get(key) : undefined;
+  if (!holder) return;
+  const blocks = Array.from(holder.querySelectorAll<HTMLElement>("[data-source-line]"))
+    .filter((block) => !block.querySelector("[data-source-line]"));
+  const block = blocks.find((candidate) => start && candidate.textContent?.includes(start)) ?? holder;
+  block.scrollIntoView({ block: "center", behavior: "smooth" });
+  block.classList.add("revealed");
+  window.setTimeout(() => block.classList.remove("revealed"), 1600);
+}
+
 /** The text each prompt and reply was drawn from, by its key, which an anchor measures against. */
 const sources = new Map<string, string>();
 
@@ -106,7 +126,29 @@ function drawTurn(turn: Turn): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
   for (const { index } of turn.images ?? []) element.append(drawImage(turn, index));
-  if (turn.text) element.append(document.createTextNode(turn.text));
+  // The line the server puts above an anchored paragraph is drawn as a chip. The text
+  // around it stays as it was sent, which is what an anchor on this prompt measures against.
+  let plain: string[] = [];
+  const flush = (last: boolean) => {
+    if (plain.length) element.append(document.createTextNode(plain.join("\n") + (last ? "" : "\n")));
+    plain = [];
+  };
+  for (const line of (turn.text ?? "").split("\n")) {
+    const anchor = line.match(ANCHOR_LINE);
+    if (!anchor) {
+      plain.push(line);
+      continue;
+    }
+    flush(false);
+    const words = (anchor[2] ?? "").replace(/\.\.\.$/, "…");
+    const chip = document.createElement("span");
+    chip.className = "turn-anchor";
+    chip.textContent = `⚓\uFE0E ${words || "words unavailable"}`;
+    chip.title = line;
+    chip.addEventListener("click", () => revealRecord(anchor[1], words));
+    element.append(chip);
+  }
+  flush(true);
   return element;
 }
 
@@ -946,6 +988,7 @@ const kyo = {
         if (reply.text || reply.thinking) {
           const version = `${reply.text}|${reply.thinking ?? ""}`;
           sources.set(`r:${reply.message_id}`, reply.text ?? "");
+          if (reply.uuid) recordKeys.set(reply.uuid, `r:${reply.message_id}`);
           place(`r:${reply.message_id}`, reply.at, version, () => drawReply(reply));
         }
       }
