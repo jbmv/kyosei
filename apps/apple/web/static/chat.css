@@ -230,8 +230,8 @@ a { color: var(--link); }
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
 .box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
 /* The prompt's text starts 18px in from the box's padding, past the gutter that holds the marks. */
-.box-clear { margin-left: 18px; color: var(--apple-red); font-weight: 500; }
-.box-clear:hover { text-decoration: underline; }
+.box-delete { margin-left: 18px; color: var(--apple-red); font-weight: 500; }
+.box-delete:hover { text-decoration: underline; }
 /* Bare text in the accent colour, with the keys that do the same beside it. */
 .box-send { color: var(--link); font-weight: 600; }
 .box-send:hover:not(:disabled) { color: var(--pastel-blue); text-decoration: underline; }
