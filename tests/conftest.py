@@ -530,7 +530,9 @@ def new_record(
                 args += ["--quote-file", handle.name]
         if project is not None and requires_credit(project, kind):
             args += decision_credit_args(project)
-            args += opened_late(project, kind)
+        # KYO-658: a record of the kind, not its discussion, which would be a second record.
+        if project is not None and requires_discussion(project, kind):
+            drop_discussion_requirement(project, kind)
         result = kyo(*args, stdin=stdin)
     assert result.code == 0, result
     return result.json["record"]["id"]
