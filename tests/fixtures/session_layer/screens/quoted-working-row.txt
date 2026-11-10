@@ -1,0 +1,10 @@
+● Sample reply text.
+
+✻ Hatching… (40s · ↓ 3.6k tokens)
+● A later reply that quotes the row above.
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  weekly 12%
+  ⏵⏵ auto mode on (shift+tab to cycle)
