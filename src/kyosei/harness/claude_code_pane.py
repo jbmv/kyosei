@@ -285,13 +285,15 @@ def _working_row_above(lines: list[str], box: _InputBox) -> str | None:
     """The working row standing directly above the input box, by its words.
 
     A custom status line replaces the footer's ``esc to interrupt`` (KYO-716), so a running
-    turn is also read from its spinner row. Only blank lines and the dim ``⎿`` hint line
-    that may sit between the row and the box are skipped; any other line ends the search,
-    so a row quoted higher in the conversation counts for nothing, and a finished turn's
-    row (``✻ Churned for 40s``) has no ellipsis and does not match.
+    turn is also read from its spinner row. Blank and indented lines between the row and
+    the box are skipped: the ``⎿`` tip, a task list under the row, and a right-aligned
+    notice such as ``✔ Update installed`` are all drawn indented. The first line that
+    starts in the first column ends the search, so a row quoted higher in the conversation
+    counts for nothing, and a finished turn's row (``✻ Churned for 40s``) has no ellipsis
+    and does not match.
     """
     for line in reversed(lines[: box.first - 1]):
-        if not line.strip() or line.lstrip().startswith("⎿"):
+        if not line.strip() or line[0].isspace():
             continue
         found = _WORKING_ROW.match(line)
         return found.group(1) if found else None

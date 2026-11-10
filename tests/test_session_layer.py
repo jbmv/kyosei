@@ -1814,3 +1814,12 @@ def test_an_interrupt_is_sent_on_that_screen() -> None:
     tmux = FakeTmux([screen("working-statusline.txt")])
     pane.send_interrupt(tmux, "%3")
     assert [c for c, _ in tmux.commands] == [("send-keys", "-t", "%3", "Escape")]
+
+
+def test_an_indented_notice_between_the_row_and_the_box_does_not_hide_it() -> None:
+    # Captured live on 2026-11-10: ``✔ Update installed`` is drawn right-aligned on the line
+    # above the box, and the screen is still a working one.
+    raw = screen("working-statusline-notice.txt")
+    assert "Update installed" in raw and "esc to interrupt" not in raw
+    assert pane.classify(raw).state == pane.WORKING
+    assert pane.terminal(raw, pane.classify(raw)).working_line.startswith("Tempering…")
