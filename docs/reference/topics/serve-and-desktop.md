@@ -197,7 +197,7 @@ because that format is not a published interface and changes between releases.
 | `GET /v1/projects/<name>/sessions/<id>/turns[?cursor=...]` | the session's transcript objects |
 | `GET /v1/projects/<name>/sessions/<id>/screen` | what the pane shows now, classified and as text |
 | `GET /v1/projects/<name>/sessions/<id>/images/<turn>/<index>` | one image the person sent, as its own bytes |
-| `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls, and for a dispatched worker its dispatch's branch and line counts |
+| `GET /v1/projects/<name>/sessions/<id>/subagents/<agent>` | one subagent's tool calls and token use so far, and for a dispatched worker its dispatch's branch and line counts |
 | `GET /v1/projects/<name>/sessions/<id>/changes` | the lines the session's working directory holds that no commit does, and the repository's remote |
 | `GET /v1/projects/<name>/sessions/<id>/events[?cursor=...]` | Server-Sent Events for the session |
 
@@ -314,11 +314,19 @@ environment setting that changes one session's window, such as
 `CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
 
 **A subagent.** `GET .../sessions/<id>/subagents/<agent>` is `{"ok", "session_id", "agent_id",
-"readable", "why", "dispatch", "dispatch_why", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
+"readable", "why", "dispatch", "dispatch_why", "usage", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
 call has the shape above. It reads the subagent's own transcript, beside the session's, so a
 subagent still running can be read before it appears in `subagents`. An agent id that is not
 this session's answers 404. `readable: false` means the file's rows are of no format this
 build recognises, and `why` says so.
+
+`usage` is `{"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+"total"}`: the tokens of every message in the subagent's transcript as it stands, summed as
+a dispatch's worker tokens are, so that each message counts once. It may be read while the
+subagent runs, and a later request returns the sum of a transcript that has grown since.
+`total` is the four counts added, cache reads included. `usage` is `null` when `readable` is
+`false`. It is on this route rather than on the `subagents` of `/turns` for the reason given
+for `dispatch` below.
 
 `dispatch` is `{"id", "record", "branch", "added", "removed"}` for a subagent started as a
 dispatched worker, which its prompt states by opening with "the dispatched worker for" and

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import cmd_sessions, serve, serve_sessions, session_layer
+from kyosei import cmd_sessions, serve, serve_sessions, session_layer, worker_tokens
 
 from .conftest import git_init, new_record, opt_in_transcripts
 from .test_kyo_serve import Client, body_json, register, start, stop
@@ -920,6 +920,101 @@ def test_a_store_that_cannot_be_read_leaves_the_tool_calls_served(bed: Bed, kyo)
     document = json_body(bed.get(f"{SESSIONS}/{OLD}/subagents/{WORKER}"))
     assert document["dispatch"] is None and "could not be read" in document["dispatch_why"]
     assert document["tool_calls"]
+
+
+# ------------------------------------------ KYO-711: a subagent's token use, read while it runs
+
+USAGE_AGENT = "a5555555555555555"
+USAGE_ROUTE = f"{SESSIONS}/{OLD}/subagents/{USAGE_AGENT}"
+
+
+def _agent_row(kind: str, uuid: int, message: dict, *, sidechain: bool = True) -> str:
+    row = {
+        "type": kind,
+        "uuid": f"00000000-0000-4000-8000-{uuid:012d}",
+        "agentId": USAGE_AGENT,
+        "timestamp": f"2026-11-09T12:{uuid:02d}:00.000Z",
+        "sessionId": OLD,
+        "message": message,
+    }
+    if sidechain:
+        row["isSidechain"] = True
+    return json.dumps(row) + "\n"
+
+
+def _reply(message_id: str, inp: int, out: int, read: int, made: int) -> dict:
+    usage = {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cache_read_input_tokens": read,
+        "cache_creation_input_tokens": made,
+        "service_tier": "standard",
+    }
+    return {
+        "id": message_id,
+        "role": "assistant",
+        "model": "claude-test",
+        "content": [{"type": "text", "text": "working"}],
+        "usage": usage,
+    }
+
+
+def place_usage_agent(bed: Bed, *, sidechain: bool = True) -> Path:
+    """A subagent transcript of two messages; the first's two rows repeat its usage (KYO-292)."""
+    directory = bed.transcripts / OLD / "subagents"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"agent-{USAGE_AGENT}.jsonl"
+    prompt = {"role": "user", "content": "Count the files"}
+    path.write_text(
+        _agent_row("user", 1, prompt, sidechain=sidechain)
+        + _agent_row("assistant", 2, _reply("msg_1", 3, 1, 1000, 200), sidechain=sidechain)
+        + _agent_row("assistant", 3, _reply("msg_1", 3, 40, 1000, 200), sidechain=sidechain)
+        + _agent_row("assistant", 4, _reply("msg_2", 5, 60, 1200, 50), sidechain=sidechain),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_subagents_usage_is_its_transcripts_sum(bed: Bed) -> None:
+    path = place_usage_agent(bed)
+    status, _, body = bed.get(USAGE_ROUTE)
+    assert status == 200
+    usage = body_json(body)["usage"]
+    # msg_1 counts once, by its last row (40 output, not 1); msg_2 adds itself.
+    assert usage == {
+        "input_tokens": 8,
+        "output_tokens": 100,
+        "cache_read_tokens": 2200,
+        "cache_creation_tokens": 250,
+        "total": 2558,
+    }
+    counts = worker_tokens.sum_transcript_usage(path).counts
+    assert usage["input_tokens"] == counts["input_tokens"]
+    assert usage["output_tokens"] == counts["output_tokens"]
+    assert usage["cache_read_tokens"] == counts["cache_read_input_tokens"]
+    assert usage["cache_creation_tokens"] == counts["cache_creation_input_tokens"]
+    assert usage["total"] == sum(counts.values())
+
+
+def test_a_second_request_after_the_transcript_grows_gives_the_larger_sum(bed: Bed) -> None:
+    path = place_usage_agent(bed)
+    first = json_body(bed.get(USAGE_ROUTE))["usage"]
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(_agent_row("assistant", 5, _reply("msg_3", 7, 70, 1500, 30)))
+    second = json_body(bed.get(USAGE_ROUTE))["usage"]
+    assert second["total"] == first["total"] + 7 + 70 + 1500 + 30
+    assert second["output_tokens"] == first["output_tokens"] + 70
+
+
+def test_a_subagent_whose_transcript_cannot_be_read_has_no_usage_and_still_answers(
+    bed: Bed,
+) -> None:
+    place_usage_agent(bed, sidechain=False)  # rows of no format this build recognises
+    status, _, body = bed.get(USAGE_ROUTE)
+    assert status == 200
+    document = body_json(body)
+    assert document["readable"] is False and "isSidechain" in document["why"]
+    assert document["usage"] is None
 
 
 def test_the_subagent_route_refuses_until_the_project_opts_in(
