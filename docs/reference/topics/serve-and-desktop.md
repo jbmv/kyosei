@@ -392,7 +392,8 @@ URL, and a host's nested groups stay in it, as `group/sub/name`. It is `null` wh
 `origin`, or when `origin` is a local path or cannot be read as a repository on a host. Only
 the URL's path reaches `remote`, so a user name or token in the URL does not. `ahead` is
 `git rev-list --count @{upstream}..HEAD`, the commits on `HEAD` that the branch's upstream
-lacks, and `null` when the branch has no upstream (KYO-717). `added` and
+lacks. A branch with no upstream configured is counted against `origin`'s branch of the
+same name, and `ahead` is `null` when there is neither (KYO-717). `added` and
 `removed` are `git diff HEAD --numstat` summed over the repository holding the session's
 working directory, staged or not, and `files` counts the tracked files that differ. A binary
 file adds to `files` and to no line count. Before the first commit the figures are what has

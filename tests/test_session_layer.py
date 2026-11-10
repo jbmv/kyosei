@@ -1838,3 +1838,19 @@ def test_ahead_counts_commits_the_upstream_lacks_and_is_none_without_one(
     run_git(repo, "add", "more.txt")
     run_git(repo, "commit", "-q", "-m", "second")
     assert changes(repo).ahead == 1
+
+
+def test_ahead_counts_against_origins_branch_when_no_upstream_is_configured(
+    repo: Path, tmp_path: Path
+) -> None:
+    # Pushed without -u, as `git push origin main` leaves it: no upstream, but a
+    # remote-tracking branch of the same name.
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(upstream)], check=True)
+    run_git(repo, "remote", "add", "origin", str(upstream))
+    run_git(repo, "push", "-q", "origin", "HEAD")
+    assert changes(repo).ahead == 0
+    (repo / "more.txt").write_text("x\n", encoding="utf-8")
+    run_git(repo, "add", "more.txt")
+    run_git(repo, "commit", "-q", "-m", "second")
+    assert changes(repo).ahead == 1

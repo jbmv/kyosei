@@ -637,6 +637,13 @@ def uncommitted_changes(
     added, removed, files = _numstat(diff.stdout)
     origin = git(root, "remote", "get-url", "origin")
     counted = git(root, "rev-list", "--count", "@{upstream}..HEAD")
+    if counted.returncode != 0:
+        # A branch pushed with `git push origin <branch>` has no upstream configured, but
+        # origin's branch of the same name is what it is ahead of (KYO-717).
+        branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+        name = branch.stdout.decode("utf-8", errors="replace").strip()
+        if branch.returncode == 0 and name:
+            counted = git(root, "rev-list", "--count", f"refs/remotes/origin/{name}..HEAD")
     ahead = (
         int(counted.stdout.decode("ascii", errors="replace").strip() or 0)
         if counted.returncode == 0 and counted.stdout.strip().isdigit()
