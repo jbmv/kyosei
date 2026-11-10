@@ -622,6 +622,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-10** — `KYO-729` (bug) — Mac app: an anchor on a right-clicked word marks the word's first occurrence in the reply
 - **2026-11-10** — `KYO-716` (bug) — kyo serve: a working session reads as idle when the status line hides `esc to interrupt`
 - **2026-11-10** — `KYO-715` (task) — kyo serve: attachments on a composer prompt, and a session's prompt-cache state for the cold-cache warning
 - **2026-11-10** — `KYO-714` (task) — kyo statusline: save Claude Code's usage limits, and kyo serve sends them with the session facts
