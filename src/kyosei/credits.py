@@ -73,6 +73,13 @@ once (KYO-644.c9); active seconds, leaving out every gap longer than
 ``SPAN_BREAK_SECONDS`` (fifteen minutes); and the span's first and last timestamps. With
 no transcript, or in a project that has not opted in, the span's ids are stored and its
 measures left empty.
+
+A SPAN FROM A DISCUSSION (KYO-658). A decided credit filed from a discussion
+(:mod:`kyosei.cmd_discuss`) takes its span from the discussion's turn references
+(:func:`discussion_span`) when no ``--span-first`` and ``--span-last`` are given: from the
+turn it was opened at to the turn holding the credited words, in the opening's session, and
+it is measured as an explicit span is. A discussion whose opening the index did not stamp
+gives no span.
 """
 
 from __future__ import annotations

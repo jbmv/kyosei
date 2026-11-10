@@ -23,10 +23,28 @@ is the disposal (KYO-44). Each kind declares:
   `amendable`, `swept`, `counted` (+ optional `requires_evidence_links` and
   `raises_docs_obligations`) for `knowledge` kinds; `requires_credit` (optional, either
   archetype, KYO-644) makes `kyo new` and `kyo spawn` refuse the kind
-  (`filing-requires-credit`) without a `decided` credit naming the person who decided it. `raises_docs_obligations` (KYO-554, on
+  (`filing-requires-credit`) without a `decided` credit naming the person who decided it.
+  `requires_discussion` (optional, either archetype, KYO-658, on the packaged `decision`)
+  makes them refuse it (`decision-requires-discussion`) unless it is filed from its
+  discussion: spawned from one, from a record one produced, or with `--discussion <id>`, or
+  with `--opened-late`, which opens one at the filing and marks it late for good. Both apply
+  only where `people:` declares someone. `raises_docs_obligations` (KYO-554, on
   the packaged `decision`) makes filing or editing a record raise a standing docs
   obligation on each ssot section it names by id and each of its doc-refs
   ([docs governance](docs-governance.md)).
+
+**Discussions (KYO-658).** A conversation in which the person is asked to choose is a
+record of the default `discussion` kind: `archetype: knowledge`, not counted, swept, and
+filed only by `kyo discuss open --title "..."` (its `accepts_from` is empty). The command
+writes a turn reference (`KYO-n.sN`) to the person's latest confirmed turn of
+`$CLAUDE_CODE_SESSION_ID` in the turn index, or to the turn `--at <prompt>` names; where
+there is no index (no session, or a project that has not opted in to reading transcripts)
+the reference says `index_state: absent`. `kyo discuss note <id> --file F` keeps what was put
+to the person as a record note with a turn reference. Spawning a decision, proposal, plan
+or task from the discussion closes it, and `kyo discuss close <id> --dropped --why "..."`
+closes one that produced nothing. A store scaffolded before this release has no
+`discussion` entry and no `requires_discussion` key; copy both from the packaged
+`kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it produces.
 
 **Reminders (KYO-497, KYO-521).** A decision waiting on the operator, or a reminder tied
 to a date or an event, that the next shift must see is a record of the default `reminder`

@@ -463,6 +463,18 @@ def requires_discussion(project: Path, kind: str) -> bool:
     return policy.get("requires_discussion") is True
 
 
+def drop_discussion_requirement(project: Path, kind: str = "decision") -> None:
+    """Remove ``requires_discussion`` from ``kind``'s policy in this project's registry.
+
+    For a test file about credits, whose decisions are filed for the credit and not for
+    the discussion they came from; KYO-658's rule has its own tests
+    (``tests/test_kyo658_discussions.py`` and the remedy tests), as KYO-656's opt-in does."""
+    path = kinds_yml(project)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    (raw["kinds"][kind].get("policy") or {}).pop("requires_discussion", None)
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
 def opened_late(project: Path, kind: str) -> list[str]:
     """KYO-658: ``--opened-late`` for a test filing a decision about something else, where
     the kind requires a discussion; the suite's projects keep no turn index, so it records

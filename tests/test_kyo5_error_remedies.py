@@ -102,6 +102,7 @@ from .conftest import (
     Run,
     decided,
     declare_person,
+    drop_discussion_requirement,
     git_init,
     invoke,
     kinds_yml,
@@ -641,6 +642,13 @@ def test_the_config_db_drift_names_the_cheap_remedy_first_and_unhedged(
 # `kyo spawn`'s life. KYO-68, below, is that missing quantifier.
 
 
+def _without_discussion_kind(raw: dict) -> None:
+    """KYO-658: a registry from before the `discussion` kind, in a parsed kinds.yml."""
+    raw["kinds"].pop("discussion", None)
+    for entry in raw["kinds"].values():
+        entry["accepts_from"] = [k for k in entry.get("accepts_from") or [] if k != "discussion"]
+
+
 def _decision_without_intake(project: Path) -> None:
     """The pre-KYO-521 ``decision``: ``accepts_from: [proposal, investigation]``, and
     ``reminder`` no longer producing it. KYO-521 opened ``intake`` on the shipped
@@ -652,6 +660,9 @@ def _decision_without_intake(project: Path) -> None:
     raw["kinds"]["reminder"]["produces"] = [
         k for k in raw["kinds"]["reminder"]["produces"] if k != "decision"
     ]
+    # KYO-658: nor does the `discussion` kind exist yet, nor `requires_discussion`.
+    _without_discussion_kind(raw)
+    raw["kinds"]["decision"]["policy"].pop("requires_discussion", None)
     # KYO-644: without `requires_credit` too, so the routes these tests read are the only
     # thing a remedy has to get right; the credit refusal is tested on its own below.
     raw["kinds"]["decision"]["policy"].pop("requires_credit", None)
@@ -3849,6 +3860,12 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-658: `decision-requires-discussion`; each named remedy is run by the test cited.
+    "cmd_discuss.py:filing_discussion#5": (
+        "the same command with --opened-late, or with --discussion naming the discussion "
+        "`kyo discuss open` filed, or `kyo spawn <discussion-id> --kind decision`; proved by "
+        "test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one"
+    ),
     # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
     "credits.py:recheck#6": (
         "the transcript placed where Claude Code keeps it, then the same `kyo credit "
@@ -4407,6 +4424,40 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-658: `kyo discuss` and the filing flags, each refusal's re-invocation or edit run
+    # by the test the reason names (tests/test_kyo658_discussions.py).
+    "cmd_discuss.py:_match_at#0": (
+        "a re-invocation naming a listed turn whole or by a unique prefix; proved by "
+        "test_at_opens_at_an_earlier_indexed_turn_and_shows_the_lag"
+    ),
+    "cmd_discuss.py:file_discussion#0": (
+        "copying the packaged `discussion:` entry into kyosei/kinds.yml, a hand edit; proved "
+        "by test_a_registry_without_the_discussion_kind_is_cleared_by_copying_the_entry"
+    ),
+    "cmd_discuss.py:filing_discussion#0": (
+        "a re-invocation without the discussion flags; proved by "
+        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "cmd_discuss.py:filing_discussion#1": (
+        "a re-invocation giving --discussion or --opened-late, not both; proved by "
+        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "cmd_discuss.py:_open#1": (
+        "a re-invocation giving --title; proved by "
+        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "cmd_discuss.py:_note#0": (
+        "a re-invocation naming the discussion; proved by "
+        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "cmd_discuss.py:_close#0": (
+        "a re-invocation naming the discussion; proved by "
+        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "store.py:Store.add_turn_ref#0": (
+        "a call passing no stamp with index_state absent; proved by "
+        "test_the_one_writer_refuses_an_absent_reference_carrying_a_stamp"
+    ),
     # KYO-705: a turn anchor with nothing to read; its remedies are supplying the digest and
     # role in the anchor, or the project's own opt-in, both run in tests/test_kyo_notes.py.
     "cmd_notes.py:_turn_anchor#4": (
@@ -6911,10 +6962,14 @@ def test_kyo504_a_probe_outside_pytest_is_refused_too(tmp_path: Path) -> None:
 _K644_SESSION = "3c4d5e6f-1111-4a2b-9c3d-0123456789ab"
 
 
-def _k644_project(at: Path) -> tuple[Path, str, Run]:
+def _k644_project(at: Path, *, discussions: bool = False) -> tuple[Path, str, Run]:
     root, record = _project_with_a_record(at)
     declare_person(root)
     opt_in_transcripts(root)  # the KYO-644 and KYO-653 remedies here are the transcript's
+    if not discussions:
+        # KYO-658: these decisions are filed for their credit; the discussion rule has its
+        # own remedy tests, which pass discussions=True.
+        drop_discussion_requirement(root)
     return root, record, _runner(root)
 
 
@@ -7085,6 +7140,58 @@ def test_kyo644_a_decision_without_a_credit_is_cleared_by_the_credit(tmp_path: P
     refused = kyo("spawn", proposal, "--kind", "decision", "--title", "Use it")
     assert refused.code == EXIT_CONTRACT and "filing-requires-credit" in refused.err
     assert kyo("spawn", proposal, "--kind", "decision", "--title", "Use it", *credit).code == 0
+
+
+def test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one(
+    tmp_path: Path,
+) -> None:
+    """`decision-requires-discussion`, at `kyo new` and at `kyo spawn`: each remedy the
+    message names files it -- `--opened-late` on the same command, `--discussion` naming
+    one `kyo discuss open` filed, and spawning from that discussion."""
+    root, record, kyo = _k644_project(tmp_path, discussions=True)
+    words = _k644_file(tmp_path, "w", "use SQLite")
+    decision = _k644_file(tmp_path, "d.yml", "outcome: unprompted\n")
+    credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
+    refused = kyo("new", "decision", "--title", "Use SQLite", *credit)
+    assert refused.code == EXIT_CONTRACT and "decision-requires-discussion" in refused.err
+    for remedy in ("--opened-late", "--discussion <discussion-id>", "kyo spawn <discussion-id>"):
+        assert remedy in refused.err, remedy
+    assert kyo("new", "decision", "--title", "Use SQLite", *credit, "--opened-late").code == 0
+    opened = kyo("discuss", "open", "--title", "Which store", "--json").json["id"]
+    named = kyo("new", "decision", "--title", "Use it", *credit, "--discussion", opened)
+    assert named.code == 0, named
+    proposal = new_record(kyo, kind="proposal", title="Pick", criteria=["picked"])
+    refused = kyo("spawn", proposal, "--kind", "decision", "--title", "Use it", *credit)
+    assert refused.code == EXIT_CONTRACT and "decision-requires-discussion" in refused.err
+    again = kyo("discuss", "open", "--title", "Which store again", "--json").json["id"]
+    spawned = kyo("spawn", again, "--kind", "decision", "--title", "Use it again", *credit)
+    assert spawned.code == 0, spawned
+
+
+def test_kyo658_opened_late_with_a_turn_index_is_cleared_by_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--opened-late` in a session the turn index holds names where the discussion began;
+    the refusal lists the person's turns, and `--at` with one of them files the decision."""
+    root, record, kyo = _k644_project(tmp_path, discussions=True)
+    session = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session)
+    (root / "kyosei" / "turns.jsonl").write_text(
+        json.dumps({
+            "session": session, "prompt_id": "aaaaaaaa-0000-4000-8000-000000000001",
+            "turn": "p-1", "at": "2026-11-06T10:00:00.000Z", "origin": "human",
+            "source": "hook", "pasted": False,
+        }) + "\n",
+        encoding="utf-8",
+    )  # fmt: skip
+    words = _k644_file(tmp_path, "w", "use SQLite")
+    decision = _k644_file(tmp_path, "d.yml", "outcome: unprompted\n")
+    credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
+    late = ("new", "decision", "--title", "Use SQLite", *credit, "--opened-late")
+    refused = kyo(*late)
+    assert refused.code == EXIT_CONTRACT and "--at <prompt>" in refused.err
+    assert "aaaaaaaa-0000-4000-8000-000000000001" in refused.err
+    assert kyo(*late, "--at", "aaaaaaaa-0000-4000-8000-000000000001").code == 0
 
 
 def _k644_late(tmp_path: Path) -> tuple[Path, Run, str, str, tuple[str, ...]]:

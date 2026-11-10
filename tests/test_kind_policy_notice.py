@@ -178,7 +178,7 @@ def _narrow_task_grant(project: Path) -> None:
     start = lines.index("  task:\n")
     for index in range(start + 1, len(lines)):
         if lines[index].startswith("    accepts_from:"):
-            lines[index] = "    accepts_from: [idea, bug, investigation, reminder]\n"
+            lines[index] = "    accepts_from: [idea, bug, investigation, reminder, discussion]\n"
             break
     _kinds(project).write_text("".join(lines), encoding="utf-8")
 

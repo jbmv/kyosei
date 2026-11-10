@@ -184,7 +184,7 @@
         "worked_from_sha": "<SHA>"
       }
     ],
-    "schema_version": 31,
+    "schema_version": 32,
     "scope": null,
     "since_note": null,
     "status": "open",
@@ -198,6 +198,7 @@
         "symbol": null
       }
     ],
+    "turn_refs": [],
     "updated_at": "2026-01-02T03:04:05.678Z",
     "wont_do_reason": null
   },

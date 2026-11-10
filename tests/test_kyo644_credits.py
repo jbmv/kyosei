@@ -20,6 +20,7 @@ from .conftest import (
     CREDIT_ELSEWHERE,
     TEST_PERSON,
     declare_person,
+    drop_discussion_requirement,
     new_record,
     opt_in_transcripts,
 )
@@ -31,6 +32,8 @@ SESSION = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
 def _reads_transcripts(project: Path) -> None:
     """This file is about the check itself; KYO-656's opt-in has its own test file."""
     opt_in_transcripts(project)
+    # KYO-658: and its decisions are filed for the credit, not their discussion.
+    drop_discussion_requirement(project)
 
 
 # ------------------------------------------------------------------ transcript fixtures

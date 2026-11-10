@@ -340,7 +340,8 @@ def test_a_decided_credit_from_a_discussion_takes_its_span_from_the_turn_referen
         SESSION, "p-1", "p-3",
     )  # fmt: skip
     # Measured as an explicit span is: the person's two turns and the agent's reply between.
-    assert credit["span_person_turns"] == 2 and credit["span_started_at"] == "2026-11-06T10:00:00.000Z"
+    assert credit["span_person_turns"] == 2
+    assert credit["span_started_at"] == "2026-11-06T10:00:00.000Z"
     assert credit["span_ended_at"] == "2026-11-06T10:01:00.000Z"
     last = _refs(kyo, opened)[-1]
     assert last["role"] == "closed" and last["produced_id"] == decided.json["record_id"]
@@ -375,3 +376,76 @@ def test_a_decision_spawned_from_a_proposal_the_discussion_produced_inherits_it(
     assert decided.json["discussion_id"] == opened
     credit = kyo("show", decided.json["record_id"], "--json").json["credits"][0]
     assert credit["span_first_turn"] == "p-1"
+
+
+# ------------------------------------------------------------------ the usage refusals
+
+
+def test_each_usage_refusal_is_cleared_by_the_invocation_it_names(
+    kyo, project: Path, tmp_path: Path, session: str
+) -> None:
+    """The re-invocations the refusals name, each run from the state that printed it."""
+    no_title = kyo("discuss", "open")
+    assert no_title.code == 64 and "--title" in no_title.err
+    opened = kyo("discuss", "open", "--title", "x", "--json")
+    assert opened.code == 0, opened
+    discussion = opened.json["id"]
+
+    no_id = kyo("discuss", "note", "--file", _file(tmp_path, "n.md", "A or B"))
+    assert no_id.code == 64 and "give its id" in no_id.err
+    assert kyo("discuss", "note", discussion, "--file", _file(tmp_path, "n.md", "A or B")).code == 0
+
+    no_id = kyo("discuss", "close", "--dropped", "--why", "nothing came of it")
+    assert no_id.code == 64 and "give its id" in no_id.err
+
+    flags = [*_decision_flags(project, tmp_path), "--source-other", "a call"]
+    both = kyo(
+        "new", "decision", "--title", "d", *flags, "--discussion", discussion, "--opened-late"
+    )
+    assert both.code == 64 and "give one" in both.err
+    assert kyo("new", "decision", "--title", "d", *flags, "--discussion", discussion).code == 0
+
+    task = kyo("new", "task", "--title", "t", "--opened-late")
+    assert task.code == 64 and "requires_discussion" in task.err
+    assert kyo("new", "task", "--title", "t").code == 0
+
+    again = kyo("discuss", "open", "--title", "y", "--json").json["id"]
+    assert kyo("discuss", "close", again, "--dropped", "--why", "nothing came of it").code == 0
+
+
+def test_a_registry_without_the_discussion_kind_is_cleared_by_copying_the_entry(
+    kyo, project: Path, session: str
+) -> None:
+    """A store scaffolded before KYO-658 has no `discussion` kind; the refusal says to copy
+    the packaged entry, and copying it (with its edges) lets a discussion open."""
+    import yaml
+
+    path = project / "kyosei" / "kinds.yml"
+    packaged = path.read_text(encoding="utf-8")
+    raw = yaml.safe_load(packaged)
+    raw["kinds"].pop("discussion")
+    for entry in raw["kinds"].values():
+        entry["accepts_from"] = [k for k in entry.get("accepts_from") or [] if k != "discussion"]
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    refused = kyo("discuss", "open", "--title", "x")
+    assert refused.code == 1 and "copy the `discussion:` entry" in refused.err
+    path.write_text(packaged, encoding="utf-8")
+    assert kyo("discuss", "open", "--title", "x").code == 0
+
+
+def test_the_one_writer_refuses_an_absent_reference_carrying_a_stamp(kyo, project: Path) -> None:
+    from kyosei.errors import KyoseiError
+    from kyosei.store import open_store
+
+    discussion = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    store = open_store(project)
+    try:
+        with pytest.raises(KyoseiError, match="stamps nothing from the index"):
+            store.add_turn_ref(
+                discussion, role="note", index_state="absent", author="t", at="2026-11-06T10:00:00Z"
+            )
+        with store.transaction():
+            ref = store.add_turn_ref(discussion, role="note", index_state="absent", author="t")
+        assert ref == f"{discussion}.s2"
+    finally:
+        store.close()

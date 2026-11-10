@@ -71,7 +71,7 @@ from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .kinds import DISCUSSION_KIND
 from .prose import read_prose, single_line
-from .render import echo_block, echo_value, lag_seconds, turn_ref_lines
+from .render import echo_block, echo_value, turn_ref_lines
 from .store import Store
 
 CONTRACT_DECISION_REQUIRES_DISCUSSION = "decision-requires-discussion"
@@ -224,15 +224,11 @@ def _match_at(lines: list[dict], at: str, session: str) -> dict:
     exact = [line for line in lines if at in (line.get("prompt_id"), line.get("turn"))]
     if len(exact) == 1:
         return exact[0]
-    found = (
-        [
-            line
-            for line in lines
-            if any(isinstance(v, str) and v.startswith(at) for v in (line.get("prompt_id"), line.get("turn")))
-        ]
-        if len(at) >= MIN_AT_PREFIX
-        else []
-    )
+    def named(line: dict) -> bool:
+        ids = (line.get("prompt_id"), line.get("turn"))
+        return any(isinstance(v, str) and v.startswith(at) for v in ids)
+
+    found = [line for line in lines if named(line)] if len(at) >= MIN_AT_PREFIX else []
     if len(found) == 1:
         return found[0]
     what = "matches several" if found else "matches none"
@@ -495,7 +491,8 @@ def filing_discussion(
     late = bool(getattr(args, "opened_late", False))
     at = getattr(args, "at", None)
     if not kind_def.requires_discussion:
-        flags = [f for f, v in (("--discussion", given), ("--opened-late", late), ("--at", at)) if v]
+        given_flags = (("--discussion", given), ("--opened-late", late), ("--at", at))
+        flags = [flag for flag, value in given_flags if value]
         if flags:
             raise UsageError(
                 f"{', '.join(flags)} name a discussion, and kind {kind_def.name!r} does not "
@@ -515,7 +512,9 @@ def filing_discussion(
             "opened; give one"
         )
     if at is not None and not late:
-        raise UsageError("--at goes with --opened-late here: it names where the late discussion began")
+        raise UsageError(
+            "--at goes with --opened-late here: it names where the late discussion began"
+        )
     from_source = None
     via_source = False
     if spawn_source is not None:
@@ -577,7 +576,8 @@ def filing_lines(store: Store, done: dict | None) -> list[str]:
         return []
     discussion_id = done["discussion_id"]
     refs = _refs(store, discussion_id)
-    out = [f"discussion: {discussion_id}" + (" (opened late, at this filing)" if done["late"] else "")]
+    late = " (opened late, at this filing)" if done["late"] else ""
+    out = [f"discussion: {discussion_id}{late}"]
     if done["late"]:
         opened = discussion_state(refs)["opened"]
         out += [f"  {line}" for line in turn_ref_lines([opened])]
@@ -598,14 +598,16 @@ def _receipt(store: Store, record_id: str, head: str) -> list[str]:
 
 def _open(ctx: Context, store: Store, args: Namespace) -> Output:
     if args.id is not None:
-        raise UsageError("`kyo discuss open` takes no id; it files a new discussion")
+        raise UsageError("open takes no id: it files a new discussion")
     if not getattr(args, "title", None):
-        raise UsageError('`kyo discuss open` needs --title "<topic>"')
+        raise UsageError('open needs the topic: give --title "<topic>"')
     title = single_line(args.title, what="--title")
     stamp = current_stamp(ctx, store, getattr(args, "at", None))
     with store.transaction():
         created = now()
-        record_id, ref_id = file_discussion(ctx, store, title, stamp, late=False, created_at=created)
+        record_id, ref_id = file_discussion(
+            ctx, store, title, stamp, late=False, created_at=created
+        )
         after, events = commands._commit_and_export(
             store,
             command="discuss open",
@@ -636,7 +638,7 @@ def _open(ctx: Context, store: Store, args: Namespace) -> Output:
 
 def _note(ctx: Context, store: Store, args: Namespace) -> Output:
     if args.id is None:
-        raise UsageError("`kyo discuss note <discussion-id> --file FILE`")
+        raise UsageError("note names the discussion: give its id, and --file FILE")
     if not getattr(args, "file", None):
         raise UsageError(
             "--file holds what was put to the person (the options and the recommendation), "
@@ -680,6 +682,7 @@ def _note(ctx: Context, store: Store, args: Namespace) -> Output:
             "ok": True,
             "command": "discuss note",
             "id": args.id,
+            "record_id": args.id,
             "note_id": note_id,
             "turn_ref": ref_id,
             "record": after[args.id],
@@ -689,12 +692,11 @@ def _note(ctx: Context, store: Store, args: Namespace) -> Output:
 
 def _close(ctx: Context, store: Store, args: Namespace) -> Output:
     if args.id is None:
-        raise UsageError('`kyo discuss close <discussion-id> --dropped --why "<reason>"`')
+        raise UsageError('close names the discussion: give its id, --dropped and --why "<reason>"')
     if not getattr(args, "dropped", False):
         raise UsageError(
-            "a discussion closes by spawning what it produced (`kyo spawn <id> --kind "
-            "decision`, proposal, plan or task); `kyo discuss close` is for one that produced "
-            'nothing, and says so with --dropped --why "<reason>"'
+            "a discussion closes when a decision, proposal, plan or task is spawned from it; "
+            'close is for one that produced nothing, and says so with --dropped --why "<reason>"'
         )
     why = getattr(args, "why", None)
     if not (why or "").strip():
@@ -717,6 +719,7 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
             "ok": True,
             "command": "discuss close",
             "id": args.id,
+            "record_id": args.id,
             "turn_ref": ref_id,
             "record": after[args.id],
         },

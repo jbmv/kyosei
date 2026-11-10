@@ -141,6 +141,7 @@ def test_every_module_that_imports_the_reader_asks_the_one_question() -> None:
             if any("claude_code_transcript" in name for name in names):
                 readers.append(path)
     assert {p.name for p in readers} == {
+        "cmd_discuss.py",  # KYO-658: the stamp folds the transcript into the index
         "cmd_notes.py",
         "cmd_turns.py",
         "credits.py",
@@ -216,7 +217,8 @@ def test_a_span_and_a_refining_turn_read_nothing(
     )
     ran = kyo("new", "decision", "--title", "Keep the cache", "--quote-file", _file(tmp_path, "q"),
               "--decision-file", decision_file, "--session", SESSION,
-              "--span-first", PERSON_TURN, "--span-last", PERSON_TURN, "--json")  # fmt: skip
+              "--span-first", PERSON_TURN, "--span-last", PERSON_TURN, "--opened-late",
+              "--json")  # fmt: skip
     assert ran.code == 0, ran
     shown = kyo("show", ran.json["record_id"], "--json")
     (credit,) = shown.json["credits"]

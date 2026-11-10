@@ -44,7 +44,7 @@ def _overrode_decision(kyo, tmp_path: Path) -> tuple[str, str]:
     quote.write_text("no, B", encoding="utf-8")
     made = kyo(
         "new", "decision", "--title", "Pick a thing", "--quote-file", str(quote),
-        "--decision-file", str(decision_file), *CREDIT_ELSEWHERE, "--json",
+        "--decision-file", str(decision_file), *CREDIT_ELSEWHERE, "--opened-late", "--json",
     )  # fmt: skip
     assert made.code == 0, made
     return made.json["id"], made.json["credit_id"]
@@ -108,7 +108,7 @@ def test_a_withdrawn_subject_can_be_credited_again_without_supersede(
     approved.write_text("approved", encoding="utf-8")
     approval = kyo(
         "new", "decision", "--title", "Credit it again", "--quote-file", str(approved),
-        "--decision-file", str(decision), *CREDIT_ELSEWHERE, "--json",
+        "--decision-file", str(decision), *CREDIT_ELSEWHERE, "--opened-late", "--json",
     )  # fmt: skip
     assert approval.code == 0, approval
     quote = tmp_path / "w.txt"
