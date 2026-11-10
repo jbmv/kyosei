@@ -65,7 +65,8 @@ export function awaitingIds(gates: unknown): Set<string> {
 
 /**
  * The filters after one chip is pressed. Awaiting you is about work already dispatched, so
- * turning it on turns Open and Dispatchable off; the other two only toggle themselves.
+ * it never stands with Open or Dispatchable: turning it on turns those two off, and turning
+ * either of them on turns it off. Open and Dispatchable combine with each other.
  */
 export function pressed<T extends { open: boolean; dispatchable: boolean; awaiting: boolean }>(
   filters: T, name: "open" | "dispatchable" | "awaiting",
@@ -75,6 +76,7 @@ export function pressed<T extends { open: boolean; dispatchable: boolean; awaiti
     next.open = false;
     next.dispatchable = false;
   }
+  if (name !== "awaiting" && next[name]) next.awaiting = false;
   return next;
 }
 

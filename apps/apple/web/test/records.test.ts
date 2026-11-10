@@ -333,10 +333,14 @@ test("a document with parts missing still makes a page", () => {
   assert.equal(page.none.length, 12);
 });
 
-test("pressing Awaiting you turns Open and Dispatchable off, and the others only toggle", () => {
+test("Awaiting you never stands with Open or Dispatchable", () => {
   const all = { open: true, dispatchable: true, awaiting: false, search: "x" };
   assert.deepEqual(pressed(all, "awaiting"), { open: false, dispatchable: false, awaiting: true, search: "x" });
   const waiting = { open: false, dispatchable: false, awaiting: true, search: "" };
-  assert.deepEqual(pressed(waiting, "open"), { open: true, dispatchable: false, awaiting: true, search: "" });
+  // Turning Open or Dispatchable on turns Awaiting you off, so the three never stand together.
+  assert.deepEqual(pressed(waiting, "open"), { open: true, dispatchable: false, awaiting: false, search: "" });
+  assert.deepEqual(pressed(waiting, "dispatchable"), { open: false, dispatchable: true, awaiting: false, search: "" });
+  const open = { open: true, dispatchable: false, awaiting: false, search: "" };
+  assert.deepEqual(pressed(open, "dispatchable"), { open: true, dispatchable: true, awaiting: false, search: "" });
   assert.deepEqual(pressed(waiting, "awaiting"), { open: false, dispatchable: false, awaiting: false, search: "" });
 });
