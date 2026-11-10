@@ -32,8 +32,8 @@ struct ChatView: View {
                 if let mode = feed.facts?.permission_mode { Text(mode) }
                 if let lines = feed.facts?.lines {
                     HStack(spacing: 4) {
-                        Text("+\(lines.added.formatted())").foregroundStyle(.green)
-                        Text("−\(lines.removed.formatted())").foregroundStyle(.red)
+                        Text("+\(lines.added.formatted())")
+                        Text("−\(lines.removed.formatted())")
                     }
                     .monospacedDigit()
                 }
