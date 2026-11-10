@@ -350,8 +350,10 @@ public struct Backoff: Sendable {
 public struct StreamWatch: Sendable {
     /// The frames the server's reader of the session sends. `held` is announced by the
     /// route that holds the message, and keeps arriving when the reader has stopped.
+    /// `resumed` says a pass has succeeded after an `error` frame (KYO-728), which only a
+    /// reader that is reading can say.
     public static let readerFrames: Set<String> = [
-        "transcript", "reply", "facts", "screen", "terminal",
+        "transcript", "reply", "facts", "screen", "terminal", "resumed",
     ]
     /// Fresh reads that must differ in a row before the stream is held to be stale.
     public static let differingReads = 2
@@ -492,14 +494,21 @@ public struct SessionFollower: Sendable {
                         project: project, session: session, cursor: cursor, idleLimit: idleLimit)
                     for try await event in events {
                         if event.name == "error" {
-                            // The server could not read the session, and rows it read before
-                            // failing may never be sent; a new connection catches up from the
-                            // cursor.
+                            // The server could not read the session (KYO-728). With
+                            // `stopped` its reader has ended and the next connection is
+                            // given a new one, whose `ready` is a fresh read. Without it
+                            // the same reader goes on trying, and its `ready` is what it
+                            // read before failing: the next connection is live only once
+                            // a reader frame (`resumed` among them) or a fresh read of the
+                            // pane shows it, so the chat does not turn live and back on
+                            // every attempt while the failure lasts.
                             let object =
                                 try? JSONSerialization.jsonObject(with: Data(event.data.utf8))
                                 as? [String: Any]
                             let said = object?["error"] as? String
-                            return .lost(said ?? "kyo serve could not read the session.", stale: false)
+                            let stopped = object?["stopped"] as? Bool ?? false
+                            return .lost(
+                                said ?? "kyo serve could not read the session.", stale: !stopped)
                         }
                         let becameLive = progress.received(event, at: .now)
                         out.yield(.event(event))
@@ -539,8 +548,9 @@ private final class FollowProgress: @unchecked Sendable {
     private var watch = StreamWatch()
     private var live = false
     private var wasLive = false
-    /// The last connection was found stale, so the next one's `ready` is not taken as proof:
-    /// a reader that has stopped still answers a new subscriber with what it last saw.
+    /// The last connection was found stale or carried an `error`, so the next one's `ready`
+    /// is not taken as proof: a reader that is stuck or failing answers a new subscriber
+    /// with what it last saw.
     private var needsProof = false
 
     init(cursor: String?) {

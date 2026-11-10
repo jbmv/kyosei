@@ -571,3 +571,85 @@ private let screenIdle = #"{"ok": true, "screen": {"state": "idle"}, "terminal":
     #expect(reasons(updates) == ["kyo serve answered 404: no session s in this project"])
     #expect(server.requests.count == 1)
 }
+
+// MARK: The `resumed` frame (KYO-728)
+
+@Test func aResumedFrameShowsTheReaderIsReading() {
+    let start = ContinuousClock.now
+    var watch = StreamWatch(quiet: .seconds(10))
+    watch.received(readyFrame(state: "idle", text: "before"), at: start)
+    #expect(!watch.confirmed)
+    watch.received(
+        ServerEvent(name: "resumed", data: #"{"session_id": "s"}"#, id: nil), at: start + .seconds(9))
+    #expect(watch.confirmed)
+    // It counts as heard from the reader, and leaves what the stream said of the pane.
+    #expect(!watch.wantsRead(at: start + .seconds(18)))
+    #expect(watch.stated == PaneSnapshot(state: "idle", text: "before"))
+}
+
+@Test func aResumedFrameIsTakenWithoutReconnecting() async throws {
+    let server = FakeServe { target, _, reply in
+        guard target.contains("/events") else { return reply.respond(200, screenIdle) }
+        reply.open()
+        reply.frame("ready", readyIdle)
+        reply.frame("resumed", #"{"session_id": "s"}"#)
+        reply.frame("transcript", #"{"turns": []}"#, id: "c1")
+        reply.keepalive(every: 0.05)
+    }
+    try await server.start()
+    defer { server.stop() }
+    // Read on past the frames, so that a reconnection made because of one would be seen.
+    let updates = await collect(follower(server), within: .seconds(1)) { _ in false }
+    #expect(names(updates) == ["ready", "LIVE", "resumed", "transcript"])
+    #expect(server.requests(to: "/events").count == 1)
+}
+
+@Test func anErrorSentAfterReadyKeepsTheChatNotLiveUntilTheReaderResumes() async throws {
+    // A reader whose passes fail answers each new connection with `ready` and then `error`.
+    let server = FakeServe { target, count, reply in
+        guard target.contains("/events") else { return reply.respond(200, screenIdle) }
+        reply.open()
+        reply.frame("ready", readyIdle)
+        if count < 3 {
+            reply.frame("error", #"{"error": "session s could not be sampled: tmux timed out"}"#)
+        } else {
+            reply.frame("resumed", #"{"session_id": "s"}"#)
+        }
+        reply.keepalive(every: 0.05)
+    }
+    try await server.start()
+    defer { server.stop() }
+    let updates = await collect(follower(server)) { names($0).filter { $0 == "LIVE" }.count == 2 }
+    // The second connection's `ready` is not taken as live, and the third's is once
+    // `resumed` has arrived.
+    #expect(
+        names(updates) == [
+            "ready", "LIVE", "NOT LIVE", "ready", "NOT LIVE", "ready", "resumed", "LIVE",
+        ])
+    #expect(reasons(updates).allSatisfy { $0 == "session s could not be sampled: tmux timed out" })
+    #expect(server.requests(to: "/events").count == 3)
+}
+
+@Test func aStoppedReadersErrorReconnectsToAReadyThatIsLive() async throws {
+    // `stopped` says the reader has ended, so the next connection's `ready` is a new
+    // reader's fresh read and needs no further proof.
+    let server = FakeServe { target, count, reply in
+        guard target.contains("/events") else { return reply.respond(200, screenIdle) }
+        reply.open()
+        reply.frame("ready", readyIdle)
+        if count == 1 {
+            reply.frame("error", #"{"error": "the reader of session s stopped", "stopped": true}"#)
+            reply.close()
+        } else {
+            reply.keepalive(every: 0.05)
+        }
+    }
+    try await server.start()
+    defer { server.stop() }
+    let started = ContinuousClock.now
+    let updates = await collect(follower(server)) { names($0).filter { $0 == "LIVE" }.count == 2 }
+    #expect(names(updates) == ["ready", "LIVE", "NOT LIVE", "ready", "LIVE"])
+    #expect(reasons(updates) == ["the reader of session s stopped"])
+    #expect(server.requests(to: "/screen").isEmpty)
+    #expect(ContinuousClock.now - started < .seconds(2))
+}

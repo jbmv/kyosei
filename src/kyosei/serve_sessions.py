@@ -52,6 +52,17 @@ client is subscribed. The first subscriber to a session starts a :class:`_Sample
 ones join it, and it stops when the last one leaves. A subscriber is noticed leaving
 within :data:`_CLIENT_CHECK_SECONDS`, because a stream's client sends nothing further and the
 socket says when it has closed.
+
+A READER THAT HAS STOPPED IS RETIRED (KYO-728). A stream's keepalives come from its own
+connection and a held message's frames from the route that holds it, so neither shows that
+the reader is still reading. A reader whose thread ends on an exception, or whose pass has
+not finished within :data:`STALL_SECONDS`, is therefore taken out of the hub: the exception
+is logged with its traceback, its subscribers are sent an ``error`` frame with ``stopped``
+and their streams are ended, and the next subscriber starts a new reader. A client that
+reconnects with its cursor is sent what it missed. A pass that fails with an error the
+reader expects (a pane or a file that could not be read) keeps the reader: its subscribers
+are sent ``error`` once and ``resumed`` when a pass next succeeds, and a subscriber that
+joins between the two is sent the ``error`` after its ``ready``.
 """
 
 from __future__ import annotations
@@ -63,6 +74,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import traceback
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -84,6 +96,11 @@ SAMPLE_SECONDS = 0.5
 #: check reads the head of every sibling transcript, so it runs far less often than the
 #: reading of new rows; a session in a pane is followed by its process record instead.
 PANELESS_FOLLOW_SECONDS = 30.0
+
+#: How long one pass of a reader may take before the reader is held to be stuck and retired.
+#: A pass runs a few ``tmux`` commands, each of which gives up after ten seconds, so a pass
+#: that is only slow ends well inside this.
+STALL_SECONDS = 30.0
 
 #: How many events may wait for a slow client before its stream is ended; it reconnects
 #: with its last cursor and misses nothing.
@@ -722,6 +739,8 @@ class Subscriber:
         self.overflowed = False
         #: Set once the ready event is queued; nothing is sent to this subscriber before that.
         self.joined = False
+        #: Set when the reader has been retired: the stream ends once its queue is written.
+        self.ended = False
         self.sampler: _Sampler | None = None
 
     def put(self, chunk: bytes) -> None:
@@ -754,6 +773,15 @@ class _Sampler:
         self._facts: dict | None = None
         self._next_follow = 0.0
         self._last_error: str | None = None
+        #: Set by the hub when this reader is taken out of use; it then sends nothing more.
+        self.retired = False
+        #: When the reading thread was last seen moving, on the monotonic clock.
+        self.beat = time.monotonic()
+        #: The transcript's offset as of the last pass whose rows were sent.
+        self._offset = 0
+        #: Frames of a pass that follows a failed one, kept until the pass is known to have
+        #: succeeded so that ``resumed`` goes out before them.
+        self._kept: list[bytes] | None = None
 
     def start_once(self) -> None:
         """Read the baseline and start sampling; a later subscriber waits for the first."""
@@ -777,15 +805,44 @@ class _Sampler:
             self._terminal = _terminal_json(update.terminal)
             self._reply = update.reply_in_progress
             self._facts = _facts_json(self._live.facts())
+            self._offset = self._live.transcript.offset
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
+            self.beat = time.monotonic()
             self._thread = threading.Thread(target=self._run, name=_SAMPLER_THREAD, daemon=True)
             self._thread.start()
 
-    def join(self, sub: Subscriber) -> None:
-        """Add ``sub`` with the session's current state as its first event."""
+    def join(self, sub: Subscriber) -> bool:
+        """Add ``sub`` with the session's current state as its first event.
+
+        False when this reader was retired first, so that ``sub`` is not answered from it.
+        A reader whose last pass failed says so after ``ready``, which is built from what it
+        last read.
+        """
         with self.lock:
+            if self.retired:
+                return False
             sub.put(self._ready())
+            failing = self._last_error
+            if failing is not None:
+                sub.put(frame("error", {"error": failing}))
             sub.joined = True
+            return True
+
+    def stopped(self) -> str | None:
+        """Why this reader is no longer reading, or None while it is.
+
+        A reader stopped by its last subscriber leaving has left the hub already and is not
+        asked.
+        """
+        thread = self._thread
+        if thread is None or self.hub.stopping.is_set():
+            return None  # still reading its baseline, or ending with the server
+        if not thread.is_alive():
+            return "its thread has ended"
+        quiet = time.monotonic() - self.beat
+        if quiet > self.hub.stall_seconds():
+            return f"its last pass has not finished in {quiet:.0f} seconds"
+        return None
 
     def _ready(self) -> bytes:
         live = self._live
@@ -807,29 +864,73 @@ class _Sampler:
 
     def _broadcast(self, chunk: bytes) -> None:
         with self.lock:
-            for sub in self.subs:
-                if sub.joined:
-                    sub.put(chunk)
+            if self.retired:
+                return
+            if self._kept is not None:
+                self._kept.append(chunk)
+                return
+            self._send(chunk)
+
+    def _send(self, chunk: bytes) -> None:
+        for sub in self.subs:
+            if sub.joined:
+                sub.put(chunk)
+
+    def _release(self, first: bytes | None = None) -> None:
+        """Send ``first`` and then the frames kept during a pass."""
+        with self.lock:
+            kept, self._kept = self._kept or [], None
+            if self.retired:
+                return
+            for chunk in ([] if first is None else [first]) + kept:
+                self._send(chunk)
 
     def _run(self) -> None:
+        try:
+            self._loop()
+        except BaseException as exc:  # noqa: BLE001 - whatever ends the thread is reported
+            self.hub.retire(
+                self,
+                f"the reader of session {self.session_id} stopped on an error it does not "
+                f"expect ({type(exc).__name__}: {exc})",
+                "".join(traceback.format_exception(exc)),
+            )
+
+    def _loop(self) -> None:
         while not self.stop.wait(self.hub.sample_seconds()):
             if self.hub.stopping.is_set():
                 return
+            self.beat = time.monotonic()
             self.ticks += 1
+            failing = self._last_error is not None
+            if failing:
+                with self.lock:
+                    self._kept = []
             try:
-                self._tick()
-                self._last_error = None
+                try:
+                    self._tick()
+                except BaseException:
+                    self._release()
+                    raise
             except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
                 message = f"session {self.session_id} could not be sampled: {exc}"
                 if message != self._last_error:
                     self._last_error = message
                     self._broadcast(frame("error", {"error": message}))
+            else:
+                self._last_error = None
+                self._release(
+                    frame("resumed", {"session_id": self.session_id}) if failing else None
+                )
+            self.beat = time.monotonic()
 
     def _tick(self) -> None:
         live = self._live
         assert live is not None
-        previous_id, previous_offset = self.session_id, live.transcript.offset
-        if live.pane is not None or time.monotonic() >= self._next_follow:
+        # The offset is the one held from the last pass that got this far, and not the
+        # transcript's own, which a pass that failed after reading has already moved.
+        previous_id, previous_offset = self.session_id, self._offset
+        if live.pane is not None or live.unreported or time.monotonic() >= self._next_follow:
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
             update = live.refresh()
             lists, screen, words, reply, followed = (
@@ -848,6 +949,7 @@ class _Sampler:
                 False,
             )
         self.session_id = live.session_id
+        self._offset = live.transcript.offset
         if followed:
             self._position = _Position()
             self.hub.alias(self, self.session_id)
@@ -930,29 +1032,77 @@ class SessionHub:
     def sample_seconds(self) -> float:
         return self.server.session_sample_seconds
 
+    def stall_seconds(self) -> float:
+        return self.server.session_stall_seconds
+
     def subscribe(self, project: ProjectSessions, session_id: str) -> Subscriber:
         """A subscriber to ``session_id``, or the refusal that session deserves.
 
-        Must be matched by :meth:`unsubscribe`, which stops the sampler on the last one.
+        Must be matched by :meth:`unsubscribe`, which stops the sampler on the last one. A
+        sampler that has stopped reading is retired here and a new one started, so that a
+        subscriber is never answered with what a stopped reader last saw (KYO-728).
         """
         project.require(session_id)
-        sub = Subscriber()
+        key = (project.root, session_id)
+        while True:
+            sub = Subscriber()
+            with self._lock:
+                sampler = self._samplers.get(key)
+                why = None if sampler is None else sampler.stopped()
+                if why is None:
+                    if sampler is None:
+                        sampler = _Sampler(self, project, session_id)
+                        self._samplers[key] = sampler
+                    sub.sampler = sampler
+                    with sampler.lock:
+                        # Held so the sampler is not stopped while it starts.
+                        sampler.subs.add(sub)
+            if why is not None:
+                assert sampler is not None
+                self.retire(sampler, f"the reader of session {session_id} stopped: {why}")
+                continue
+            try:
+                sampler.start_once()
+            except Refusal:
+                self.unsubscribe(sub)
+                raise
+            if sampler.join(sub):
+                return sub
+            self.unsubscribe(sub)  # retired while this subscriber was joining
+
+    def retire(self, sampler: _Sampler, why: str, detail: str = "") -> None:
+        """Take a sampler that has stopped reading out of use, once, and say so.
+
+        Its subscribers are sent an ``error`` frame with ``stopped`` and their streams are
+        ended, and it is logged with ``detail`` (a traceback). Its thread, if it is stuck
+        and not dead, ends when its pass returns and sends nothing in the meantime.
+        """
         with self._lock:
-            key = (project.root, session_id)
-            sampler = self._samplers.get(key)
-            if sampler is None:
-                sampler = _Sampler(self, project, session_id)
-                self._samplers[key] = sampler
-            sub.sampler = sampler
             with sampler.lock:
-                sampler.subs.add(sub)  # held so the sampler is not stopped while it starts
-        try:
-            sampler.start_once()
-        except Refusal:
-            self.unsubscribe(sub)
-            raise
-        sampler.join(sub)
-        return sub
+                if sampler.retired:
+                    return
+                chunk = frame("error", {"error": why, "stopped": True})
+                sampler._send(chunk)
+                sampler.retired = True
+                for sub in sampler.subs:
+                    sub.ended = True
+            for key in sampler.keys:
+                if self._samplers.get(key) is sampler:
+                    del self._samplers[key]
+            sampler.stop.set()
+        self.server.log_stream.write(
+            f"kyo serve: {why}; its streams were ended and the next subscriber starts a new "
+            f"reader\n{detail}"
+        )
+
+    def check(self, sub: Subscriber) -> None:
+        """Retire ``sub``'s sampler if it has stopped reading (asked by an idle stream)."""
+        sampler = sub.sampler
+        if sampler is None or sampler.retired:
+            return
+        why = sampler.stopped()
+        if why is not None:
+            self.retire(sampler, f"the reader of session {sampler.session_id} stopped: {why}")
 
     def alias(self, sampler: _Sampler, session_id: str) -> None:
         """A session that moved on ``/clear``: a subscriber to its new id joins this sampler."""
@@ -1003,7 +1153,8 @@ def stream(
     *,
     keepalive_seconds: float,
 ) -> None:
-    """Write ``sub``'s events to ``write`` until the client leaves or the server stops.
+    """Write ``sub``'s events to ``write`` until the client leaves, the server stops or the
+    session's reader is retired.
 
     A cursor is honoured from a fresh read of the transcript, since the sampler keeps only
     the session's position. Objects read there can also arrive from the sampler, and a client
@@ -1018,6 +1169,10 @@ def stream(
             try:
                 chunk = sub.queue.get(timeout=_CLIENT_CHECK_SECONDS)
             except queue.Empty:
+                if sub.ended:  # the reader was retired, and what it sent has been written
+                    return
+                if sub.sampler is not None:
+                    sub.sampler.hub.check(sub)
                 idle += _CLIENT_CHECK_SECONDS
                 if idle >= keepalive_seconds:
                     write(KEEPALIVE)

@@ -144,7 +144,9 @@ kyo serve --uninstall --apply        # stop it and remove the file (without --ap
 The agent runs the absolute path of the `kyo` that ran `--install`, with the same
 `--port`, `--bind`, `--allow-host` and `--allow-origin`. It carries `KYOSEI_HOME` (when
 set) and the installing shell's `PATH`. On macOS its stderr goes to
-`~/Library/Logs/kyosei-serve.log`. To change a flag, run `--install --apply` again with
+`~/Library/Logs/kyosei-serve.log`. Each line `kyo serve` writes there begins with the time in
+UTC, as `2026-11-10T17:53:59.653Z`; a traceback follows the dated line that names what
+raised it. To change a flag, run `--install --apply` again with
 the new flags. Windows is not supported, and `--install` there says so.
 
 **Restart it after every upgrade.** A running server keeps serving the build it started
@@ -428,7 +430,8 @@ known state is `unrecognised`, and the session layer also keeps a copy of it und
 answers an overlay in the session itself.
 
 **Events.** `text/event-stream`, a `: keepalive` comment on an idle stream, and each frame
-naming one of:
+naming one of the following. A keepalive comes from the connection and a `held` frame from
+the route that holds the message, so neither shows that the session is still being read.
 
 | Frame | `data` |
 |---|---|
@@ -440,7 +443,8 @@ naming one of:
 | `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |
 | `event: session` | `session_id`, `previous_session_id`, `followed_clear`: the session moved to a new id on `/clear`; its objects continue under the new id |
 | `event: reset` | `session_id`: the transcript does not match the stream's position; read `/turns` again |
-| `event: error` | `error`: the session could not be sampled; sampling continues |
+| `event: error` | `error`: a pass over the session failed. Sent once for a failure that repeats, and after `ready` to a client that connects while it lasts. Reading goes on, and rows read before the failure are sent by the pass that next succeeds. With `stopped: true` the session's reader has ended or has been stuck for 30 seconds: the stream then ends, and the next connection starts a new reader |
+| `event: resumed` | `session_id`: a pass has succeeded after an `error` frame; sent before that pass's own frames |
 
 A `transcript` frame carries the id of its `cursor`, so a client that reconnects with
 `Last-Event-ID`, or that passes `?cursor=`, is sent what it missed first; objects sent twice

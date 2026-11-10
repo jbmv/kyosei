@@ -1689,6 +1689,9 @@ def test_the_operating_reference_states_the_shapes() -> None:
         "event: session",
         "event: facts",
         "event: terminal",
+        "event: error",
+        "event: resumed",
+        "`stopped: true`",
         "`deliveries`",
         "`images`",
         "/sessions/<id>/images/<turn>/<index>",
@@ -1789,3 +1792,198 @@ def test_turns_state_a_listed_subagents_model_and_effort(bed: Bed) -> None:
     expected = transcript.subagent_model_effort(place_agent / AGENT_FILE.name)
     assert expected[0] == "claude-haiku-5-5"
     assert (listed[AGENT]["model"], listed[AGENT]["effort"]) == expected
+
+
+# --------------------------------------------- KYO-728: a reader that has stopped reading
+
+
+def _next_event(opened: Stream, *, within: float = 10.0) -> tuple[str, dict]:
+    """The next event of any name, skipping keepalives."""
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        block = opened.block()
+        names = [line for line in block if line.startswith("event: ")]
+        if names:
+            data = next(line for line in block if line.startswith("data: "))
+            return names[0].removeprefix("event: "), json.loads(data.removeprefix("data: "))
+    raise TimeoutError("no event arrived")
+
+
+def _ends(opened: Stream, *, within: float = 10.0) -> bool:
+    """Whether the server ends the stream, having sent no further event."""
+    deadline = time.monotonic() + within
+    try:
+        while time.monotonic() < deadline:
+            assert not any(line.startswith("event: ") for line in opened.block())
+    except EOFError:
+        return True
+    return False
+
+
+def _log(bed: Bed) -> str:
+    return bed.server.log_stream.stream.getvalue()
+
+
+def test_a_reader_that_dies_is_logged_its_subscribers_told_and_the_next_gets_a_new_reader(
+    bed: Bed, stream, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    one = stream()
+    one.event("ready")
+    hub = bed.server.session_hub
+    first = hub.samplers()[0]
+
+    def refresh(self):
+        raise ValueError("a row of a shape nothing expected")
+
+    # Not one of the errors a pass is expected to fail with, so it ends the reader's thread.
+    monkeypatch.setattr(session_layer.LiveSession, "refresh", refresh)
+    said = one.event("error")
+    assert said["stopped"] is True
+    assert "ValueError: a row of a shape nothing expected" in said["error"]
+    assert _ends(one), "the stream stayed open on a reader that had died"
+    _wait_for(lambda: _sampler_threads() == 0)
+    assert hub.samplers() == []
+
+    logged = _log(bed)
+    assert "Traceback (most recent call last)" in logged
+    assert "ValueError: a row of a shape nothing expected" in logged
+    dated = next(line for line in logged.splitlines() if "the reader of session" in line)
+    assert dated[:2] == "20" and f"Z kyo serve: the reader of session {OLD} stopped" in dated
+
+    monkeypatch.undo()
+    two = stream()
+    two.event("ready")
+    assert hub.samplers()[0] is not first
+    bed.append(rows[len(rows) // 2 :])
+    assert two.event("transcript")["session_id"] == OLD
+
+
+def test_rows_read_before_a_capture_raised_arrive_on_the_next_pass(
+    bed: Bed, stream, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    opened = stream()
+    ready = opened.event("ready")
+    real = session_layer.pane.capture
+    state = {"failing": True, "failed": 0}
+
+    def capture(tmux, pane_id):
+        if state["failing"]:
+            state["failed"] += 1
+            raise OSError("the pane could not be captured")
+        return real(tmux, pane_id)
+
+    monkeypatch.setattr(session_layer.pane, "capture", capture)
+    assert "the pane could not be captured" in opened.event("error")["error"]
+    # The rows land while every pass fails, so a failing pass is the one that reads them.
+    bed.append(rows[len(rows) // 2 :])
+    failed = state["failed"]
+    _wait_for(lambda: state["failed"] >= failed + 3)
+
+    # A subscriber that joins meanwhile is told, after the state the reader last read.
+    late = stream()
+    assert late.event("ready")["cursor"] == ready["cursor"]
+    name, said = _next_event(late)
+    assert name == "error" and "stopped" not in said
+
+    state["failing"] = False
+    # KYO-728.c4: the stream says reading has resumed, and then carries what was read.
+    name, said = _next_event(opened)
+    assert (name, said) == ("resumed", {"session_id": OLD})
+    name, event = _next_event(opened)
+    assert name == "transcript" and event["cursor"] != ready["cursor"]
+    whole = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
+    assert event["cursor"] == whole["cursor"], "rows read in the failed pass were not sent"
+    assert _next_event(late)[0] == "resumed"
+
+
+def test_a_stream_that_never_failed_carries_no_resumed(bed: Bed, stream) -> None:
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    opened = stream()
+    opened.event("ready")
+    bed.append(rows[len(rows) // 2 :])
+    assert _next_event(opened)[0] == "transcript"
+
+
+def _project_sessions(bed: Bed) -> serve_sessions.ProjectSessions:
+    return serve_sessions.ProjectSessions(str(bed.project), bed.server.environ)
+
+
+def test_a_new_subscriber_is_not_answered_from_a_reader_that_has_returned(bed: Bed) -> None:
+    # Subscribed without a stream, so that only the new subscription can notice the reader.
+    hub = bed.server.session_hub
+    project = _project_sessions(bed)
+    one = hub.subscribe(project, OLD)
+    try:
+        stopped = one.sampler
+        stopped.stop.set()
+        _wait_for(lambda: _sampler_threads() == 0)
+        assert hub.samplers() == [stopped], "the stopped reader left the hub by itself"
+
+        two = hub.subscribe(project, OLD)
+        try:
+            assert two.sampler is not stopped and hub.samplers() == [two.sampler]
+            assert b"event: ready" in two.queue.get_nowait()
+            ticks = two.sampler.ticks
+            _wait_for(lambda: two.sampler.ticks > ticks + 2)
+            # The subscriber the stopped reader still had is told, and its stream is ended.
+            one.queue.get_nowait()  # its own ready
+            said = one.queue.get_nowait()
+            assert b"event: error" in said and b'"stopped": true' in said
+            assert one.ended and b"its thread has ended" in said
+            assert "its thread has ended" in _log(bed)
+        finally:
+            hub.unsubscribe(two)
+    finally:
+        hub.unsubscribe(one)
+    _wait_for(lambda: hub.samplers() == [] and _sampler_threads() == 0)
+
+
+def test_a_reader_stuck_in_a_pass_is_replaced_and_its_stream_ended(bed: Bed, stream) -> None:
+    bed.server.session_stall_seconds = 0.3
+    rows = bed.rows()
+    bed.write_transcript(rows[: len(rows) // 2])
+    one = stream()
+    one.event("ready")
+    hub = bed.server.session_hub
+    stuck = hub.samplers()[0]
+    release = threading.Event()
+    reading = stuck._live.refresh
+
+    def refresh():
+        release.wait(20)
+        return reading()
+
+    stuck._live.refresh = refresh
+    try:
+        # The stream itself notices: its keepalives never depended on the reader.
+        said = one.event("error")
+        assert said["stopped"] is True and "has not finished" in said["error"]
+        assert _ends(one)
+        assert hub.samplers() == []
+
+        two = stream()
+        two.event("ready")
+        assert hub.samplers()[0] is not stuck
+        bed.append(rows[len(rows) // 2 :])
+        assert two.event("transcript")["session_id"] == OLD
+    finally:
+        release.set()
+    # Released, the stuck reader's thread ends and sends nothing: one reader remains.
+    _wait_for(lambda: _sampler_threads() == 1)
+
+
+def test_a_reader_that_is_reading_is_not_retired(bed: Bed, stream) -> None:
+    bed.server.session_stall_seconds = 0.3
+    opened = stream()
+    opened.event("ready")
+    sampler = bed.server.session_hub.samplers()[0]
+    time.sleep(1.0)
+    assert bed.server.session_hub.samplers() == [sampler] and not sampler.retired
+    again = stream()
+    again.event("ready")
+    assert bed.server.session_hub.samplers() == [sampler]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import re
 import socket
 import sqlite3
 import threading
@@ -589,3 +590,51 @@ def test_a_post_without_json_is_refused_and_json_clears_that(
     )
     assert status == 405
     assert "GET" in body_json(body)["error"]
+
+
+# ------------------------------------------------------------ KYO-728: the log's times
+
+_TIMED = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z kyo serve: ")
+
+
+def test_a_request_is_logged_with_the_time_it_was_served(served: Client) -> None:
+    assert served.get("/v1/version")[0] == 200
+    written = served.server.log_stream.stream
+    deadline = time.monotonic() + 5
+    while "/v1/version" not in written.getvalue() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    lines = written.getvalue().splitlines()
+    assert lines and all(_TIMED.match(line) for line in lines), lines
+    assert any('"GET /v1/version' in line for line in lines)
+
+
+def test_a_line_written_by_any_module_is_dated_and_a_traceback_stands_under_it() -> None:
+    written = io.StringIO()
+    log = serve.TimedLog(written)
+    log.write("kyo serve: one\n")
+    print("kyo serve: two", file=log, flush=True)  # print writes the text and the newline apart
+    log.write("kyo serve: three\nTraceback (most recent call last):\n  File x\n")
+    log.write("kyo serve: four\n")
+    lines = written.getvalue().splitlines()
+    assert [bool(_TIMED.match(line)) for line in lines] == [True, True, True, False, False, True]
+    assert [line.split("kyo serve: ")[-1] for line in lines if _TIMED.match(line)] == [
+        "one",
+        "two",
+        "three",
+        "four",
+    ]
+
+
+def test_the_servers_own_log_is_the_timed_one(served: Client) -> None:
+    # Every module writes to `server.log_stream`, so wrapping it there dates them all.
+    assert isinstance(served.server.log_stream, serve.TimedLog)
+
+
+def test_a_request_that_raises_past_its_handler_is_logged_with_the_time(served: Client) -> None:
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        served.server.handle_error(None, ("127.0.0.1", 1))
+    text = served.server.log_stream.stream.getvalue()
+    first = next(line for line in text.splitlines() if "raised" in line)
+    assert _TIMED.match(first) and "ValueError: boom" in text

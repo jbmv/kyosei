@@ -110,6 +110,7 @@ import signal
 import socket
 import sys
 import threading
+import traceback
 import urllib.parse
 from argparse import Namespace
 from dataclasses import dataclass
@@ -474,6 +475,35 @@ def project_name(root: str) -> str:
 # -------------------------------------------------------------------- server
 
 
+class TimedLog:
+    """``kyo serve``'s log: every line written to it begins with the time (KYO-728).
+
+    The time is UTC in the form :func:`kyosei.clock.now` writes, so that an incident can be
+    dated from the log, which under ``kyo serve --install`` is a file nothing else dates. A
+    write that begins a line is given the time. The further lines of one write, a traceback's,
+    stand under the dated line as they are. ``stream`` is the stream written to.
+    """
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self._lock = threading.Lock()
+        self._at_line_start = True
+
+    def write(self, text: str) -> int:
+        from . import clock
+
+        if not text:
+            return 0
+        with self._lock:
+            if self._at_line_start:
+                self.stream.write(f"{clock.now()} ")
+            self._at_line_start = text.endswith("\n")
+            return self.stream.write(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+
 class KyoServer(ThreadingHTTPServer):
     """One `kyo serve`: its guards' configuration, its lock, and its start identity."""
 
@@ -503,7 +533,8 @@ class KyoServer(ThreadingHTTPServer):
         # Captured before any command runs: the streams are redirected under the
         # lock while one does, and a request line logged by another thread then must
         # not land inside that command's captured output.
-        self.log_stream = log_stream if log_stream is not None else sys.stderr
+        # Every line written to it begins with the time (KYO-728), whichever module writes it.
+        self.log_stream = TimedLog(log_stream if log_stream is not None else sys.stderr)
         self.lock = threading.Lock()
         #: Set when the server stops, so an open event stream ends with it.
         self.stopping = threading.Event()
@@ -516,6 +547,10 @@ class KyoServer(ThreadingHTTPServer):
         from .serve_sessions import SAMPLE_SECONDS, SessionHub
 
         self.session_sample_seconds = SAMPLE_SECONDS
+        #: KYO-728: how long a session's reader may be stuck before it is replaced.
+        from .serve_sessions import STALL_SECONDS
+
+        self.session_stall_seconds = STALL_SECONDS
         self.session_hub = SessionHub(self)
         #: KYO-703: messages held until a turn ends, and how often one is looked at.
         from .serve_held import HELD_POLL_SECONDS, HeldMessages
@@ -540,6 +575,12 @@ class KyoServer(ThreadingHTTPServer):
         #: The build this process started as, the reference `stale` compares with.
         self.started_version = self.version_payload()
         self.held_messages.resume()
+
+    def handle_error(self, request, client_address) -> None:
+        """A request that raised past its handler goes to the log, where it is dated."""
+        self.log_stream.write(
+            f"kyo serve: a request from {client_address[0]} raised\n{traceback.format_exc()}"
+        )
 
     def shutdown(self) -> None:
         self.stopping.set()
