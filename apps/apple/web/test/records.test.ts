@@ -5,6 +5,7 @@ import {
   FOLD_ABOVE, HISTORY_LIMIT, awaitingIds, byKind, dispatchableIds, historyFrom, historyRows, isFolded,
   latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
+  pressed,
 } from "../src/records.ts";
 
 const rows = [
@@ -330,4 +331,12 @@ test("a document with parts missing still makes a page", () => {
   assert.equal(page.id, "KYO-3");
   assert.deepEqual(page.sections, []);
   assert.equal(page.none.length, 12);
+});
+
+test("pressing Awaiting you turns Open and Dispatchable off, and the others only toggle", () => {
+  const all = { open: true, dispatchable: true, awaiting: false, search: "x" };
+  assert.deepEqual(pressed(all, "awaiting"), { open: false, dispatchable: false, awaiting: true, search: "x" });
+  const waiting = { open: false, dispatchable: false, awaiting: true, search: "" };
+  assert.deepEqual(pressed(waiting, "open"), { open: true, dispatchable: false, awaiting: true, search: "" });
+  assert.deepEqual(pressed(waiting, "awaiting"), { open: false, dispatchable: false, awaiting: false, search: "" });
 });

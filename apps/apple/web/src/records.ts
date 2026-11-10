@@ -63,6 +63,21 @@ export function awaitingIds(gates: unknown): Set<string> {
   return ids;
 }
 
+/**
+ * The filters after one chip is pressed. Awaiting you is about work already dispatched, so
+ * turning it on turns Open and Dispatchable off; the other two only toggle themselves.
+ */
+export function pressed<T extends { open: boolean; dispatchable: boolean; awaiting: boolean }>(
+  filters: T, name: "open" | "dispatchable" | "awaiting",
+): T {
+  const next = { ...filters, [name]: !filters[name] };
+  if (name === "awaiting" && next.awaiting) {
+    next.open = false;
+    next.dispatchable = false;
+  }
+  return next;
+}
+
 function searchWords(search: string): string[] {
   return search.toLowerCase().split(/\s+/).filter(Boolean);
 }

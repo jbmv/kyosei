@@ -7,7 +7,7 @@ import {
 } from "./marks";
 import { render } from "./pipeline";
 import {
-  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind,
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
   dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
   recordPage, refParts, visit,
 } from "./records";
@@ -3111,7 +3111,7 @@ document.querySelectorAll<HTMLInputElement>(".records-search").forEach((field) =
 document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip) => {
   chip.addEventListener("click", () => {
     const name = chip.dataset.filter as "open" | "dispatchable" | "awaiting";
-    narrowing[name] = !narrowing[name];
+    Object.assign(narrowing, pressed(narrowing, name));
     store(FILTERS_KEY, {
       open: narrowing.open, dispatchable: narrowing.dispatchable, awaiting: narrowing.awaiting,
     });
