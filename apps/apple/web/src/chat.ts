@@ -2,7 +2,7 @@
 // about a session. Each object is one element, addressed by the object's own id, and a later
 // version replaces it in place.
 import { agentKind, shortModel } from "./agents";
-import { shiftLines } from "./marks";
+import { lineOf, scrollToShow, shiftLines } from "./marks";
 import { render } from "./pipeline";
 import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
@@ -1515,16 +1515,25 @@ const pasted = new WeakMap<HTMLTextAreaElement, string[]>();
 const boxes = document.getElementById("boxes")!;
 const composerNote = document.getElementById("composer-note")!;
 
+/**
+ * Makes a box as tall as its text. The text is measured with the box's height released, and
+ * for that moment the composer has less to scroll over: a view near the end of the released
+ * box is moved up to the shorter end and is not moved back when the height returns. Each key
+ * typed in the last box so put its last lines under the composer's edge (KYO-727), so the
+ * composer's place is put back once the height is set.
+ */
 function fitBox(area: HTMLTextAreaElement): void {
+  const place = boxes.scrollTop;
   area.style.height = "auto";
   area.style.height = `${area.scrollHeight}px`;
+  boxes.scrollTop = place;
 }
 
 function textAreas(): HTMLTextAreaElement[] {
   return Array.from(boxes.querySelectorAll("textarea"));
 }
 
-/** A button inside a box. It leaves the focus in the text, so an empty box does not close under it. */
+/** A button inside a box. It leaves the focus, and so the caret, in the text. */
 function boxButton(className: string, label: string, act: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = className;
@@ -1612,6 +1621,39 @@ function trackEdit(area: HTMLTextAreaElement): void {
 /** Where a line sits beside the text, read from a hidden copy that wraps as the text does. */
 function lineTop(marks: Marks, line: number): number {
   return (marks.mirror.children[line] as HTMLElement | undefined)?.offsetTop ?? 0;
+}
+
+/** The paragraph the caret is in, or was in when the box was last used. */
+function caretLine(area: HTMLTextAreaElement): number {
+  return lineOf(area.value, area.selectionStart);
+}
+
+const CARET_MARGIN = 8;
+
+/**
+ * Scrolls the composer by the least that shows the line the caret is on, and not at all
+ * while that line is in view. The line is found in the hidden copy of the text, by the
+ * character beside the caret. On the last line of a box the box's buttons are shown too.
+ */
+function showCaret(area: HTMLTextAreaElement): void {
+  const marks = marksOf.get(area)!;
+  const caret = area.selectionEnd;
+  const start = area.value.lastIndexOf("\n", caret - 1) + 1;
+  const node = marks.mirror.children[lineOf(area.value, caret)]?.firstChild;
+  if (!(node instanceof Text)) return;
+  // The character after the caret, or at a paragraph's end the one before it.
+  const from = Math.max(0, Math.min(caret - start, node.length - 1));
+  const range = document.createRange();
+  range.setStart(node, from);
+  range.setEnd(node, Math.min(from + 1, node.length));
+  const line = range.getBoundingClientRect();
+  if (!line.height) return;
+  const view = boxes.getBoundingClientRect();
+  const lastLine = area.getBoundingClientRect().bottom - line.bottom < line.height / 2;
+  const bottom = lastLine ? area.closest(".box")!.getBoundingClientRect().bottom : line.bottom;
+  boxes.scrollTop += scrollToShow(
+    line.top - CARET_MARGIN, bottom + CARET_MARGIN, view.top, view.bottom,
+  );
 }
 
 function drawMarks(area: HTMLTextAreaElement): void {
@@ -1784,17 +1826,20 @@ function spanAt(holder: HTMLElement, key: string, target: HTMLElement): Omit<Anc
   return span(from, from + text.length, picked || first.textContent || text);
 }
 
-/** Puts an anchor on a paragraph of a prompt, or on a new paragraph at its end. */
+/**
+ * Puts an anchor on a paragraph of a prompt: the one named, or the one the caret was in when
+ * the box was left, which a text area keeps while the focus is elsewhere. The text is not
+ * changed, so an empty paragraph takes the anchor as it is.
+ */
 function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem): void {
   const marks = marksOf.get(area)!;
-  area.focus();
-  if (line === null && area.value) replaceRange(area, area.value.length, area.value.length, "\n");
-  const id = marks.ids[line ?? marks.ids.length - 1];
+  const id = marks.ids[line ?? caretLine(area)];
   const held = marks.items.get(id) ?? [];
   const same = (other: Item) => other.kind === "anchor" && other.key === item.key
     && other.start === item.start && other.end === item.end;
   if (!held.some(same)) marks.items.set(id, [...held, item]);
-  if (line === null) area.setSelectionRange(area.value.length, area.value.length);
+  // Typing goes on where it was.
+  area.focus();
   remember();
   drawMarks(area);
 }
@@ -1809,11 +1854,11 @@ function showAnchorMenu(x: number, y: number, item: AnchorItem): void {
     });
     return button;
   };
-  const caretLine = area.value.slice(0, area.selectionStart).split("\n").length - 1;
+  // The first entry is the caret's paragraph, so the list names the others.
+  const caret = caretLine(area);
   const lines = area.value.split("\n")
     .map((text, line) => ({ text, line }))
-    .filter(({ text }) => text.trim())
-    .sort((a, b) => Number(b.line === caretLine) - Number(a.line === caretLine));
+    .filter(({ text, line }) => text.trim() && line !== caret);
   const heading = document.createElement("div");
   heading.className = "anchor-heading";
   heading.textContent = "Anchor to";
@@ -1982,7 +2027,7 @@ function reveal(item: AnchorItem): void {
   }
 }
 
-/** A box for one prompt: the whole of one message, with its own Send and Clear. */
+/** A box for one prompt: the whole of one message, with its own Send and Delete. */
 function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   const box = document.createElement("div");
   box.className = "box";
@@ -2011,7 +2056,19 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   body.append(gutter, words);
   body.addEventListener("mousemove", (event) => followMouse(area, event));
   body.addEventListener("mouseleave", () => { ghost.hidden = true; });
-  new ResizeObserver(() => drawMarks(area)).observe(words);
+  // The height was fitted to the text as it wrapped at one width. At another the box is too
+  // short or too tall, and a box shorter than its text scrolls the text inside itself when
+  // the caret goes to the hidden part (KYO-727). A long draft restored into an empty
+  // composer meets this at once where scroll bars take room: its height is what makes the
+  // composer's scroll bar appear, and the bar narrows it.
+  let fittedWidth = -1;
+  new ResizeObserver(() => {
+    if (words.clientWidth !== fittedWidth) {
+      fittedWidth = words.clientWidth;
+      fitBox(area);
+    }
+    drawMarks(area);
+  }).observe(words);
   area.addEventListener("keydown", (event) => listKeys(area, event));
   area.addEventListener("focus", () => { lastArea = area; });
   area.addEventListener("paste", (event) => {
@@ -2039,24 +2096,21 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
     fitBox(area);
     trackEdit(area);
     drawMarks(area);
+    showCaret(area);
     remember();
-  });
-  // An empty box closes up when you leave it, unless it is the only one or holds a mark.
-  area.addEventListener("blur", (event) => {
-    if (markPanel.contains(event.relatedTarget as Node | null)) return;
-    if (!area.value && !marks.items.size && textAreas().length > 1) box.remove();
   });
   let armed: number | undefined;
   const disarm = () => {
     if (armed !== undefined) clearTimeout(armed);
     armed = undefined;
-    clear.textContent = "Clear";
+    remove.textContent = "Delete";
   };
-  // Clear asks once more, then removes this prompt and leaves the others.
-  const clear = boxButton("box-clear", "Clear", () => {
-    if (armed === undefined) {
-      if (!area.value) return;
-      clear.textContent = "Clear?";
+  // A box leaves only by this button (KYO-727): an empty one that closed when the focus left
+  // it was gone before an anchor could be chosen for it in the chat. Delete asks once more
+  // when the box holds words or marks, then removes this prompt and leaves the others.
+  const remove = boxButton("box-delete", "Delete", () => {
+    if (armed === undefined && (area.value || marks.items.size)) {
+      remove.textContent = "Delete?";
       armed = window.setTimeout(disarm, 3000);
       return;
     }
@@ -2077,7 +2131,7 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   send.title = "Send (⌘↩)";
   const actions = document.createElement("div");
   actions.className = "box-actions";
-  actions.append(clear, send);
+  actions.append(remove, send);
   box.append(body, actions);
   boxes.append(box);
   fitBox(area);
@@ -2229,8 +2283,7 @@ async function thumbnail(file: File): Promise<string | undefined> {
 /** Puts a pasted file on the caret's paragraph and sends it to the session's machine. */
 async function attachFile(area: HTMLTextAreaElement, file: File): Promise<void> {
   const marks = marksOf.get(area)!;
-  const line = area.value.slice(0, area.selectionStart).split("\n").length - 1;
-  const id = marks.ids[line];
+  const id = marks.ids[caretLine(area)];
   const ref = `upload-${nextUpload++}`;
   const item: FileItem = { kind: "file", id: "", name: file.name || "pasted image", pending: ref };
   marks.items.set(id, [...(marks.items.get(id) ?? []), item]);
@@ -2427,7 +2480,7 @@ if (savedWidth !== null) setComposerWidth(savedWidth);
 const startBoxes = storedBoxes().filter((box) => box.text || box.marks?.length);
 showTexts(startBoxes.map((box) => box.text), startBoxes);
 const newPromptButton = document.getElementById("new-prompt")!;
-// Keeping the focus where it is stops the click from closing an empty box under it.
+// The click leaves the focus where it is until the new prompt takes it.
 newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());
 newPromptButton.addEventListener("click", newPrompt);
 // Cmd-Return sends the prompt being typed in, or the only one there is.

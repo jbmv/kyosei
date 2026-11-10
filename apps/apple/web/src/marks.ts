@@ -11,10 +11,22 @@ export interface Shift {
   merged: [number, number][];
 }
 
-function lineOf(text: string, position: number): number {
+/** The line of `text` that `position` is in, which for a caret is the paragraph it stands in. */
+export function lineOf(text: string, position: number): number {
   let line = 0;
   for (let at = text.indexOf("\n"); at >= 0 && at < position; at = text.indexOf("\n", at + 1)) line++;
   return line;
+}
+
+/**
+ * How far a view must scroll to show the span from `top` to `bottom`, all four measured on
+ * the same axis: nothing while the span is inside the view, and otherwise the least that
+ * brings it in. A span taller than the view is shown from its top.
+ */
+export function scrollToShow(top: number, bottom: number, viewTop: number, viewBottom: number): number {
+  if (top < viewTop) return top - viewTop;
+  if (bottom > viewBottom) return Math.min(bottom - viewBottom, top - viewTop);
+  return 0;
 }
 
 /**

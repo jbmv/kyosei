@@ -1,7 +1,7 @@
 // Run with `npm test`. A mark must stay with its paragraph through every kind of edit.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { shiftLines } from "../src/marks.ts";
+import { lineOf, scrollToShow, shiftLines } from "../src/marks.ts";
 
 /** Applies an edit to three lines with ids 1, 2, 3 and new ids from 10. */
 function edit(before: string, after: string, caret?: number) {
@@ -88,4 +88,41 @@ test("deleting a line and the Return after it, above an empty line, drops it", (
   assert.deepEqual(shift.dropped.includes(2), true);
   assert.equal(shift.ids[0], 1);
   assert.equal(shift.ids[2], 4);
+});
+
+// An anchor or a file goes to the paragraph the caret is in (KYO-727).
+test("a caret is in the paragraph that holds it, at either end of the text", () => {
+  const text = "one\n\nthree";
+  assert.equal(lineOf(text, 0), 0);
+  assert.equal(lineOf(text, 3), 0, "at the first paragraph's end");
+  assert.equal(lineOf(text, 4), 1, "on the empty paragraph");
+  assert.equal(lineOf(text, 5), 2, "at the last paragraph's start");
+  assert.equal(lineOf(text, text.length), 2);
+});
+
+test("a caret in an empty prompt is in its one paragraph", () => {
+  assert.equal(lineOf("", 0), 0);
+});
+
+test("a caret after a closing Return is on the new last paragraph", () => {
+  assert.equal(lineOf("one\n", 4), 1);
+});
+
+// Typing scrolls the composer only as far as the typed line needs (KYO-727).
+test("a line inside the view scrolls nothing", () => {
+  assert.equal(scrollToShow(100, 122, 50, 700), 0);
+  assert.equal(scrollToShow(50, 700, 50, 700), 0, "edge to edge");
+});
+
+test("a line under the view comes up by what is hidden", () => {
+  assert.equal(scrollToShow(690, 712, 50, 700), 12);
+});
+
+test("a line over the view comes down by what is hidden", () => {
+  assert.equal(scrollToShow(30, 52, 50, 700), -20);
+});
+
+test("a span taller than the view is shown from its top", () => {
+  assert.equal(scrollToShow(100, 900, 50, 700), 50);
+  assert.equal(scrollToShow(20, 900, 50, 700), -30);
 });
