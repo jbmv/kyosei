@@ -11,6 +11,7 @@
   --panel: #f0eee8;
   --failed: #b3362b;
   --link: #2f62b5;
+  --apple-green: #28a745;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +26,7 @@
     --panel: #32312e;
     --failed: #e8796e;
     --link: #82aeef;
+    --apple-green: #30d158;
   }
 }
 
@@ -198,6 +200,10 @@ a { color: var(--link); }
 #composer-top { flex: none; height: 46px; display: flex; align-items: center; }
 #new-prompt { width: 30px; height: 26px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
 #new-prompt:hover { background: var(--line); color: var(--text); }
+/* Bare text beside the add button: the red says it is pressable, and the underline says it is under the pointer. */
+#interrupt { margin-left: 14px; padding: 0; border: 0; background: none; color: var(--apple-red); font-size: 13px; font-weight: 500; }
+#interrupt[hidden] { display: none; }
+#interrupt:hover { text-decoration: underline; }
 #boxes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .box:first-child { margin-top: auto; }
 .box { flex: none; }
@@ -222,9 +228,15 @@ a { color: var(--link); }
 .box:focus-within { border-color: var(--muted); }
 
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
-.box-actions button { padding: 4px 14px; border-radius: 999px; font-size: 13px; }
-.box-clear { border: 0; background: none; color: var(--apple-red); font-weight: 500; padding-left: 0 !important; }
-.box-send { border: 1px solid var(--line); background: var(--panel); color: var(--text); font-weight: 600; }
+.box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
+/* The prompt's text starts 18px in from the box's padding, past the gutter that holds the marks. */
+.box-clear { margin-left: 18px; color: var(--apple-red); font-weight: 500; }
+.box-clear:hover { text-decoration: underline; }
+/* Bare text in the accent colour, with the keys that do the same beside it. */
+.box-send { color: var(--link); font-weight: 600; }
+.box-send:hover:not(:disabled) { color: var(--pastel-blue); text-decoration: underline; }
+.box-send:disabled { color: var(--muted); cursor: default; }
+.send-keys { margin-left: 8px; font-weight: 400; letter-spacing: 1px; }
 
 .box { position: relative; }
 .box-body { display: flex; }
@@ -461,6 +473,9 @@ body.terminal-open #terminal { display: flex; }
 #side section .side-task { display: flex; gap: 8px; margin: 6px 0; }
 #side section .agent-meta { margin: -3px 0 10px; color: var(--muted); font-size: 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .agent-meta .added { margin-right: 5px; }
+/* A running subagent is marked in the system green the status bar uses. */
+#side section .side-task.running .side-task-name { color: var(--apple-green); font-weight: 600; }
+#side section .agent-meta.running { color: var(--apple-green); }
 .stamp { margin: 10px 0 2px; color: var(--muted); font-size: 12.5px; }
 .clickable { cursor: default; }
 .clickable:hover { opacity: 0.7; }

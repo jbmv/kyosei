@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -65,6 +66,11 @@ from .serve_sessions import ProjectSessions
 HELD_POLL_SECONDS = 1.0
 
 _WATCH_THREAD = "kyo-serve-held-watcher"
+
+#: How long a prompt is remembered, so that the same one is not taken twice (KYO-724). A
+#: person who presses Send again because nothing seemed to happen does so within a few seconds,
+#: and a prompt typed again on purpose takes longer than that to type.
+DUPLICATE_WINDOW_SECONDS = 10.0
 
 #: The reason on a message found marked as being delivered when the server starts.
 _INTERRUPTED = "delivery-interrupted"
@@ -122,6 +128,10 @@ class HeldMessages:
         self._thread: threading.Thread | None = None
         #: Sessions whose last look found an idle screen; memory only, so a restart looks twice.
         self._idle_once: set[str] = set()
+        #: Each session's last accepted prompt: its fingerprint and when it was taken.
+        self._last_taken: dict[str, tuple[str, float]] = {}
+        #: The clock the window is measured on; a test replaces it.
+        self._now: Callable[[], float] = time.monotonic
 
     # ------------------------------------------------------------------------ the files
 
@@ -177,6 +187,23 @@ class HeldMessages:
         def store(device: dict, automatic: bool, segments: list[dict]) -> dict:
             with self._lock_of(session_id):
                 path = serve_files.composer_target(self.environ, serve_files.HELD, session_id)
+                fingerprint = json.dumps(
+                    [segments, (prompt or {}).get("marks"), notes or []], sort_keys=True
+                )
+                taken = self._last_taken.get(session_id)
+                if (
+                    taken is not None
+                    and taken[0] == fingerprint
+                    and self._now() - taken[1] < DUPLICATE_WINDOW_SECONDS
+                ):
+                    raise Refusal(
+                        409,
+                        f"session {session_id} was sent this same prompt within the last "
+                        f"{DUPLICATE_WINDOW_SECONDS:g} seconds, held or delivered, so it is not "
+                        "taken twice; wait for the first to be delivered, or change the prompt "
+                        "to send a different one",
+                        reason="already-sent",
+                    )
                 if (existing := self._load(path)) is not None:
                     raise Refusal(
                         409,
@@ -202,6 +229,7 @@ class HeldMessages:
                     "prompt": prompt,
                 }
                 self._save(path, message)
+                self._last_taken[session_id] = (fingerprint, self._now())
             self._announce(session_id, "held", message)
             self._ensure_watching()
             return _public(message, text=False)
@@ -265,6 +293,8 @@ class HeldMessages:
                 )
             serve_files.remove_private(path)
             self._idle_once.discard(session_id)
+            # A prompt taken back is the person's to send again, edited or not.
+            self._last_taken.pop(session_id, None)
         serve_send.log_held(
             self.environ,
             message,

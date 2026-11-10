@@ -381,6 +381,16 @@ class LiveSession:
         reader.read()
         return reader
 
+    def subagent_model_effort(self, agent_id: str) -> tuple[str | None, str | None]:
+        """The model and effort subagent ``agent_id``'s own transcript records (KYO-726).
+
+        None for each that the transcript does not state, or when there is no such file.
+        """
+        path = transcript.subagent_transcript(self.transcript.path, agent_id)
+        if path is None:
+            return None, None
+        return transcript.subagent_model_effort(path)
+
     def subagent_dispatch(self, agent_id: str) -> str | None:
         """The id of the dispatch subagent ``agent_id`` was started as a worker for, or None.
 

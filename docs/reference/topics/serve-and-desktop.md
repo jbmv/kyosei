@@ -237,7 +237,7 @@ reply:     message_id, uuid, at, text, thinking, thinking_omitted, model, usage,
            usage: input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 tool call: call_id, uuid, at, name, input, result
            result: uuid, at, text, is_error (null until the result lands)
-subagent:  agent_id, tool_call_uuid, description, agent_type
+subagent:  agent_id, tool_call_uuid, description, agent_type, model, effort
 command output: uuid, at, command, args, text
 delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, status,
            summary, usage
@@ -255,6 +255,11 @@ changes it, as when a tool result lands, and a client replaces what it holds. A 
 transcript does not match the cursor, so the lists hold the whole session. `readable: false` means
 no record had a format this build recognises, and `why` says so. A first read of a long
 session is one response holding all of it.
+
+A subagent's `model` and `effort` are the ones its own transcript records on its first
+assistant row, such as `claude-fable-5-2` and `medium`. They are read from that file at each
+request, so a later request states them for a subagent that had not yet replied, and each is
+`null` where the transcript records none. The same two fields are on the subagent route below.
 
 `command_outputs` holds what slash commands printed, where the transcript records it, in
 time order on the same clock as the other lists' `at`. `text` has the output's terminal
@@ -352,7 +357,7 @@ environment setting that changes one session's window, such as
 `CLAUDE_CODE_DISABLE_1M_CONTEXT`, is not visible here.
 
 **A subagent.** `GET .../sessions/<id>/subagents/<agent>` is `{"ok", "session_id", "agent_id",
-"readable", "why", "dispatch", "dispatch_why", "usage", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
+"readable", "why", "model", "effort", "dispatch", "dispatch_why", "usage", "tool_calls"}`, where `<agent>` is a subagent's `agent_id` and each tool
 call has the shape above. It reads the subagent's own transcript, beside the session's, so a
 subagent still running can be read before it appears in `subagents`. An agent id that is not
 this session's answers 404. `readable: false` means the file's rows are of no format this
@@ -541,7 +546,10 @@ switched on, since a draft does not touch a session.
 **A held message** is kept until the session's screen is idle and then delivered as `send`
 would type it. It passes the checks a send makes, so holding needs `serve_send: true`. A
 session holds one at a time; a second is refused with `already-held`, naming the id to
-retract. A message held on an idle screen is delivered on the next looks. `GET` and the
+retract. A prompt identical to the one the session last took, held or delivered, within ten
+seconds is refused with `already-sent` (409), so that a second press of Send posts nothing; a
+different prompt is not refused for it, and a prompt taken back may be sent again at once. A
+message held on an idle screen is delivered on the next looks. `GET` and the
 response to `POST` give `id`, `at`, `device`, `automatic`, `segments`, `state` (`held` or
 `delivering`), `reason`, `detail`, `retrying`, `notes` (the ids of a set of notes, or empty)
 and `prompt` (for a message held by `send-prompt`, its own `segments` and `marks`; in the

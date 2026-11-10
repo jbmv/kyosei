@@ -1,8 +1,10 @@
 // The read-only chat. It holds the objects `kyo serve` sent and draws them; it decides nothing
 // about a session. Each object is one element, addressed by the object's own id, and a later
 // version replaces it in place.
+import { agentKind, shortModel } from "./agents";
 import { shiftLines } from "./marks";
 import { render } from "./pipeline";
+import { SendGate } from "./sending";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -19,6 +21,8 @@ interface Delivery {
 }
 interface Subagent {
   agent_id: string; description: string; agent_type: string; tool_call_uuid: string;
+  /** What the subagent's own transcript records, null before its first reply (KYO-726). */
+  model?: string | null; effort?: string | null;
 }
 interface ToolCall {
   call_id: string; uuid: string; at: string; name: string; input: Record<string, unknown> | null;
@@ -816,19 +820,13 @@ function tookWords(call: ToolCall): string | undefined {
 
 function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
   const row = document.createElement("div");
-  row.className = "side-task clickable";
+  row.className = running ? "side-task clickable running" : "side-task clickable";
   const name = document.createElement("span");
   name.className = "side-task-name";
   name.textContent = agent.description || agent.agent_type;
   name.title = name.textContent;
   row.append(name);
   const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at;
-  if (running && agentUsage.has(agent.agent_id)) {
-    const tokens = document.createElement("span");
-    tokens.className = "side-task-time";
-    tokens.textContent = tokenWords(agentUsage.get(agent.agent_id)!);
-    row.append(tokens);
-  }
   if (running && since) {
     const time = document.createElement("span");
     time.className = "side-task-time";
@@ -845,23 +843,21 @@ function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
     drawAgents();
   });
   const rows: HTMLElement[] = [row];
-  if (!running) {
-    if (!agentCalls.has(agent.agent_id) && !requestedAgents.has(agent.agent_id)) {
-      requestedAgents.add(agent.agent_id);
-      requestAgent(agent.agent_id);
-    }
-    const words = agentMeta(agent);
-    if (words) {
-      const meta = document.createElement("div");
-      meta.className = "agent-meta";
-      meta.append([words.tokens, words.took].filter(Boolean).join("  ·  "));
-      if (words.lines) {
-        if (words.tokens || words.took) meta.append("  ·  ");
-        meta.append(...words.lines);
-      }
-      rows.push(meta);
-    }
+  if (!running && !agentCalls.has(agent.agent_id) && !requestedAgents.has(agent.agent_id)) {
+    requestedAgents.add(agent.agent_id);
+    requestAgent(agent.agent_id);
   }
+  // The second line: what it runs on, then its tokens, how long it took and its lines. It
+  // does not wrap, so a long one is cut at the panel's edge.
+  const words = agentMeta(agent, running);
+  const meta = document.createElement("div");
+  meta.className = running ? "agent-meta running" : "agent-meta";
+  meta.append(words.parts.join("  ·  "));
+  if (words.lines) {
+    if (words.parts.length) meta.append("  ·  ");
+    meta.append(...words.lines);
+  }
+  rows.push(meta);
   if (!openAgents.has(agent.agent_id)) return rows;
   const list = document.createElement("div");
   list.className = "agent-calls";
@@ -885,19 +881,30 @@ function tokenWords(total: number): string {
     : `${(total / 1_000_000).toFixed(1)}M`;
 }
 
+/** The words of a subagent's second line. A running one's tokens come from its transcript. */
 function agentMeta(
-  agent: Subagent,
-): { tokens: string | null; took: string | null; lines: HTMLElement[] | null } | null {
+  agent: Subagent, running: boolean,
+): { parts: string[]; lines: HTMLElement[] | null } {
   const usage = deliveries.find((delivery) =>
     delivery.task_id === agent.agent_id && delivery.usage)?.usage;
   const dispatch = agentDispatches.get(agent.agent_id);
-  if (!usage?.total_tokens && !usage?.duration_ms && !dispatch) return null;
+  const tokens = running
+    ? (agentUsage.has(agent.agent_id) ? tokenWords(agentUsage.get(agent.agent_id)!) : null)
+    : (usage?.total_tokens ? tokenWords(usage.total_tokens) : null);
   return {
-    tokens: usage?.total_tokens ? tokenWords(usage.total_tokens) : null,
-    took: usage?.duration_ms ? duration(usage.duration_ms) : null,
+    parts: [kindOf(agent), tokens && `${tokens} tokens`, usage?.duration_ms ? duration(usage.duration_ms) : null]
+      .filter((part): part is string => Boolean(part)),
     lines: dispatch ? counts(dispatch.added, dispatch.removed) : null,
   };
 }
+
+/** `fable medium`, from what the subagent's route last stated, else what the turns listed. */
+function kindOf(agent: Subagent): string {
+  return agentKind({ ...agent, ...agentFacts.get(agent.agent_id) });
+}
+
+/** The model and effort each subagent's route last stated, which can be later than the list's. */
+const agentFacts = new Map<string, { model: string | null; effort: string | null }>();
 
 function drawAgents(): void {
   const agents = [...subagents.values()];
@@ -916,6 +923,8 @@ function drawAgents(): void {
     agents: running.map((agent) => ({
       name: agent.description,
       type: agent.agent_type,
+      model: shortModel(agentFacts.get(agent.agent_id)?.model ?? agent.model),
+      effort: agentFacts.get(agent.agent_id)?.effort ?? agent.effort ?? "",
       since: [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? "",
       tokens: agentUsage.has(agent.agent_id) ? tokenWords(agentUsage.get(agent.agent_id)!) : "",
     })),
@@ -1310,8 +1319,12 @@ const kyo = {
     agent_id: string; tool_calls: ToolCall[];
     dispatch?: { added: number; removed: number } | null;
     usage?: { total: number; latest_turn?: number } | null;
+    model?: string | null; effort?: string | null;
   }): void {
     agentCalls.set(data.agent_id, data.tool_calls);
+    if (data.model || data.effort) {
+      agentFacts.set(data.agent_id, { model: data.model ?? null, effort: data.effort ?? null });
+    }
     // The latest turn's size, the figure the terminal's agent row shows; the sum counts cache reads per turn.
     if (data.usage) agentUsage.set(data.agent_id, data.usage.latest_turn ?? data.usage.total);
     if (data.dispatch) agentDispatches.set(data.agent_id, data.dispatch);
@@ -1400,13 +1413,16 @@ const kyo = {
   sent(frame: { id?: string; error?: string }): void {
     if (frame.error) {
       composerNote.textContent = frame.error;
+      // A refusal ends the send, so the prompt stays and Send can be pressed again.
+      sendGate.end();
+      drawSending();
       return;
     }
     composerNote.textContent = "";
     showHeld(frame.id ?? null);
     // Only the prompt that was sent leaves; the others are still drafts.
-    sending?.remove();
-    sending = null;
+    sendGate.end()?.remove();
+    drawSending();
     if (!textAreas().length) addBox();
     remember();
   },
@@ -2049,7 +2065,15 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
     if (!textAreas().length) addBox().focus();
     remember();
   });
-  const send = boxButton("box-send", "Send", () => attemptSend(area));
+  // Bare text in the accent colour, then the keys that do the same.
+  const send = boxButton("box-send", "", () => attemptSend(area));
+  const word = document.createElement("span");
+  const keys = document.createElement("span");
+  keys.className = "send-keys";
+  keys.textContent = "⌘↩";
+  send.append(word, keys);
+  word.textContent = sendGate.current ? "Sending…" : "Send";
+  send.disabled = sendGate.current !== null;
   send.title = "Send (⌘↩)";
   const actions = document.createElement("div");
   actions.className = "box-actions";
@@ -2242,10 +2266,25 @@ function sentMarks(area: HTMLTextAreaElement): unknown[] {
   });
 }
 
-/** The box whose prompt the server has been asked to take, until it answers. */
-let sending: HTMLElement | null = null;
+/**
+ * The box whose prompt the server has been asked to take, until it answers (KYO-724). Send
+ * posts nothing while one is held here: a prompt pressed three times in a second was posted
+ * three times, since nothing recorded the first press until the server's answer came back.
+ */
+const sendGate = new SendGate<HTMLElement>();
+
+/** Every Send reads as sending, and takes no press, from the press until the server answers. */
+function drawSending(): void {
+  const busy = sendGate.current !== null;
+  for (const button of boxes.querySelectorAll<HTMLButtonElement>(".box-send")) {
+    button.disabled = busy;
+    button.firstElementChild!.textContent = busy ? "Sending…" : "Send";
+  }
+}
 
 function attemptSend(area: HTMLTextAreaElement): void {
+  // A prompt already on its way to the server is not posted again.
+  if (sendGate.current) return;
   const segments = messageSegments(area);
   if (!segments.length) {
     // A prompt needs some words: the server sends text, and a mark rides on a line of it.
@@ -2275,8 +2314,9 @@ function attemptSend(area: HTMLTextAreaElement): void {
     return;
   }
   coldConfirm = null;
+  if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
   composerNote.textContent = "Sending…";
-  sending = area.closest<HTMLElement>(".box");
+  drawSending();
   // Kept so that a message taken back to edit returns with its marks.
   const box = currentBoxes().find((saved) => saved.text === area.value);
   if (box) store(HELD_KEY, box);

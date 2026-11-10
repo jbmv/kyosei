@@ -715,6 +715,9 @@ def test_a_retraction_racing_a_delivery_has_exactly_one_outcome(
     bed: Bed, monkeypatch: pytest.MonkeyPatch, store_home: Path, on: str
 ) -> None:
     monkeypatch.setattr(bed.server.held_messages, "_ensure_watching", lambda: None)
+    # Each round sends the same words, a minute after the last (KYO-724's window).
+    ticks = iter(range(0, 10_000, 60))
+    monkeypatch.setattr(bed.server.held_messages, "_now", lambda: float(next(ticks)))
     outcomes = [_race_round(bed, on, number) for number in range(40)]
     actions = [row["action"] for row in log_rows(store_home)]
     assert actions.count("retract") == outcomes.count("retracted")
@@ -818,3 +821,40 @@ def test_send_now_with_nothing_held_is_refused(bed: Bed, on: str) -> None:
     assert status == 404 and answer["reason"] == "not-held", answer
     held = hold(bed, on)
     assert send_now(bed, on, held)[0] == 200
+
+
+# ------------------------------------------ KYO-724: the same prompt is not taken twice
+
+
+def test_an_identical_prompt_within_the_window_is_refused_and_a_different_one_is_not(
+    bed: Bed, on: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(bed.server.held_messages, "_now", lambda: clock[0])
+    held = hold(bed, on)
+    clock[0] = 1.5
+
+    status, refused = post(bed, HELD, MESSAGE, on)
+    assert status == 409 and refused["reason"] == "already-sent", refused
+    assert "different" in refused["error"]  # it names the remedy
+
+    # The remedy: a different prompt is held in its turn, or the first taken back.
+    status, other = post(bed, HELD, {"segments": [{"kind": "typed", "text": "another thing"}]}, on)
+    assert status == 409 and other["reason"] == "already-held"  # one is held at a time, as before
+    status, taken_back = retract_of(bed, on, held)
+    assert status == 200, taken_back
+    assert hold(bed, on)  # the same words again, once taken back, are accepted
+
+
+def test_an_identical_prompt_after_the_first_was_delivered_is_refused_then_accepted_later(
+    bed: Bed, store_home: Path, on: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(bed.server.held_messages, "_now", lambda: clock[0])
+    hold(bed, on)
+    serve_files.remove_private(held_file(store_home))  # delivered: nothing is held now
+    clock[0] = 3.0
+    status, refused = post(bed, HELD, MESSAGE, on)
+    assert status == 409 and refused["reason"] == "already-sent", refused
+    clock[0] = 60.0
+    assert hold(bed, on)  # the same words a minute on are a new prompt

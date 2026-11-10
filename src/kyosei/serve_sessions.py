@@ -191,12 +191,21 @@ def _tool_call_json(call: Any) -> dict:
     }
 
 
-def _subagent_json(ref: Any) -> dict:
+def _subagent_json(ref: Any, live: Any = None) -> dict:
+    """A subagent, with the model and effort its own transcript records (KYO-726).
+
+    Both are read from that file at each request, and are null when it records none, as before
+    the subagent's first reply. ``live`` is the session they are read through; without one,
+    both are null.
+    """
+    model, effort = (None, None) if live is None else live.subagent_model_effort(ref.agent_id)
     return {
         "agent_id": ref.agent_id,
         "tool_call_uuid": ref.tool_call_uuid,
         "description": ref.description,
         "agent_type": ref.agent_type,
+        "model": model,
+        "effort": effort,
     }
 
 
@@ -406,14 +415,19 @@ def parse_cursor(text: str | None, *, refuse: bool = True) -> Cursor | None:
     return Cursor(tuple(int(count) for count in counts), digest)
 
 
-def objects_json(lists: Iterable[list]) -> dict[str, list]:
-    """The lists as JSON, each object once at its latest version and in first-seen order."""
+def objects_json(lists: Iterable[list], live: Any = None) -> dict[str, list]:
+    """The lists as JSON, each object once at its latest version and in first-seen order.
+
+    ``live`` is the session a subagent's model and effort are read through (KYO-726).
+    """
     turns, replies, calls, subagents, outputs, deliveries = lists
     return {
         "turns": [_turn_json(item) for item in _latest(turns, lambda t: t.id)],
         "replies": [_reply_json(item) for item in _latest(replies, lambda r: r.message_id)],
         "tool_calls": [_tool_call_json(item) for item in _latest(calls, lambda c: c.call_id)],
-        "subagents": [_subagent_json(item) for item in _latest(subagents, lambda s: s.agent_id)],
+        "subagents": [
+            _subagent_json(item, live) for item in _latest(subagents, lambda s: s.agent_id)
+        ],
         "command_outputs": [_command_output_json(item) for item in outputs],
         "deliveries": [_delivery_json(item) for item in sorted(deliveries, key=lambda d: d.at)],
     }
@@ -553,7 +567,7 @@ class ProjectSessions:
             "readable": live.transcript.readable,
             "why": live.transcript.why,
             "facts": _facts_json(live.facts()),
-            **objects_json(lists),
+            **objects_json(lists, live),
         }
 
     def image(self, session_id: str, turn_id: str, index: int) -> tuple[str, bytes]:
@@ -597,12 +611,15 @@ class ProjectSessions:
                 "it holds",
             )
         dispatch, dispatch_why = self._dispatch_lines(named)
+        model, effort = live.subagent_model_effort(agent_id)
         return {
             "ok": True,
             "session_id": session_id,
             "agent_id": agent_id,
             "readable": reader.readable,
             "why": reader.why,
+            "model": model,
+            "effort": effort,
             "dispatch": dispatch,
             "dispatch_why": dispatch_why,
             "usage": _transcript_usage_json(reader),
@@ -853,7 +870,7 @@ class _Sampler:
             self._broadcast(
                 frame(
                     "transcript",
-                    {"session_id": self.session_id, "cursor": cursor, **objects_json(lists)},
+                    {"session_id": self.session_id, "cursor": cursor, **objects_json(lists, live)},
                     event_id=cursor,
                 )
             )
