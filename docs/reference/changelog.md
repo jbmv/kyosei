@@ -622,6 +622,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-10** — `KYO-741` (task) — Mac app: search in the chat
 - **2026-11-10** — `KYO-739` (task) — kyo show reads a criterion, gate, note or claim by its id
 - **2026-11-10** — `KYO-735` (task) — kyo serve: a project's files, as a tree and as bytes, behind a files permission
 - **2026-11-10** — `KYO-729` (bug) — Mac app: an anchor on a right-clicked word marks the word's first occurrence in the reply
