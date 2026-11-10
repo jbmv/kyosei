@@ -72,7 +72,9 @@ interface Menu {
 
 const chat = document.getElementById("chat")!;
 const live = document.getElementById("live")!;
-const scroller = document.scrollingElement!;
+// The chat scrolls in its own pane, so that its scroll bar stands at the composer's divider
+// and not at the window's edge, beyond the composer.
+const scroller = document.getElementById("page")!;
 const STICK_DISTANCE = 80;
 const elements = new Map<string, HTMLElement>();
 const rendered = new Map<string, string>();
@@ -85,6 +87,16 @@ window.addEventListener("error", (event) => log(`error: ${event.message}`));
 function atBottom(): boolean {
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < STICK_DISTANCE;
 }
+
+// A way back to the end of a chat that has been scrolled up, or landed in by a search.
+const jumpBottom = document.getElementById("jump-bottom")!;
+function drawJump(): void {
+  jumpBottom.classList.toggle("shown", !atBottom());
+}
+scroller.addEventListener("scroll", drawJump, { passive: true });
+jumpBottom.addEventListener("click", () => {
+  scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+});
 
 /**
  * When the main conversation last replied or called a tool. A subagent's work and a

@@ -194,7 +194,31 @@ a { color: var(--link); }
   font-size: 14px;
 }
 
-#page { padding-top: calc(46px + var(--views-height)); margin-right: var(--composer-width); }
+/* The chat's own scrolling pane, ending at the composer's divider as the other views' do. */
+#page {
+  position: fixed;
+  top: calc(46px + var(--views-height));
+  left: 0;
+  right: calc(var(--composer-width) + 6px);
+  bottom: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+}
+body.terminal-open #page { bottom: 46%; }
+html, body { overflow: hidden; }
+#jump-bottom {
+  position: fixed; z-index: 3; bottom: 18px;
+  left: calc((100vw - var(--composer-width) - 6px) / 2 - 17px);
+  width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+  background: var(--background); color: var(--muted); cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.08);
+}
+#jump-bottom .icon { width: 17px; height: 17px; }
+#jump-bottom:hover { color: var(--link); }
+#jump-bottom.shown { display: flex; }
+body.view-records #jump-bottom, body.view-files #jump-bottom { display: none; }
+body.terminal-open #jump-bottom { bottom: calc(46% + 18px); }
 
 #composer {
   position: fixed;
