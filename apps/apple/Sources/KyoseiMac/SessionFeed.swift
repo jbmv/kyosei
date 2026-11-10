@@ -261,6 +261,30 @@ final class SessionFeed {
         "image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf",
     ]
 
+    private static let largeImageBytes = 3 * 1024 * 1024
+    private static let longestEdge = 4096
+
+    /// An image as a JPEG no longer than `longestEdge` on a side, turned the right way up.
+    private static func jpeg(from data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: longestEdge,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        let output = NSMutableData()
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                output, "public.jpeg" as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(
+            destination, image,
+            [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? output as Data : nil
+    }
+
     /// Uploads a file pasted into a prompt to the machine the session runs on, and tells the
     /// composer the id and path the server gave it.
     func attach(body: [String: Any]) {
@@ -275,11 +299,13 @@ final class SessionFeed {
             return fail("That file could not be read.")
         }
         var type = body["type"] as? String ?? ""
-        if !Self.keptTypes.contains(type) {
-            guard let image = NSImage(data: data), let tiff = image.tiffRepresentation,
-                let jpeg = NSBitmapImageRep(data: tiff)?.representation(
-                    using: .jpeg, properties: [.compressionFactor: 0.9])
-            else { return fail("That kind of file cannot be attached.") }
+        // A photo pasted from the clipboard arrives as a PNG many times the size of the file
+        // it came from, so a large image is sent as JPEG, as is any type the server does not keep.
+        let large = type.hasPrefix("image/") && data.count > Self.largeImageBytes
+        if !Self.keptTypes.contains(type) || large {
+            guard let jpeg = Self.jpeg(from: data) else {
+                return fail("That kind of file cannot be attached.")
+            }
             data = jpeg
             type = "image/jpeg"
         }

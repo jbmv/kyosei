@@ -1712,6 +1712,16 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
     const text = event.clipboardData?.getData("text/plain");
     if (text) pasted.set(area, [...(pasted.get(area) ?? []), text]);
   });
+  // An image or PDF dragged in is attached. Any other file is left to the text area, which
+  // takes its path as text.
+  area.addEventListener("drop", (event) => {
+    const files = Array.from(event.dataTransfer?.files ?? [])
+      .filter((file) => file.type.startsWith("image/") || file.type === "application/pdf");
+    if (!files.length) return;
+    event.preventDefault();
+    area.focus();
+    for (const file of files) attachFile(area, file);
+  });
   area.addEventListener("input", () => {
     fitBox(area);
     trackEdit(area);

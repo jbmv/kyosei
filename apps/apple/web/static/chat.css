@@ -558,7 +558,7 @@ body.terminal-open #terminal { display: block; }
 #mark-tip div + div { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 #mark-tip small { display: block; margin-top: 2px; color: var(--muted); }
 
-#top-activity { margin-right: 14px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#top-activity { margin-left: 14px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #top-activity:empty { display: none; }
 #top-activity.amber { color: #c98a1b; }
 #top-activity.red { color: var(--apple-red); }
