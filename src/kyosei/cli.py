@@ -2996,7 +2996,8 @@ def build_parser() -> KyoseiParser:
     p_discuss.add_argument("id", nargs="?", help="note and close: the discussion, PREFIX-N")
     p_discuss.add_argument("--title", help="open: the topic, one line")
     p_discuss.add_argument(
-        "--at",
+        "--at-prompt",
+        dest="at",
         metavar="PROMPT",
         help="the person's turn to stamp, a prompt id or transcript record uuid from the turn "
         "index (a unique prefix will do); defaults to their latest confirmed turn",

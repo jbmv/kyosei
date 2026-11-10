@@ -402,7 +402,7 @@ kinds:
   references, since a knowledge kind has no status flow. `requires_discussion`, set on the
   shipped `decision`, is consumed by `kyo new` and `kyo spawn`: a decision is filed from its
   discussion (spawned from it, from a record it produced, or `--discussion`), or with
-  `--opened-late`, which opens one in the same transaction at the turn `--at` names and marks
+  `--opened-late`, which opens one in the same transaction at the turn `--at-prompt` names and marks
   it late for good, `index_state: absent` where there is no index. Otherwise the filing is
   refused (`decision-requires-discussion`). It applies where `people:` declares someone, as
   credits do, so an upgrade refuses nothing before the operator has chosen. A decided credit

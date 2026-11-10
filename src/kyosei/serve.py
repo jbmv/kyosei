@@ -249,6 +249,8 @@ NOT_SERVED: dict[str, str] = {
     "check-command": _GUARD,
     "check-push": _GUARD,
     "pre-tool-use": _GUARD,
+    # KYO-658: it stamps a person's turn from this machine's turn index into the store.
+    "discuss": _WRITES_STORE,
     "turns": "it is a session hook writing the local turn index and archive, not a read",
     "install-hooks": _WRITES_FILES,
     "install-skill": _WRITES_FILES,

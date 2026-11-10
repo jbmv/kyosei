@@ -7,7 +7,7 @@ life is its turn references (``turn_refs``, ``KYO-n.sN``), each naming one of th
 turns as the turn index (:mod:`kyosei.cmd_turns`) recorded it:
 
 * ``kyo discuss open --title "<topic>"`` files one with an ``opened`` reference to the
-  latest confirmed person turn of ``$CLAUDE_CODE_SESSION_ID``. ``--at <prompt>`` names an
+  latest confirmed person turn of ``$CLAUDE_CODE_SESSION_ID``. ``--at-prompt <prompt>`` names an
   earlier indexed turn instead, and the lag between that turn and the opening is shown.
 * ``kyo discuss note <id> --file F`` keeps what was put to the person, the options and the
   recommendation, as a record note, with a ``note`` reference to the turn it answers.
@@ -30,7 +30,7 @@ time but its own ``created_at``.
 DECISIONS REQUIRE A DISCUSSION (DC3). A kind whose policy sets ``requires_discussion`` (the
 shipped ``decision``) is filed, by ``kyo new`` or ``kyo spawn``, from its discussion: spawned
 from it, or from a record the discussion produced, or naming it with ``--discussion``. With
-none, ``--opened-late`` opens one in the same transaction, at the turn ``--at`` names, and
+none, ``--opened-late`` opens one in the same transaction, at the turn ``--at-prompt`` names, and
 its ``opened`` reference is ``late`` for good; with no index it records ``index_state:
 absent``. Otherwise the filing is refused under ``decision-requires-discussion``
 (:func:`filing_discussion`). As with credits (KYO-656, DC12), the rule applies only where
@@ -80,10 +80,10 @@ ROLE_OPENED = "opened"
 ROLE_NOTE = "note"
 ROLE_CLOSED = "closed"
 
-#: How many of the session's confirmed turns a refusal over ``--at`` lists.
+#: How many of the session's confirmed turns a refusal over ``--at-prompt`` lists.
 LISTED_TURNS = 5
 
-#: The shortest ``--at`` prefix accepted, so a one-character typo matches nothing.
+#: The shortest ``--at-prompt`` prefix accepted, so a one-character typo matches nothing.
 MIN_AT_PREFIX = 4
 
 
@@ -214,8 +214,8 @@ def current_stamp(ctx: Context, store: Store, at: str | None = None) -> TurnStam
             return _from_line(_match_at(lines, at, session))
     if at is not None:
         raise UsageError(
-            f"--at names a turn of the turn index, and there is none to name ({stamp.why}); "
-            "drop --at, and the opening is recorded with index_state absent"
+            f"--at-prompt names a turn of the turn index, and there is none to name ({stamp.why}); "
+            "drop --at-prompt, and the opening is recorded with index_state absent"
         )
     return stamp
 
@@ -235,7 +235,7 @@ def _match_at(lines: list[dict], at: str, session: str) -> dict:
     raise UsageError(
         "\n".join(
             [
-                f"--at {at!r} {what} of the person's confirmed turns in session {session}; "
+                f"--at-prompt {at!r} {what} of the person's confirmed turns in session {session}; "
                 "give a prompt id or a transcript record uuid, whole or by a unique prefix of "
                 f"at least {MIN_AT_PREFIX} characters. The latest:",
                 *_turn_listing(lines),
@@ -452,7 +452,7 @@ class FilingDiscussion:
 
 
 def add_filing_flags(parser) -> None:
-    """``--discussion``, ``--opened-late`` and ``--at`` on `kyo new` and `kyo spawn`."""
+    """``--discussion``, ``--opened-late`` and ``--at-prompt`` on `kyo new` and `kyo spawn`."""
     parser.add_argument(
         "--discussion",
         metavar="ID",
@@ -463,10 +463,11 @@ def add_filing_flags(parser) -> None:
         "--opened-late",
         action="store_true",
         help="no discussion was opened: open one now, in the same act, marked late for "
-        "good. With a turn index, --at names the person's turn it began at",
+        "good. With a turn index, --at-prompt names the person's turn it began at",
     )
     parser.add_argument(
-        "--at",
+        "--at-prompt",
+        dest="at",
         metavar="PROMPT",
         help="with --opened-late, or `kyo discuss open`: the person's turn the discussion "
         "began at, a prompt id or transcript record uuid from the turn index (a unique "
@@ -491,7 +492,7 @@ def filing_discussion(
     late = bool(getattr(args, "opened_late", False))
     at = getattr(args, "at", None)
     if not kind_def.requires_discussion:
-        given_flags = (("--discussion", given), ("--opened-late", late), ("--at", at))
+        given_flags = (("--discussion", given), ("--opened-late", late), ("--at-prompt", at))
         flags = [flag for flag, value in given_flags if value]
         if flags:
             raise UsageError(
@@ -513,7 +514,7 @@ def filing_discussion(
         )
     if at is not None and not late:
         raise UsageError(
-            "--at goes with --opened-late here: it names where the late discussion began"
+            "--at-prompt goes with --opened-late here: it names where the late discussion began"
         )
     from_source = None
     via_source = False
@@ -546,7 +547,7 @@ def filing_discussion(
                     f"--opened-late opens the discussion at the person's turn it began at, and "
                     f"session {opening.session} has a turn index, so `{command}` names that "
                     "turn: nothing was written",
-                    f"add --at <prompt>, a prompt id from the index. The latest of the "
+                    f"add --at-prompt <prompt>, a prompt id from the index. The latest of the "
                     f"person's {len(lines)} confirmed turns:",
                     *_turn_listing(lines),
                 ],
@@ -564,8 +565,8 @@ def filing_discussion(
             "file it from the discussion `kyo discuss open` filed: `kyo spawn <discussion-id> "
             f"--kind {kind_def.name}`, or give the same command --discussion <discussion-id>",
             "or, when no discussion was opened, give the same command --opened-late (with "
-            "--at <prompt> where the session has a turn index), which opens one now and marks "
-            "it late for good",
+            "--at-prompt <prompt> where the session has a turn index), which opens one now and "
+            "marks it late for good",
         ],
     )
 

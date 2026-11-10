@@ -7172,7 +7172,7 @@ def test_kyo658_opened_late_with_a_turn_index_is_cleared_by_at(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--opened-late` in a session the turn index holds names where the discussion began;
-    the refusal lists the person's turns, and `--at` with one of them files the decision."""
+    the refusal lists the person's turns, and `--at-prompt` with one of them files the decision."""
     root, record, kyo = _k644_project(tmp_path, discussions=True)
     session = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session)
@@ -7189,9 +7189,9 @@ def test_kyo658_opened_late_with_a_turn_index_is_cleared_by_at(
     credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
     late = ("new", "decision", "--title", "Use SQLite", *credit, "--opened-late")
     refused = kyo(*late)
-    assert refused.code == EXIT_CONTRACT and "--at <prompt>" in refused.err
+    assert refused.code == EXIT_CONTRACT and "--at-prompt <prompt>" in refused.err
     assert "aaaaaaaa-0000-4000-8000-000000000001" in refused.err
-    assert kyo(*late, "--at", "aaaaaaaa-0000-4000-8000-000000000001").code == 0
+    assert kyo(*late, "--at-prompt", "aaaaaaaa-0000-4000-8000-000000000001").code == 0
 
 
 def _k644_late(tmp_path: Path) -> tuple[Path, Run, str, str, tuple[str, ...]]:

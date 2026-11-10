@@ -37,7 +37,7 @@ is the disposal (KYO-44). Each kind declares:
 record of the default `discussion` kind: `archetype: knowledge`, not counted, swept, and
 filed only by `kyo discuss open --title "..."` (its `accepts_from` is empty). The command
 writes a turn reference (`KYO-n.sN`) to the person's latest confirmed turn of
-`$CLAUDE_CODE_SESSION_ID` in the turn index, or to the turn `--at <prompt>` names; where
+`$CLAUDE_CODE_SESSION_ID` in the turn index, or to the turn `--at-prompt <prompt>` names; where
 there is no index (no session, or a project that has not opted in to reading transcripts)
 the reference says `index_state: absent`. `kyo discuss note <id> --file F` keeps what was put
 to the person as a record note with a turn reference. Spawning a decision, proposal, plan

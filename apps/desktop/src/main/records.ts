@@ -119,6 +119,7 @@ export const KYO_WRITING_COMMANDS: readonly string[] = [
   "init",
   "new",
   "credit",
+  "discuss",
   "promote",
   "spawn",
   "edit",

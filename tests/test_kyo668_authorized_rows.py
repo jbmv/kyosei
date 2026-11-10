@@ -9,8 +9,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .conftest import CREDIT_ELSEWHERE, declare_person, new_record
+import pytest
+
+from .conftest import (
+    CREDIT_ELSEWHERE,
+    declare_person,
+    drop_discussion_requirement,
+    new_record,
+)
 from .test_kyo644_credits import _approval, _credits, _file, _legacy_verdict, _subjects
+
+
+@pytest.fixture(autouse=True)
+def _decisions_without_discussions(project: Path) -> None:
+    """KYO-658: the approvals here are filed for their credit, not their discussion."""
+    drop_discussion_requirement(project)
 
 
 def _batch(tmp_path: Path, *lines: str) -> str:

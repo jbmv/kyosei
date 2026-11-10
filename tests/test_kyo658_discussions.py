@@ -184,15 +184,15 @@ def test_no_flag_of_kyo_discuss_takes_a_time(kyo) -> None:
 
 
 def test_at_opens_at_an_earlier_indexed_turn_and_shows_the_lag(kyo, indexed: Path) -> None:
-    several = kyo("discuss", "open", "--title", "x", "--at", PROMPT_1[:12])
+    several = kyo("discuss", "open", "--title", "x", "--at-prompt", PROMPT_1[:12])
     assert several.code == 64 and "matches several" in several.err
-    opened = kyo("discuss", "open", "--title", "x", "--at", "p-1", "--json")
+    opened = kyo("discuss", "open", "--title", "x", "--at-prompt", "p-1", "--json")
     assert opened.code == 0, opened
     ref = _refs(kyo, opened.json["id"])[0]
     assert ref["prompt_id"] == PROMPT_1 and ref["turn"] == "p-1"
     shown = kyo("show", opened.json["id"])
     assert f"prompt {PROMPT_1} at {ref['at']}" in shown.out
-    refused = kyo("discuss", "open", "--title", "x", "--at", "zzzz")
+    refused = kyo("discuss", "open", "--title", "x", "--at-prompt", "zzzz")
     assert refused.code != 0 and "matches none" in refused.err and PROMPT_3 in refused.err
 
 
@@ -203,7 +203,7 @@ def test_with_no_index_the_opening_is_recorded_index_absent(kyo, session: str) -
     assert ref["index_state"] == "absent" and ref["session"] == SESSION
     assert ref["at"] is None and ref["prompt_id"] is None and ref["turn"] is None
     assert "index absent" in kyo("show", opened.json["id"]).out
-    refused = kyo("discuss", "open", "--title", "x", "--at", PROMPT_1)
+    refused = kyo("discuss", "open", "--title", "x", "--at-prompt", PROMPT_1)
     assert refused.code != 0 and "none to name" in refused.err
 
 
@@ -296,10 +296,10 @@ def test_opened_late_with_an_index_names_where_it_began(
 ) -> None:
     flags = _decision_flags(indexed, tmp_path)
     refused = kyo("new", "decision", "--title", "Keep the cache", *flags, "--opened-late")
-    assert refused.code == 2 and "--at <prompt>" in refused.err and PROMPT_1 in refused.err
+    assert refused.code == 2 and "--at-prompt <prompt>" in refused.err and PROMPT_1 in refused.err
     filed = kyo(
         "new", "decision", "--title", "Keep the cache", *flags, "--opened-late",
-        "--at", PROMPT_1, "--json",
+        "--at-prompt", PROMPT_1, "--json",
     )  # fmt: skip
     assert filed.code == 0, filed
     refs = _refs(kyo, filed.json["discussion_id"])
@@ -328,7 +328,7 @@ def test_a_named_discussion_is_linked_and_closed(kyo, project: Path, tmp_path: P
 def test_a_decided_credit_from_a_discussion_takes_its_span_from_the_turn_references(
     kyo, indexed: Path, tmp_path: Path
 ) -> None:
-    opened = kyo("discuss", "open", "--title", "x", "--at", PROMPT_1, "--json").json["id"]
+    opened = kyo("discuss", "open", "--title", "x", "--at-prompt", PROMPT_1, "--json").json["id"]
     decided = kyo(
         "spawn", opened, "--kind", "decision", "--title", "Keep the cache",
         *_decision_flags(indexed, tmp_path), "--json",
@@ -348,7 +348,7 @@ def test_a_decided_credit_from_a_discussion_takes_its_span_from_the_turn_referen
 
 
 def test_an_explicit_span_is_kept_over_the_derived_one(kyo, indexed: Path, tmp_path: Path) -> None:
-    opened = kyo("discuss", "open", "--title", "x", "--at", PROMPT_1, "--json").json["id"]
+    opened = kyo("discuss", "open", "--title", "x", "--at-prompt", PROMPT_1, "--json").json["id"]
     decided = kyo(
         "spawn", opened, "--kind", "decision", "--title", "Keep the cache",
         *_decision_flags(indexed, tmp_path), "--span-first", "a-1", "--span-last", "p-3",
@@ -362,7 +362,7 @@ def test_an_explicit_span_is_kept_over_the_derived_one(kyo, indexed: Path, tmp_p
 def test_a_decision_spawned_from_a_proposal_the_discussion_produced_inherits_it(
     kyo, indexed: Path, tmp_path: Path
 ) -> None:
-    opened = kyo("discuss", "open", "--title", "x", "--at", PROMPT_1, "--json").json["id"]
+    opened = kyo("discuss", "open", "--title", "x", "--at-prompt", PROMPT_1, "--json").json["id"]
     proposal = kyo(
         "spawn", opened, "--kind", "proposal", "--title", "Design it",
         "--criteria-file", _file(tmp_path, "c.txt", "it is argued\n"),

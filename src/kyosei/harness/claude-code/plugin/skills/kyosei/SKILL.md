@@ -147,8 +147,8 @@ it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo sp
 record's own kind (KYO-50). Before answering a turn that puts a choice to the person, run
 `kyo discuss open --title "<topic>"`, which stamps it (KYO-658); file the decision from it, `kyo
 spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
-(KYO-644). With none opened, `kyo new decision` takes `--opened-late --at <prompt>`. One needing
-design work first is a proposal.
+(KYO-644). With none open, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
+needing design first is a proposal.
 
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing
 still a want or a question, leave it in `ideas/`.

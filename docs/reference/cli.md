@@ -493,7 +493,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at PROMPT] [--file FILE] [--dropped] [--why WHY] {open,note,close} [id]`
+Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--why WHY] {open,note,close} [id]`
 
 ### Positional arguments
 
@@ -503,7 +503,7 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 ### Options
 
 - `--title TITLE` — optional. open: the topic, one line
-- `--at PROMPT` — optional. the person's turn to stamp, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults to their latest confirmed turn
+- `--at-prompt PROMPT` — optional. the person's turn to stamp, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults to their latest confirmed turn
 - `--file FILE` — optional. note: what was put to the person, the options and the recommendation, from a file or '-' for stdin (law 5)
 - `--dropped` — optional. close: the discussion produced nothing; needs --why
 - `--why WHY` — optional. close --dropped: why nothing was produced, one line
@@ -989,7 +989,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
+Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
 
 ### Positional arguments
 
@@ -1015,8 +1015,8 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
 - `--discussion ID` — optional. the discussion this record came from, which filing it closes; a kind whose policy sets requires_discussion (the default `decision`) names one (KYO-658)
-- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at names the person's turn it began at
-- `--at PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
+- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
+- `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
 - `--from FILE` — optional. file the whole record from one markdown file instead of --title/--plan/--scope/--description-file/--criteria-file/--touches-file: front matter for title/scope/plan/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)
@@ -1522,7 +1522,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at PROMPT] [--check] [--force] [--no-prior-art] SOURCE_ID`
+Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--check] [--force] [--no-prior-art] SOURCE_ID`
 
 ### Positional arguments
 
@@ -1548,8 +1548,8 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
 - `--discussion ID` — optional. the discussion this record came from, which filing it closes; a kind whose policy sets requires_discussion (the default `decision`) names one (KYO-658)
-- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at names the person's turn it began at
-- `--at PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
+- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
+- `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)
 - `--no-prior-art` — optional. skip the prior-art search kyosei/config.yml's recx.prior_art would run for this record (KYO-585); `kyo prior-art <id>` runs it later
