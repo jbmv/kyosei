@@ -1004,7 +1004,8 @@ const kyo = {
   /** A held message taken back, to edit. */
   retracted(frame: { text: string }): void {
     showHeld(null);
-    showTexts([frame.text, ...currentTexts()]);
+    const held = stored<SavedBox | null>(HELD_KEY, null);
+    showTexts([frame.text, ...currentTexts()], [...(held ? [held] : []), ...currentBoxes()]);
   },
 
   /** The server's draft for a session just opened: none yet is `etag: null`. */
@@ -1157,9 +1158,9 @@ function drawMarks(area: HTMLTextAreaElement): void {
     const items = marks.items.get(id) ?? [];
     if (!items.length) return [];
     // One thing shows as what it is, and several as their number.
-    const label = items.length > 1 ? String(items.length) : items[0].kind === "tag" ? "#" : "↗";
+    const label = items.length > 1 ? String(items.length) : items[0].kind === "tag" ? "#" : "⚓\uFE0E";
     const mark = boxButton("mark held", label, () => showMark(area, id));
-    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `↗ ${item.words}`)).join("\n");
+    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}` : `⚓\uFE0E ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
     return [mark];
   });
@@ -1209,7 +1210,7 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
       chip.textContent = `#${item.name}`;
     } else {
       // An anchor's chip goes to the place it names.
-      chip.append(boxButton("mark-anchor", `↗ ${item.words}`, () => reveal(item)));
+      chip.append(boxButton("mark-anchor", `⚓\uFE0E ${item.words}`, () => reveal(item)));
     }
     chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
     return chip;
@@ -1621,6 +1622,27 @@ function messageSegments(area: HTMLTextAreaElement): { kind: string; text: strin
   return segments;
 }
 
+const HELD_KEY = "composer-held";
+
+/** A prompt's marks as the server takes them: the line, its anchors and its tags. */
+function sentMarks(area: HTMLTextAreaElement): unknown[] {
+  const marks = marksOf.get(area)!;
+  return marks.ids.flatMap((id, line) => {
+    const items = marks.items.get(id) ?? [];
+    if (!items.length) return [];
+    const anchors = items.flatMap((item) => {
+      if (item.kind !== "anchor") return [];
+      const place = { kind: "turn", session: item.session, start: item.start, end: item.end };
+      // A reply is named by its message, which may join several records; a prompt by its own.
+      return [item.key.startsWith("r:")
+        ? { ...place, message: item.key.slice(2) }
+        : { ...place, uuid: item.key.slice(2) }];
+    });
+    const tags = items.flatMap((item) => (item.kind === "tag" ? [item.name] : []));
+    return [{ line, anchors, tags }];
+  });
+}
+
 /** The box whose prompt the server has been asked to take, until it answers. */
 let sending: HTMLElement | null = null;
 
@@ -1633,7 +1655,10 @@ function attemptSend(area: HTMLTextAreaElement): void {
   }
   composerNote.textContent = "Sending…";
   sending = area.closest<HTMLElement>(".box");
-  post("send", { segments });
+  // Kept so that a message taken back to edit returns with its marks.
+  const box = currentBoxes().find((saved) => saved.text === area.value);
+  if (box) store(HELD_KEY, box);
+  post("send", { segments, marks: sentMarks(area) });
 }
 
 const heldBox = document.getElementById("held")!;

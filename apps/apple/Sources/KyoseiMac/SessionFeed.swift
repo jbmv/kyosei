@@ -144,8 +144,12 @@ final class SessionFeed {
         return object?["error"] as? String ?? "The server refused that."
     }
 
-    /// Hands a message to the server, which holds it until the turn has ended.
+    /// Hands a message to the server, which holds it until the turn has ended. A prompt with
+    /// marks goes by the route that puts each mark's anchors above its paragraph and files it.
     func sendMessage(body: [String: Any]) {
+        let marked = !((body["marks"] as? [Any]) ?? []).isEmpty
+        var body = body
+        if !marked { body["marks"] = nil }
         guard let session = current, let token = Self.deviceToken(),
             let data = try? JSONSerialization.data(withJSONObject: body)
         else {
@@ -155,7 +159,8 @@ final class SessionFeed {
         Task {
             guard
                 let reply = try? await client.authorised(
-                    "POST", sessionPath(session, "held"), token: token, body: data)
+                    "POST", sessionPath(session, marked ? "send-prompt" : "held"), token: token,
+                    body: data)
             else {
                 send("sent", #"{"error": "The server could not be reached."}"#)
                 return
@@ -228,7 +233,10 @@ final class SessionFeed {
             }
             let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
             let held = object?["held"] as? [String: Any] ?? object ?? [:]
-            let segments = held["segments"] as? [[String: Any]] ?? []
+            // A prompt sent with marks was delivered with lines added above its paragraphs,
+            // so what returns to the composer is the prompt as it was typed.
+            let typed = (held["prompt"] as? [String: Any])?["segments"] as? [[String: Any]]
+            let segments = typed ?? held["segments"] as? [[String: Any]] ?? []
             let text = segments.compactMap { $0["text"] as? String }.joined()
             send("retracted", #"{"text": \#(quoted(text))}"#)
         }
