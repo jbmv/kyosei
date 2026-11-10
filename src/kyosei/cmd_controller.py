@@ -503,6 +503,11 @@ def attach_argv(tmux: Tmux, prefix: str) -> list[str]:
     return [tmux.binary, *tmux.socket_args, "attach", "-t", f"={prefix}"]
 
 
+class AlreadyRunning(KyoseiError):
+    """``start``'s refusal when the project's session is live, so that ``kyo serve``'s start
+    route (KYO-719) can answer it as a conflict and not as a failed start."""
+
+
 def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> dict:
     session = project.prefix
     command = home_settings.load(environ).controller_argv(session)
@@ -519,7 +524,7 @@ def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> di
     existing = session_panes(tmux, session) if running else []
     live = [pane for pane in existing if not pane.dead]
     if live:
-        raise KyoseiError(
+        raise AlreadyRunning(
             f"orchestrator session {session} is already running on {tmux.spelled} (claude "
             f"process {live[0].pid}, in {live[0].cwd}); attach to it "
             f"(`{attach_command(tmux, session)}`), or end it first (`kyo orchestrator stop "
@@ -572,6 +577,32 @@ def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> di
         "remote_control_name": remote_control_name(command),
         "server_was_running": running,
     }
+
+
+def action_document(action: str, project: ControllerProject, data: dict) -> dict:
+    """What ``kyo orchestrator <action> <project> --json`` prints."""
+    return {"ok": True, "command": "orchestrator", "action": action, **project.to_json(), **data}
+
+
+def start_registered(root: str | Path, environ: dict[str, str]) -> dict:
+    """Start the session of the registered project at ``root``; returns what ``kyo
+    orchestrator start <project> --json`` prints (KYO-719, decision KYO-718).
+
+    This is what ``kyo serve``'s start route calls. The tmux server is resolved here, from
+    ``environ`` as the command resolves it, because no ``kyosei.serve*`` module may hold one:
+    only :mod:`kyosei.serve_send` reaches a pane's input. ``environ`` is the server's own. A
+    server that launchd started has no ``TMUX`` or ``TMUX_TMPDIR`` and none of
+    :data:`SSH_ENV`, so the socket is the one a shell reaches after :func:`controller_env`.
+    """
+    project = _project_at(root, registered=True)
+    if project is None:
+        raise KyoseiError(
+            f"the project at {root} has no orchestrator session to start, because its "
+            "config.yml gives no usable project_prefix, which names the session; set "
+            "`project_prefix` there to 2 to 16 capital letters and digits beginning with a "
+            "letter"
+        )
+    return action_document("start", project, start(project, resolve_tmux(environ), environ))
 
 
 def stop(project: ControllerProject, tmux: Tmux) -> dict:
@@ -969,7 +1000,4 @@ def cmd_controller(ctx: Context, args: Namespace) -> Output:
         lines = [
             f"kyo orchestrator: stopped {data['session']} for {project.name} on {data['socket']}"
         ]
-    return Output(
-        lines,
-        {"ok": True, "command": "orchestrator", "action": args.action, **project.to_json(), **data},
-    )
+    return Output(lines, action_document(args.action, project, data))
