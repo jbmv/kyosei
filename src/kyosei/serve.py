@@ -53,7 +53,7 @@ reading transcripts. This module only routes them;
 :mod:`kyosei.serve_sessions` holds the rest.
 
 THE SEND ROUTES (KYO-699). ``sessions/{id}/send``, ``.../slash`` and ``.../interrupt`` (POST)
-are the only routes that change a session. They are off until the machine's owner sets
+change a session, each after reading its screen. They are off until the machine's owner sets
 ``serve_send: true`` in ``$KYOSEI_HOME/settings.yml``, need a device token holding the send
 permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is the one
 ``kyosei.serve*`` module that can reach the session layer's sending half.
@@ -74,6 +74,14 @@ composer prompt with its marks, which needs the ``send`` permission and ``notes`
 and so are ``sessions/{id}/marks`` and ``tags`` (GET, KYO-710), which only read.
 They are the one exception to a read-only store: each write opens its own connection and goes
 through the transaction ``kyo notes`` uses.
+
+THE TERMINAL ROUTES (KYO-721). ``sessions/{id}/terminal`` (GET, Server-Sent Events) streams a
+session's pane as its program draws it, and ``.../terminal/input`` and ``.../terminal/resize``
+(POST) type into it and state the size of the client's view. They send whatever is typed to
+whatever the screen shows, so they need a device token holding the ``terminal`` permission as
+well as the machine's ``serve_send``, and each connection is logged;
+:mod:`kyosei.serve_terminal` holds that, and reaches the pane through a tmux control client of
+its own.
 
 THE START ROUTE (KYO-719, decision KYO-718). ``orchestrator/start`` (POST) starts the
 project's orchestrator session as ``kyo orchestrator start`` does, and is the one process
@@ -324,6 +332,12 @@ _NOTE_TAGS_ROUTE = "tags"
 SESSION_MARKS_ROUTE = "marks"
 TAGS_ROUTE = "tags"
 
+#: KYO-721: ``sessions/{id}/terminal`` (GET, a stream) and the POST routes beneath it.
+#: :data:`kyosei.serve_terminal.ROUTE`, ``INPUT`` and ``RESIZE``, spelled here because that
+#: module imports this one.
+SESSION_TERMINAL_ROUTE = "terminal"
+SESSION_TERMINAL_ACTIONS = ("input", "resize")
+
 #: KYO-719: ``orchestrator/start`` (POST), the one process this server starts.
 #: :data:`kyosei.serve_orchestrator.ROUTE` and ``START``, spelled here because that module
 #: imports this one.
@@ -506,6 +520,10 @@ class KyoServer(ThreadingHTTPServer):
 
         self.held_poll_seconds = HELD_POLL_SECONDS
         self.held_messages = HeldMessages(self)
+        #: KYO-721: the open terminal connections, each a tmux control client.
+        from .serve_terminal import Terminals
+
+        self.terminals = Terminals(self)
         self.pid = os.getpid()
         self.started_at = clock.now()
         try:
@@ -523,6 +541,7 @@ class KyoServer(ThreadingHTTPServer):
 
     def shutdown(self) -> None:
         self.stopping.set()
+        self.terminals.close_all()
         super().shutdown()
 
     # ------------------------------------------------------------- execution
@@ -771,6 +790,15 @@ class ServeHandler(BaseHTTPRequestHandler):
             and rest[4] == SESSION_ATTACHMENTS_ROUTE
         ):
             allowed = ("POST",) if len(rest) == 5 else ("GET",)
+        elif (
+            len(rest) in (5, 6)
+            and rest[0] == "projects"
+            and rest[2] == "sessions"
+            and rest[4] == SESSION_TERMINAL_ROUTE
+        ):
+            if len(rest) == 6 and rest[5] not in SESSION_TERMINAL_ACTIONS:
+                raise _no_route(method, split.path)
+            allowed = ("GET",) if len(rest) == 5 else ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == "sessions":
             if not (
                 len(rest) == 3
@@ -808,6 +836,8 @@ class ServeHandler(BaseHTTPRequestHandler):
                 return self._session_composer(method, rest[1], rest[3], rest[4], split.query)
             if len(rest) >= 5 and rest[4] == SESSION_ATTACHMENTS_ROUTE:
                 return self._session_attachments(rest[1], rest[3], rest[5:], split.query)
+            if len(rest) >= 5 and rest[4] == SESSION_TERMINAL_ROUTE:
+                return self._session_terminal(rest[1], rest[3], rest[5:], split.query)
             return self._session_route(rest[1], rest[3:], split.query)
         return self._file_route(method, rest[1], rest[2], "/".join(rest[3:]))
 
@@ -1087,6 +1117,56 @@ class ServeHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
             raise
         return status, _json_bytes(document)
+
+    def _session_terminal(
+        self, name: str, session_id: str, rest: list[str], query: str
+    ) -> tuple | None:
+        """The terminal stream and its two POST routes. :mod:`kyosei.serve_terminal` decides."""
+        from . import serve_terminal
+
+        terminals = self.server.terminals
+        authorization = self.headers.get("Authorization")
+        if rest:
+            if query:
+                raise Refusal(
+                    400,
+                    f"the terminal {rest[0]} route takes no query string; send the token as "
+                    "`Authorization: Bearer <token>` and everything else in the JSON body",
+                )
+            act = terminals.input if rest[0] == serve_terminal.INPUT else terminals.resize
+            return 200, _json_bytes(act(name, session_id, authorization, self._body))
+        connection = terminals.open(
+            name,
+            lambda: self.server.project(name).root,
+            session_id,
+            authorization,
+            lambda: serve_terminal.size_from_query(_query_pairs(query)),
+        )
+        reason = "client-left"
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self._common_headers()
+            self.end_headers()
+            self.close_connection = True
+
+            def write(chunk: bytes) -> None:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+
+            reason = terminals.serve(
+                connection,
+                write,
+                self.server.stopping,
+                self._client_gone,
+                keepalive_seconds=self.server.keepalive_seconds,
+            )
+        except OSError:  # the client left before the headers were written
+            pass
+        finally:
+            terminals.close(connection, reason)
+        return None
 
     def _note_route(self, method: str, name: str, rest: list[str], query: str) -> tuple:
         """Every note route. Everything it decides is :mod:`kyosei.serve_notes`'s."""
@@ -1406,8 +1486,9 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "
         f".../send-prompt or .../attachments, GET .../attachments/{{attachment}}, GET/POST "
         f"{project}/notes, GET {project}/notes/{{id}}, POST {project}/notes/{{id}}/tags, "
-        f"GET {project}/tags, GET {project}/sessions/{{id}}/marks and POST "
-        f"{project}/orchestrator/start",
+        f"GET {project}/tags, GET {project}/sessions/{{id}}/marks, GET "
+        f"{project}/sessions/{{id}}/terminal, POST .../terminal/input or .../terminal/resize, "
+        f"and POST {project}/orchestrator/start",
     )
 
 

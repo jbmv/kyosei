@@ -674,7 +674,10 @@ def test_only_the_send_module_can_reach_the_sending_functions() -> None:
         path.name: found
         for path in modules
         if (found := reaches_send(path.read_text(encoding="utf-8"), path.name))
-        and path.name != "serve_send.py"
+        # serve_terminal.py is the deliberate exception (KYO-721): it types what a person
+        # types, through a client of its own, and tests/test_kyo_serve_terminal.py pins
+        # what it reaches.
+        and path.name not in ("serve_send.py", "serve_terminal.py")
     }
     assert offenders == {}, f"only kyosei.serve_send may reach the sending half: {offenders}"
 
