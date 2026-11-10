@@ -267,6 +267,7 @@ def _facts_json(facts: Any) -> dict | None:
         },
         "lines": _lines_json(facts.lines),
         "limits": facts.limits,
+        "cache": facts.cache,
     }
 
 
@@ -863,6 +864,12 @@ class _Sampler:
             or (
                 self._facts is not None
                 and session_layer.read_limits(live.environ) != held.get("limits")
+            )
+            # KYO-715: a session's prompt cache is saved by its status line, which no
+            # transcript row announces, so a saved change is looked for on each tick too.
+            or (
+                self._facts is not None
+                and session_layer.read_cache(live.session_id, live.environ) != held.get("cache")
             )
         ):
             now_facts = _facts_json(live.facts())

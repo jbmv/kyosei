@@ -270,3 +270,127 @@ def test_read_limits_is_none_with_no_file_or_an_unreadable_one(store_home: Path)
     store_home.mkdir(parents=True, exist_ok=True)
     limits_file(store_home).write_text("{oops", encoding="utf-8")
     assert cmd_statusline.read_limits() is None
+
+
+# ------------------------------------------------ KYO-715: a session's prompt cache
+
+EXPIRES = 1_999_999_000
+
+CACHED = {
+    **DOCUMENTED,
+    "prompt_cache": {
+        "warm": True,
+        "caching_observed": True,
+        "ttl": "5m",
+        "expires_at": EXPIRES,
+        "hit_ratio": 0.92,
+        "recache_tokens_if_cold": 45000,
+    },
+}
+
+
+def cache_file(store_home: Path) -> Path:
+    return store_home / cmd_statusline.CACHE_FILE
+
+
+def saved_sessions(store_home: Path) -> dict:
+    return json.loads(cache_file(store_home).read_text(encoding="utf-8"))["sessions"]
+
+
+def test_the_prompt_cache_is_saved_for_its_session_beside_the_limits(store_home: Path) -> None:
+    before = datetime.now(UTC)
+    run = statusline(CACHED)
+    assert run.code == 0, run
+    assert run.out == "5-hour 24% · weekly 41%\n"
+    entry = saved_sessions(store_home)["abc123"]
+    assert {key: entry[key] for key in ("warm", "expires_at", "recache_tokens_if_cold")} == {
+        "warm": True,
+        "expires_at": EXPIRES,
+        "recache_tokens_if_cold": 45000,
+    }
+    assert set(entry) == {"warm", "expires_at", "recache_tokens_if_cold", "read_at"}
+    read_at = datetime.fromisoformat(entry["read_at"].replace("Z", "+00:00"))
+    assert before - timedelta(seconds=1) <= read_at <= datetime.now(UTC)
+    # The limits it already saved are saved as before.
+    saved = json.loads(limits_file(store_home).read_text(encoding="utf-8"))
+    assert saved["five_hour"] == {"used_percentage": 23.5, "resets_at": RESETS}
+
+
+def test_a_cache_without_limits_is_saved_and_the_limits_file_is_left(store_home: Path) -> None:
+    payload = {"session_id": "s1", "prompt_cache": {**CACHED["prompt_cache"], "warm": False}}
+    run = statusline(payload)
+    assert (run.code, run.out, run.err) == (0, "", "")
+    assert saved_sessions(store_home)["s1"]["warm"] is False
+    assert not limits_file(store_home).exists()
+
+
+def test_null_cache_fields_are_saved_as_null(store_home: Path) -> None:
+    cache = {"warm": False, "expires_at": None, "recache_tokens_if_cold": None}
+    assert statusline({"session_id": "s1", "prompt_cache": cache}).code == 0
+    entry = saved_sessions(store_home)["s1"]
+    assert entry["expires_at"] is None and entry["recache_tokens_if_cold"] is None
+
+
+def test_each_session_keeps_its_own_entry_and_only_recent_ones_are_kept(
+    store_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cmd_statusline, "CACHE_SESSIONS_KEPT", 2)
+    moments = iter(datetime(2026, 11, 9, 12, minute, tzinfo=UTC) for minute in range(10))
+    monkeypatch.setattr(cmd_statusline, "_now", lambda: next(moments))
+    for session in ("one", "two", "three"):
+        cmd_statusline.record(json.dumps({**CACHED, "session_id": session}))
+    assert set(saved_sessions(store_home)) == {"two", "three"}
+    cmd_statusline.record(json.dumps({**CACHED, "session_id": "two"}))
+    cmd_statusline.record(json.dumps({**CACHED, "session_id": "four"}))
+    assert set(saved_sessions(store_home)) == {"two", "four"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"prompt_cache": CACHED["prompt_cache"]},
+        {"session_id": "", "prompt_cache": CACHED["prompt_cache"]},
+        {"session_id": 7, "prompt_cache": CACHED["prompt_cache"]},
+        {"session_id": "abc123", "prompt_cache": "warm"},
+        {"session_id": "abc123", "prompt_cache": {"warm": "yes"}},
+        {"session_id": "abc123", "prompt_cache": {"warm": True, "expires_at": "soon"}},
+        {"session_id": "abc123", "prompt_cache": {"warm": True, "recache_tokens_if_cold": True}},
+    ],
+)
+def test_a_malformed_cache_prints_nothing_and_leaves_the_cache_file(
+    store_home: Path, payload: dict
+) -> None:
+    assert statusline({"session_id": "abc123", "prompt_cache": CACHED["prompt_cache"]}).code == 0
+    before = cache_file(store_home).read_text(encoding="utf-8")
+    run = statusline(payload)
+    assert (run.code, run.out, run.err) == (0, "", "")
+    assert cache_file(store_home).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only directory")
+def test_an_unwritable_home_with_a_cache_prints_nothing(store_home: Path) -> None:
+    assert statusline(CACHED).code == 0
+    before = cache_file(store_home).read_text(encoding="utf-8")
+    store_home.chmod(0o500)
+    try:
+        payload = {**CACHED, "rate_limits": {}, "session_id": "other"}
+        run = statusline(payload)
+    finally:
+        store_home.chmod(0o700)
+    assert (run.code, run.out, run.err) == (0, "", "")
+    assert cache_file(store_home).read_text(encoding="utf-8") == before
+
+
+def test_read_cache_states_an_iso_expiry_and_none_for_an_unknown_session(
+    store_home: Path,
+) -> None:
+    assert cmd_statusline.read_cache("abc123") is None
+    assert statusline(CACHED).code == 0
+    cache = cmd_statusline.read_cache("abc123")
+    assert cache is not None
+    assert cache["expires_at"] == "2033-05-18T03:16:40.000Z"
+    assert cache["warm"] is True and cache["recache_tokens_if_cold"] == 45000
+    assert isinstance(cache["read_at"], str) and cache["read_at"].endswith("Z")
+    assert cmd_statusline.read_cache("someone-else") is None
+    cache_file(store_home).write_text("{oops", encoding="utf-8")
+    assert cmd_statusline.read_cache("abc123") is None

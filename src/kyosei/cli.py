@@ -2278,8 +2278,10 @@ def build_parser() -> KyoseiParser:
         "statusline",
         parents=[common],
         help="Claude Code's status line command: reads the session JSON on stdin, saves the "
-        "account's usage limits to $KYOSEI_HOME/usage-limits.json for kyo serve, and prints "
-        "the two windows as percentages for the status row; exits 0 and prints nothing on any error (KYO-714)",
+        "account's usage limits to $KYOSEI_HOME/usage-limits.json and the session's prompt "
+        "cache to $KYOSEI_HOME/prompt-cache.json for kyo serve, and prints the two windows "
+        "as percentages for the status row; exits 0 and prints nothing on any error "
+        "(KYO-714, KYO-715)",
     )
     statusline_mode = p_statusline.add_mutually_exclusive_group()
     statusline_mode.add_argument(

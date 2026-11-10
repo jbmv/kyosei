@@ -12,24 +12,37 @@ figures: ``$KYOSEI_HOME/usage-limits.json``, beside ``device-tokens.json``, repl
 whole on each write. Input without ``rate_limits`` leaves it as it is, so a session
 that has not replied yet does not erase what another session saved.
 
+THE PROMPT CACHE (KYO-715). After the main conversation's first response the document
+also carries ``prompt_cache``, whose ``warm`` (a boolean), ``expires_at`` (epoch seconds,
+or null when the last response reported no cache tokens) and ``recache_tokens_if_cold``
+(a token count, or null after a compaction) are saved for the document's ``session_id``
+in ``$KYOSEI_HOME/prompt-cache.json``, beside the limits. Unlike the limits these are a
+session's, so the file holds one entry per session, each with its ``read_at``, and keeps
+the :data:`CACHE_SESSIONS_KEPT` most recently read; an older session's entry is dropped
+when a newer one is saved. Each write replaces the file whole under an ``flock`` on a
+lock file beside it, so two sessions replying at once do not drop each other's entry.
+
 A status line command runs often and its failure shows in the person's terminal, so the
 plain form exits 0 and prints nothing on any error: unreadable input, a malformed
 document, an unwritable home. ``--install``, ``--uninstall`` and ``--print`` manage the
 ``statusLine`` entry in Claude Code's user settings and refuse as any command does.
 
-:func:`read_limits` is the reading half, which :mod:`kyosei.session_layer` calls each
-time it builds a session's facts, so a new figure reaches a client without a restart.
+:func:`read_limits` and :func:`read_cache` are the reading half, which
+:mod:`kyosei.session_layer` calls each time it builds a session's facts, so a new figure
+reaches a client without a restart.
 """
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import math
 import os
 import sys
 import tempfile
 from argparse import Namespace
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,6 +54,12 @@ from .errors import KyoseiError
 #: The file's name under ``$KYOSEI_HOME``.
 LIMITS_FILE = "usage-limits.json"
 
+#: KYO-715: the prompt cache's file under ``$KYOSEI_HOME``, one entry per session.
+CACHE_FILE = "prompt-cache.json"
+
+#: How many sessions' cache entries the file keeps, the most recently read.
+CACHE_SESSIONS_KEPT = 50
+
 #: The two windows Claude Code reports, in the order the status row shows them, with
 #: the word each is shown by.
 WINDOWS: tuple[tuple[str, str], ...] = (("five_hour", "5-hour"), ("seven_day", "weekly"))
@@ -51,6 +70,10 @@ STATUS_LINE = {"type": "command", "command": "kyo statusline"}
 
 def limits_path(environ: Mapping[str, str] | None = None) -> Path:
     return store_home(dict(environ) if environ is not None else None) / LIMITS_FILE
+
+
+def cache_path(environ: Mapping[str, str] | None = None) -> Path:
+    return store_home(dict(environ) if environ is not None else None) / CACHE_FILE
 
 
 def _now() -> datetime:
@@ -109,15 +132,7 @@ def status_row(windows: Mapping[str, dict]) -> str:
 def save_limits(path: Path, windows: Mapping[str, dict], read_at: datetime) -> None:
     """Replace the file whole, so a reader never sees half of a write."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = {"read_at": _iso(read_at), **windows}
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(document, indent=2) + "\n")
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    _replace_json(path, {"read_at": _iso(read_at), **windows})
 
 
 def read_limits(
@@ -152,19 +167,140 @@ def read_limits(
     return shown
 
 
+# ------------------------------------------------------- the prompt cache (KYO-715)
+
+
+def _nullable_number(value: object) -> tuple[bool, int | None]:
+    """Whether ``value`` is a number or null, and the number as an int."""
+    if value is None:
+        return True, None
+    number = _number(value)
+    return (False, None) if number is None else (True, int(number))
+
+
+def cache_from(document: object) -> tuple[str, dict] | None:
+    """The session id and its prompt cache's three fields, or None.
+
+    None unless ``session_id`` is a non-empty string and ``prompt_cache`` carries a
+    boolean ``warm`` and an ``expires_at`` and ``recache_tokens_if_cold`` that are each a
+    number or null. A missing field counts as null, as Claude Code sends null for one
+    it does not know.
+    """
+    if not isinstance(document, dict):
+        return None
+    session_id = document.get("session_id")
+    cache = document.get("prompt_cache")
+    if not isinstance(session_id, str) or not session_id or not isinstance(cache, dict):
+        return None
+    warm = cache.get("warm")
+    if not isinstance(warm, bool):
+        return None
+    expires_ok, expires_at = _nullable_number(cache.get("expires_at"))
+    recache_ok, recache = _nullable_number(cache.get("recache_tokens_if_cold"))
+    if not (expires_ok and recache_ok):
+        return None
+    return session_id, {
+        "warm": warm,
+        "expires_at": expires_at,
+        "recache_tokens_if_cold": recache,
+    }
+
+
+def _saved_sessions(path: Path) -> dict[str, dict]:
+    """The file's entries, or none when it is absent or unreadable."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    sessions = document.get("sessions") if isinstance(document, dict) else None
+    if not isinstance(sessions, dict):
+        return {}
+    return {key: value for key, value in sessions.items() if isinstance(value, dict)}
+
+
+@contextlib.contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    """An exclusive ``flock`` on ``<file>.lock`` for one read-modify-write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path.with_name(f".{path.name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def save_cache(path: Path, session_id: str, cache: Mapping, read_at: datetime) -> None:
+    """Save one session's entry, keeping the most recently read entries only."""
+    with _locked(path):
+        sessions = _saved_sessions(path)
+        sessions[session_id] = {**cache, "read_at": _iso(read_at)}
+        recent = sorted(
+            sessions.items(),
+            key=lambda item: str(item[1].get("read_at") or ""),
+            reverse=True,
+        )[:CACHE_SESSIONS_KEPT]
+        _replace_json(path, {"sessions": dict(recent)})
+
+
+def read_cache(session_id: str, environ: Mapping[str, str] | None = None) -> dict | None:
+    """One session's saved prompt cache as the session facts carry it, or None.
+
+    ``expires_at`` is an ISO time (or null, as saved). Whether the cache is cold is not
+    decided here: a client compares ``expires_at`` with its own clock. Read from disk on
+    every call.
+    """
+    entry = _saved_sessions(cache_path(environ)).get(session_id)
+    if entry is None:
+        return None
+    parsed = cache_from({"session_id": session_id, "prompt_cache": entry})
+    if parsed is None:
+        return None
+    _, cache = parsed
+    expires_at = cache["expires_at"]
+    read_at = entry.get("read_at")
+    return {
+        "warm": cache["warm"],
+        "expires_at": None
+        if expires_at is None
+        else _iso(datetime.fromtimestamp(expires_at, UTC)),
+        "recache_tokens_if_cold": cache["recache_tokens_if_cold"],
+        "read_at": read_at if isinstance(read_at, str) else None,
+    }
+
+
+def _replace_json(path: Path, document: dict) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(document, indent=2) + "\n")
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def record(raw: str, environ: Mapping[str, str] | None = None) -> str:
     """Save what ``raw`` carries and return the status row; never raises.
 
-    Input with no usable window leaves the file untouched and returns an empty row.
+    The limits and a session's prompt cache are saved apart: input with no usable window
+    leaves the limits file untouched and returns an empty row, and input with no usable
+    ``prompt_cache`` leaves the cache file untouched.
     """
     try:
-        windows = windows_from(json.loads(raw))
+        document = json.loads(raw)
     except (ValueError, RecursionError):
         return ""
+    now = _now()
+    cache = cache_from(document)
+    if cache is not None:
+        with contextlib.suppress(Exception):  # a status line never fails visibly (KYO-714)
+            save_cache(cache_path(environ), cache[0], cache[1], now)
+    windows = windows_from(document)
     if not windows:
         return ""
     try:
-        save_limits(limits_path(environ), windows, _now())
+        save_limits(limits_path(environ), windows, now)
     except Exception:  # noqa: BLE001 - a status line never fails visibly (KYO-714)
         return ""
     return status_row(windows)
