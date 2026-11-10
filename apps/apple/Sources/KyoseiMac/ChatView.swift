@@ -133,6 +133,9 @@ struct RunningAgentsLabel: View {
     var body: some View {
         Text("\(count) subagent\(count == 1 ? "" : "s") running")
             .monospacedDigit()
+            // Green with a soft glow while any subagent runs, so it is seen at a glance.
+            .foregroundStyle(count > 0 ? Color.green : Color.secondary)
+            .shadow(color: count > 0 ? Color.green.opacity(0.7) : .clear, radius: 3)
             .contentShape(Rectangle())
             .onTapGesture { if !agents.isEmpty { shown.toggle() } }
             .help(agents.isEmpty ? "No subagent is running" : agents.map(\.name).joined(separator: "\n"))

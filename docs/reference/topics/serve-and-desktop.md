@@ -357,10 +357,13 @@ this session's answers 404. `readable: false` means the file's rows are of no fo
 build recognises, and `why` says so.
 
 `usage` is `{"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
-"total"}`: the tokens of every message in the subagent's transcript as it stands, summed as
+"total", "latest_turn"}`: the tokens of every message in the subagent's transcript as it stands, summed as
 a dispatch's worker tokens are, so that each message counts once. It may be read while the
 subagent runs, and a later request returns the sum of a transcript that has grown since.
-`total` is the four counts added, cache reads included. `usage` is `null` when `readable` is
+`total` is the four counts added, cache reads included. `latest_turn` is the four counts of
+the last message alone, the size of the subagent's latest turn; it is the figure Claude
+Code's own agent row shows, and far smaller than `total`, which counts the cache read by
+every turn. `usage` is `null` when `readable` is
 `false`. It is on this route rather than on the `subagents` of `/turns` for the reason given
 for `dispatch` below.
 

@@ -1118,7 +1118,10 @@ def test_a_subagents_usage_is_its_transcripts_sum(bed: Bed) -> None:
         "cache_read_tokens": 2200,
         "cache_creation_tokens": 250,
         "total": 2558,
+        "latest_turn": worker_tokens.sum_transcript_usage(path).latest_turn_tokens,
     }
+    # The latest turn is one message's size, which the sum of two messages exceeds.
+    assert 0 < usage["latest_turn"] < usage["total"]
     counts = worker_tokens.sum_transcript_usage(path).counts
     assert usage["input_tokens"] == counts["input_tokens"]
     assert usage["output_tokens"] == counts["output_tokens"]
@@ -1135,6 +1138,7 @@ def test_a_second_request_after_the_transcript_grows_gives_the_larger_sum(bed: B
     second = json_body(bed.get(USAGE_ROUTE))["usage"]
     assert second["total"] == first["total"] + 7 + 70 + 1500 + 30
     assert second["output_tokens"] == first["output_tokens"] + 70
+    assert second["latest_turn"] == 7 + 70 + 1500 + 30
 
 
 def test_a_subagent_whose_transcript_cannot_be_read_has_no_usage_and_still_answers(

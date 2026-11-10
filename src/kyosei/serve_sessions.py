@@ -142,14 +142,17 @@ def _transcript_usage_json(reader: Any) -> dict | None:
     """
     if not reader.readable:
         return None
-    counts = sum_transcript_usage(reader.path).counts
+    summed = sum_transcript_usage(reader.path)
+    counts = summed.counts
     usage = {
         "input_tokens": counts["input_tokens"],
         "output_tokens": counts["output_tokens"],
         "cache_read_tokens": counts["cache_read_input_tokens"],
         "cache_creation_tokens": counts["cache_creation_input_tokens"],
     }
-    return {**usage, "total": sum(usage.values())}
+    # KYO-717: the latest turn's size is what Claude Code's own agent row shows while the
+    # agent runs, where the sum counts each turn's cache reads again.
+    return {**usage, "total": sum(usage.values()), "latest_turn": summed.latest_turn_tokens}
 
 
 def _reply_json(reply: Any) -> dict:

@@ -842,7 +842,7 @@ function drawAgents(): void {
   });
 }
 
-/** Each subagent's tokens so far, as the server last summed its transcript. */
+/** Each subagent's latest turn in tokens, as the server last read its transcript. */
 const agentUsage = new Map<string, number>();
 const USAGE_REFRESH_MS = 15000;
 
@@ -1047,10 +1047,11 @@ const kyo = {
   agent(data: {
     agent_id: string; tool_calls: ToolCall[];
     dispatch?: { added: number; removed: number } | null;
-    usage?: { total: number } | null;
+    usage?: { total: number; latest_turn?: number } | null;
   }): void {
     agentCalls.set(data.agent_id, data.tool_calls);
-    if (data.usage) agentUsage.set(data.agent_id, data.usage.total);
+    // The latest turn's size, the figure the terminal's agent row shows; the sum counts cache reads per turn.
+    if (data.usage) agentUsage.set(data.agent_id, data.usage.latest_turn ?? data.usage.total);
     if (data.dispatch) agentDispatches.set(data.agent_id, data.dispatch);
     drawAgents();
   },
