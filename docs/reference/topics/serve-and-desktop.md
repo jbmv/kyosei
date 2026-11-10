@@ -738,6 +738,23 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 | A document or file | `on document <path> at <commit> lines 3-9 "<words>..."` |
 | Another note | `on note <id>` |
 
+A reply or prompt anchor takes one of two forms, by the length of the person's selection
+(KYO-733). A selection of six words or more is quoted as above. A shorter one says little about
+where it lies, and the uuid does not take an agent to the place, since an agent cannot see the
+ids of its own replies. The line then quotes the sentence that holds the selection, from the
+sentence's start and up to ten words, and names the selection after it:
+
+```
+on your reply 8c1f73e2-0d9d-4c8e-a1d5-3f2e0b7a4c11 "The count was blank because this repository's..." at "blank"
+```
+
+The sentence ends at a full stop, question mark or exclamation mark followed by white space, at
+a line break, or at the end of the block, as it does for a right-click anchor in the Mac app. When
+the block is a heading, a list item, a table cell or a code block, the line ends with
+`(heading)`, `(list item)`, `(table cell)` or `(code block)` after the quote, in either form; a
+heading's line means the section under it. A paragraph is not labelled. The anchor is stored as
+the person selected it, and `marks` and the app read the same offsets as before.
+
 `<words>` is the first six words of the span, read from the transcript or the commit when the
 message is made, and a `...` follows if the span goes on. When the words cannot be read, or a
 turn span does not match the digest stored with its anchor, the line ends `(words

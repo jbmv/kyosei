@@ -227,6 +227,15 @@ after it: a question it asks may already be answered there, and an instruction i
 without knowledge of what those replies reported. The line is not the operator's words, so
 leave it out of anything quoted or credited to them.
 
+### An `on your reply <uuid> "..."` line names a place in your own reply (KYO-733)
+
+You cannot see the ids of your replies, so find the place by the quoted words. Under six selected
+words the line quotes the sentence holding the selection, from its start and up to ten words,
+then the selection itself: `on your reply <uuid> "The count was blank because..." at "blank"`.
+Search your reply for the sentence and read the `at` words within it. A selection of six words or
+more is quoted alone. A trailing `(heading)`, `(list item)`, `(table cell)` or `(code block)`
+names the block, and a heading's line means the section under it.
+
 ### Why the symbol form of a touch line matters (KYO-301)
 
 The symbol is any phrase found in the file -- a function or type name in code, a **section

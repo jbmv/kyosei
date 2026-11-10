@@ -49,7 +49,23 @@ THE MESSAGE. :func:`compose` writes a fixed plain-text form, stated in the opera
 
 A span's words are the first :data:`ANCHOR_WORDS` words and no more, read from the transcript
 when the message is made, because no transcript text is stored and the agent cannot see
-transcript ids. An agent that needs the exact span looks it up by id. The person's words are
+transcript ids. An agent that needs the exact span looks it up by id.
+
+A SHORT SELECTION (KYO-733). A selection of fewer than :data:`ANCHOR_WORDS` words says little
+about where it lies, and the uuid does not take an agent to the place, since an agent cannot
+see the ids of its own replies. For a turn anchor the line then quotes the sentence that holds
+the selection, from that sentence's start and up to :data:`SENTENCE_WORDS` words, and names
+the selection after it, unless the selection is the whole sentence:
+
+    on your reply 8c1f...e2 "The count was blank because this repository's..." at "blank"
+
+The sentence ends as a right-click anchor's does (:func:`sentence_at`): at a full stop,
+question mark or exclamation mark followed by white space or the end, at a line break, or at
+the end of the block. A selection of :data:`ANCHOR_WORDS` words or more is quoted as it
+always was. When the block is a heading, a list item, a table cell or a code block, the
+quote is followed by ``(heading)``, ``(list item)``, ``(table cell)`` or ``(code block)``
+(:func:`block_of`), and a heading's line means the section under it. The stored anchor, and
+what reads it back, are unchanged: only this line is longer. The person's words are
 not re-wrapped or prefixed, so that a transcript check still finds them.
 
 A PROMPT WITH MARKS (KYO-709, decided by KYO-708). One composer box is one prompt, and a mark
@@ -118,6 +134,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Iterator
@@ -132,6 +149,8 @@ from .store import is_lock_contention, lock_contention_message
 
 #: How many words of a span a message carries.
 ANCHOR_WORDS = 6
+#: How many words of the sentence holding a short selection a message carries (KYO-733).
+SENTENCE_WORDS = 10
 
 #: A span with one very long word stays short all the same.
 ANCHOR_CHARS = 120
@@ -388,14 +407,91 @@ def tag(
 # ------------------------------------------------------------------------------ sending
 
 
-def _words(span: str) -> str:
-    """The first words of a span, quoted: control characters would act as keys in a pane."""
-    words = "".join(
+def _clean_words(span: str) -> list[str]:
+    """A span's words, control characters dropped: they would act as keys in a pane."""
+    return "".join(
         char for char in span if char.isspace() or unicodedata.category(char) != "Cc"
     ).split()
-    shown = " ".join(words[:ANCHOR_WORDS])
-    cut = len(words) > ANCHOR_WORDS or len(shown) > ANCHOR_CHARS
+
+
+def _words(span: str, limit: int = ANCHOR_WORDS) -> str:
+    """The first ``limit`` words of a span, quoted."""
+    words = _clean_words(span)
+    shown = " ".join(words[:limit])
+    cut = len(words) > limit or len(shown) > ANCHOR_CHARS
     return f'"{shown[:ANCHOR_CHARS]}{"..." if cut else ""}"'
+
+
+_SENTENCE_END = re.compile(r"[.!?]+[\"')\]\u201d\u2019]*(?=\s|$)")
+_LIST_ITEM = re.compile(r"\s*(?:[-*]|\d+\.)\s+")
+_HEADING = re.compile(r"\s*#+\s")
+
+
+def sentence_at(line: str, at: int) -> tuple[int, int]:
+    """The sentence of ``line`` that offset ``at`` is in, as ``(from, to)`` (KYO-733).
+
+    It ends at a full stop, question mark or exclamation mark that white space or the end
+    follows, and has no white space at either end: the bounds a right-click anchor in the Mac
+    app takes (``sentenceAt`` in ``apps/apple/web/src/marks.ts``), within one line.
+    """
+    start, end = 0, len(line)
+    for match in _SENTENCE_END.finditer(line):
+        if at < match.end():
+            end = match.end()
+            break
+        start = match.end()
+    while start < end and line[start].isspace():
+        start += 1
+    while end > start and line[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def block_of(text: str, at: int) -> tuple[str, int, int]:
+    """The kind of block offset ``at`` of ``text`` is in, and the span of its words.
+
+    Returns ``(label, from, to)``: the label is ``heading``, ``list item``, ``table cell``,
+    ``code block`` or ``""`` for a paragraph, and ``from`` to ``to`` the part of the line the
+    block's own words occupy, without its marker or the pipes around a cell (KYO-733). A line
+    is read as markdown source: ``#``, ``-``/``*``/``1.`` and ``|`` begin a heading, an item
+    and a cell, and a line between two fences is code.
+    """
+    offset = 0
+    fenced = False
+    for line in text.split("\n"):
+        end = offset + len(line)
+        stripped = line.lstrip()
+        if at <= end:
+            if stripped.startswith(("```", "~~~")):
+                return "", offset, end
+            if fenced:
+                return "code block", offset, end
+            if _HEADING.match(line):
+                return "heading", offset + _HEADING.match(line).end(), end
+            if _LIST_ITEM.match(line):
+                return "list item", offset + _LIST_ITEM.match(line).end(), end
+            if stripped.startswith("|"):
+                bar_start = text.rfind("|", offset, at) if at > offset else -1
+                start = max(bar_start, offset + len(line) - len(stripped)) + 1
+                bar_end = text.find("|", max(at, start), end)
+                return "table cell", start, end if bar_end < 0 else bar_end
+            return "", offset, end
+        if stripped.startswith(("```", "~~~")):
+            fenced = not fenced
+        offset = end + 1
+    return "", 0, len(text)
+
+
+def _place(text: str, start: int, end: int) -> tuple[str, str]:
+    """The sentence holding offset ``start`` of ``text``, quoted, and its block's label."""
+    label, first, last = block_of(text, start)
+    block = text[first:last]
+    # A selection that starts before the block's words (on a marker or a pipe) is at its start.
+    sentence_from, sentence_to = sentence_at(block, max(start - first, 0))
+    sentence = block[sentence_from:sentence_to]
+    if label == "code block":
+        sentence = block.strip()
+    return _words(sentence, SENTENCE_WORDS), label
 
 
 #: What ends a held prompt's line, so that a later session reads what a reply is here.
@@ -443,7 +539,20 @@ def _anchor_line(
         )
         line = f"on {kind} {target} at {anchor['commit_sha']} {span}"
     words = cmd_notes.span_text(ctx, anchor, records)
-    return f"{line} {_words(words) if words else '(words unavailable)'}"
+    if not words:
+        return f"{line} (words unavailable)"
+    if kind != cmd_notes.ANCHOR_TURN:
+        return f"{line} {_words(words)}"
+    # A turn's span is read from its record, which span_text has found and checked.
+    text = cmd_notes.record_text(records[target])
+    quote, label = _place(text, anchor["char_start"], anchor["char_end"])
+    if len(_clean_words(words)) < ANCHOR_WORDS:
+        # A selection that is the whole sentence is the quote already.
+        if _words(words) != quote:
+            quote = f"{quote} at {_words(words)}"
+    else:
+        quote = _words(words)
+    return f"{line} {quote}{f' ({label})' if label else ''}"
 
 
 def _refuse_unsendable(note: dict) -> None:
