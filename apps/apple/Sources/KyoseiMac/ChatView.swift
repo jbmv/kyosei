@@ -280,6 +280,12 @@ struct ChatWebView: NSViewRepresentable {
                 return
             }
             if message.name == "image", let body = message.body as? [String: Any],
+                let attachment = body["attachment"] as? String
+            {
+                feed.loadAttachment(attachment)
+                return
+            }
+            if message.name == "image", let body = message.body as? [String: Any],
                 let turn = body["turn"] as? String, let index = body["index"] as? Int
             {
                 feed.loadImage(turn: turn, index: index)

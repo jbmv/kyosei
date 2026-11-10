@@ -214,6 +214,33 @@ function drawImage(turn: Turn, index: number): HTMLElement {
   return image;
 }
 
+/** `attached <absolute path>`, as `kyo serve` writes it for a file on a paragraph (KYO-715). */
+const ATTACHED_LINE = /^attached (?:.*\/)?(([0-9a-f]{64})\.(png|jpe?g|gif|webp|pdf))$/;
+
+/** A sent attachment: the image itself, fetched by its id, or a chip naming any other file. */
+function drawAttached(line: string, name: string, id: string, extension: string): HTMLElement {
+  if (extension === "pdf") {
+    const chip = document.createElement("span");
+    chip.className = "turn-anchor";
+    chip.append(icon("file"), `PDF ${id.slice(0, 8)}`);
+    chip.title = line;
+    return chip;
+  }
+  const key = `a:${id}`;
+  const image = document.createElement("img");
+  image.className = "turn-image";
+  image.title = line;
+  image.alt = name;
+  const data = imageData.get(key);
+  if (data) {
+    image.src = data;
+  } else {
+    image.dataset.image = key;
+    (window as any).webkit?.messageHandlers?.image?.postMessage({ attachment: id });
+  }
+  return image;
+}
+
 function drawTurn(turn: Turn): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
@@ -227,6 +254,12 @@ function drawTurn(turn: Turn): HTMLElement {
   };
   for (const line of (turn.text ?? "").split("\n")) {
     const anchor = line.match(ANCHOR_LINE);
+    const attached = anchor ? null : line.match(ATTACHED_LINE);
+    if (attached) {
+      flush(false);
+      element.append(drawAttached(line, attached[1], attached[2], attached[3]));
+      continue;
+    }
     if (!anchor) {
       plain.push(line);
       continue;
@@ -1025,10 +1058,22 @@ const kyo = {
     drawSide();
   },
 
-  image(frame: { key: string; data: string }): void {
+  image(frame: { key: string; data: string | null }): void {
+    const waiting = document.querySelectorAll<HTMLImageElement>(`img[data-image="${frame.key}"]`);
+    if (!frame.data) {
+      // The server did not return the file, so the prompt names it in a chip.
+      waiting.forEach((image) => {
+        const chip = document.createElement("span");
+        chip.className = "turn-anchor";
+        chip.append(icon("file"), image.alt || "attachment");
+        chip.title = image.title;
+        image.replaceWith(chip);
+      });
+      return;
+    }
     imageData.set(frame.key, frame.data);
-    document.querySelectorAll<HTMLImageElement>(`img[data-image="${frame.key}"]`).forEach((image) => {
-      image.src = frame.data;
+    waiting.forEach((image) => {
+      image.src = frame.data!;
       image.removeAttribute("data-image");
     });
   },

@@ -450,6 +450,29 @@ final class SessionFeed {
         }
     }
 
+    /// A sent attachment's image, by its id, for the prompt it was sent in (KYO-720).
+    func loadAttachment(_ id: String) {
+        guard let session = current, let token = Self.deviceToken() else { return }
+        Task {
+            guard
+                let reply = try? await client.authorised(
+                    "GET", sessionPath(session, "attachments/\(id)"), token: token),
+                reply.status == 200
+            else {
+                send("image", #"{"key": \#(quoted("a:" + id)), "data": null}"#)
+                return
+            }
+            guard session == current else { return }
+            let bytes = [UInt8](reply.data.prefix(4))
+            let type =
+                bytes.starts(with: [0x89, 0x50]) ? "image/png"
+                : bytes.starts(with: [0xFF, 0xD8]) ? "image/jpeg"
+                : bytes.starts(with: [0x47, 0x49]) ? "image/gif" : "image/webp"
+            let data = "data:\(type);base64,\(reply.data.base64EncodedString())"
+            send("image", #"{"key": \#(quoted("a:" + id)), "data": \#(quoted(data))}"#)
+        }
+    }
+
     private func send(_ function: String, _ json: String) {
         webView?.evaluateJavaScript("window.kyo.\(function)(\(json))") { _, error in
             if let error { print("[feed] \(function): \(error)") }
