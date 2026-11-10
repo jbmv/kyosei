@@ -248,6 +248,7 @@ NOT_SERVED: dict[str, str] = {
     "harness": "it writes a link in this machine's Kyosei home and runs `claude`",
     # KYO-699: a device must not be able to issue itself a token.
     "devices": "it issues and revokes the tokens this server checks, on this machine only",
+    "statusline": "it is Claude Code's status line command, and writes this machine's settings",
 }
 
 #: Query keys refused by name: the server sets `--root` from `{project}`, runs as
