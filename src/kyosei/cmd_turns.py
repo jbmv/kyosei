@@ -181,6 +181,25 @@ def index_prompt(store_root: Path | str, payload: dict) -> None:
             handle.write(json.dumps(line, sort_keys=True) + "\n")
 
 
+def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) -> dict | None:
+    """KYO-662: write ``skip`` on one index line, the reason a turn the Stop check asked
+    about is not a discussion. ``key`` is the line's prompt id or record uuid. Returns the
+    line as written, or None when the session's index holds no such line. The reason and
+    the time it was given are the only words the index holds, and they are the agent's.
+    """
+    with _locked(store_root):
+        lines = read_lines(store_root)
+        for line in lines:
+            if line.get("session") == session_id and key in (
+                line.get("prompt_id"),
+                line.get("turn"),
+            ):
+                line["skip"] = {"why": why, "at": _now()}
+                _rewrite(store_root, lines)
+                return line
+    return None
+
+
 def _read_cursor(fd: int) -> dict[str, int]:
     os.lseek(fd, 0, os.SEEK_SET)
     try:

@@ -674,6 +674,11 @@ def session_event_outcome(event: str) -> str:
     return STATE_ENDED if event == EVENT_END else STATE_RUNNING
 
 
+def _stops_before(previous: dict) -> int:
+    held = previous.get("stops")
+    return held if isinstance(held, int) and not isinstance(held, bool) and held > 0 else 0
+
+
 def apply_event(
     entries: list[dict],
     *,
@@ -725,6 +730,11 @@ def apply_event(
         # KYO-735: the scratchpad directory the session reported with `kyo sessions
         # scratch`. No hook event can learn it, so every event keeps what was recorded.
         "scratchpad_dir": previous.get("scratchpad_dir"),
+        # KYO-662: how many Stop events this session has recorded and when the last one
+        # was. `kyo doctor` reads them to name a session that stopped more than once while
+        # the turn index, which the hooks beside this one write, holds no line for it.
+        "stops": _stops_before(previous) + (1 if event == EVENT_STOP else 0),
+        "stopped_at": stamp if event == EVENT_STOP else previous.get("stopped_at"),
     }
     if not lookup.found:
         # A later event that cannot see the record must not erase one an earlier

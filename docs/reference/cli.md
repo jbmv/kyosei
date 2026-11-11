@@ -520,13 +520,13 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`; `kyo discuss skip --json` carries `prompt_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--why WHY] {open,note,close} [id]`
+Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--why WHY] [--hook] {open,note,close,skip,check} [id]`
 
 ### Positional arguments
 
-- `{open,note,close}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --dropped closes one with nothing produced
+- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the Stop check asked about is not a discussion; check --hook is that Stop check (KYO-662)
 - `[ID]` — optional. note and close: the discussion, PREFIX-N
 
 ### Options
@@ -535,7 +535,8 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--at-prompt PROMPT` — optional. the person's turn to stamp, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults to their latest confirmed turn
 - `--file FILE` — optional. note: what was put to the person, the options and the recommendation, from a file or '-' for stdin (law 5)
 - `--dropped` — optional. close: the discussion produced nothing; needs --why
-- `--why WHY` — optional. close --dropped: why nothing was produced, one line
+- `--why WHY` — optional. close --dropped: why nothing was produced; skip: why the turn is not a discussion. One line
+- `--hook` — optional. check: read Claude Code's Stop payload on stdin and, when the turn put a choice to the person and no discussion is open in this session, print one line of hook JSON whose additionalContext asks the agent to open one or skip. Claude Code continues the conversation once for it. Never blocks and always exits 0; how the packaged Stop hook invokes this (KYO-662)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

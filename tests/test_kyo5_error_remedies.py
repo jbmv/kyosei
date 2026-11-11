@@ -4106,6 +4106,16 @@ UNREACHED: dict[str, str] = {
         "`kyo discuss open` filed, or `kyo spawn <discussion-id> --kind decision`; proved by "
         "test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one"
     ),
+    # KYO-662: the Stop check's two invocation refusals; the re-invocation each spells is
+    # run by the test cited, with the hook's payload on stdin.
+    "cmd_discuss.py:_check#0": (
+        "running it as `kyo discuss check --hook`; proved by "
+        "tests/test_kyo662_stop_check.py::test_check_without_hook_is_refused_naming_the_flag"
+    ),
+    "cmd_discuss.py:cmd_discuss#0": (
+        "moving --hook to `kyo discuss check`; proved by "
+        "tests/test_kyo662_stop_check.py::test_check_without_hook_is_refused_naming_the_flag"
+    ),
     # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
     "credits.py:recheck#6": (
         "the transcript placed where Claude Code keeps it, then the same `kyo credit "
@@ -4809,6 +4819,11 @@ RECORDED: dict[str, str] = {
     "cmd_discuss.py:_close#0": (
         "a re-invocation naming the discussion; proved by "
         "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    # KYO-662: `kyo discuss skip` with no reason.
+    "cmd_discuss.py:_skip#1": (
+        "a re-invocation giving --why; proved by "
+        "test_skip_refuses_without_a_reason_and_with_one_it_is_recorded"
     ),
     "store.py:Store.add_turn_ref#0": (
         "a call passing no stamp with index_state absent; proved by "

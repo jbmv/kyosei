@@ -51,18 +51,48 @@ addresses a whole prompt of the person's, and its facts come from the turn index
 holds no text and survives the transcript's deletion. It has nothing to digest, and the
 integrity object for a whole prompt is the per-line commitment the index line will carry
 (KYO-663), which a reference cites by its session and prompt id rather than repeating.
+
+THE STOP CHECK (KYO-662, decision KYO-654 DC4, proposal section 5.1 Tier 2). ``kyo discuss
+check --hook`` runs at every Stop, in its own hook group. It reads the turn that just ended
+(the person's words and whether AskUserQuestion was used, from the transcript; the reply,
+from the payload's ``last_assistant_message``) and asks two things: does a cue say a choice
+was put to the person or raised by them (:func:`detect`), and is the turn attached, which
+means a discussion is open in this session or already names the turn. When a cue fires on
+an unattached turn it prints one JSON line carrying ``hookSpecificOutput.additionalContext``.
+Claude Code (read in its hooks reference at 2.1.322) gives that text to the agent as "Stop
+hook feedback" and CONTINUES THE CONVERSATION so the agent can act on it, without reporting
+a hook error; it is not ``decision: "block"`` and not exit 2. The agent runs ``kyo discuss
+open`` or ``kyo discuss skip --why "..."`` and stops again. The check says nothing when the
+payload's ``stop_hook_active`` is set, so it costs at most one continuation per turn
+whatever the agent did with it, and nothing when the turn is attached or its index line
+carries a skip. It never exits non-zero and never prints anything else: any failure to read
+the store, the index or the transcript is a pass, reported only under ``--json``.
+
+``kyo discuss skip --why "<one line>"`` writes the reason on the turn's index line
+(:func:`kyosei.cmd_turns.mark_skipped`), so a dismissal is kept, and ``kyo doctor`` counts
+them per week beside the shares of decisions opened live, late and unindexed
+(:func:`kyosei.doctor_records.check_discussion_shares`).
+
+The cue lists are deliberately broad. Measured on the maintainer's earlier transcripts by
+``tests/fixtures/kyo662_measure_detector.py`` (which reads private files named at run time
+and prints counts only), they are tuned for recall on the openings of known discussions
+against the number of turn ends outside any discussion at which the check would speak.
 """
 
 from __future__ import annotations
 
+import json
+import re
+import sys
 from argparse import Namespace
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import commands, export
 from .clock import now
 from .cmd_sessions import recorded_transcript_path
-from .cmd_turns import HUMAN, confirm_from_transcript, read_lines
+from .cmd_turns import HUMAN, confirm_from_transcript, mark_skipped, read_lines
 from .commands import Context, Output, _load_registry, _load_status_ladder, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .contracts import TURN_REF_ABSENT, TURN_REF_INDEXED
@@ -226,6 +256,7 @@ def _match_at(lines: list[dict], at: str, session: str) -> dict:
     exact = [line for line in lines if at in (line.get("prompt_id"), line.get("turn"))]
     if len(exact) == 1:
         return exact[0]
+
     def named(line: dict) -> bool:
         ids = (line.get("prompt_id"), line.get("turn"))
         return any(isinstance(v, str) and v.startswith(at) for v in ids)
@@ -778,10 +809,439 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
     )
 
 
+# ------------------------------------------------------------------ the Stop check (KYO-662)
+
+#: The cues, as the check names them in its message and under ``--json``.
+CUE_PERSON = "the person's message asks a question or opens a choice"
+CUE_REPLY = "your reply puts a choice to the person"
+CUE_ASKED = "the turn used AskUserQuestion"
+
+ASK_TOOL = "AskUserQuestion"
+
+#: Text the detector does not read: code, URLs and what the harness injected.
+_NOT_PROSE = re.compile(
+    r"```.*?(?:```|\Z)|`[^`\n]*`|https?://\S+"
+    r"|<(system-reminder|pasted-content|pasted_content)\b[^>]*>.*?</\1>",
+    re.S,
+)
+_QUESTION_MARK = re.compile(r"\?(?=[\s\"')\]*_]|$)")
+
+#: Phrases in the person's words that open a choice (proposal section 5.1, Tier 2).
+_PERSON_PHRASES = re.compile(
+    r"\b(?:what do you think|what would you|how about|what about|what if|should (?:we|i|it)"
+    r"|shall we|could we|would it|options?|i'?m leaning|i am leaning|leaning toward"
+    r"|let'?s discuss|let'?s talk|thoughts|i wonder|wondering|not sure|unsure"
+    r"|alternatives?|trade-?offs?|pros and cons|or (?:should|would|do|is|are) "
+    r"|i'?d (?:rather|prefer|like)|i would (?:rather|prefer|like)|prefer|rather than"
+    r"|instead of|maybe we|is there a (?:way|better)|which (?:one|is|would|do|should|of)"
+    r"|do you (?:think|recommend|suggest)|recommend|your (?:opinion|view|take)|decide|decision)\b",
+    re.I,
+)
+
+#: Phrases in the agent's final message that put a choice to the person. Offers and
+#: reports of waiting ("if you'd like", "waiting on you", "needs your") were measured and
+#: left out: they added turn ends outside any discussion and no opening of one.
+_REPLY_PHRASES = re.compile(
+    r"\b(?:i recommend|my recommendation|recommendation:|i(?:'d| would) (?:recommend"
+    r"|suggest|go with|lean|pick|choose)|i suggest|which (?:do|would|should) you|which one"
+    r"|do you want|would you like|want me to|shall i|should i|your call|up to you"
+    r"|your decision|for you to decide|yours to decide|you decide|let me know (?:which|if"
+    r"|whether|how|what)|tell me (?:which|if|whether|how|what)|say (?:which|go|the word)"
+    r"|your choice|options?:)\b",
+    re.I,
+)
+#: A labelled option at the start of a line or list item: ``D1``, ``R12``, ``Option B``,
+#: ``(a)``. Two different labels make a set of options.
+_LABEL = re.compile(
+    r"(?m)^[ \t]*(?:[-*+] |\d+[.)] |\|[ \t]*)?(?:\*\*|__)?"
+    r"(\(?[A-Z]{1,2}\d{1,2}\)?|[Oo]ption [A-Z0-9]+|\(?[a-e]\))(?:\*\*|__)?[ \t]*[:.)\-—|]"
+)
+
+
+def _prose(text: str) -> str:
+    return _NOT_PROSE.sub(" ", text)
+
+
+def person_cue(words: str) -> bool:
+    """Whether the person's words contain a question or a phrase that opens a choice."""
+    prose = _prose(words)
+    return bool(_QUESTION_MARK.search(prose) or _PERSON_PHRASES.search(prose))
+
+
+def reply_cue(reply: str) -> bool:
+    """Whether the agent's final message puts a choice to the person: a recommendation or a
+    request for their choice, two or more labelled options, or a closing question."""
+    prose = _prose(reply)
+    if _REPLY_PHRASES.search(prose):
+        return True
+    if len({label.strip("()").lower() for label in _LABEL.findall(prose)}) >= 2:
+        return True
+    closing = [line for line in prose.splitlines() if line.strip()][-2:]
+    return any(_QUESTION_MARK.search(line) for line in closing)
+
+
+def detect(person: tuple[str, ...] | list[str], reply: str | None, asked: bool) -> list[str]:
+    """The cues that fire for one turn, in the order the message names them."""
+    cues: list[str] = []
+    if any(person_cue(words) for words in person):
+        cues.append(CUE_PERSON)
+    if reply and reply_cue(reply):
+        cues.append(CUE_REPLY)
+    if asked:
+        cues.append(CUE_ASKED)
+    return cues
+
+
+@dataclass(frozen=True)
+class TurnView:
+    """One turn as the transcript holds it: the prompt that opened it and what followed
+    until the next prompt. ``person`` is the person's words in it: the opening prompt when
+    it is theirs, and each message they sent while the agent worked."""
+
+    prompt_id: str | None
+    origin: str | None
+    at: str | None
+    person: tuple[str, ...]
+    asked: bool
+    reply: str | None
+
+
+def _block_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
+def _opens_prompt(record: dict) -> str | None:
+    """The prompt id a record opens a turn with, for a ``user`` record that is not a tool
+    result; None for every other record."""
+    if record.get("type") != "user" or record.get("toolUseResult") is not None:
+        return None
+    prompt_id = record.get("promptId")
+    return prompt_id if isinstance(prompt_id, str) and prompt_id else None
+
+
+def split_turns(records: Iterator[dict] | list[dict]) -> Iterator[list[dict]]:
+    """Group a transcript's main-chain records into turns, in order. A turn starts at the
+    first record of each prompt id and holds everything up to the next one's."""
+    current: list[dict] = []
+    current_id: str | None = None
+    for record in records:
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        prompt_id = _opens_prompt(record)
+        if prompt_id is not None and prompt_id != current_id:
+            if current:
+                yield current
+            current, current_id = [], prompt_id
+        current.append(record)
+    if current:
+        yield current
+
+
+def turn_view(records: list[dict]) -> TurnView:
+    """What the detector reads of one turn of :func:`split_turns`."""
+    opening = records[0] if records else {}
+    prompt_id = _opens_prompt(opening)
+    origin = opening.get("origin")
+    kind = origin.get("kind") if isinstance(origin, dict) else None
+    person: list[str] = []
+    asked = False
+    reply: str | None = None
+    for record in records:
+        own = record.get("origin")
+        if (
+            record.get("type") == "user"
+            and record.get("toolUseResult") is None
+            and not record.get("isMeta")
+            and isinstance(own, dict)
+            and own.get("kind") == HUMAN
+        ):
+            person.append(_block_text((record.get("message") or {}).get("content")))
+            continue
+        if record.get("type") == "attachment":
+            attachment = record.get("attachment")
+            if (
+                isinstance(attachment, dict)
+                and attachment.get("type") == "queued_command"
+                and attachment.get("commandMode") == "prompt"
+                and (attachment.get("origin") or {}).get("kind") == HUMAN
+                and isinstance(attachment.get("prompt"), str)
+            ):
+                person.append(attachment["prompt"])
+        elif record.get("type") == "assistant":
+            content = (record.get("message") or {}).get("content")
+            if isinstance(content, list) and any(
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("name") == ASK_TOOL
+                for block in content
+            ):
+                asked = True
+            text = _block_text(content)
+            if text.strip():
+                reply = text
+    stamp = opening.get("timestamp")
+    return TurnView(
+        prompt_id=prompt_id,
+        origin=kind,
+        at=stamp if isinstance(stamp, str) else None,
+        person=tuple(words for words in person if words.strip()),
+        asked=asked,
+        reply=reply,
+    )
+
+
+#: How much of a transcript's tail the check reads first; doubled until the turn's opening
+#: record is inside it.
+_TAIL_BYTES = 2 * 1024 * 1024
+
+
+def _parsed(data: bytes) -> Iterator[dict]:
+    for raw in data.split(b"\n"):
+        if not raw.strip():
+            continue
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
+def read_turn(path: Path, prompt_id: str | None) -> TurnView | None:
+    """The turn ``prompt_id`` opened, or the transcript's last turn when it is None, read
+    from the end of the file. None when the transcript does not hold it. Raises
+    :class:`OSError`."""
+    size = path.stat().st_size
+    window = _TAIL_BYTES
+    while True:
+        start = max(0, size - window)
+        with path.open("rb") as handle:
+            handle.seek(start)
+            data = handle.read(size - start)
+        if start:
+            data = data[data.find(b"\n") + 1 :]  # the first line is cut somewhere inside
+        turns = list(split_turns(_parsed(data)))
+        # The first turn of a partial window may have lost its opening records.
+        whole = turns[1:] if start else turns
+        for records in reversed(whole):
+            if prompt_id is None or _opens_prompt(records[0]) == prompt_id:
+                return turn_view(records) if _opens_prompt(records[0]) is not None else None
+        if not start:
+            return None
+        window *= 2
+
+
+def _record_ids(prefix: str, text: str) -> set[str]:
+    return set(re.findall(rf"\b{re.escape(prefix)}-\d+\b", text))
+
+
+def open_discussions(store: Store, session: str) -> list[dict]:
+    """The discussions opened in ``session`` that no reference has closed and that are not
+    void, each with the record ids it is about: those its title, description and notes
+    name and those it is linked with."""
+    ladder = _load_status_ladder(store)
+    prefix = store.config.project_prefix
+    out: list[dict] = []
+    for row in store.conn.execute(
+        "SELECT r.id, r.title, r.description, r.status FROM records r"
+        " WHERE r.kind = ? AND EXISTS (SELECT 1 FROM turn_refs t WHERE t.record_id = r.id"
+        " AND t.role = ? AND t.session = ?) AND NOT EXISTS (SELECT 1 FROM turn_refs c"
+        " WHERE c.record_id = r.id AND c.role = ?) ORDER BY r.seq",
+        (DISCUSSION_KIND, ROLE_OPENED, session, ROLE_CLOSED),
+    ):
+        if ladder.is_terminal(row["status"]):
+            continue
+        about = _record_ids(prefix, f"{row['title']}\n{row['description'] or ''}")
+        for note in store.conn.execute("SELECT text FROM notes WHERE record_id = ?", (row["id"],)):
+            about |= _record_ids(prefix, note["text"] or "")
+        for link in store.conn.execute(
+            "SELECT src_id, dst_id FROM links WHERE src_id = ? OR dst_id = ?",
+            (row["id"], row["id"]),
+        ):
+            about |= {link["src_id"], link["dst_id"]}
+        about.discard(row["id"])
+        out.append({"id": row["id"], "title": row["title"], "about": about})
+    return out
+
+
+def _index_line(ctx: Context, session: str, prompt_id: str | None) -> dict | None:
+    if prompt_id is None:
+        return None
+    for line in read_lines(ctx.root):
+        if line.get("session") == session and line.get("prompt_id") == prompt_id:
+            return line
+    return None
+
+
+def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
+    """Decide one Stop. Returns ``{"fire": bool, "why": str, ...}`` and, when it fires,
+    ``message``. Reads only; raises what the store, the index or the transcript raise."""
+    if payload.get("hook_event_name") != "Stop":
+        return {"fire": False, "why": "not a Stop event"}
+    if payload.get("stop_hook_active"):
+        return {"fire": False, "why": "this stop already follows a Stop hook's feedback"}
+    if not transcripts_opted_in(store.config):
+        return {"fire": False, "why": "the project has not opted in to reading transcripts"}
+    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
+        return {"fire": False, "why": "a worktree's session is not the orchestrator's"}
+    session = payload.get("session_id")
+    raw_path = payload.get("transcript_path")
+    if not isinstance(session, str) or not session or not isinstance(raw_path, str):
+        return {"fire": False, "why": "no session_id or transcript_path in the hook payload"}
+    wanted = payload.get("prompt_id")
+    turn = read_turn(Path(raw_path).expanduser(), wanted if isinstance(wanted, str) else None)
+    if turn is None:
+        return {"fire": False, "why": "the transcript does not hold this turn"}
+    last = payload.get("last_assistant_message")
+    reply = last if isinstance(last, str) and last.strip() else turn.reply
+    cues = detect(turn.person, reply, turn.asked)
+    if not cues:
+        return {"fire": False, "why": "no cue fired", "prompt_id": turn.prompt_id}
+    result: dict = {"fire": False, "cues": cues, "prompt_id": turn.prompt_id}
+    line = _index_line(ctx, session, turn.prompt_id)
+    if line is not None and isinstance(line.get("skip"), dict):
+        return result | {"why": "the turn is skipped with a recorded reason"}
+    if (
+        turn.prompt_id is not None
+        and store.conn.execute(
+            "SELECT 1 FROM turn_refs WHERE session = ? AND prompt_id = ?", (session, turn.prompt_id)
+        ).fetchone()
+    ):
+        return result | {"why": "a discussion names this turn"}
+    discussions = open_discussions(store, session)
+    named = set().union(
+        *(_record_ids(store.config.project_prefix, _prose(words)) for words in turn.person)
+    )
+    covered = set().union(*(d["about"] | {d["id"]} for d in discussions))
+    if discussions and (CUE_PERSON not in cues or not named or named & covered):
+        return result | {"why": f"{discussions[-1]['id']} is open in this session"}
+    at = (line or {}).get("at") or turn.at or "an unknown time"
+    prompt = (turn.prompt_id or "?")[:8]
+    whose = (
+        f"the person's message at {at} (prompt {prompt}) or your reply"
+        if turn.person
+        else f"your reply in the turn opened at {at} (prompt {prompt})"
+    )
+    if discussions:
+        state = (
+            f"it names {', '.join(sorted(named))}, which no discussion open in this session "
+            f"is about ({', '.join(d['id'] for d in discussions)} open)"
+        )
+    else:
+        state = "no discussion is open in this session"
+    message = (
+        f"{whose} put a choice to them ({'; '.join(cues)}), and {state}. Open one now with "
+        '`kyo discuss open --title "<topic>"`, which stamps the person\'s latest turn, or '
+        f"record that it is not one with `kyo discuss skip --at-prompt {turn.prompt_id} --why "
+        '"<one line>"`. This is asked once for this turn and does not block the stop.'
+    )
+    return result | {"fire": True, "why": state, "message": message}
+
+
+def stop_feedback(message: str) -> str:
+    """The one line a Stop hook prints for Claude Code to hand ``message`` to the agent as
+    hook feedback. The conversation continues once so the agent can act on it."""
+    return json.dumps(
+        {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": message}},
+        ensure_ascii=False,
+    )
+
+
+def _check(ctx: Context, args: Namespace) -> Output:
+    if not getattr(args, "hook", False):
+        raise UsageError(
+            "check reads Claude Code's Stop payload on stdin: run it as `kyo discuss check "
+            "--hook`, which is how the packaged Stop hook runs it"
+        )
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        data = check_turn(ctx, ctx.store(), payload)
+    except Exception as exc:  # noqa: BLE001 - a Stop hook that fails must say nothing
+        data = {"fire": False, "why": f"could not check: {exc}", "problem": str(exc)}
+    lines = [stop_feedback(data["message"])] if data.get("fire") else []
+    return Output(lines, {"ok": True, "command": "discuss check", **data})
+
+
+def _skip(ctx: Context, store: Store, args: Namespace) -> Output:
+    if args.id is not None:
+        raise UsageError("skip takes no id: it marks a turn, named with --at-prompt")
+    why = getattr(args, "why", None)
+    if not (why or "").strip():
+        raise UsageError('skip records why the turn is not a discussion: give --why "<one line>"')
+    why = single_line(why, what="--why")
+    session = _session_of(ctx)
+    if session is None:
+        raise UsageError(
+            f"skip marks a turn of this Claude Code session, and ${ENV_SESSION} is unset"
+        )
+    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
+        raise UsageError(
+            "skip writes the turn index, which a worktree's kyo never does; the Stop check "
+            "does not ask in a worktree, so there is nothing to skip here"
+        )
+    if not transcripts_opted_in(store.config):
+        raise UsageError(
+            "skip writes its reason on the turn's line in the turn index, and this project "
+            f"keeps none (`{READ_TRANSCRIPTS_KEY}:` in kyosei/config.yml); the Stop check "
+            "does not ask in such a project, so there is nothing to skip here"
+        )
+    _refresh_index(ctx, session)
+    lines = sorted(
+        (
+            line
+            for line in read_lines(ctx.root)
+            if line.get("session") == session and isinstance(line.get("at"), str)
+        ),
+        key=lambda line: line["at"],
+    )
+    at = getattr(args, "at", None)
+    prompts = [line for line in lines if isinstance(line.get("prompt_id"), str)]
+    if at is not None:
+        line = _match_at(lines, at, session)
+    elif prompts:
+        line = prompts[-1]
+    else:
+        raise UsageError(f"the turn index holds no prompt of session {session} to skip")
+    key = line.get("prompt_id") or line.get("turn")
+    written = mark_skipped(ctx.root, session, key, why)
+    if written is None:
+        raise KyoseiError(f"the turn index no longer holds {key} of session {session}")
+    return Output(
+        [f"skipped prompt {key} at {written['at']}", echo_value("why", why)],
+        {
+            "ok": True,
+            "command": "discuss skip",
+            "session": session,
+            "prompt_id": written.get("prompt_id"),
+            "turn": written.get("turn"),
+            "skip": written["skip"],
+        },
+    )
+
+
 def cmd_discuss(ctx: Context, args: Namespace) -> Output:
-    """``kyo discuss open | note | close``."""
-    store = ctx.store()
+    """``kyo discuss open | note | close | skip | check --hook``."""
     action = args.action
+    if action == "check":
+        return _check(ctx, args)
+    if getattr(args, "hook", False):
+        raise UsageError("--hook belongs to `kyo discuss check`")
+    store = ctx.store()
+    if action == "skip":
+        return _skip(ctx, store, args)
     if action == "open":
         return _open(ctx, store, args)
     if action == "note":

@@ -3091,9 +3091,11 @@ def build_parser() -> KyoseiParser:
     )
     p_discuss.add_argument(
         "action",
-        choices=["open", "note", "close"],
+        choices=["open", "note", "close", "skip", "check"],
         help="open files a discussion at the person's latest confirmed turn; note keeps what "
-        "was put to the person; close --dropped closes one with nothing produced",
+        "was put to the person; close --dropped closes one with nothing produced; skip "
+        "records, on the turn's index line, why a turn the Stop check asked about is not a "
+        "discussion; check --hook is that Stop check (KYO-662)",
     )
     p_discuss.add_argument("id", nargs="?", help="note and close: the discussion, PREFIX-N")
     p_discuss.add_argument("--title", help="open: the topic, one line")
@@ -3115,7 +3117,20 @@ def build_parser() -> KyoseiParser:
         action="store_true",
         help="close: the discussion produced nothing; needs --why",
     )
-    p_discuss.add_argument("--why", help="close --dropped: why nothing was produced, one line")
+    p_discuss.add_argument(
+        "--why",
+        help="close --dropped: why nothing was produced; skip: why the turn is not a "
+        "discussion. One line",
+    )
+    p_discuss.add_argument(
+        "--hook",
+        action="store_true",
+        help="check: read Claude Code's Stop payload on stdin and, when the turn put a "
+        "choice to the person and no discussion is open in this session, print one line of "
+        "hook JSON whose additionalContext asks the agent to open one or skip. Claude Code "
+        "continues the conversation once for it. Never blocks and always exits 0; how the "
+        "packaged Stop hook invokes this (KYO-662)",
+    )
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and
     # every part of it is in the payload, so there is nothing to select. `--root` and
