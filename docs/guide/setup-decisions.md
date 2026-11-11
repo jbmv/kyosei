@@ -463,6 +463,11 @@ decides, and how a setup agent can find the answer before asking.
 
 ### D14. May Kyosei read this project's transcripts?
 
+The answer allows three things: checking that words credited to the person are theirs,
+counting the turns of a discussion a credit cites, and sealing each message as it is sent,
+so that a few lines of a conversation can later be shown to someone who can confirm they
+were written then and are unchanged, without seeing the rest (KYO-663).
+
 - **Default:** none, and it cannot be recorded as declined or deferred under `onboarding:`.
   `kyo init` refuses to create a store without `--read-transcripts yes` or
   `--read-transcripts no` and writes nothing, on every route that creates one, including

@@ -103,7 +103,10 @@ Ask these together, in one message.
   operator's yes; never run either without it.
 - **[D14] Reading transcripts.** Ask, giving the disclosure in full: "May Kyosei read your
   Claude Code transcripts for this project? It is used to check that words credited to you
-  are yours, and to count the turns of a discussion a credit cites. **What is read:** the
+  are yours, and to count the turns of a discussion a credit cites. Each message is also
+  sealed as it is sent, so that you can later show someone a few lines of a conversation
+  and they can confirm the lines were written then and are unchanged, without seeing the
+  rest. **What is read:** the
   transcript of the session a credit names, and your prompt history
   (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
   this machine, when a credit is written or rechecked; each time a session stops, its
