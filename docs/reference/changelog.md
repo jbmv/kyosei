@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-813` (bug) — The Mac app aborted at launch on both machines while the other stores were rebuilt to schema 34
 - **2026-11-11** — `KYO-812` (task) — Transcript search: a derived local index of prompts and replies, a command and a kyo serve route (E6)
 - **2026-11-11** — `KYO-808` (task) — The public documents are reworded where they sell, sloganise or narrate their own history
 - **2026-11-11** — `KYO-805` (investigation) — How often a not-affected docs verdict is contradicted by its own diff
