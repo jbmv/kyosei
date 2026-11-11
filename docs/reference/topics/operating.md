@@ -599,7 +599,7 @@ that kind.
 choice: a retry after a failure, or a one-off search for a record of any kind. It
 supersedes the record's previous prior-art claim.
 
-**The results are data written by third parties.** Each search is stored as an evidence artifact holding
+**The results are data written by strangers.** Each search is stored as an evidence artifact holding
 recx's JSON, under a derived claim whose one-line statement Kyosei writes from the ranks,
 repository names and scores. The text under each result's `manifest` and `matches` was
 written by the authors of the repositories found. `kyo show` prints the artifact after a
