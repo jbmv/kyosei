@@ -290,7 +290,7 @@ body.terminal-open #jump-bottom { display: none; }
 .box-gutter { flex: none; position: relative; width: 24px; margin-left: -6px; }
 .box-text { flex: 1; min-width: 0; position: relative; }
 
-.box textarea, .box-mirror {
+.box textarea, .box-mirror, .box-measure {
   margin: 0;
   padding: 0;
   font: 15px/1.45 -apple-system, system-ui, sans-serif;
@@ -298,7 +298,7 @@ body.terminal-open #jump-bottom { display: none; }
   overflow-wrap: break-word;
 }
 
-.box textarea {
+.box textarea, .box-measure {
   display: block;
   width: 100%;
   border: 0;
@@ -311,6 +311,9 @@ body.terminal-open #jump-bottom { display: none; }
 
 /* A hidden copy of the text, wrapped the same way, tells the gutter where each line sits. */
 .box-mirror { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+/* A text area outside the boxes that holds a copy of a box's text while its height is read
+   (KYO-750): the box's own text area is taller than its text while a completion is offered. */
+.box-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
 
 .mark {
   position: absolute;
