@@ -56,9 +56,8 @@ import { WINDOW_SHOW_SWITCH, type WindowShow } from "../src/shared/protocol";
  * throttling is turned off by name rather than avoided: `prepareApp` in
  * `main/main.ts` appends `disable-background-timer-throttling`,
  * `disable-renderer-backgrounding` and `disable-backgrounding-occluded-windows`, and
- * every window carries `backgroundThrottling: false`. That neutralisation is checked
- * rather than trusted -- see "an unshown window is not a throttled one" in
- * `smoke.spec.ts`, which measures frames and timers inside the real thing. Under
+ * every window carries `backgroundThrottling: false`. No check measures that
+ * neutralisation since the smoke checks were removed (KYO-830 found the reference). Under
  * those switches an unshown window reports `document.visibilityState === "visible"`
  * and delivers frames at full rate, so there is no observable difference for page
  * code to notice.
@@ -896,7 +895,7 @@ export interface GateFilterFixture extends Fixture {
  *
  * Deliberately its OWN store and not an addition to `makeRecordsFixture`'s: that
  * fixture's FIX-1 is the one record in ITS store with an open gate ("nothing else
- * in this store has any", asserted in `smoke.spec.ts`), and seeding a second and
+ * in this store has any"), and seeding a second and
  * third gated record into it would falsify that assertion for a reason that has
  * nothing to do with what it is about.
  */

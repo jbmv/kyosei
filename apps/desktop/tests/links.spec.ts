@@ -695,8 +695,7 @@ test("a kyosei link clicked inside the claude view is opened in-app, never in a 
   await expect(hint).toHaveAttribute("data-tip", /markdown link/);
 
   // The view's own contents, found by ORIGIN: this app's renderers are `file:` and
-  // the view's page is not. The same rule `poppedPaneWindow` uses in `smoke.spec.ts`,
-  // and for the same reason -- the two are indistinguishable by arrival order.
+  // the view's page is not. The two are indistinguishable by arrival order.
   const findView = (): Promise<number | null> =>
     (app as ElectronApplication).evaluate(({ webContents }) => {
       const view = webContents

@@ -2,9 +2,8 @@
 //
 // KYO-136 decided that docs mode sits past the seam and is pure view-only: a document
 // changes when an idea reaches an orchestrator session, which reads and edits it. So
-// this file is the whole capability surface of the mode, and it is two reads. Ideas
-// mode needed `assertWritable` because it has writes to constrain; the equivalent
-// guarantee here is that there is no third function.
+// this file is the whole capability surface of the mode, and it is two reads. Having no
+// writes to constrain, its guarantee is that there is no third function.
 //
 // WHERE THE ROWS COME FROM, and why not from a Base. The governance layer -- what a
 // document governs, which claims no longer resolve, how current it is -- is the KYO-109
