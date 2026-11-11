@@ -5,8 +5,8 @@
     event: changed
     data: {"kind": "store"}
 
-with ``kind`` one of ``store``, ``ideas``, ``sessions`` and ``scratchpad``, and a ``: keepalive``
-comment goes out every :data:`KEEPALIVE_SECONDS` so a proxy in between (Tailscale
+with ``kind`` one of ``store``, ``ideas``, ``sessions``, ``scratchpad`` and ``draft``, and a
+``: keepalive`` comment goes out every :data:`KEEPALIVE_SECONDS` so a proxy in between (Tailscale
 Serve, say) does not close an idle stream. It replaced the hand-framed WebSocket of
 the server the desktop app once ran; ``EventSource`` is built into every browser.
 
@@ -27,6 +27,11 @@ store costs nothing measurable:
   The inode is in the stamp because kyo serve writes by atomic rename: two saves
   inside one mtime tick with the same length are still two files.
 
+- ``draft`` (KYO-798): the project's own composer draft, which lives in the store home and
+  is stamped by :func:`kyosei.serve_drafts.project_stamp`. It is not part of
+  :func:`fingerprint`, which reads a project's own paths: the route hands :func:`stream` the
+  stamp as one of ``more``. The event says that the draft changed and carries none of it.
+
 A path that is not there is part of the answer (``gone``), so a store whose database
 appears later changes from ``gone`` to a stamp, which is an event.
 
@@ -45,7 +50,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from .serve_files import ProjectPaths
@@ -130,20 +135,29 @@ def stream(
     *,
     poll_seconds: float = POLL_SECONDS,
     keepalive_seconds: float = KEEPALIVE_SECONDS,
+    more: Mapping[str, Callable[[], str]] | None = None,
 ) -> None:
     """Write events to ``write`` until it raises (the client left) or ``stopping``.
 
     The first fingerprint is the baseline: a stream reports changes AFTER it opened,
     and a client reads current state with the ordinary routes when it attaches.
+
+    ``more`` is further kinds, each with the function that stamps it, for a thing that is
+    not among the project's own paths; they are sent after :data:`KINDS`.
     """
-    last = fingerprint(paths)
+    stamps = dict(more or {})
+
+    def taken() -> dict[str, str]:
+        return {**fingerprint(paths), **{kind: stamp() for kind, stamp in stamps.items()}}
+
+    last = taken()
     since_keepalive = 0.0
     try:
         write(OPENING)
         while not stopping.wait(poll_seconds):
-            now = fingerprint(paths)
+            now = taken()
             sent = False
-            for kind in KINDS:
+            for kind in (*KINDS, *stamps):
                 if now[kind] != last[kind]:
                     write(changed_event(kind))
                     sent = True

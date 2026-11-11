@@ -30,8 +30,9 @@ adds the following.
   and the orchestrator keeps its plan there with `kyo agenda`. The hooks print the unchecked
   items into the session on each prompt and name the person's at each stop.
 - **Drafts kept on the server.** The server saves the unsent prompts of each session and of
-  the project. A prompt written on one device is found on another, and one written while no
-  session runs is carried into the next session.
+  the project. A prompt written on one device appears on another while both are open, a
+  prompt sent from one leaves the other, and one written while no session runs is carried
+  into the next session.
 - **Held prompts.** A prompt sent while the agent is in a turn is held by the server and
   delivered when the session's screen is idle. Until then it can be taken back or sent at
   once.
@@ -73,6 +74,20 @@ five seconds, and then reads the project's draft in place of what the window hol
 the copy another device saved last is the one shown. A save that is waiting is sent before
 the composer turns from one draft to another. The page also keeps each project's prompts in
 its own storage, under the server and the project, which is all a device with no token has.
+
+A draft saved on another device is shown without reopening anything (KYO-798). The server
+announces a save of the session's draft on the session's event stream and a save of the
+project's on the project's, both of which the app already follows. `SessionFeed.swift` reads
+the draft when the etag announced is not one it holds, and hands it to the page. Every box
+has an id that all devices and the server share, and the page merges by it
+(`web/src/drafts.ts`). A box not edited in this window follows the server: it takes words
+typed elsewhere, and it leaves when it was sent or deleted elsewhere. A box holding edits
+the server has not acknowledged keeps them. If the same box was edited on the other device
+too, that version is added after it, and a line under the composer says that both were kept.
+The merged draft is then saved, which brings the other device to the same boxes. The same
+merge runs when the server refuses a save as stale. The page learns what the server holds
+from the app's answer to each save, and a box that already shows what is wanted is left in
+place, so the caret and the box's undo history stay.
 
 A quit waits for the last save (KYO-782). The page saves after a pause in typing, so the app
 asks it for a save still waiting, makes that save, and waits up to two seconds for the

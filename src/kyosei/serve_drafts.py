@@ -23,8 +23,27 @@ may compose may send, and a drafts-only device has no use. The machine's ``serve
 is not consulted, because a draft does not touch a session.
 
 THE SHAPE. ``{"boxes": [{"text": ...}, ...]}``: an ordered list of objects, each with a
-``text`` string. A box's other keys are kept as written, for the composer's own use (its marks:
-anchors, tags and attachments); the server does not interpret them.
+``text`` string and an ``id``. A box's other keys are kept as written, for the composer's own
+use (its marks: anchors, tags and attachments); the server does not interpret them.
+
+A BOX'S ID (KYO-798) is what every device and the server know one box by, so that a device can
+tell a box edited elsewhere from one added, and one sent or deleted elsewhere from one it has
+just written. The device that makes a box names it, and the id is kept through every save and
+every move between drafts. A box saved without one is given one here, and so is a box read
+from a draft stored before boxes had them: that id is derived from the box's text and its
+place among boxes of the same text, so every device reading the stored draft is given the
+same one without a write. An ``id`` must be a string that is not empty; one repeated within a
+draft is replaced on the later box.
+
+A CHANGE IS ANNOUNCED (KYO-798) on a stream an open app already holds, so that a draft saved
+on one device is read by the others without their being reopened. A session's draft is
+announced on the session's event stream as ``draft``, carrying the session and the new etag,
+and the stream's ``ready`` states the etag as ``draft``; :func:`session_etag` is what the
+sampler asks on each tick. The project's own draft is announced on the project's event stream
+as ``changed`` with ``kind`` ``draft``, from :func:`project_stamp`. Neither carries a box:
+both streams are open to a device that may not read a draft, which is read with the ``send``
+permission by the ``GET`` above. A device compares the etag with the one its own last save or
+read returned, so its own save is not read back.
 
 BETWEEN SESSIONS (KYO-763). Boxes move between a session's draft and the project's at two
 moments, and the server makes both moves, from the copies it stores. A device is not asked to,
@@ -50,7 +69,9 @@ it; one whose state cannot be read is left alone.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import subprocess
 import threading
 from collections.abc import Callable
@@ -85,7 +106,39 @@ def _boxes(raw: bytes) -> list[dict]:
             raise Refusal(
                 400, f'boxes[{index}] needs a "text" string', reason="bad-request"
             )
+        if "id" in box and not (isinstance(box["id"], str) and box["id"]):
+            raise Refusal(
+                400,
+                f'boxes[{index}] has an "id" that is not a string of at least one character; '
+                "leave the key out and the server names the box",
+                reason="bad-request",
+            )
     return boxes
+
+
+def _identified(boxes: list[dict]) -> list[dict]:
+    """The boxes, each with an id no other box of the list has (KYO-798).
+
+    A box with none is given one derived from its text and from how many unnamed boxes of
+    that text came before it, so the same stored draft reads with the same ids every time.
+    """
+    seen: set[str] = set()
+    unnamed: dict[str, int] = {}
+    named: list[dict] = []
+    for box in boxes:
+        held = box.get("id")
+        if not (isinstance(held, str) and held) or held in seen:
+            text = box.get("text") if isinstance(box.get("text"), str) else ""
+            while True:
+                nth = unnamed.get(text, 0)
+                unnamed[text] = nth + 1
+                held = "b" + hashlib.sha256(f"{nth}\0{text}".encode()).hexdigest()[:20]
+                if held not in seen:
+                    break
+            box = {**box, "id": held}
+        seen.add(held)
+        named.append(box)
+    return named
 
 
 def _stored(target: Path, shown: str) -> tuple[dict, str] | None:
@@ -111,7 +164,39 @@ def _stored(target: Path, shown: str) -> tuple[dict, str] | None:
 def _held(found: tuple[dict, str] | None) -> list[dict]:
     """The boxes of a stored draft; none for a draft that is absent or holds no list."""
     boxes = found[0].get("boxes") if found is not None else None
-    return [box for box in boxes if isinstance(box, dict)] if isinstance(boxes, list) else []
+    if not isinstance(boxes, list):
+        return []
+    return _identified([box for box in boxes if isinstance(box, dict)])
+
+
+def _unnamed(box: dict) -> dict:
+    return {key: value for key, value in box.items() if key != "id"}
+
+
+def session_etag(environ: dict[str, str], session_id: str) -> str | None:
+    """The etag of a session's stored draft; None when it has none or it cannot be read.
+
+    What the session's event stream announces (KYO-798): the etag and no box.
+    """
+    try:
+        path = serve_files.composer_path(environ, serve_files.DRAFTS, session_id)
+        return serve_files.etag_of(path.read_bytes())
+    except (Refusal, OSError):
+        return None
+
+
+def project_stamp(environ: dict[str, str], name: str) -> str:
+    """A stamp of the file holding a project's own draft, which differs after each save.
+
+    What the project's event stream compares (KYO-798). The inode is part of it because a
+    draft is written by rename: two saves of one length inside one tick of the file's clock
+    are still two files.
+    """
+    try:
+        info = os.stat(serve_files.project_draft_path(environ, name))
+    except (Refusal, OSError):
+        return "gone"
+    return f"{info.st_mtime_ns}:{info.st_size}:{info.st_ino}"
 
 
 class _Drafts:
@@ -151,7 +236,7 @@ class _Drafts:
         """Replace one draft under its precondition; the status, the document, the etag."""
         target = self.path(session_id, create=True)
         document = {
-            "boxes": boxes,
+            "boxes": _identified(boxes),
             "updated_at": clock.now(),
             "device": {"id": self.device.id, "name": self.device.name},
         }
@@ -219,7 +304,15 @@ class _Drafts:
         left.sort(key=lambda row: row[:2])
         boxes = _held(stored)
         for _, _, theirs, _ in left:
-            boxes += [box for box in theirs if box not in boxes]
+            # A box is the one already there when it has that box's id, as it has when the
+            # move was made before and the emptying after it failed.
+            # One that differs only in its id is the same words written twice, and is not
+            # added again either.
+            have = {box["id"] for box in boxes}
+            words = [_unnamed(box) for box in boxes]
+            boxes += [
+                box for box in theirs if box["id"] not in have and _unnamed(box) not in words
+            ]
         moved = self.move(None, boxes, stored[1] if stored is not None else None)
         for _, session_id, _, etag in left:
             self.empty(session_id, etag)
@@ -248,7 +341,7 @@ def _response(
     return {
         "ok": True,
         **whose,
-        "boxes": held.get("boxes", []),
+        "boxes": _held((held, "")) if document is not None else [],
         "updated_at": held.get("updated_at"),
         "device": held.get("device"),
         "etag": etag,

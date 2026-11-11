@@ -113,6 +113,10 @@ final class SessionFeed {
     /// The etag of each draft read, by its path. A save still on its way when the window
     /// turns to another session answers for its own draft and not the one shown (KYO-761).
     private var draftEtags: [String: String] = [:]
+    /// The etag of the draft the page was last handed, by its path (KYO-798). The page states
+    /// it with each save it asks for, which is how a save asked for before the page had
+    /// merged a newer draft is told from one asked for after.
+    private var handedEtags: [String: String] = [:]
     /// The reads and saves of drafts, which run one at a time in the order they were asked.
     private var draftTask: Task<Void, Never>?
     /// The wait between asking the page for a save that is pending and reading the draft
@@ -235,6 +239,7 @@ final class SessionFeed {
             liveSessions = [:]
             projectVerified = false
             draftEtags = [:]
+            handedEtags = [:]
             agendaEtags = [:]
             tokenNeeded = nil
             client = ServeClient(base: server, token: Self.deviceToken())
@@ -562,6 +567,7 @@ final class SessionFeed {
                 frame["turned"] = turned
                 guard let json = try? JSONSerialization.data(withJSONObject: frame) else { return }
                 draftEtags[path] = frame["etag"] as? String
+                handedEtags[path] = frame["etag"] as? String
                 shownPlace = place
                 send("draft", String(decoding: json, as: UTF8.self))
                 // Prompts the server had not acknowledged when the app last quit are newer
@@ -716,11 +722,72 @@ final class SessionFeed {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["etag"] as? String
     }
 
+    /// The stream said the draft of `place` was saved (KYO-798): the session's stream with
+    /// the new etag as `stated`, the project's with none. A draft whose etag this window
+    /// holds is its own save, or one it has read, and is not read again. The read waits for
+    /// a save still on its way, so that the save's own announcement finds its etag held.
+    private func draftChanged(_ place: DraftPlace, stated: String?? = nil) {
+        guard place == shownPlace, place == draftPlace, let token = Self.deviceToken()
+        else { return }
+        let client = client
+        let path = draftPath(place)
+        let previous = draftTask
+        draftTask = Task {
+            await previous?.value
+            guard place == shownPlace, place == draftPlace, client.base == self.client.base
+            else { return }
+            if case .some(let etag) = stated, etag == draftEtags[path] { return }
+            await handDraft(place, path: path, client: client, token: token)
+        }
+    }
+
+    /// The session stream's word of the session's draft: `ready` states it under `draft`
+    /// when the stream opens or resumes, and `draft` is the change itself.
+    private func draftChanged(_ event: String, session: String) {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: Data(event.utf8)) as? [String: Any]
+        else { return }
+        // A server from before drafts were announced says nothing of one in `ready`.
+        guard let stated = object["draft"] as? [String: Any] ?? (object["etag"] != nil ? object : nil)
+        else { return }
+        draftChanged(.session(session), stated: .some(stated["etag"] as? String))
+    }
+
+    /// Reads the draft of `place` and hands it to the page as one saved from another device,
+    /// unless this window already holds that one. The page merges it with the prompts on
+    /// the screen: those not edited here follow it, and those with unsaved edits keep them.
+    private func handDraft(
+        _ place: DraftPlace, path: String, client: ServeClient, token: String
+    ) async {
+        guard let reply = try? await client.authorised("GET", path, token: token),
+            reply.status == 200,
+            let frame = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
+        else { return }
+        let etag = frame["etag"] as? String
+        // The etag is taken only with the draft it names: a later save made under it would
+        // otherwise replace boxes the page was never shown.
+        guard etag != draftEtags[path], place == shownPlace, client.base == self.client.base
+        else { return }
+        draftEtags[path] = etag
+        handedEtags[path] = etag
+        send("draftElsewhere", String(decoding: reply.data, as: UTF8.self))
+    }
+
     /// Replaces the draft the composer was last given. Saves run one at a time, so each
     /// uses the last etag. The task returned answers whether the server acknowledged this
     /// save; nil is returned when there is nowhere to save to.
+    ///
+    /// The page numbers each save it asks for (`seq`) and states the etag of the draft it was
+    /// last handed (`seen`); neither is part of the draft. An acknowledged save is said back
+    /// to the page by its number, which is how the page knows what the server holds
+    /// (KYO-798). A save asked for before the page had merged a draft handed to it since is
+    /// not made, because it would replace what another device saved: the page's merge asks
+    /// for a save of its own.
     @discardableResult
     func saveDraft(body: [String: Any]) -> Task<Bool, Never>? {
+        var body = body
+        let seq = body.removeValue(forKey: "seq") as? Int
+        let seen = body.removeValue(forKey: "seen")
         guard let place = shownPlace, let token = Self.deviceToken(),
             let data = try? JSONSerialization.data(withJSONObject: body)
         else { return nil }
@@ -740,6 +807,7 @@ final class SessionFeed {
         )
         let save = Task { () -> Bool in
             await previous?.value
+            if let seen, seen as? String != handedEtags[path] { return false }
             let etag = draftEtags[path]
             guard
                 let reply = try? await client.authorised(
@@ -753,12 +821,15 @@ final class SessionFeed {
                     restoredDraft = false
                     KeptDraft.forget(in: .standard)
                 }
+                if let seq, place == shownPlace, client.base == self.client.base {
+                    send("draftSaved", #"{"seq": \#(seq)}"#)
+                }
                 return true
             } else if reply.status == 412 {
-                // Another device saved first. Keep this text, and let the next edit replace it.
-                draftEtags[path] = self.etag(in: reply.data)
-                guard place == shownPlace, client.base == self.client.base else { return false }
-                send("note", #"{"text": "This draft also changed on another device."}"#)
+                // Another device saved first. Its draft is read and handed to the page,
+                // which keeps what was typed here beside it, says so, and saves the two
+                // together (KYO-798).
+                await handDraft(place, path: path, client: client, token: token)
             }
             return false
         }
@@ -1343,21 +1414,29 @@ final class SessionFeed {
 
     /// Follows the project's change events and tells the page of each, so that the Records
     /// view reads again what changed. After a lost connection the page is told once more,
-    /// since a change made meanwhile was not heard.
+    /// since a change made meanwhile was not heard. A change of the project's own composer
+    /// draft is the app's to read (KYO-798), and matters while no session is live.
     private func followProject() async {
         let project = project
         var retry = Backoff()
         var lost = false
         let client = client
         while !Task.isCancelled {
-            if lost { send("recordsChanged", #"{"kind": "store"}"#) }
+            if lost {
+                send("recordsChanged", #"{"kind": "store"}"#)
+                draftChanged(.project)
+            }
             do {
                 for try await event in client.projectEvents(project: project)
                 where event.name == "changed" {
                     // A stream that was cancelled still yields what it had buffered.
                     if Task.isCancelled { return }
                     retry.reset()
-                    send("recordsChanged", event.data)
+                    if event.data.contains(#""draft""#) {
+                        draftChanged(.project)
+                    } else {
+                        send("recordsChanged", event.data)
+                    }
                 }
             } catch {
                 if Task.isCancelled { return }
@@ -1689,6 +1768,11 @@ final class SessionFeed {
                     send("ready", event.data)
                     takeFacts(from: Data(event.data.utf8))
                     agendaChanged(event.data, session: session)
+                    // A draft saved while the stream was away is read now (KYO-798).
+                    draftChanged(event.data, session: session)
+                case "draft":
+                    // Saved from another device, or moved by the server.
+                    draftChanged(event.data, session: session)
                 case "agenda":
                     // Saved by the orchestrator, or from another device.
                     agendaChanged(event.data, session: session)

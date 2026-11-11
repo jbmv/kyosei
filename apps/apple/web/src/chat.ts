@@ -27,6 +27,9 @@ import {
   type ProjectsFrame, anchorGoneNote, anchorOpens, choices, keepBoxes, keptBoxes, listNote,
   meetDraft, sessionLinks, typedChoice,
 } from "./projects";
+import {
+  type Agreed, type DraftBox, agreedOn, boxId, boxSignature, mergeDraft, mergeNote, signatures,
+} from "./drafts";
 import { SendGate } from "./sending";
 import {
   type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
@@ -1638,6 +1641,9 @@ const kyo = {
     if (!textAreas().length) addBox();
     paintAnchors();
     remember();
+    // KYO-798: the sent prompt leaves the saved draft at once and not after a pause, so that
+    // it leaves the composer of every other device showing this draft.
+    flushDraft();
     switchWhenFree();
   },
 
@@ -1657,7 +1663,13 @@ const kyo = {
    * the screen.
    */
   draft(frame: { boxes: SavedBox[]; etag: string | null; turned?: boolean }): void {
-    const saved = frame.boxes.filter((box) => box.text || box.marks?.length);
+    // A server from before boxes had ids sends none, and a box is then named here.
+    const saved = frame.boxes.filter((box) => box.text || box.marks?.length)
+      .map((box) => ({ ...box, id: box.id || boxId() }));
+    // Saves still unanswered were of another draft, or of this one before it was read.
+    posted.clear();
+    agreed = agreedOn([]);
+    seenEtag = frame.etag;
     // The server's draft carries each prompt's marks, so a prompt opens the same on any device.
     const met = scope === null
       ? { boxes: saved, merged: false }
@@ -1676,10 +1688,43 @@ const kyo = {
     loadingDraft = true;
     showTexts(met.boxes.map((box) => box.text), met.boxes);
     loadingDraft = false;
+    agreed = agreedWith(saved, new Set(saved.map((box) => box.id)));
     keepCurrent();
     adoptShelf();
     // Prompts only this device held are now part of the draft, and are saved to it.
     if (met.merged) remember();
+  },
+
+  /**
+   * The server acknowledged the save the page numbered `seq` (KYO-798): what it held is now
+   * the draft this window and the server agree on, which a change made elsewhere is merged
+   * against.
+   */
+  draftSaved(frame: { seq?: number }): void {
+    const held = frame.seq === undefined ? undefined : posted.get(frame.seq);
+    if (!held) return;
+    for (const seq of [...posted.keys()]) if (seq <= frame.seq!) posted.delete(seq);
+    agreed = agreedOn(held);
+  },
+
+  /**
+   * The draft on the screen was saved from another device (KYO-798): the stream announced it
+   * and the app read it, or the server refused this window's save because another came
+   * first. Prompts not edited here follow the server's draft, so one sent or deleted elsewhere
+   * leaves and one typed elsewhere appears. Prompts with edits the server has not
+   * acknowledged keep them, the person is told, and the merged draft is saved.
+   */
+  draftElsewhere(frame: { boxes: SavedBox[]; etag: string | null }): void {
+    const remote = frame.boxes.filter((box) => box.text || box.marks?.length)
+      .map((box) => ({ ...box, id: box.id || boxId() }));
+    const merged = mergeDraft(agreed, currentBoxes(), remote);
+    seenEtag = frame.etag;
+    applyBoxes(merged.boxes);
+    agreed = agreedWith(remote, new Set(merged.boxes.filter((box) => remote.includes(box)).map((box) => box.id)));
+    keepCurrent();
+    const note = mergeNote(merged);
+    if (note) composerNote.textContent = note;
+    if (merged.save) remember();
   },
 
   /**
@@ -1956,7 +2001,12 @@ interface AnchorItem {
 interface FileItem { kind: "file"; id: string; name: string; path?: string; thumb?: string; pending?: string }
 /** KYO-737: a record or lines of a file are held as the places `marks.ts` describes. */
 type Item = TagItem | AnchorItem | FileItem | Place;
-interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
+/**
+ * One prompt as it is saved. `id` is the box's own, shared by every device and the server
+ * (KYO-798); a prompt kept before boxes had one has none until it is shown.
+ */
+interface SavedBox { id?: string; text: string; marks?: { line: number; items: Item[] }[] }
+type NamedBox = SavedBox & DraftBox;
 
 /**
  * One placing of an anchor in a box (KYO-780). The box's own undo history holds edits of its
@@ -1983,6 +2033,8 @@ interface Marks {
 }
 
 const marksOf = new WeakMap<HTMLTextAreaElement, Marks>();
+/** Each box's id (KYO-798), which it keeps for as long as it is a draft on any device. */
+const boxIds = new WeakMap<HTMLTextAreaElement, string>();
 let nextLine = 1;
 let openMark: { area: HTMLTextAreaElement; id: number } | null = null;
 const markPanel = document.createElement("div");
@@ -3071,10 +3123,11 @@ function reveal(item: AnchorItem): void {
 }
 
 /** A box for one prompt: the whole of one message, with its own Send and Delete. */
-function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
+function addBox(text = "", saved: SavedBox["marks"] = [], id: string = boxId()): HTMLTextAreaElement {
   const box = document.createElement("div");
   box.className = "box";
   const area = document.createElement("textarea");
+  boxIds.set(area, id);
   area.rows = 1;
   area.placeholder = "Reply…";
   area.value = text;
@@ -3220,20 +3273,111 @@ function currentTexts(): string[] {
   return textAreas().map((area) => area.value).filter(Boolean);
 }
 
-/** Each prompt with its marks, by the line each is on. */
-function currentBoxes(): SavedBox[] {
-  // A prompt with an anchor and no words yet is still a draft.
-  return textAreas().filter((area) => area.value || marksOf.get(area)!.items.size).map((area) => {
-    const marks = marksOf.get(area)!;
-    return {
-      text: area.value,
-      marks: marks.ids.flatMap((id, line) => {
-        // A file still uploading is not saved: nothing would finish it after a relaunch.
-        const items = marks.items.get(id)?.filter((item) => !(item.kind === "file" && item.pending));
-        return items?.length ? [{ line, items }] : [];
-      }),
-    };
-  });
+/** One prompt as it is saved: its id, its words, and its marks by the line each is on. */
+function savedBox(area: HTMLTextAreaElement): NamedBox {
+  const marks = marksOf.get(area)!;
+  return {
+    id: boxIds.get(area)!,
+    text: area.value,
+    marks: marks.ids.flatMap((id, line) => {
+      // A file still uploading is not saved: nothing would finish it after a relaunch.
+      const items = marks.items.get(id)?.filter((item) => !(item.kind === "file" && item.pending));
+      return items?.length ? [{ line, items }] : [];
+    }),
+  };
+}
+
+/** A box that is a draft: a prompt with an anchor and no words yet is still one. */
+function isDraft(area: HTMLTextAreaElement): boolean {
+  return Boolean(area.value || marksOf.get(area)!.items.size);
+}
+
+/** Each prompt with its marks. */
+function currentBoxes(): NamedBox[] {
+  return textAreas().filter(isDraft).map(savedBox);
+}
+
+/** The draft this window and the server last agreed on (KYO-798); none before one is read. */
+let agreed: Agreed = agreedOn([]);
+/** The saves the server has not answered yet, by the number each was posted under. */
+const posted = new Map<number, NamedBox[]>();
+let saveSeq = 0;
+/**
+ * The etag of the server's draft this window was last handed. A save states it, so that the
+ * app can tell a save asked for before the page had merged a newer draft, which it drops:
+ * the merge asks for its own.
+ */
+let seenEtag: string | null = null;
+
+/** Asks the app to save the prompts, and keeps what was asked until the server answers. */
+function postDraft(): void {
+  const held = currentBoxes();
+  saveSeq += 1;
+  posted.set(saveSeq, held);
+  post("saveDraft", { boxes: held, seq: saveSeq, seen: seenEtag });
+}
+
+/**
+ * The agreed draft once `server` has met this window. A box whose id is in `taken` is shown
+ * as the server sent it, and is compared from now on as this window writes it. Any other is
+ * one this window kept its own edit of, and is compared with the server's copy.
+ */
+function agreedWith(server: NamedBox[], taken: Set<string>): Agreed {
+  const drawn = signatures(currentBoxes());
+  return {
+    server: signatures(server),
+    local: new Map(server.map((box) =>
+      [box.id, (taken.has(box.id) ? drawn.get(box.id) : undefined) ?? boxSignature(box)])),
+  };
+}
+
+/**
+ * Shows these prompts in place of the ones on the screen, leaving alone each box that
+ * already holds what is wanted: its caret, its selection and its own undo history stay. A
+ * box with no words is no part of a draft and stays too.
+ */
+function applyBoxes(wanted: NamedBox[]): void {
+  const focused = document.activeElement instanceof HTMLTextAreaElement && boxIds.has(document.activeElement)
+    ? document.activeElement : null;
+  const caret = focused
+    ? { id: boxIds.get(focused)!, start: focused.selectionStart, end: focused.selectionEnd } : null;
+  const before = textAreas();
+  const have = new Map(before.map((area) => [boxIds.get(area)!, area]));
+  const ids = new Set(wanted.map((box) => box.id));
+  const kept = new Set<HTMLTextAreaElement>();
+  const order: Element[] = [];
+  const wasLoading = loadingDraft;
+  loadingDraft = true;
+  for (const box of wanted) {
+    const shown = have.get(box.id);
+    const area = shown && boxSignature(savedBox(shown)) === boxSignature(box)
+      ? shown : addBox(box.text, box.marks, box.id);
+    kept.add(area);
+    order.push(area.closest(".box")!);
+  }
+  for (const area of before) {
+    if (kept.has(area)) continue;
+    if (!isDraft(area) && !ids.has(boxIds.get(area)!)) {
+      order.push(area.closest(".box")!);
+      continue;
+    }
+    if (openMark?.area === area) hideMark();
+    area.closest(".box")!.remove();
+  }
+  // Only a box that is out of its place is moved, since moving one takes the focus from it.
+  let next = boxes.querySelector(":scope > .box");
+  for (const box of order) {
+    if (box === next) next = next.nextElementSibling;
+    else boxes.insertBefore(box, next);
+  }
+  if (!textAreas().length) addBox();
+  loadingDraft = wasLoading;
+  paintAnchors();
+  const again = caret && textAreas().find((area) => boxIds.get(area) === caret.id);
+  if (again && document.activeElement !== again) {
+    again.focus();
+    again.setSelectionRange(Math.min(caret.start, again.value.length), Math.min(caret.end, again.value.length));
+  }
 }
 
 /**
@@ -3260,7 +3404,7 @@ function flushDraft(): void {
   if (draftSave === undefined) return;
   clearTimeout(draftSave);
   draftSave = undefined;
-  post("saveDraft", { boxes: currentBoxes() });
+  postDraft();
 }
 
 const DRAFT_SAVE_DELAY_MS = 700;
@@ -3289,7 +3433,7 @@ function remember(): void {
   if (draftSave !== undefined) clearTimeout(draftSave);
   draftSave = window.setTimeout(() => {
     draftSave = undefined;
-    post("saveDraft", { boxes: currentBoxes() });
+    postDraft();
   }, DRAFT_SAVE_DELAY_MS);
 }
 
@@ -3301,7 +3445,13 @@ function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   hideMark();
   // The session's list is the first thing in this column and is not a prompt.
   for (const box of boxes.querySelectorAll(":scope > .box")) box.remove();
-  for (const text of texts) addBox(text, kept.find((box) => box.text === text)?.marks);
+  // A prompt whose text is known keeps its id with its marks, each known prompt once.
+  const left = [...kept];
+  for (const text of texts) {
+    const at = left.findIndex((box) => box.text === text);
+    const known = at < 0 ? undefined : left.splice(at, 1)[0];
+    addBox(text, known?.marks, known?.id || boxId());
+  }
   if (!texts.length) addBox();
   remember();
 }

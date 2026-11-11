@@ -929,7 +929,7 @@ class ServeHandler(BaseHTTPRequestHandler):
         project = self.server.project(name)
         paths = serve_files.project_paths(project.root, self.server.environ)
         if route == "events":
-            self._events(paths)
+            self._events(paths, name)
             return None
         if route == "docs":
             if relpath == "":
@@ -1002,10 +1002,12 @@ class ServeHandler(BaseHTTPRequestHandler):
             raise Refusal(400, "the body must be a JSON object")
         return document
 
-    def _events(self, paths) -> None:
+    def _events(self, paths, name: str) -> None:
         """A ``text/event-stream`` that lasts until the client leaves or the
         server stops. It takes no lock: a fingerprint reads no store content."""
-        from . import serve_events
+        from . import serve_drafts, serve_events
+
+        environ = self.server.environ
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -1024,6 +1026,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             self.server.stopping,
             poll_seconds=self.server.poll_seconds,
             keepalive_seconds=self.server.keepalive_seconds,
+            # KYO-798: the project's own composer draft, saved from another device.
+            more={"draft": lambda: serve_drafts.project_stamp(environ, name)},
         )
 
     # ------------------------------------------------------------ session routes

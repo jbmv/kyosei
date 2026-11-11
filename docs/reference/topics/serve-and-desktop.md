@@ -511,7 +511,7 @@ the route that holds the message, so neither shows that the session is still bei
 
 | Frame | `data` |
 |---|---|
-| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`, `held`, `agenda`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` is `{"etag": ...}` |
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`, `held`, `agenda`, `draft`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` and `draft` are each `{"etag": ...}` |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
 | `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, or new usage limits saved by any session change them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
@@ -523,6 +523,7 @@ the route that holds the message, so neither shows that the session is still bei
 | `event: resumed` | `session_id`: a pass has succeeded after an `error` frame; sent before that pass's own frames |
 | `event: held` | `outcome` (`held`, `delivered`, `retracted`), `id` and the held message's description, without its text (see "Saved drafts and held messages") |
 | `event: agenda` | `session_id`, `etag`: the session's task list was saved; no item is carried (see "A session's task list") |
+| `event: draft` | `session_id`, `etag`: the session's composer draft was saved; no box is carried (see "Saved drafts and held messages") |
 
 A `transcript` frame carries the id of its `cursor`, so a client that reconnects with
 `Last-Event-ID`, or that passes `?cursor=`, is sent what it missed first; objects sent twice
@@ -630,7 +631,7 @@ draft, which is `/v1/projects/<name>/draft`.
 | Route | Method | Purpose |
 |---|---|---|
 | `draft` | GET | The saved boxes, or `boxes: []` and `etag: null` when there are none |
-| `draft` | PUT | Replace them: `{"boxes": [{"text": ...}, ...]}` |
+| `draft` | PUT | Replace them: `{"boxes": [{"id": ..., "text": ...}, ...]}` |
 | `/v1/projects/<name>/draft` | GET | The project's draft, in the same shape (KYO-763) |
 | `/v1/projects/<name>/draft` | PUT | Replace it, as a session's draft is replaced |
 | `held` | POST | Hold a message: the body of `send` |
@@ -641,8 +642,28 @@ draft, which is `/v1/projects/<name>/draft`.
 **A draft** is written with `If-Match: <etag>`, or `If-None-Match: *` for a first draft, and
 a writer holding an older etag is refused with 412 and the current etag, so one device cannot
 overwrite another's newer draft. The etag covers the stored file, including the time of the
-write. A box may carry keys beside `text`; the server keeps them unread. Sending need not be
-switched on, since a draft does not touch a session.
+write. A box may carry keys beside `id` and `text`; the server keeps them unread. Sending
+need not be switched on, since a draft does not touch a session.
+
+**A box's `id`** (KYO-798) is the name every device and the server know the box by. The
+device that makes a box names it, with any string that is not empty, and the id is kept
+through every save and through the moves between drafts described below. A box saved without
+an id is given one. A box read from a draft stored before boxes had ids is given one derived
+from its text and its place among boxes of the same text, so every device reading that draft
+is given the same ids. An id repeated within a draft is replaced on the later box. With the
+ids a device can tell a box edited on another device from one added there, and a box sent or
+deleted there from one it has just written itself.
+
+**A saved draft is announced** (KYO-798) on a stream an open client already holds, so that
+what is typed on one device appears on another without the second being reopened. A session's
+draft is announced on the session's event stream: `ready` states `draft: {"etag": ...}`, and
+a `draft` event carries `session_id` and the new `etag`, within one sampling interval of the
+save. The project's own draft is announced on the project's `events` stream as a `changed`
+event whose `kind` is `draft`, within a second. Neither carries a box, because both streams
+are open to a device that may not read a draft. A client reads the draft with `GET` when the
+etag announced is not the one its own last read or save returned, so its own save is not read
+back. The etag rule is unchanged: a client holding edits it has not saved merges them with
+the draft it read and saves under the new etag.
 
 A draft, a held message or a task list whose file cannot be read or written is refused with
 500 and the `reason` `composer-state-unusable`; the message names the file or the directory
