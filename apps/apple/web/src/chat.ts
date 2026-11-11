@@ -5632,13 +5632,21 @@ function foundRow(className: string, root: string, path: string, line: number | 
   return row;
 }
 
-/** The search's answers in the side bar, grouped by root, in place of the tree and lists. */
+/**
+ * The search's answers, grouped by root, in place of the tree and lists: in the side bar and
+ * on the page Files shows with no file open, each of which has the field.
+ */
 function drawFound(): void {
   const searching = filesQuery.length >= SEARCH_MIN_CHARS;
-  document.getElementById("files-side")!.classList.toggle("searching", searching);
-  const holder = document.getElementById("files-found")!;
-  holder.hidden = !searching;
-  if (!searching) return;
+  for (const place of [document.getElementById("files-side")!, filesLanding]) {
+    place.classList.toggle("searching", searching);
+    const holder = place.querySelector<HTMLElement>(".files-found")!;
+    holder.hidden = !searching;
+    if (searching) holder.replaceChildren(...foundRows());
+  }
+}
+
+function foundRows(): HTMLElement[] {
   const rows: HTMLElement[] = [];
   for (const [root, answer] of filesFound) {
     const head = document.createElement("h4");
@@ -5674,7 +5682,7 @@ function drawFound(): void {
       }));
     }
   }
-  holder.replaceChildren(...rows);
+  return rows;
 }
 
 function recentRow(item: Recent): HTMLElement {
@@ -6001,17 +6009,21 @@ document.addEventListener("click", (event) => {
   if (item) showFile(item.root, item.path, item.line, item.entry);
 });
 
-const filesSearchField = document.getElementById("files-search") as HTMLInputElement;
-filesSearchField.addEventListener("input", () => {
-  window.clearTimeout(filesSearchTimer);
-  filesSearchTimer = window.setTimeout(() => searchFiles(filesSearchField.value), 250);
-});
-filesSearchField.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-  filesSearchField.value = "";
-  window.clearTimeout(filesSearchTimer);
-  searchFiles("");
-});
+// The two fields are one search: what is typed in one is shown in the other.
+const filesSearchFields = Array.from(document.querySelectorAll<HTMLInputElement>(".files-search"));
+for (const field of filesSearchFields) {
+  field.addEventListener("input", () => {
+    for (const other of filesSearchFields) if (other !== field) other.value = field.value;
+    window.clearTimeout(filesSearchTimer);
+    filesSearchTimer = window.setTimeout(() => searchFiles(field.value), 250);
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    for (const each of filesSearchFields) each.value = "";
+    window.clearTimeout(filesSearchTimer);
+    searchFiles("");
+  });
+}
 
 navIcons("files", {
   home: filesHome,

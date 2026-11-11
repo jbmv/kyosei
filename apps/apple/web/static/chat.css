@@ -1015,13 +1015,15 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 #files-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
 #files-mentioned { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #files-recent { flex: 1; min-height: 0; max-height: 30%; overflow-y: auto; overscroll-behavior: contain; }
-#files-search { flex: none; margin: 0 4px; }
-/* While a search is shown it takes the side bar, and the tree and the lists wait beneath. */
-#files-side.searching > :not(#files-search):not(#files-found) { display: none; }
-#files-found { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-#files-found[hidden] { display: none; }
-#files-found h4 { margin: 10px 10px 4px; }
-#files-found h4:first-child { margin-top: 2px; }
+#files-side > .files-search { flex: none; margin: 0 4px; }
+#files-landing > .files-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+/* While a search is shown it takes the side bar, or the page, and the tree and the lists wait beneath. */
+#files-side.searching > :not(.files-search):not(.files-found),
+#files-landing.searching > :not(.files-search):not(.files-found) { display: none; }
+#files-side > .files-found { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.files-found[hidden] { display: none; }
+.files-found h4 { margin: 10px 10px 4px; }
+.files-found h4:first-child { margin-top: 2px; }
 .found-file, .found-line { padding: 4px 10px; border-radius: 7px; cursor: default; }
 .found-file:hover, .found-line:hover { background: var(--panel); }
 .found-line { padding-left: 22px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -96,8 +96,8 @@
              and the files the session's replies and prompts have named. -->
         <div id="files-side" data-view="files" hidden>
           <!-- Search (KYO-814): every served code and store root at once, by name and contents. -->
-          <input id="files-search" class="records-search" type="search" placeholder="Search files" aria-label="Search files" />
-          <div id="files-found" hidden></div>
+          <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
+          <div class="files-found" hidden></div>
           <div class="files-bar">
             <div class="files-roots"></div>
             <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
@@ -221,6 +221,8 @@
       <div class="files-inner">
         <div id="files-note" hidden></div>
         <div id="files-landing">
+          <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
+          <div class="files-found" hidden></div>
           <div class="files-bar">
             <div class="files-roots"></div>
             <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
