@@ -812,11 +812,20 @@ extension ServeClient {
     public func filesURL(
         project: String, segments: [String], query: [(name: String, value: String)] = []
     ) -> URL {
+        projectURL(project: project, under: "files", segments: segments, query: query)
+    }
+
+    /// The address of a route under the project's `under`: `segments` each encoded as one
+    /// segment, and `query` after them.
+    public func projectURL(
+        project: String, under: String, segments: [String] = [],
+        query: [(name: String, value: String)] = []
+    ) -> URL {
         func encoded(_ text: String) -> String {
             text.addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? text
         }
         var components = URLComponents(
-            url: base.appending(path: "v1/projects/\(project)/files"),
+            url: base.appending(path: "v1/projects/\(project)/\(under)"),
             resolvingAgainstBaseURL: false)!
         if !segments.isEmpty {
             components.percentEncodedPath += "/" + segments.map(encoded).joined(separator: "/")
@@ -837,7 +846,26 @@ extension ServeClient {
         project: String, segments: [String], query: [(name: String, value: String)] = [],
         token: String?, ifNoneMatch: String? = nil, post: Data? = nil
     ) async throws -> FileReply {
-        var request = URLRequest(url: filesURL(project: project, segments: segments, query: query))
+        try await route(
+            filesURL(project: project, segments: segments, query: query), token: token,
+            ifNoneMatch: ifNoneMatch, post: post)
+    }
+
+    /// The transcript search and the history of opened results (KYO-825), which answer as the
+    /// file routes do: the body and status, a refusal's own document included.
+    public func history(
+        project: String, under: String, segments: [String] = [],
+        query: [(name: String, value: String)] = [], token: String?, post: Data? = nil
+    ) async throws -> FileReply {
+        try await route(
+            projectURL(project: project, under: under, segments: segments, query: query),
+            token: token, post: post)
+    }
+
+    private func route(
+        _ url: URL, token: String?, ifNoneMatch: String? = nil, post: Data? = nil
+    ) async throws -> FileReply {
+        var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if let post {
             request.httpMethod = "POST"

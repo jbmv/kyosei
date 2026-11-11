@@ -1633,6 +1633,54 @@ final class SessionFeed {
         }
     }
 
+    /// The page's History view (KYO-825): a search of this project's transcripts, and the
+    /// results the person opened, read and added to. Each answer goes back with the request's
+    /// own `ask` so the page can tell a stale one from the current.
+    func history(body: [String: Any]) {
+        let project = project
+        let client = client
+        let token = Self.deviceToken()
+        let ask = body["ask"] as? Int ?? 0
+        switch body["want"] as? String {
+        case "search":
+            guard let text = body["q"] as? String else { return }
+            var query: [(name: String, value: String)] = [(name: "q", value: text)]
+            for name in ["role", "cursor", "context"] {
+                if let value = body[name] as? String, !value.isEmpty { query.append((name: name, value: value)) }
+                if let value = body[name] as? Int { query.append((name: name, value: String(value))) }
+            }
+            Task {
+                let reply = try? await client.history(
+                    project: project, under: "search", query: query, token: token)
+                guard project == self.project else { return }
+                send(
+                    "historySearched",
+                    #"{"ask": \#(ask), "status": \#(reply?.status ?? 0), "#
+                        + #""document": \#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
+            }
+        case "recent", "opened":
+            var post: Data?
+            if body["want"] as? String == "opened" {
+                post = try? JSONSerialization.data(withJSONObject: [
+                    "session": body["session"] as? String ?? "",
+                    "message": body["message"] as? String ?? "",
+                    "words": body["words"] as? String ?? "",
+                ])
+            }
+            Task {
+                let reply = try? await client.history(
+                    project: project, under: "history", segments: ["recent"], token: token, post: post)
+                guard project == self.project else { return }
+                send(
+                    "historyRecent",
+                    #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
+                        + #""error": \#(filesProblem(reply))}"#)
+            }
+        default:
+            break
+        }
+    }
+
     private func send(_ function: String, _ json: String) {
         webView?.evaluateJavaScript("window.kyo.\(function)(\(json))") { _, error in
             if let error { print("[feed] \(function): \(error)") }

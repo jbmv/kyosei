@@ -306,6 +306,11 @@ final class ChatPage: WKWebView {
             evaluateJavaScript("window.kyo.find()", completionHandler: nil)
             return true
         }
+        // Command-Shift-F opens History (KYO-825), offered to the menu first like Command-F.
+        if flags == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "f" {
+            evaluateJavaScript("window.kyo.history()", completionHandler: nil)
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 }
@@ -329,7 +334,7 @@ struct ChatWebView: NSViewRepresentable {
         for name in [
             "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
             "sendNow", "copy",
-            "terminal", "records", "files", "project", "projects",
+            "terminal", "records", "files", "history", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
@@ -430,6 +435,10 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "files", let body = message.body as? [String: Any] {
                 feed.files(body: body)
+                return
+            }
+            if message.name == "history", let body = message.body as? [String: Any] {
+                feed.history(body: body)
                 return
             }
             if message.name == "start" {

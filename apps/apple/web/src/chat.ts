@@ -36,6 +36,9 @@ import {
   refusalText,
 } from "./agenda";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
+import {
+  type Found, type Opened, type Role, chatKey, foundOf, openedEntries, plainWords, searchQuery,
+} from "./searchhistory";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -242,6 +245,7 @@ const ICONS = {
   down: '<path d="M5.5 9.5L12 16l6.5-6.5"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
+  history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.2 4.8v3.6h3.6"/><path d="M12 8v4.3l2.8 1.7"/>',
 };
 
 /** A bare line icon in the colour of the text around it. */
@@ -1445,6 +1449,7 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 const kyo = {
   clear(): void {
     endAnchorMode();
+    flashed = null;
     turnsLoaded = false;
     drawEmptyChat();
     lastMainActivity = "";
@@ -1584,6 +1589,7 @@ const kyo = {
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
       drawChatLinksSoon();
+      revealPending();
       paintAnchors();
       refreshSearch();
     });
@@ -1864,6 +1870,7 @@ const kyo = {
    */
   project(frame: { project?: string; scope?: string }): void {
     endAnchorMode();
+    resetHistory();
     const leaving = scope;
     windowProject = frame.project ?? "";
     scope = frame.scope ?? windowProject;
@@ -3265,7 +3272,7 @@ findField.addEventListener("keydown", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key.toLowerCase() === "f" && event.metaKey && !event.ctrlKey && !event.altKey) {
+  if (event.key.toLowerCase() === "f" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
     if (event.target instanceof Node && terminalPane.contains(event.target)) return;
     event.preventDefault();
     openSearch();
@@ -4177,6 +4184,7 @@ const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () 
   { id: "chat", name: "Chat", icon: "chat" },
   { id: "records", name: "Records", icon: "records", entered: () => enterRecords() },
   { id: "files", name: "Files", icon: "folder", entered: () => enterFiles() },
+  { id: "history", name: "History", icon: "history", entered: () => enterHistory() },
 ];
 let currentView = "chat";
 /** Where the transcript was when another view replaced it. */
@@ -6384,4 +6392,230 @@ drawMentions();
 drawRecent();
 drawChatLinks();
 
-(window as any).kyo = Object.assign(kyo, recordFrames, fileFrames);
+// ---------------------------------------------------------------- History (KYO-825)
+
+/** The text searched, the chips on, the results so far and the next page's cursor. */
+let historyText = "";
+const historyRoles = new Set<Role>(["person", "assistant"]);
+let historyFound: Found[] = [];
+let historyCursor: string | null = null;
+let historyProblem: string | null = null;
+let historyWaiting = false;
+/** Each request's number; an answer to an older one is not drawn. */
+let historyAsk = 0;
+let historyTimer: number | undefined;
+let historyOpened: Opened[] = [];
+/** A message a result opened, to be shown once its session's chat has drawn it. */
+let pendingReveal: { session: string; message: string; key: string; until: number } | null = null;
+/** The element lit last, so that a redraw does not light it again. */
+let flashed: string | null = null;
+const historyField = document.querySelector<HTMLInputElement>(".history-search")!;
+const historyResults = document.getElementById("history-results")!;
+
+function resetHistory(): void {
+  historyText = "";
+  historyField.value = "";
+  historyFound = [];
+  historyCursor = null;
+  historyProblem = null;
+  historyWaiting = false;
+  historyOpened = [];
+  pendingReveal = null;
+  document.getElementById("history-back")!.hidden = true;
+  drawHistory();
+  drawOpened();
+}
+
+function enterHistory(): void {
+  post("history", { want: "recent" });
+  drawHistory();
+  drawOpened();
+  historyField.focus();
+}
+
+/** Asks for the field's text, from the first page or, with `more`, the next. */
+function askHistory(more = false): void {
+  const query = searchQuery(historyText, historyRoles, more ? historyCursor : null);
+  historyAsk += 1;
+  if (!more) {
+    historyFound = [];
+    historyCursor = null;
+  }
+  historyProblem = null;
+  historyWaiting = query !== null;
+  if (query) post("history", { want: "search", ask: historyAsk, ...query });
+  drawHistory();
+}
+
+function sessionTitle(session: string): string {
+  const row = menu?.sessions.sessions.find((item) => item.session_id === session);
+  if (row) return sessionLabel(row);
+  return `session ${session.slice(0, 8)}`;
+}
+
+function resultBlock(found: Found, index: number): HTMLElement {
+  const block = document.createElement("div");
+  block.className = "history-result";
+  block.dataset.result = String(index);
+  const head = document.createElement("div");
+  head.className = "history-head";
+  head.append(
+    span("history-who", found.role === "person" ? "You" : "Claude"),
+    span("history-when", when(found.at) ?? ""),
+    span("history-session", sessionTitle(found.session)));
+  const text = document.createElement("div");
+  text.className = "history-text";
+  for (const piece of found.excerpt) {
+    if (piece.match) text.append(Object.assign(document.createElement("mark"), { textContent: piece.text }));
+    else text.append(piece.text);
+  }
+  block.append(head, text);
+  return block;
+}
+
+function historyNote(text: string): HTMLElement {
+  return Object.assign(document.createElement("div"), { className: "history-note", textContent: text });
+}
+
+function drawHistory(): void {
+  const rows: HTMLElement[] = historyFound.map(resultBlock);
+  const asked = searchQuery(historyText, historyRoles, null) !== null;
+  if (historyProblem) rows.push(historyNote(historyProblem));
+  else if (historyWaiting && !historyFound.length) rows.push(historyNote("Searching…"));
+  else if (asked && !historyFound.length) rows.push(historyNote("Nothing said in this project holds it."));
+  else if (!asked && historyText.trim()) rows.push(historyNote("Type two letters or more, with You or Claude on."));
+  historyResults.replaceChildren(...rows);
+  const more = document.getElementById("history-more")!;
+  more.hidden = !historyCursor || historyWaiting;
+  document.getElementById("history-count")!.textContent = asked && !historyWaiting
+    ? `${historyFound.length}${historyCursor ? "+" : ""} ${historyFound.length === 1 && !historyCursor ? "message" : "messages"}`
+    : "";
+  document.querySelectorAll<HTMLElement>(".history-filters [data-role]").forEach((chip) => {
+    chip.setAttribute("aria-pressed", String(historyRoles.has(chip.dataset.role as Role)));
+  });
+}
+
+function drawOpened(): void {
+  const rows = historyOpened.map((entry, index) => {
+    const row = document.createElement("div");
+    row.className = "mention-row";
+    row.dataset.opened = String(index);
+    row.append(
+      span("mention-name", entry.words || "(no words)"),
+      span("mention-place", `${sessionTitle(entry.session)} · ${when(entry.opened_at) ?? ""}`));
+    return row;
+  });
+  fill(document.getElementById("history-recent")!, rows.length ? rows : [emptyRow("No result opened yet.")]);
+}
+
+/** Opens a message in the chat: its session if another, then the message, lit and faded. */
+function openMessage(session: string, message: string, key: string): void {
+  showView("chat");
+  document.getElementById("history-back")!.hidden = false;
+  flashed = null;
+  pendingReveal = { session, message, key, until: Date.now() + 20000 };
+  if (menu?.current !== session) select(session);
+  revealPending();
+}
+
+/** Shows the message waiting to be shown, once its session's chat has drawn it. */
+function revealPending(): void {
+  const want = pendingReveal;
+  if (!want || menu?.current !== want.session) return;
+  if (Date.now() > want.until) {
+    pendingReveal = null;
+    return;
+  }
+  // A reply opened from the list of opened results is known by its record uuid alone.
+  const key = elements.has(want.key) ? want.key : recordKeys.get(want.message) ?? `t:${want.message}`;
+  const element = elements.get(key);
+  if (!element || !element.isConnected) return;
+  pendingReveal = null;
+  if (flashed === key) return;
+  flashed = key;
+  element.scrollIntoView({ block: "center" });
+  element.classList.remove("history-flash");
+  void element.offsetWidth;
+  element.classList.add("history-flash");
+  element.addEventListener("animationend", () => element.classList.remove("history-flash"), { once: true });
+}
+
+historyField.addEventListener("input", () => {
+  historyText = historyField.value;
+  window.clearTimeout(historyTimer);
+  historyTimer = window.setTimeout(() => askHistory(), 300);
+});
+historyField.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  historyField.value = historyText = "";
+  window.clearTimeout(historyTimer);
+  askHistory();
+});
+document.querySelectorAll<HTMLElement>(".history-filters [data-role]").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    const role = chip.dataset.role as Role;
+    if (historyRoles.has(role)) historyRoles.delete(role);
+    else historyRoles.add(role);
+    askHistory();
+  });
+});
+document.getElementById("history-more")!.addEventListener("click", () => askHistory(true));
+document.getElementById("history-back")!.addEventListener("click", () => {
+  document.getElementById("history-back")!.hidden = true;
+  showView("history");
+});
+historyResults.addEventListener("click", (event) => {
+  const block = (event.target as Element).closest<HTMLElement>("[data-result]");
+  const found = block ? historyFound[Number(block.dataset.result)] : undefined;
+  if (!found) return;
+  post("history", { want: "opened", session: found.session, message: found.message, words: plainWords(found.excerpt) });
+  openMessage(found.session, found.message, chatKey(found));
+});
+document.getElementById("history-recent")!.addEventListener("click", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>("[data-opened]");
+  const entry = row ? historyOpened[Number(row.dataset.opened)] : undefined;
+  if (!entry) return;
+  post("history", { want: "opened", session: entry.session, message: entry.message, words: entry.words });
+  openMessage(entry.session, entry.message, `t:${entry.message}`);
+});
+// Command-Shift-F opens History with its field focused; Command-F stays the page's find.
+document.addEventListener("keydown", (event) => {
+  if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    historyFrames.history();
+  }
+});
+
+const historyFrames = {
+  /** Command-Shift-F, when the app's menu takes the key before the page sees it. */
+  history(): void {
+    if (currentView !== "history") showView("history");
+    else historyField.focus();
+    historyField.select();
+  },
+
+  historySearched(frame: { ask: number; status?: number; document?: unknown; error?: string | null }): void {
+    if (frame.ask !== historyAsk) return;
+    historyWaiting = false;
+    const read = frame.status === 200 ? foundOf(frame.document) : null;
+    if (!read) {
+      historyProblem = frame.error || "The server did not answer the search.";
+    } else {
+      historyFound = [...historyFound, ...read.found];
+      historyCursor = read.cursor;
+    }
+    drawHistory();
+  },
+
+  historyRecent(frame: { status?: number; document?: unknown }): void {
+    const entries = frame.status === 200 ? openedEntries(frame.document) : null;
+    if (!entries) return;
+    historyOpened = entries;
+    drawOpened();
+  },
+};
+
+drawHistory();
+drawOpened();
+
+(window as any).kyo = Object.assign(kyo, recordFrames, fileFrames, historyFrames);

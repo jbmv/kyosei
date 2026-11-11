@@ -1099,5 +1099,34 @@ body.view-files #views, body.view-files #top { background: var(--view-tint); }
 body.view-records .view-item[aria-current="page"] { color: var(--kind-task); }
 body.view-files .view-item[aria-current="page"] { color: var(--kind-plan); }
 
+/* ---------------------------------------------------------------------------- History (KYO-825) */
+body.view-history { --view-tint: color-mix(in srgb, var(--kind-discussion) 16%, var(--background)); }
+body.view-history #views, body.view-history #top { background: var(--view-tint); }
+body.view-history .view-item[aria-current="page"] { color: var(--kind-discussion); }
+body.view-history #jump-bottom { display: none; }
+.history-inner { max-width: 780px; margin: 0 auto; padding: 22px 28px 40px; }
+.history-search { display: block; width: 100%; box-sizing: border-box; }
+.history-filters { display: flex; gap: 6px; margin: 10px 0 16px; }
+#history-count { color: var(--muted); }
+.history-note { color: var(--muted); font-size: 13.5px; margin: 8px 0; white-space: pre-wrap; }
+/* Each result a block of its own, lit whole under the pointer, as what a press opens. */
+.history-result { margin: 0 0 10px; padding: 10px 14px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: default; }
+.history-result:hover { background: color-mix(in srgb, var(--pastel-blue) 14%, var(--background)); border-color: color-mix(in srgb, var(--pastel-blue) 55%, var(--line)); }
+.history-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12.5px; color: var(--muted); }
+.history-who { font-weight: 600; color: var(--text); }
+.history-session { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-text { font-size: 14px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.history-text mark { background: color-mix(in srgb, var(--pastel-blue) 42%, transparent); color: inherit; border-radius: 2px; }
+#history-more { display: block; margin: 6px auto 0; }
+#history-more[hidden], #history-back[hidden] { display: none; }
+#history-back { margin-right: 10px; }
+body.view-history #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
+#history-side { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#history-side > h4 { margin: 4px 10px 4px; }
+#history-recent { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* A message a result opened, lit in the transcript and then faded. */
+@keyframes history-flash { from { background: color-mix(in srgb, var(--pastel-blue) 38%, transparent); } to { background: transparent; } }
+.history-flash { animation: history-flash 2.6s ease-out; border-radius: 8px; }
+
 #empty-chat { margin: 48px 0; color: var(--muted); font-style: italic; text-align: center; }
 .turn-anchor code { font-size: 0.95em; }

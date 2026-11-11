@@ -42,7 +42,7 @@
 
     <!-- An element with data-view is shown only while that view is the current one. -->
     <header id="top">
-      <span class="top-part" data-view="chat"><span id="top-title"></span><span id="top-activity"></span>
+      <span class="top-part" data-view="chat"><button id="history-back" class="text-button" hidden>‹ Results</button><span id="top-title"></span><span id="top-activity"></span>
       </span>
       <span class="top-part" data-view="records" hidden>
         <span class="nav-icons" data-nav="records">
@@ -52,6 +52,7 @@
         </span>
         <span id="records-count"></span>
       </span>
+      <span class="top-part" data-view="history" hidden><span id="history-count"></span></span>
       <span class="top-part" data-view="files" hidden>
         <span class="nav-icons" data-nav="files">
           <button id="files-home" class="nav-icon" data-nav-icon="home" title="Home" aria-label="Home"></button>
@@ -94,6 +95,11 @@
         </div>
         <!-- Files (KYO-736): a chip for each root the server serves, the chosen root's tree,
              and the files the session's replies and prompts have named. -->
+        <!-- History (KYO-825): the search results the person opened, on any device. -->
+        <div id="history-side" data-view="history" hidden>
+          <h4>Recently opened</h4>
+          <div id="history-recent"></div>
+        </div>
         <div id="files-side" data-view="files" hidden>
           <!-- Search (KYO-814): every served code and store root at once, by name and contents. -->
           <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
@@ -215,6 +221,17 @@
           <div id="records-groups"></div>
         </div>
         <article id="record" hidden></article>
+      </div>
+    </section>
+    <section id="view-history" class="view-pane" data-view="history" hidden>
+      <div class="history-inner">
+        <input class="records-search history-search" type="search" placeholder="Search what was said" aria-label="Search what was said" />
+        <div class="history-filters">
+          <button class="chip" data-role="person" aria-pressed="true">You</button>
+          <button class="chip" data-role="assistant" aria-pressed="true">Claude</button>
+        </div>
+        <div id="history-results"></div>
+        <button id="history-more" class="text-button" hidden>Load more</button>
       </div>
     </section>
     <section id="view-files" class="view-pane" data-view="files" hidden>
