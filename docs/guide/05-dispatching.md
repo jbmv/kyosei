@@ -93,6 +93,14 @@ whole-suite commands (`make test`, `npm run check`) in `controller_only_commands
 hook refuses them inside a worker's worktree, naming what to run instead and how to
 override. Empty by default, which turns the check off.
 
+**Guard tests.** A worker runs the tests that cover its change, and some tests cover no
+change in particular: one asserting that every command is classified, or that no flag
+breaks a naming rule, fails on a change made elsewhere. List these in `guard_tests` in
+`kyosei/config.yml`, each rule giving globs of touched paths, the test files to run and
+the command they are appended to. A brief then states the rules its dispatch's touches
+match, as commands the worker runs before it reports. Empty by default; the shape and the
+matching are in [the dispatch reference](../reference/topics/dispatch.md).
+
 **Who deploys?** ([D10](setup-decisions.md#d10-who-deploys)) Workers never do. For the
 orchestrator there are three answers: you deploy; the orchestrator deploys when you ask; or
 the orchestrator owns deploys. Write the answer in the project's CLAUDE.md, and if it is the

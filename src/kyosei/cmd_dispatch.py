@@ -558,6 +558,10 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             f"{record_id} is kind {record['kind']!r}; its policy.dispatchable is not true in "
             "kyosei/kinds.yml, so it cannot be dispatched"
         )
+    # KYO-744: read before anything is created, so a malformed `guard_tests` refuses the
+    # dispatch with nothing to undo. Parsed here and not by `load_config`, so the same
+    # value never blinds a hook.
+    guard_rules = config_module.read_guard_tests(ctx.root)
     # KYO-295: checked here, beside the kind-policy refusal and before anything is
     # frozen — a record with nothing left to build is not a candidate whose scope is
     # worth comparing, which is the same order `_ready_records` puts these in.
@@ -878,6 +882,9 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         # below and into the frozen brief the worker reads (law 3).
         provenance = declaration_provenance(store, others_running)
         cooccurrence = commands.touch_cooccurrence(store, claim.files)
+        # KYO-744: the guard tests this claim calls for. Matched against the whole
+        # claim, covered records included, since one branch carries all of it.
+        guard_commands = config_module.matched_guard_tests(guard_rules, claim.files)
         # KYO-327.c2: two more answers this store could already give and did not —
         # where the declared symbols are, and which test files past dispatches on
         # these paths also changed. Both resolved here, beside the three above, for
@@ -924,6 +931,7 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             # reason `--worktree` is declared rather than inferred), so looking for
             # a `.venv` from here would answer a question about the wrong tree.
             worktree_setup=store.config.worktree_setup,
+            guard_commands=guard_commands,
             # KYO-299.c2: what this project declared numbered and append-only, with
             # this dispatch's own fragment path already computed. Read here rather than
             # in `brief.py` for the same reason `worktree_setup` is read here: the
@@ -1039,6 +1047,11 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
                 "rebuild it by hand; declare the commands in kyosei/config.yml to have "
                 "them stated in the brief"
             )
+    # KYO-744: the same commands the brief states, for the orchestrator who will read
+    # the worker's report. Printed only when a rule matched.
+    if guard_commands:
+        lines.append("  guard tests the brief tells the worker to run (`guard_tests`):")
+        lines.extend(f"    {guard.command}" for guard in guard_commands)
     # KYO-32: echoed either way. "(not declared — `kyo report` will not check where
     # this dispatch's commits landed)" is a statement, not a silence: the absence of
     # the check is the thing a controller most needs to know it is living without.

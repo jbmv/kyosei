@@ -47,6 +47,8 @@ The checks, and the law each one keeps honest:
 ``check_kind_policy_missing``  KYO-556 — a knowledge kind's ``policy`` lacks a key the
                               packaged default sets. A NOTICE naming the line to add;
                               ``kind_policy_notice: false`` declines it
+``check_guard_tests``         KYO-744 — ``guard_tests`` in kyosei/config.yml parses, and
+                              every test file it declares exists in the code repository
 ``check_prior_art_config``    KYO-585 — ``recx.prior_art`` in kyosei/config.yml parses,
                               and its trigger names only kinds kinds.yml defines and
                               commands that can create them
@@ -164,6 +166,7 @@ from .doctor_exports import (
 from .doctor_install import (
     check_code_repo_identity,
     check_code_repo_identity_mismatch,
+    check_guard_tests,
     check_harness,
     check_harness_hook,
     check_hook_config,
@@ -296,6 +299,8 @@ CHECK_ORDER = (
     # KYO-585: after the kind checks, because it reads the kind registry: a
     # `recx.prior_art` trigger naming a kind or command that does not exist.
     "prior_art_config",
+    # KYO-744: beside the other check of a reader-parsed config key.
+    "guard_tests",
     # KYO-100: beside its sibling, and after it — a store whose kinds.yml is broken has
     # a bigger problem than a scope, and the two messages read better in that order.
     "scope_registry",
@@ -383,6 +388,7 @@ CHECKS = {
     "column_consumers": check_column_consumers,
     "config_consumers": check_config_consumers,
     "orchestrator_only_setup": check_orchestrator_only_setup,
+    "guard_tests": check_guard_tests,
     "docs_suggestions": check_docs_suggestions,
     "kind_registry": check_kind_registry,
     "kind_grants_missing": check_kind_grants_missing,
