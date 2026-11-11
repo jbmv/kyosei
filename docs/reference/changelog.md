@@ -623,6 +623,10 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## (no scope declared)
 
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
+- **2026-11-11** — `KYO-749` (task) — kyo spawn takes a plan, and a discussion can produce more than one record
+- **2026-11-11** — `KYO-747` (task) — kyo devices: the token alone on request, and a permission added to a live token
+- **2026-11-11** — `KYO-746` (bug) — kyo confirm says which unobserved criteria it left, and can settle all the person's words cover
+- **2026-11-11** — `KYO-745` (task) — kyo report amends a report from the commits an orchestrator added to the branch
 - **2026-11-11** — `KYO-738` (task) — Mac app Files: home, back and forward as icons
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
