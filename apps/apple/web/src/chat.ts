@@ -3292,12 +3292,19 @@ const agendaWhy = document.getElementById("agenda-why")!;
 const agendaList = document.getElementById("agenda-items")!;
 const agendaAdd = document.getElementById("agenda-add") as HTMLInputElement;
 const agendaNote = document.getElementById("agenda-note")!;
+const agendaCompleted = document.getElementById("agenda-completed")!;
+agendaCompleted.addEventListener("click", () => {
+  agendaShowCompleted = !agendaShowCompleted;
+  drawAgenda();
+});
 /** The list as the app last sent it. */
 let agendaFrame: AgendaFrame | null = null;
 /** The person's item whose text is open for editing, with the words typed so far. */
 let agendaEditing: { id: string; text: string } | null = null;
 /** The change whose save is out. Its answer clears the field the change was typed in. */
 let agendaSaving: Change | null = null;
+/** Whether the checked items are drawn; the list opens without them. */
+let agendaShowCompleted = false;
 
 function agendaItemsNow(): AgendaItem[] {
   return agendaFrame?.state === "shown" ? agendaFrame.items : [];
@@ -3391,7 +3398,7 @@ function agendaRow(row: Row): HTMLElement {
 }
 
 function drawAgenda(): void {
-  const view = agendaView(agendaFrame);
+  const view = agendaView(agendaFrame, agendaShowCompleted);
   agendaPane.hidden = !view.shown;
   agendaWhy.hidden = view.why === null;
   agendaWhy.textContent = view.why ?? "";
@@ -3401,7 +3408,17 @@ function drawAgenda(): void {
   const open = agendaList.querySelector<HTMLInputElement>(".agenda-edit");
   const caret = open && document.activeElement === open
     ? [open.selectionStart ?? open.value.length, open.selectionEnd ?? open.value.length] : null;
-  agendaList.replaceChildren(...view.rows.map(agendaRow));
+  const drawn = view.rows.map(agendaRow);
+  if (view.dividerAt !== null) {
+    const divider = document.createElement("li");
+    divider.className = "agenda-divider";
+    divider.setAttribute("role", "separator");
+    drawn.splice(view.dividerAt, 0, divider);
+  }
+  agendaList.replaceChildren(...drawn);
+  agendaCompleted.hidden = view.completed === 0;
+  agendaCompleted.textContent = `${view.showCompleted ? "Hide" : "Show"} completed (${view.completed})`;
+  agendaCompleted.setAttribute("aria-expanded", String(view.showCompleted));
   const again = agendaList.querySelector<HTMLInputElement>(".agenda-edit");
   if (caret && again) {
     again.focus();

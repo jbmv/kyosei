@@ -25,7 +25,8 @@ test("no bubble before a frame arrives, or with no live session", () => {
 test("a list that cannot be read says why, and offers nothing to press", () => {
   const view = agendaView({ state: "unavailable", why: "This device's token lacks the send permission." });
   assert.deepEqual(view, {
-    shown: true, why: "This device's token lacks the send permission.", rows: [], canAdd: false,
+    shown: true, why: "This device's token lacks the send permission.", rows: [], dividerAt: null,
+    completed: 0, showCompleted: false, canAdd: false,
   });
 });
 
@@ -37,13 +38,17 @@ test("each item shows its text, its check and whose it is", () => {
   assert.deepEqual(view.rows, [
     { id: "1", text: "push before close", checked: false, mine: true, whose: "you" },
     { id: "2", text: "dispatch wave 3", checked: false, mine: false, whose: "orchestrator" },
-    { id: "3", text: "merge wave 2", checked: true, mine: false, whose: "orchestrator" },
   ]);
+  assert.equal(view.completed, 1);
+  const all = agendaView({ state: "shown", session_id: "s", items, etag: '"e"' }, true);
+  assert.deepEqual(all.rows[2], { id: "3", text: "merge wave 2", checked: true, mine: false, whose: "orchestrator" });
 });
 
 test("an empty list is still a bubble the person can add to", () => {
   const view = agendaView({ state: "shown", session_id: "s", items: [], etag: null });
-  assert.deepEqual(view, { shown: true, why: null, rows: [], canAdd: true });
+  assert.deepEqual(view, {
+    shown: true, why: null, rows: [], dividerAt: null, completed: 0, showCompleted: false, canAdd: true,
+  });
 });
 
 test("the person adds an item at the end, with no id and no author", () => {
@@ -102,4 +107,36 @@ test("any other refusal is the server's sentence, or the status when it sent non
   );
   assert.equal(refusalText({ status: 500 }), "The list was not saved (HTTP 500).");
   assert.match(refusalText({ status: 0 }), /not reached/);
+});
+
+const mixed: AgendaItem[] = [
+  { id: "o1", text: "accept 1", author: "orchestrator", checked: false },
+  { id: "p1", text: "mine 1", author: "person", checked: false },
+  { id: "o2", text: "accept 2", author: "orchestrator", checked: true },
+  { id: "p2", text: "mine 2", author: "person", checked: true },
+  { id: "o3", text: "accept 3", author: "orchestrator", checked: false },
+  { id: "p3", text: "mine 3", author: "person", checked: false },
+];
+const frameOf = (list: AgendaItem[]) => ({ state: "shown", session_id: "s", items: list, etag: null }) as const;
+
+test("the person's unchecked items come first, then the divider, then the orchestrator's", () => {
+  const view = agendaView(frameOf(mixed));
+  assert.deepEqual(view.rows.map((row) => row.id), ["p1", "p3", "o1", "o3"]);
+  assert.equal(view.dividerAt, 2);
+  assert.equal(view.completed, 2);
+});
+
+test("completed items follow their own group when shown, and the groups stay", () => {
+  const view = agendaView(frameOf(mixed), true);
+  assert.deepEqual(view.rows.map((row) => row.id), ["p1", "p3", "p2", "o1", "o3", "o2"]);
+  assert.equal(view.dividerAt, 3);
+  assert.equal(view.showCompleted, true);
+});
+
+test("the divider is drawn only when both groups have items", () => {
+  assert.equal(agendaView(frameOf(mixed.filter((item) => item.author === "person"))).dividerAt, null);
+  assert.equal(agendaView(frameOf(mixed.filter((item) => item.author === "orchestrator"))).dividerAt, null);
+  const onlyDone = mixed.map((item) => ({ ...item, checked: item.author === "person" }));
+  assert.equal(agendaView(frameOf(onlyDone)).dividerAt, null);
+  assert.notEqual(agendaView(frameOf(onlyDone), true).dividerAt, null);
 });
