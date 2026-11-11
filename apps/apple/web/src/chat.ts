@@ -3781,9 +3781,14 @@ function agendaRow(row: Row): HTMLElement {
     const text = document.createElement("span");
     text.className = "agenda-text";
     text.textContent = row.text;
+    // A path in a reminder is a link to Files, as one in a reply is (2026-11-11). The path
+    // links are declared further down the module, so they are made once it has run.
+    queueMicrotask(() => linkQuietly(text));
     if (row.mine) {
       text.title = "Edit";
-      text.addEventListener("click", () => {
+      text.addEventListener("click", (event) => {
+        // A press on a link follows it; the rest of the words open them to edit.
+        if (event.target instanceof Element && event.target.closest("a")) return;
         agendaEditing = { id: row.id, text: row.text };
         drawAgenda();
         agendaList.querySelector<HTMLInputElement>(".agenda-edit")?.focus();
