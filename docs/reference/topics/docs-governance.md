@@ -378,8 +378,20 @@ guess:
 is not a selector on its own and `&`-composition means the selector a document
 names is never the one written.
 
+**A file whose name has no suffix (KYO-828).** A target with no `/` and no file
+suffix is spelled like a bare symbol, and `Makefile`, `LICENSE` and `Dockerfile`
+are spelled that way. Such a target names the file when the project root, or a
+base the document set declares (`paths_relative_to` in `documents.yml`), holds a
+file under exactly that name, with the same letter case; it then governs that
+file alone and no symbol search runs.
+A leading `./` names the file by spelling: `./Makefile` is always a path, so
+`kyo docs check` reports it unresolved if the file is later removed or renamed,
+where the plain `Makefile` would go back to being a symbol and resolve to every
+code file containing the word. Write `./` where that difference matters.
+
 **A bare symbol, and a field inside a class (KYO-397, KYO-396).** A target with
-no path — `OrderSnapshot.total_cents` — still *resolves* to every code
+no path, such as `OrderSnapshot.total_cents`, that names no such file still
+*resolves* to every code
 file that mentions it, which is what `kyo docs check` validates. It *raises*
 only where the symbol is defined: a changed file raises when its own diff shows
 the definition changing, appearing or disappearing, and a file that merely uses
