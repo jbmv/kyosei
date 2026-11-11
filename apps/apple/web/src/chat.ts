@@ -14,6 +14,7 @@ import {
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
 import { highlight, render } from "./pipeline";
+import { chipPieces } from "./chipwords";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
   dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
@@ -367,18 +368,41 @@ function drawPlaceLine(line: string): HTMLElement | null {
   if (record) {
     const words = record.words.replace(/\.\.\.$/, "…");
     chip.dataset.place = placeKey({ kind: "record", id: record.id });
-    chip.append(icon("records"), words ? `${record.id} ${words}` : record.id);
+    chip.append(icon("records"), record.id, ...(words ? [" ", ...drawChipWords(words)] : []));
     chip.addEventListener("click", () => revealPlace({ kind: "record", id: record.id, words }));
   } else if (file) {
     const words = (file.selection ?? file.words).replace(/\.\.\.$/, "…");
     chip.dataset.place = placeKey({ kind: "path", ...file });
-    chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}${words ? ` ${words}` : ""}`);
+    chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}`, ...(words ? [" ", ...drawChipWords(words)] : []));
     chip.addEventListener("click", () => revealPlace({
       kind: "path", root: file.root, path: file.path, lines: file.lines, words,
       ...(file.session ? { session: file.session } : {}),
     }));
   }
   return chip;
+}
+
+/** A chip's quoted words as inline markdown; the chip's title and click keep the source words (KYO-758). */
+function drawChipWords(words: string): Node[] {
+  return chipPieces(words).map((piece) => {
+    let node: Node = document.createTextNode(piece.text);
+    if (piece.code) {
+      const code = document.createElement("code");
+      code.append(node);
+      node = code;
+    }
+    if (piece.italic) {
+      const em = document.createElement("em");
+      em.append(node);
+      node = em;
+    }
+    if (piece.bold) {
+      const strong = document.createElement("strong");
+      strong.append(node);
+      node = strong;
+    }
+    return node;
+  });
 }
 
 function drawTurn(turn: Turn): HTMLElement {
@@ -422,7 +446,7 @@ function drawTurn(turn: Turn): HTMLElement {
     const words = (anchor[3] ?? anchor[2] ?? "").replace(/\.\.\.$/, "…");
     const chip = document.createElement("span");
     chip.className = "turn-anchor";
-    chip.append(icon("anchor"), words || "words unavailable");
+    chip.append(icon("anchor"), ...(words ? drawChipWords(words) : ["words unavailable"]));
     chip.title = line;
     chip.addEventListener("click", () => revealRecord(anchor[1], words));
     element.append(chip);
