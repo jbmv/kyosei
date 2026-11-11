@@ -1735,17 +1735,34 @@ const boxes = document.getElementById("boxes")!;
 const composerNote = document.getElementById("composer-note")!;
 
 /**
- * Makes a box as tall as its text. The text is measured with the box's height released, and
- * for that moment the composer has less to scroll over: a view near the end of the released
- * box is moved up to the shorter end and is not moved back when the height returns. Each key
- * typed in the last box so put its last lines under the composer's edge (KYO-727), so the
- * composer's place is put back once the height is set.
+ * A text area that is never focused, in which a box's text is measured. The system draws an
+ * inline prediction inside the focused text area as part of its layout, so that area's
+ * `scrollHeight` counts an offered completion's lines although its value does not hold them,
+ * and no event tells the page when the offer is made or withdrawn (KYO-750). It stands
+ * outside the boxes, where no list of the prompts' text areas finds it. It is editable, as
+ * the boxes are, so that nothing but the focus distinguishes it from the one it stands for.
+ */
+const boxMeasure = document.createElement("textarea");
+boxMeasure.className = "box-measure";
+boxMeasure.rows = 1;
+boxMeasure.tabIndex = -1;
+boxMeasure.setAttribute("aria-hidden", "true");
+boxes.after(boxMeasure);
+
+/**
+ * Makes a box as tall as its text: the text the person typed or accepted, wrapped at the
+ * box's width. The height is read from a copy of the text and not from the box, for two
+ * measured reasons. The box is taller than its text while a completion that wraps is
+ * offered: a box fitted then grew, kept the lines after the offer was withdrawn, and lost
+ * them at the next key (KYO-750). And where scroll bars take room, the box read with its
+ * height released reports a line more than its text has at some widths, which stays under
+ * the text until a later fit reads otherwise (KYO-760). The box's own height is never
+ * released, so the composer keeps its place (KYO-727).
  */
 function fitBox(area: HTMLTextAreaElement): void {
-  const place = boxes.scrollTop;
-  area.style.height = "auto";
-  area.style.height = `${area.scrollHeight}px`;
-  boxes.scrollTop = place;
+  boxMeasure.style.width = `${area.getBoundingClientRect().width}px`;
+  boxMeasure.value = area.value;
+  area.style.height = `${boxMeasure.scrollHeight}px`;
 }
 
 function textAreas(): HTMLTextAreaElement[] {
