@@ -642,6 +642,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-746` (bug) — kyo confirm says which unobserved criteria it left, and can settle all the person's words cover
 - **2026-11-11** — `KYO-745` (task) — kyo report amends a report from the commits an orchestrator added to the branch
 - **2026-11-11** — `KYO-744` (task) — A dispatch's brief names the guard tests its touches call for
+- **2026-11-11** — `KYO-740` (task) — Mac app Records: a dispatch's brief folded, and its report shown in full
 - **2026-11-11** — `KYO-738` (task) — Mac app Files: home, back and forward as icons
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
