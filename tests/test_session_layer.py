@@ -752,10 +752,15 @@ def test_a_message_submitted_at_once_gets_one_enter() -> None:
 
 def test_a_message_the_box_keeps_is_reported_and_left_there() -> None:
     tmux = FakeTmux([EMPTY_BOX], enters_ignored=99)
-    with pytest.raises(pane.NotSubmitted, match="press Enter in the session's terminal"):
+    with pytest.raises(pane.NotSubmitted, match="press Enter in the session's terminal") as raised:
         pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
     assert tmux.enters() == 2
-    assert [c for c, _ in tmux.commands][-1] == ("send-keys", "-t", "%3", "Enter")  # not cleared
+    # Each reading of the screen is kept on the error, ending with the box still full.
+    trace = raised.value.trace
+    assert trace[0]["step"] == "settle" and trace[-1]["step"] == "after-enter-2"
+    assert trace[-1]["input_chars"] > 0 and trace[-1]["input_end"]
+    keys = [c for c, _ in tmux.commands if c[0] == "send-keys"]
+    assert keys[-1] == ("send-keys", "-t", "%3", "Enter")  # not cleared
 
 
 def test_enter_is_not_pressed_on_a_box_that_never_shows_the_message() -> None:

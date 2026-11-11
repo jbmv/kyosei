@@ -451,6 +451,11 @@ def test_a_message_left_in_the_box_is_answered_as_not_submitted_and_enter_there_
     assert [line.split(" ", 2)[2] for line in keys_sent(bed)][-2:] == ["send-keys -t %1 Enter"] * 2
     (row,) = log_rows(store_home)
     assert (row["outcome"], row["status"], row["reason"]) == ("failed", 502, "not-submitted")
+    # What the screen showed is logged, so a failure not reproduced can be read later.
+    steps = [reading["step"] for reading in row["diagnosis"]["trace"]]
+    assert "settle" in steps and "after-enter-2" in steps, steps
+    assert row["diagnosis"]["trace"][-1]["input_chars"] > 0
+    assert isinstance(row["diagnosis"]["screen"], str)
 
     # The remedy the answer names: Enter, pressed in the terminal, takes what was left.
     ignored.unlink()

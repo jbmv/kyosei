@@ -128,6 +128,9 @@ class _Attempt:
     reason: str | None = None
     #: What a hold's store said about the message, for the response. Not logged.
     held: dict | None = None
+    #: For a message not seen to be submitted: what the screen showed at each reading and
+    #: the pane's text at the last, logged so the cause can be read later (KYO-810.c1).
+    diagnosis: dict | None = None
 
     def row(self) -> dict:
         return {
@@ -141,6 +144,7 @@ class _Attempt:
             "outcome": self.outcome,
             "status": self.status,
             "reason": self.reason,
+            **({"diagnosis": self.diagnosis} if self.diagnosis is not None else {}),
         }
 
 
@@ -194,6 +198,20 @@ def _open_log(environ: dict[str, str]) -> int:
         return serve_files.open_private_log(path)
     except OSError as exc:
         raise _log_refusal(path, str(exc)) from exc
+
+
+#: How many of the pane's last lines a diagnosis keeps.
+_DIAGNOSIS_LINES = 60
+
+
+def _diagnosis(exc: Exception) -> dict:
+    """What a message not seen to be submitted leaves in the log: the screen readings and the
+    pane's last lines. The log is private to this machine and already holds the message."""
+    screen = getattr(exc, "screen", "") or ""
+    return {
+        "trace": list(getattr(exc, "trace", []) or []),
+        "screen": "\n".join(screen.rstrip("\n").split("\n")[-_DIAGNOSIS_LINES:]),
+    }
 
 
 def _log_refusal(path: Path, why: str) -> Refusal:
@@ -491,6 +509,7 @@ def _attempt(
     except session_layer.PaneNotReady as exc:
         raise Refusal(409, str(exc), reason="screen-not-ready") from exc
     except session_layer.NotSubmitted as exc:
+        attempt.diagnosis = _diagnosis(exc)
         raise Refusal(502, f"session {session_id}: {exc}", reason=NOT_SUBMITTED) from exc
     except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
         raise Refusal(
@@ -706,6 +725,7 @@ def deliver_held(
                 result = _waiting("screen-not-ready", str(exc))
             except session_layer.NotSubmitted as exc:
                 attempt.outcome, attempt.status, attempt.reason = "failed", 502, NOT_SUBMITTED
+                attempt.diagnosis = _diagnosis(exc)
                 result = HeldOutcome(
                     "failed",
                     NOT_SUBMITTED,

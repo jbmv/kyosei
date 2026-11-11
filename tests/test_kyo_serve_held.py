@@ -586,6 +586,7 @@ def test_a_message_typed_and_not_submitted_says_so_is_not_retried_and_retracting
     assert "take the message back" in found["detail"]
     rows = [row for row in log_rows(store_home) if row["action"] == "held-delivery"]
     assert [(row["outcome"], row["reason"]) for row in rows] == [("failed", "not-submitted")]
+    assert rows[0]["diagnosis"]["trace"], "the screen readings of the failed delivery are logged"
 
     # It is not typed a second time.
     wait_until(lambda: bed.server.held_messages._thread is None)

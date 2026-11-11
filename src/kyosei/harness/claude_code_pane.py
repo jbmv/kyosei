@@ -649,7 +649,17 @@ class PaneNotReady(KyoseiError):
 
 
 class NotSubmitted(KyoseiError):
-    """A message's keys were sent, and the screen does not show that it was submitted."""
+    """A message's keys were sent, and the screen does not show that it was submitted.
+
+    ``trace`` is what each reading of the screen showed while the message was submitted, and
+    ``screen`` the pane's text at the last of them, so that a failure that cannot be
+    reproduced leaves a record of what the pane held (KYO-810.c1).
+    """
+
+    def __init__(self, message: str, trace: Sequence[dict] = (), screen: str = "") -> None:
+        super().__init__(message)
+        self.trace = list(trace)
+        self.screen = screen
 
 
 @dataclass(frozen=True)
@@ -723,7 +733,29 @@ def _send_paste(tmux: _Tmux, pane_id: str, text: str) -> None:
     tmux.run("paste-buffer", "-p", "-d", "-b", name, "-t", pane_id)
 
 
-def _settle(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> bool:
+def _reading(step: str, started: float, screen: Screen) -> dict:
+    """One line of a submission's trace: when, at which step, and what the screen was."""
+    return {
+        "step": step,
+        "ms": round((time.monotonic() - started) * 1000),
+        "state": screen.state,
+        "input_chars": len(screen.input_text),
+        "input_end": screen.input_text[-40:],
+    }
+
+
+def _plain_screen(tmux: _Tmux, pane_id: str) -> str:
+    """The pane's visible text, without escape sequences, or "" when it cannot be read."""
+    try:
+        return tmux.run("capture-pane", "-p", "-t", pane_id).stdout
+    except (KyoseiError, OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _settle(
+    tmux: _Tmux, pane_id: str, sleep: Callable[[float], None],
+    trace: list[dict] | None = None, started: float = 0.0,
+) -> bool:
     """Wait until the box shows text and two readings a poll apart agree; whether it did.
 
     Keys sent faster than the screen is drawn are still being taken when the last of them
@@ -732,6 +764,8 @@ def _settle(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> bool:
     previous: str | None = None
     for _ in range(round(_SETTLE_SECONDS / _SUBMIT_POLL_SECONDS)):
         screen = classify(capture(tmux, pane_id))
+        if trace is not None:
+            trace.append(_reading("settle", started, screen))
         if screen.state not in (IDLE, WORKING):
             return False
         if screen.input_text and screen.input_text == previous:
@@ -741,7 +775,10 @@ def _settle(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> bool:
     return bool(previous)
 
 
-def _submitted(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> Screen | None:
+def _submitted(
+    tmux: _Tmux, pane_id: str, sleep: Callable[[float], None],
+    trace: list[dict] | None = None, started: float = 0.0, step: str = "after-enter",
+) -> Screen | None:
     """Read the screen until it shows the message submitted; the last screen read if it never does.
 
     Submitted is an empty input box, on an idle screen or a working one, or a prompt that
@@ -750,6 +787,8 @@ def _submitted(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> Scr
     screen = Screen(UNRECOGNISED)
     for _ in range(round(_SUBMIT_SECONDS / _SUBMIT_POLL_SECONDS)):
         screen = classify(capture(tmux, pane_id))
+        if trace is not None:
+            trace.append(_reading(step, started, screen))
         if screen.state in (IDLE, WORKING) and not screen.input_text:
             return None
         if screen.state in (PERMISSION_PROMPT, ASK_USER_QUESTION):
@@ -763,17 +802,20 @@ def submit(tmux: _Tmux, pane_id: str, *, sleep: Callable[[float], None] = time.s
 
     Raises :class:`NotSubmitted` when it was not; see SUBMITTING in this module's header.
     """
-    if not _settle(tmux, pane_id, sleep):
+    started = time.monotonic()
+    trace: list[dict] = []
+    if not _settle(tmux, pane_id, sleep, trace, started):
         raise NotSubmitted(
             f"the message's keys were sent to pane {pane_id} and its input box did not show "
             f"them within {_SETTLE_SECONDS:g} seconds, so Enter was not pressed; look at the "
             "session's terminal, clear its input box if the text is there, and send the "
-            "message again"
+            "message again",
+            trace, _plain_screen(tmux, pane_id),
         )
     left: Screen | None = None
-    for _ in range(_SUBMIT_PRESSES):
+    for press in range(1, _SUBMIT_PRESSES + 1):
         tmux.run("send-keys", "-t", pane_id, "Enter")
-        left = _submitted(tmux, pane_id, sleep)
+        left = _submitted(tmux, pane_id, sleep, trace, started, f"after-enter-{press}")
         if left is None:
             return
         if left.state not in (IDLE, WORKING):
@@ -784,12 +826,14 @@ def submit(tmux: _Tmux, pane_id: str, *, sleep: Callable[[float], None] = time.s
             f"the message was typed into the input box of pane {pane_id} and Enter did not "
             f"submit it: after {_SUBMIT_PRESSES} presses the box still holds text. It was "
             "left there; press Enter in the session's terminal to submit it, or clear the "
-            "box and send the message again"
+            "box and send the message again",
+            trace, _plain_screen(tmux, pane_id),
         )
     raise NotSubmitted(
         f"the message was typed into pane {pane_id} and Enter was pressed, and the screen "
         f"then showed {left.state} in place of the input box, so it cannot be told whether "
-        "the message was submitted; look at the session's terminal before sending it again"
+        "the message was submitted; look at the session's terminal before sending it again",
+        trace, _plain_screen(tmux, pane_id),
     )
 
 

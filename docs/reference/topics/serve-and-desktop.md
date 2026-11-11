@@ -686,7 +686,10 @@ reaches the transcript as the person's own, so the send log is what keeps it apa
   that still holds text gets Enter a second time. A message is reported as sent only when the
   box has emptied or a turn's own prompt has replaced it; otherwise the route answers 502
   `not-submitted` and the text is left in the box, where Enter in the session's terminal
-  submits it.
+  submits it. The send log's row for such a message carries a `diagnosis`: each reading of
+  the screen while it was submitted (the step, the milliseconds since the first, the screen's
+  state and the end of the box's text) and the pane's last 60 lines, so that a failure that
+  cannot be reproduced can be read afterwards.
 - A `send` whose first word Claude Code would run as a command, such as `/usage`, is refused;
   it goes to `slash`. A first word holding a second `/`, such as a file path, is an ordinary
   message.
