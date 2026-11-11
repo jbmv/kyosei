@@ -400,7 +400,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`, `credit_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--gate GATE_ID] [--person KEY] [--session ID] [--turn UUID] [--source-other WHERE] [--no-close] RECORD_ID`
+Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--all-unobserved] [--gate GATE_ID] [--person KEY] [--session ID] [--turn UUID] [--source-other WHERE] [--no-close] RECORD_ID`
 
 ### Positional arguments
 
@@ -410,7 +410,8 @@ Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 - `--quote TEXT` — optional. the maintainer's words, when they fit on one line
 - `--quote-file FILE` — optional. the maintainer's words from a file, or '-' for stdin; stored verbatim
-- `--criterion CRITERION_ID [CRITERION_ID ...]` — optional. the criteria the words answer; overrides resolution from the gate's payload or the record's sole unmet-unobserved criterion
+- `--criterion CRITERION_ID [CRITERION_ID ...]` — optional. the criteria the words answer; overrides resolution from the gate's payload or the record's sole unmet-unobserved criterion; required when the record holds more than one unmet-unobserved criterion (or use --all-unobserved)
+- `--all-unobserved` — optional. the words answer every unmet-unobserved criterion on the record (KYO-746)
 - `--gate GATE_ID` — optional. the awaiting:human-* gate the words answer; needed only when more than one is open
 - `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
@@ -470,16 +471,17 @@ Needs a Kyosei project: **no** — it never searches for one.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal,files}] {list,issue,revoke} [NAME|ID]`
+Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal,files}] [--token-only] {list,issue,grant,revoke} [NAME|ID]`
 
 ### Positional arguments
 
-- `{list,issue,revoke}` — **required**. list every device, issue a token to a new device and print it once, or revoke a device's token, which stops working on the next request
-- `[NAME|ID]` — optional. for issue: the new device's name; for revoke: a live device's name, or an id from `kyo devices list`
+- `{list,issue,grant,revoke}` — **required**. list every device, issue a token to a new device and print it once, grant a live device's token a further permission without changing the token, or revoke a device's token (with --permission, only that permission), which stops working on the next request
+- `[NAME|ID]` — optional. for issue: the new device's name; for grant and revoke: a live device's name, or an id from `kyo devices list`
 
 ### Options
 
-- `--permission {send,notes,start,terminal,files}` — optional. with issue: a permission the token carries (repeatable). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), `terminal` the routes that draw a session's pane and type into it (KYO-721), and `files` the routes that read a project's files (KYO-735); a token issued without the one a route asks for is refused there
+- `--permission {send,notes,start,terminal,files}` — optional. with issue: a permission the token carries (repeatable); with grant: one to add to a live token; with revoke: one to remove, leaving the token live (KYO-747). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), `terminal` the routes that draw a session's pane and type into it (KYO-721), and `files` the routes that read a project's files (KYO-735); a token issued without the one a route asks for is refused there
+- `--token-only` — optional. with issue: print the token and nothing else, with no trailing newline, so `kyo devices issue NAME --token-only | pbcopy` copies the token alone (KYO-747)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
@@ -1330,7 +1332,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `dispatch_id`, `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo report [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --file FILE [--check] DISPATCH_ID`
+Usage: `kyo report [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--file FILE] [--amend-with-branch] [--check] DISPATCH_ID`
 
 ### Positional arguments
 
@@ -1338,7 +1340,8 @@ Usage: `kyo report [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 
 ### Options
 
-- `--file FILE` — **required**. the report JSON, validated against the schema `kyo report-schema` prints
+- `--file FILE` — optional. the report JSON, validated against the schema `kyo report-schema` prints (required unless --amend-with-branch)
+- `--amend-with-branch` — optional. file a report that amends the dispatch's latest one: its verdicts carried, and the commits on the branch it does not name added oldest first, each marked [orchestrator] (KYO-745)
 - `--check` — optional. run every check the ingest runs before writing, print any problem, write nothing; exits non-zero when the report would be refused (KYO-477)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -1526,7 +1529,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--check] [--force] [--no-prior-art] SOURCE_ID`
+Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--plan ID] [--keep-open] [--check] [--force] [--no-prior-art] SOURCE_ID`
 
 ### Positional arguments
 
@@ -1540,7 +1543,7 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--criteria-file FILE` — optional. one criterion per line, from a file or '-'; required when the target kind's policy.requires_criteria is true
 - `--touches-file FILE` — optional. one touch per line ('path', 'path#symbol', 'path#+' for additions to an existing file and nothing already in it, 'dir/' for a tree this work creates or owns, or '+path' for one file it creates), relative to the project root; required for archetype: work kinds, exactly as `kyo promote` requires it
 - `--scope SCOPE` — optional. the part of the system this work belongs to, from kyosei/scopes.yml. Never defaulted from the source: a spawn crosses a kind boundary
-- `--from FILE` — optional. file the new record from one markdown file instead of --title/--description-file/--criteria-file/--touches-file: front matter for title/scope/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
+- `--from FILE` — optional. file the new record from one markdown file instead of --title/--description-file/--criteria-file/--touches-file: front matter for title/scope/plan/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
 - `--evidence-file FILE` — optional. evidence stored with the new record in the same act, from a file or '-'; required when the target kind's policy sets requires_evidence_links and the SOURCE is a carried kind (a reminder becoming a decision: the operator's words -- who, when, where, then the words verbatim); not asked of a proposal or investigation source (KYO-522)
 - `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin
@@ -1554,6 +1557,8 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--discussion ID` — optional. the discussion this record came from, which filing it closes; a kind whose policy sets requires_discussion (the default `decision`) names one (KYO-658)
 - `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
 - `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
+- `--plan ID` — optional. plan record the new record belongs to, as `kyo new --plan` (KYO-749)
+- `--keep-open` — optional. spawning from a discussion closes it; with this the discussion stays open, for a discussion that produces more than one record (KYO-749)
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)
 - `--no-prior-art` — optional. skip the prior-art search kyosei/config.yml's recx.prior_art would run for this record (KYO-585); `kyo prior-art <id>` runs it later
