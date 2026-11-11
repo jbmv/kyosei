@@ -333,7 +333,11 @@ final class SessionFeed {
     }
 
     /// Reads the server's projects when `list` is set or none has been read, then the
-    /// sessions of every project that can be opened, all at once, and tells the page.
+    /// sessions of every project that can be opened, one project after another, and tells
+    /// the page. The reads were made in a task group until KYO-813: with seventeen projects
+    /// open, a child's completion aborted the process (`__cxa_pure_virtual` under
+    /// `AsyncTask::completeFuture`) within seconds of launch, and read one at a time it did not.
+    /// Why the group aborted is not established.
     /// `kyo serve` has no route that lists live sessions across projects, so each project's
     /// own list is asked for; a project that refuses its list has no link.
     private func readProjects(list: Bool) async {
@@ -353,19 +357,13 @@ final class SessionFeed {
         if let served {
             let names = served.filter(\.can_open).map(\.name)
             typealias Read = (name: String, rows: [SessionRow]?, needed: String?)
-            let reads = await withTaskGroup(of: Read.self) { group in
-                for name in names {
-                    group.addTask {
-                        do {
-                            return (name, try await client.sessions(project: name), nil)
-                        } catch {
-                            return (name, nil, ServeClient.tokenNeeded(error))
-                        }
-                    }
+            var reads: [Read] = []
+            for name in names {
+                do {
+                    reads.append((name, try await client.sessions(project: name), nil))
+                } catch {
+                    reads.append((name, nil, ServeClient.tokenNeeded(error)))
                 }
-                var reads: [Read] = []
-                for await read in group { reads.append(read) }
-                return reads
             }
             guard !Task.isCancelled, client.base == self.client.base else { return }
             var found: [String: [SessionRow]] = [:]
