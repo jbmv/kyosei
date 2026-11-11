@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-766` (task) — Mac app: File > Projects… shows the list of projects
 - **2026-11-11** — `KYO-764` (bug) — The remedy ledger does not see an error raised through a helper that returns it
 - **2026-11-11** — `KYO-759` (task) — Mac app Records: one flat list, newest first, with the kind beside the id
+- **2026-11-11** — `KYO-757` (task) — A report's false premises and disagreements have ids and can be anchored to
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
 - **2026-11-11** — `KYO-749` (task) — kyo spawn takes a plan, and a discussion can produce more than one record
 - **2026-11-11** — `KYO-748` (bug) — Standing noise in the brief, at filing and at each prompt
