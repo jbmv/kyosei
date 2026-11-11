@@ -417,7 +417,7 @@ def test_the_readme_and_the_stop_hook_say_what_the_hook_form_runs() -> None:
     from tests.reference_pages import OPERATING
 
     readme = OPERATING.read_text(encoding="utf-8")  # the README section, moved (KYO-516)
-    entry = readme[readme.index("**Close out with hooks, not a checklist**") :]
+    entry = readme[readme.index("**Close out through the hooks**") :]
     entry = entry[: entry.index("\n7. ")]
     for mode in (
         doctor_exports.ROUNDTRIP_CACHED,
