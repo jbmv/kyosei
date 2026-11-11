@@ -1710,7 +1710,7 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo transcripts [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--limit N] [--cursor CURSOR] {search,rebuild} [PHRASE ...]`
+Usage: `kyo transcripts [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--limit N] [--cursor CURSOR] [--role ROLE] [--context N] {search,rebuild} [PHRASE ...]`
 
 ### Positional arguments
 
@@ -1721,6 +1721,8 @@ Usage: `kyo transcripts [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--
 
 - `--limit N` — optional. for search: how many results a page holds (default 20, at most 100)
 - `--cursor CURSOR` — optional. for search: the `cursor` of the previous page, to list the results after it
+- `--role ROLE` — optional. for search: keep only the messages one party wrote, `person` for the prompts or `assistant` for the replies (default both) (KYO-826)
+- `--context N` — optional. for search: the characters an excerpt keeps on each side of the first match (default 80, at most 400) (KYO-826)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

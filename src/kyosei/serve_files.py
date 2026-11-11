@@ -657,6 +657,8 @@ HELD = "held"
 PROJECT_DRAFTS = "project-drafts"
 #: KYO-814: the files opened in the app for a project, named by the project.
 PROJECT_RECENT = "recent-files"
+#: KYO-826: the search results opened in the app for a project, named by the project.
+PROJECT_HISTORY = "recent-history"
 #: KYO-709: a delivered message whose notes could not be filed yet, named by the message's id.
 UNFILED = "unfiled"
 
@@ -732,6 +734,17 @@ def project_recent_path(environ: dict[str, str], project: str, *, create: bool =
     if create:
         composer_directory(environ, PROJECT_RECENT)
     return composer_kind_directory(environ, PROJECT_RECENT) / f"{project}.json"
+
+
+def project_history_path(environ: dict[str, str], project: str, *, create: bool = False) -> Path:
+    """The one file holding ``project``'s opened search results (KYO-826).
+
+    It lies beside the project's recently opened files, with the same guarantees.
+    """
+    _check_segment(project, "project name")
+    if create:
+        composer_directory(environ, PROJECT_HISTORY)
+    return composer_kind_directory(environ, PROJECT_HISTORY) / f"{project}.json"
 
 
 def _composer_refusal(directory: Path, why: str) -> Refusal:

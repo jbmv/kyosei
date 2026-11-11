@@ -81,6 +81,7 @@ joins between the two is sent the ``error`` after its ``ready``.
 from __future__ import annotations
 
 import hashlib
+import json
 import queue
 import re
 import sqlite3
@@ -90,9 +91,10 @@ import time
 import traceback
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
-from . import session_layer, transcript_search
+from . import serve_files, session_layer, transcript_search
 from .cmd_sessions import STATE_ENDED, read_sessions
 from .config import READ_TRANSCRIPTS_KEY, Config, load_config, transcripts_opted_in
 from .errors import KyoseiError, NotFound
@@ -489,6 +491,45 @@ def past_cursor(delta: Any, given: Cursor | None) -> tuple[tuple[list, ...], str
     )
 
 
+# ------------------------------------------------------- the opened search results (KYO-826)
+
+#: How many opened results a project's history keeps; the oldest is dropped.
+HISTORY_LIMIT = 50
+#: The longest ``words`` an entry keeps, in characters; more is cut.
+HISTORY_WORDS_LIMIT = 200
+#: The longest message id accepted (the ids a search names are UUIDs or shorter).
+HISTORY_MESSAGE_LIMIT = 128
+_HISTORY_LOCK = threading.Lock()
+
+
+def _history_entries(environ: dict[str, str], project: str) -> list[dict[str, Any]]:
+    """The saved list, newest first; one that is absent or unreadable is an empty one."""
+    try:
+        document = json.loads(
+            serve_files.project_history_path(environ, project).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and all(isinstance(entry.get(key), str) for key in ("session", "message", "words"))
+    ][:HISTORY_LIMIT]
+
+
+def _history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "limit": HISTORY_LIMIT,
+        "words_limit": HISTORY_WORDS_LIMIT,
+        "entries": entries[:HISTORY_LIMIT],
+    }
+
+
 # ---------------------------------------------------------------------- one project's reads
 
 
@@ -524,10 +565,22 @@ class ProjectSessions:
                 f"GET {API_PREFIX}/projects/{{project}}/sessions lists its recent sessions",
             )
 
-    def search(self, project: str, query: str, limit: str | None, cursor: str | None) -> dict:
-        """One page of the prompts and replies holding ``query`` (KYO-812)."""
+    def search(
+        self,
+        project: str,
+        query: str,
+        limit: str | None,
+        cursor: str | None,
+        role: str | None = None,
+        context: str | None = None,
+    ) -> dict:
+        """One page of the prompts and replies holding ``query`` (KYO-812, KYO-826)."""
         if limit is not None and not limit.isdecimal():
             raise Refusal(400, f"?limit is a number of results, not {limit!r}; pass digits only")
+        if context is not None and not context.isdecimal():
+            raise Refusal(
+                400, f"?context is a number of characters, not {context!r}; pass digits only"
+            )
         try:
             return transcript_search.search(
                 self.config,
@@ -536,12 +589,62 @@ class ProjectSessions:
                 query,
                 limit=transcript_search.DEFAULT_LIMIT if limit is None else int(limit),
                 cursor=cursor,
+                role=role,
+                context=(transcript_search.EXCERPT_CONTEXT if context is None else int(context)),
                 environ=self.environ,
             )
         except KyoseiError as exc:
             raise Refusal(400, str(exc)) from exc
         except (OSError, sqlite3.Error) as exc:
             raise Refusal(500, f"the transcript search index could not be used: {exc}") from exc
+
+    # --------------------------------------------------- the opened search results (KYO-826)
+
+    def history_recent(self, project: str) -> dict:
+        """The search results opened in the app for ``project``, newest first."""
+        return _history_document(_history_entries(self.environ, project))
+
+    def record_history(self, project: str, body: dict) -> dict:
+        """Put one opened result at the top of the list; a session of another project is refused.
+
+        An entry is its session and message; ``words`` is cut to :data:`HISTORY_WORDS_LIMIT`
+        characters, not refused for being longer.
+        """
+        session, message, words = body.get("session"), body.get("message"), body.get("words")
+        if not (isinstance(session, str) and isinstance(message, str) and isinstance(words, str)):
+            raise Refusal(
+                400,
+                'the JSON body needs "session" (a session id of this project), "message" (the '
+                'message id a search result names) and "words" (the text the app shows for it), '
+                "all text",
+                reason="bad-request",
+            )
+        if not message or len(message) > HISTORY_MESSAGE_LIMIT:
+            raise Refusal(
+                400,
+                f'"message" is the id a search result names, between 1 and '
+                f"{HISTORY_MESSAGE_LIMIT} characters",
+                reason="bad-request",
+            )
+        self.require(session)
+        entry = {
+            "session": session,
+            "message": message,
+            "words": words[:HISTORY_WORDS_LIMIT],
+            "opened_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        }
+        with _HISTORY_LOCK:
+            kept = [
+                item
+                for item in _history_entries(self.environ, project)
+                if (item["session"], item["message"]) != (session, message)
+            ]
+            entries = [entry] + kept
+            file = serve_files.project_history_path(self.environ, project, create=True)
+            serve_files.write_private(
+                file, json.dumps({"entries": entries[:HISTORY_LIMIT]}, indent=1).encode("utf-8")
+            )
+        return _history_document(entries)
 
     def open_live(self, session_id: str) -> session_layer.LiveSession:
         """The layer's view of a session this project records, or a refusal."""

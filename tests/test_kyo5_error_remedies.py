@@ -4361,7 +4361,7 @@ UNREACHED: dict[str, str] = {
         "tests/test_kyo_serve_send.py::test_revoking_what_is_not_there_names_the_listing"
     ),
     # KYO-812: `kyo transcripts`' refusals of a malformed search.
-    "transcript_search.py:search#0": (
+    "transcript_search.py:search#2": (
         "not provoked by this walk: the refusal is reached only in a project that opted in "
         "to reading transcripts, which its --root provocations do not build. Provoked, and "
         "its remedy run to exit 0, by "
@@ -4872,6 +4872,12 @@ RECORDED: dict[str, str] = {
         "setting `read_transcripts: true` in kyosei/config.yml; proved by "
         "tests/test_transcript_search.py::"
         "test_a_project_not_opted_in_is_refused_and_the_remedy_clears_it"
+    ),
+    # KYO-826: an unknown role is refused naming `person` and `assistant`.
+    "transcript_search.py:search#0": (
+        "asking for `person` or `assistant`, or no role; proved by "
+        "tests/test_transcript_search.py::"
+        "test_an_unknown_role_is_refused_naming_the_two_and_one_of_them_clears_it"
     ),
     "transcript_search.py:_cursor_key#0": (
         "passing the cursor of the previous response unchanged, or none; proved by "

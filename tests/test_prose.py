@@ -177,6 +177,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # decoded to the three ids it was made from and refused otherwise, and is stored
         # nowhere.
         "--cursor",
+        # KYO-826: the characters an excerpt keeps around a match, an integer that argparse
+        # parses and the search refuses outside 0 to 400; stored nowhere.
+        "--context",
         # KYO-151.c2: a rule title, not prose about one. `kyo install-procedures
         # --adopt` is checked against the CLOSED set of titles the packaged ledger
         # ships — on exactly `--scope`'s terms — and a title matching none of them is

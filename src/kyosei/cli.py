@@ -2169,6 +2169,20 @@ def build_parser() -> KyoseiParser:
         metavar="CURSOR",
         help="for search: the `cursor` of the previous page, to list the results after it",
     )
+    p_transcripts.add_argument(
+        "--role",
+        metavar="ROLE",
+        help="for search: keep only the messages one party wrote, `person` for the "
+        "prompts or `assistant` for the replies (default both) (KYO-826)",
+    )
+    p_transcripts.add_argument(
+        "--context",
+        type=int,
+        metavar="N",
+        help=f"for search: the characters an excerpt keeps on each side of the first match "
+        f"(default {transcript_search.EXCERPT_CONTEXT}, at most {transcript_search.MAX_CONTEXT}) "
+        "(KYO-826)",
+    )
 
     p_install_hooks = sub.add_parser(
         "install-hooks",
