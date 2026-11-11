@@ -65,6 +65,8 @@ PROJECT_LABELS: tuple[str, ...] = (
     "orchestrator_only_commands",
     "scopes",
     "documents",
+    # KYO-802: setup decision D8's coverage question.
+    "docs_coverage",
     # KYO-656: setup decision D14, whether Kyosei may read transcripts.
     "read_transcripts",
     # KYO-560: every declined or deferred setup decision, read back.
@@ -697,8 +699,49 @@ def _setup_items(layout, raw: dict) -> list[Item]:
                 "`kyo docs suggest` (drafts one and writes nothing; setup decision D8)",
             )
         )
+    items.append(_docs_coverage_item(layout))
     items.append(_read_transcripts_item(raw, config_path))
     return items
+
+
+def _docs_coverage_item(layout) -> Item:
+    """KYO-802.c3: the readback of the coverage question in setup decision D8.
+
+    ``missing`` while ``docs_coverage.level`` is absent and the project has documents, which
+    is when the session-start brief asks the same question; ``not-needed`` where there is no
+    document for code to be governed by. Documents are those :func:`kyosei.docs_targets.
+    documents` finds, declared or not, the set ``kyo docs coverage`` measures against.
+    """
+    from . import docs_coverage, docs_parse, docs_targets
+    from .registry import RegistryError
+
+    try:
+        config = docs_coverage.read_config(layout.store_root, layout.code_root)
+    except KyoseiError as exc:
+        return Item("docs_coverage", "unreadable", str(exc))
+    if config.level is not None:
+        return Item("docs_coverage", "present", f"level {config.level}")
+    try:
+        found = docs_targets.documents(
+            layout.code_root,
+            documents_in=docs_parse.document_set(layout.store_root / "kyosei"),
+        )
+    except RegistryError:
+        found = {}
+    if not found:
+        return Item(
+            "docs_coverage",
+            "not-needed",
+            "no level recorded; the project has no document, so nothing could govern code",
+        )
+    return Item(
+        "docs_coverage",
+        "missing",
+        "no level recorded, so the session-start brief asks the orchestrator to put the "
+        "question to the person until it is answered",
+        "`kyo docs coverage` prints the ungoverned code and the steps to a map; `kyo docs "
+        "coverage --level notice|problem|off` records the answer (setup decision D8)",
+    )
 
 
 def _read_transcripts_item(raw: dict, config_path: Path) -> Item:
@@ -743,6 +786,7 @@ DECISION_OF_LABEL: dict[str, str] = {
     "orchestrator_only_commands": "D5",
     "scopes": "D7",
     "documents": "D8",
+    "docs_coverage": "D8",
 }
 
 

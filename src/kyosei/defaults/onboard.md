@@ -247,7 +247,14 @@ Ask these together, in one message. Propose an answer for each from what you rea
   "Will requirements get ids? If so: `<DOC>-<n>` ids, one prefix per owning document,
   never reused, matched by `id_pattern: '[A-Z]{1,4}-\d+'`. Which prefix for which
   document?" Then declare the `ssot:` set (with a `section_status` including
-  `superseded`) before anything is written.
+  `superseded`) before anything is written. When documents exist, also run
+  `kyo docs coverage` and ask: "N of M source files are governed by no document section, so
+  a change to them asks nobody to check a document. Should I draft `governs:` lines for the
+  documents (the map), keep a reminder in `kyo doctor` and leave the map for later, or
+  decline?" Record the answer with `kyo docs coverage --level problem|notice|off`
+  (`problem` requires a `code:` list under `docs_coverage:` first; the command prints the
+  steps). Until a level is recorded, every session-start brief asks the orchestrator to put
+  this question to the operator.
 - **[D10] Who deploys.** Ask: "Who deploys: you, the orchestrator when asked, or the
   orchestrator outright? (Workers never deploy.)" Write the answer in CLAUDE.md, outside the
   Kyosei markers. If deploys lag merges, offer to enable the `deploy` gate tag in
@@ -363,6 +370,7 @@ Kyosei setup: readback
   orchestrator_only_commands: <commands, or none>
   scopes:                     <names, or none>
   documents:                  <declared documents, or none>
+  docs_coverage:              <off, notice or problem, or unanswered>
   read_transcripts:           <true, false, or unanswered>
   onboarding:                 <each declined or deferred decision: id, status, reason; or none>
   machine layout:             <CLI only | one machine with the app | dev box and light client>

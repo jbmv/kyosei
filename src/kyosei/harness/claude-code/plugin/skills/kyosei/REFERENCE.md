@@ -154,6 +154,31 @@ Read the log before doing anything else: it carries judgment no store can derive
 suspect," "pick up X before Y and here's why." Treat its claims as claims, with whatever
 provenance level they were written at, not as settled fact.
 
+### The `DOCS COVERAGE:` block is a decision for the person (KYO-802)
+
+While `docs_coverage.level` is absent from `kyosei/config.yml`, the project declares
+documents, and some code is governed by no document section, every session-start brief prints
+a `DOCS COVERAGE: not yet decided` block with the project's counts. A `governs:` line makes a
+branch that changes the named code raise an obligation to read the section; code no section
+governs raises none, so documents about it can go wrong unread. The audit KYO-790 of
+Kyosei's own repository found 74 documentation errors, 41 of the 71 it located in sections
+that governed no code. Do not choose for the person, and do not leave the block standing:
+
+1. Put the decision to the person before other work: draft the map, keep the reminder, or
+   decline. In a project that declares people this is a decision, so `kyo discuss open` it.
+2. Run `kyo docs coverage`. It prints the ungoverned code by directory, the files reached
+   only by a pointer comment, the targets so broad that they ask nothing specific, and the
+   sections that govern nothing.
+3. To draft the map, file a record whose criteria are those counts, and have the work
+   done per document set (dispatched, in a large project): declare `code:` under
+   `docs_coverage:` from the directories holding source files, add `governs:` lines by
+   reading each document section against the code it describes, list exclusions as
+   `unmapped:` with a reason, then run `kyo docs check`. Which document is authoritative
+   where two describe one module, what is excluded, and whether the level ever becomes
+   `problem` are the person's decisions.
+4. Record the answer: `kyo docs coverage --level notice|problem|off`. Any level ends the
+   block, `notice` included. `problem` is refused without a `code:` list.
+
 ### The `PRIOR-ART:` line is a question for the operator (KYO-586)
 
 Prior-art search is the optional extra `kyosei[recx]`, installed with

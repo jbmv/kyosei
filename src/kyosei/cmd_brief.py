@@ -1060,6 +1060,39 @@ def _new_rule_texts(store: Store, procedures_text: str, rules: list[dict]) -> di
     return {RULE_TEXTS_KEY: fresh} if fresh else {}
 
 
+def _docs_coverage_ask(store: Store) -> dict | None:
+    """KYO-802.c1/c2: what the session-start brief's DOCS COVERAGE block prints, or ``None``.
+
+    The block asks the orchestrator to put one decision to the project's person, and it
+    repeats until ``docs_coverage.level`` is recorded, so it is silent once any level is
+    (``off`` included), where the project has no document (nothing could govern), where git
+    could not list the files, where the declaration does not parse (``kyo doctor`` names
+    that), and where no code is ungoverned. Reads the files and writes nothing; the counts
+    are :func:`kyosei.docs_coverage.measure`'s, the same as ``kyo docs coverage`` prints.
+    """
+    from . import docs_coverage, docs_parse
+    from .registry import RegistryError
+
+    try:
+        config = docs_coverage.read_config(store.config.root, store.config.repo_root)
+        if config.level is not None:
+            return None
+        documents_in = docs_parse.document_set(store.config.kyosei_dir)
+    except (KyoseiError, RegistryError):
+        return None
+    coverage = docs_coverage.measure(store.config.repo_root, documents_in, config)
+    if not coverage.has_documents or not coverage.listed or not coverage.ungoverned:
+        return None
+    return {
+        "ungoverned": len(coverage.ungoverned),
+        "code": len(coverage.code),
+        "directories": [
+            [directory, count]
+            for directory, count in docs_coverage._summary_directories(coverage.ungoverned)
+        ],
+    }
+
+
 def cmd_brief(ctx: Context, args: Namespace) -> Output:
     """``kyo brief [--compact] [--session-start]`` (KYO-8.c6) — the session briefing, derived
     entirely from the store: counts by kind, ready work, gated work with
@@ -1215,6 +1248,9 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         # neither on nor off at recx.prior_art.state; null otherwise. Asked with find_spec
         # and no import, so a project without recx pays one path lookup for it.
         "prior_art_unchosen": prior_art.unchosen_line(store.config.root),
+        # KYO-802.c1: the project's counts for the docs-coverage block, or null once any
+        # level is recorded, where no document exists, or where nothing is ungoverned.
+        "docs_coverage_ask": _docs_coverage_ask(store),
         # KYO-226.c2: which build produced this brief, carried in the document and
         # rendered on the first line. A session opens on a board *and* on the identity
         # of the tool that derived it (docs/design/review.md#kyo-226). Exactly what
