@@ -1647,12 +1647,15 @@ const kyo = {
     switchWhenFree();
   },
 
-  /** A held message taken back, to edit. */
-  retracted(frame: { text: string }): void {
+  /**
+   * A held message taken back, to edit. The server returns the prompt's own marks with it
+   * (KYO-809), so the box is rebuilt from them on this device as on the one that sent it.
+   */
+  retracted(frame: { text: string; prompt?: { marks?: SentMarkBody[] } | null }): void {
     retracting = false;
     showHeld(null);
-    const held = stored<SavedBox | null>(HELD_KEY, null);
-    showTexts([frame.text, ...currentTexts()], [...(held ? [held] : []), ...currentBoxes()]);
+    const marks = restoredMarks(frame.prompt?.marks ?? []);
+    showTexts([frame.text, ...currentTexts()], [{ text: frame.text, marks }, ...currentBoxes()]);
   },
 
   /**
@@ -3456,6 +3459,44 @@ function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   remember();
 }
 
+/** One mark of a prompt as `send-prompt` takes it and the server returns it (KYO-809). */
+interface SentMarkBody {
+  line: number; anchors?: Record<string, any>[]; tags?: string[]; attachments?: string[];
+}
+
+/**
+ * A held prompt's marks as the composer holds them, the inverse of `sentMarks`. The server
+ * keeps what was sent, which has no words for a chip to show, so each chip is worded from
+ * what its anchor names.
+ */
+function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[] {
+  return marks.flatMap((mark) => {
+    const items: Item[] = [];
+    for (const anchor of mark.anchors ?? []) {
+      if (anchor.kind === "record") {
+        items.push({ kind: "record", id: anchor.id, words: anchor.id });
+      } else if (anchor.kind === "file") {
+        const name = String(anchor.path).split("/").pop();
+        items.push({
+          kind: "path", root: anchor.root, path: anchor.path, lines: anchor.lines,
+          ...(anchor.chars ? { chars: anchor.chars } : {}),
+          ...(anchor.session ? { session: anchor.session } : {}),
+          words: `${name}:${anchor.lines?.[0]}`,
+        });
+      } else if (anchor.kind === "turn") {
+        items.push({
+          kind: "anchor", key: anchor.message ? `r:${anchor.message}` : `t:${anchor.uuid}`,
+          session: anchor.session, start: anchor.start, end: anchor.end,
+          words: "an earlier message", exact: true,
+        });
+      }
+    }
+    for (const name of mark.tags ?? []) items.push({ kind: "tag", name });
+    for (const id of mark.attachments ?? []) items.push({ kind: "file", id, name: "attachment" });
+    return items.length ? [{ line: mark.line, items }] : [];
+  });
+}
+
 /** A new prompt is made on purpose: an empty box is reused before another is added. */
 function newPrompt(): void {
   (textAreas().find((area) => !area.value) ?? addBox()).focus();
@@ -3486,7 +3527,6 @@ function messageSegments(area: HTMLTextAreaElement): { kind: string; text: strin
   return segments;
 }
 
-const HELD_KEY = "composer-held";
 /** The prompt whose Send was answered with the cold-cache warning, until it is pressed again. */
 let coldConfirm: HTMLTextAreaElement | null = null;
 
@@ -3600,9 +3640,6 @@ function attemptSend(area: HTMLTextAreaElement): void {
   if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
   composerNote.textContent = "Sending…";
   drawSending();
-  // Kept so that a message taken back to edit returns with its marks.
-  const box = currentBoxes().find((saved) => saved.text === area.value);
-  if (box) store(HELD_KEY, box);
   post("send", { segments, marks: sentMarks(area) });
 }
 

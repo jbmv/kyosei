@@ -955,6 +955,26 @@ final class SessionFeed {
         }
     }
 
+    /// The frame the page rebuilds a taken-back prompt from (KYO-809): its text, and the
+    /// prompt's own marks when it had any, which the server returns to whichever device asks.
+    /// A prompt sent with marks was delivered with lines added above its paragraphs, so the
+    /// text is the prompt as it was typed.
+    nonisolated static func retractedFrame(_ data: Data) -> String {
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let held = object?["held"] as? [String: Any] ?? object ?? [:]
+        let prompt = held["prompt"] as? [String: Any]
+        let typed = prompt?["segments"] as? [[String: Any]]
+        let segments = typed ?? held["segments"] as? [[String: Any]] ?? []
+        var frame: [String: Any] = ["text": segments.compactMap { $0["text"] as? String }.joined()]
+        if let marks = prompt?["marks"] as? [[String: Any]], !marks.isEmpty {
+            frame["prompt"] = ["marks": marks]
+        }
+        guard let json = try? JSONSerialization.data(withJSONObject: frame) else {
+            return #"{"text": ""}"#
+        }
+        return String(decoding: json, as: UTF8.self)
+    }
+
     /// Takes a held message back, returning its text to the composer.
     func retract(id: String) {
         guard let session = current, let token = Self.deviceToken() else { return }
@@ -973,14 +993,7 @@ final class SessionFeed {
             // The page waits for this answer before it leaves a project, as it does for a
             // send's, so the text returns to the composer it was taken from.
             guard session == current else { return }
-            let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
-            let held = object?["held"] as? [String: Any] ?? object ?? [:]
-            // A prompt sent with marks was delivered with lines added above its paragraphs,
-            // so what returns to the composer is the prompt as it was typed.
-            let typed = (held["prompt"] as? [String: Any])?["segments"] as? [[String: Any]]
-            let segments = typed ?? held["segments"] as? [[String: Any]] ?? []
-            let text = segments.compactMap { $0["text"] as? String }.joined()
-            send("retracted", #"{"text": \#(quoted(text))}"#)
+            send("retracted", Self.retractedFrame(reply.data))
         }
     }
 
