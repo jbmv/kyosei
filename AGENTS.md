@@ -78,3 +78,18 @@ cite its records as `KYO-n`: the id of a record in that tracker, with a suffix s
 `.c2` or `.d1` naming a criterion or a dispatch within the record. `kyo changelog --all`
 lists the completed records with their titles. A citation marks where a behaviour came
 from; the surrounding text should still state the reason on its own.
+
+## Writing documents
+
+These rules apply to everything a reader outside the project sees: the README, the guide, the
+reference topics, the charter, release notes and the text the CLI prints.
+
+- Write in a measured, academic register. State the problem, then what Kyosei does about it
+  and how. A description that is accurate needs no help from adjectives.
+- Do not sell. Avoid emotional appeal, sweeping claims, and figures or anecdotes used for
+  effect. A number appears only where it was measured, with how.
+- Avoid the rhythm of marketing copy: no one-word or fragment sentences, and no contrasts
+  built for effect.
+- Be brief in overviews and give the broad strokes; put detail in the linked document.
+- Use exact terms, in the sense their field gives them; describe behaviour as it is built
+  today, and mark what is planned as planned.
