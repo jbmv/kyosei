@@ -133,10 +133,11 @@ test("completed items follow their own group when shown, and the groups stay", (
   assert.equal(view.showCompleted, true);
 });
 
-test("the divider is drawn only when both groups have items", () => {
+test("the divider stands before the orchestrator's rows, and only when there are some", () => {
   assert.equal(agendaView(frameOf(mixed.filter((item) => item.author === "person"))).dividerAt, null);
-  assert.equal(agendaView(frameOf(mixed.filter((item) => item.author === "orchestrator"))).dividerAt, null);
+  // With only the orchestrator's rows the divider still stands, below the person's add field.
+  assert.equal(agendaView(frameOf(mixed.filter((item) => item.author === "orchestrator"))).dividerAt, 0);
   const onlyDone = mixed.map((item) => ({ ...item, checked: item.author === "person" }));
-  assert.equal(agendaView(frameOf(onlyDone)).dividerAt, null);
-  assert.notEqual(agendaView(frameOf(onlyDone), true).dividerAt, null);
+  assert.equal(agendaView(frameOf(onlyDone)).dividerAt, 0);
+  assert.equal(agendaView(frameOf(onlyDone), true).dividerAt, 3);
 });

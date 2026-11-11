@@ -3476,6 +3476,10 @@ const agendaPane = document.getElementById("agenda")!;
 const agendaWhy = document.getElementById("agenda-why")!;
 const agendaList = document.getElementById("agenda-items")!;
 const agendaAdd = document.getElementById("agenda-add") as HTMLInputElement;
+/** The list row the add field is drawn in, at the end of the person's group (KYO-781.c3). */
+const agendaAddRow = document.createElement("li");
+agendaAddRow.className = "agenda-add-row";
+agendaAddRow.append(agendaAdd);
 const agendaNote = document.getElementById("agenda-note")!;
 const agendaCompleted = document.getElementById("agenda-completed")!;
 agendaCompleted.addEventListener("click", () => {
@@ -3594,13 +3598,24 @@ function drawAgenda(): void {
   const caret = open && document.activeElement === open
     ? [open.selectionStart ?? open.value.length, open.selectionEnd ?? open.value.length] : null;
   const drawn = view.rows.map(agendaRow);
+  // The person's field for adding stands at the end of their group, above the divider: it is
+  // their part of the list (KYO-781.c3). Moving it drops its focus, which is given back.
+  const adding = document.activeElement === agendaAdd
+    ? [agendaAdd.selectionStart ?? agendaAdd.value.length, agendaAdd.selectionEnd ?? agendaAdd.value.length] : null;
+  const mineEnd = view.dividerAt ?? drawn.length;
   if (view.dividerAt !== null) {
     const divider = document.createElement("li");
     divider.className = "agenda-divider";
     divider.setAttribute("role", "separator");
     drawn.splice(view.dividerAt, 0, divider);
   }
+  agendaAddRow.hidden = !view.canAdd;
+  drawn.splice(mineEnd, 0, agendaAddRow);
   agendaList.replaceChildren(...drawn);
+  if (adding) {
+    agendaAdd.focus();
+    agendaAdd.setSelectionRange(adding[0], adding[1]);
+  }
   agendaCompleted.hidden = view.completed === 0;
   agendaCompleted.textContent = `${view.showCompleted ? "Hide" : "Show"} completed (${view.completed})`;
   agendaCompleted.setAttribute("aria-expanded", String(view.showCompleted));

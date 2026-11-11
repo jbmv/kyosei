@@ -57,7 +57,11 @@ export interface AgendaView {
    * then follows the unchecked ones of its group.
    */
   rows: Row[];
-  /** The index in `rows` the divider is drawn before; null unless both groups have rows. */
+  /**
+   * The index in `rows` the divider is drawn before: where the orchestrator's rows begin, when
+   * there are any. The person's field for adding an item stands just above it, at the end of
+   * the person's group, since it is theirs (KYO-781.c3); null when the orchestrator has no rows.
+   */
   dividerAt: number | null;
   /** How many checked items the list holds, of whoever's; the control states it. */
   completed: number;
@@ -95,7 +99,7 @@ export function agendaView(frame: AgendaFrame | null, showCompleted = false): Ag
     shown: true,
     why: null,
     rows: [...mine, ...theirs],
-    dividerAt: mine.length > 0 && theirs.length > 0 ? mine.length : null,
+    dividerAt: theirs.length > 0 ? mine.length : null,
     completed,
     showCompleted,
     canAdd: true,
