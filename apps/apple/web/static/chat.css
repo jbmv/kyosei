@@ -1015,7 +1015,7 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 #files-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
 #files-mentioned { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #files-recent { flex: 1; min-height: 0; max-height: 30%; overflow-y: auto; overscroll-behavior: contain; }
-#files-side > .files-search { flex: none; margin: 0 4px; }
+#files-side > .files-search { flex: none; width: auto; align-self: stretch; box-sizing: border-box; margin: 0 4px; }
 #files-landing > .files-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 /* While a search is shown it takes the side bar, or the page, and the tree and the lists wait beneath. */
 #files-side.searching > :not(.files-search):not(.files-found),
