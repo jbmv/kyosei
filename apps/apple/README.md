@@ -112,6 +112,18 @@ no live session there is no bubble, and a token that may not read the list is to
 The app's part is `showAgenda` and `saveAgenda` in `SessionFeed.swift`; the page's is
 `web/src/agenda.ts` and the section of `web/src/chat.ts` that draws it.
 
+The page's text fields underline misspelled words and change nothing that is typed (KYO-796).
+WebKit on macOS takes both from the app's defaults rather than from the page: it underlines
+when `WebContinuousSpellCheckingEnabled` is true, and it applies the system checker's
+corrections, which include the capital at the start of a sentence, when words are being
+underlined and `WebAutomaticSpellingCorrectionEnabled` is true or absent with the correction
+on system-wide. `ChatPage` in `ChatView.swift` registers the first as true and the second as
+false before the web view is built. The Spelling and Grammar menu stores a choice under the
+same keys, and a stored value is read before a registered one, so a choice made there is
+kept. Smart quotes, smart dashes and text replacement have their own keys and still follow
+the system-wide settings. `Tests/KyoseiMacTests` builds the web view without a window and
+checks the keys and that typed text is left as typed.
+
 The app opens on the project it last showed. On a first run, or when the server no longer
 lists that project, it shows the list of projects in place of the chat. The logic is in
 `web/src/projects.ts`, and the switch is `SessionFeed.open`. File > Projects… (Command-O)
