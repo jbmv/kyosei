@@ -11,8 +11,8 @@ investigation, experiment, proposal, plan, reminder (archetype `work`: has crite
 flow, dispatches), or decision, discussion, evidence (archetype `knowledge`: claim-bearing, no
 status flow — `kyo move`/`kyo wont-do` refuse them, naming `kyo void` instead).
 Claims, verifications, and evidence artifacts (`kyo claim` / `kyo verify` /
-`kyo attach`) attach to a record of any kind, `work` or `knowledge` alike, and ship
-as of this milestone; a dedicated `amend` verb for a `knowledge` record does not yet
+`kyo attach`) attach to a record of any kind, `work` or `knowledge` alike; a dedicated
+`amend` verb for a `knowledge` record does not
 exist — `kyo edit --description-file` is the in-place edit and `kyo void <id> --why`
 is the disposal (KYO-44). Each kind declares:
 
@@ -70,7 +70,7 @@ with no indexed turn, and the number of prompts skipped; and it reports as a pro
 session that recorded two or more Stops, the last later than every line of the turn
 index, with no line of its own, which means the hooks that write the index did not run.
 
-A store scaffolded before this release has no
+A store scaffolded by a build from before KYO-658 has no
 `discussion` entry and no `requires_discussion` key; copy both from the packaged
 `kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it produces.
 
@@ -145,9 +145,11 @@ accepted on any spawn and stored when given.
 
 `kyo new <kind>` refuses an unknown kind, listing every known one — and refuses a
 *known* kind whose `accepts_from` does not carry `intake`, because `kyo new` is the
-intake edge (KYO-43). In the shipped registry every kind is filed directly — `bug`,
+intake edge (KYO-43). In the shipped registry every kind but `discussion` is filed
+directly — `bug`,
 `chore`, `decision`, `evidence`, `experiment`, `investigation`, `plan`, `proposal`,
-`reminder`, `task` — because filing directly costs no structure: `kyo new` takes
+`reminder`, `task` — and a `discussion`, whose `accepts_from` is empty, is filed only by
+`kyo discuss open` (KYO-658). Filing directly costs no structure: `kyo new` takes
 `--criteria-file` and `--touches-file` exactly as `kyo promote` does (KYO-228). Write to
 `ideas/` when a thought genuinely is not being filed this session, not as a required
 first step before every record. `decision` was the one kind still refused until
@@ -235,8 +237,8 @@ touches disagree. **That suggestion is never the source.** It is printed labeled
 — `kyo rebuild` included — derives a scope from anything. Records without touches, and
 documents, have nothing to derive from at all.
 
-Scope is optional everywhere. A store created before this release has no
-`kyosei/scopes.yml`, which reads as "this project declares no scopes" rather than as an
+Scope is optional everywhere. A store with no
+`kyosei/scopes.yml` reads as "this project declares no scopes" rather than as an
 error, and every record in it has no scope, which reads as "none was declared" rather
 than as a scope to be guessed at.
 
@@ -333,7 +335,7 @@ A record of a `policy.carried` kind (KYO-497, "The kind registry"; the default
 a `complete`-role status needs `--why` (`carried-settle-requires-reason`), and its settle
 clears the record's open gates with that reason before this contract runs, so it finds none.
 
-A store created before this release has no `kyosei/statuses.yml` and gets the ladder
+A store with no `kyosei/statuses.yml` gets the ladder
 above — the same file `kyo init` writes, so the default and the fallback cannot drift
 apart. `kyo doctor`'s `statuses` check validates the file and catches a record sitting
 in a status that has since left the registry; nothing is migrated on your behalf, because
@@ -429,8 +431,8 @@ The brief's gated work section shows the same set. A record holding an open gate
 settle, so a record reaching done means its work is live, not merely merged.
 
 Tags are optional everywhere. `kyo init` ships the file declaring none, because what a
-project waits on is a claim about *that* project; a store created before this release
-has no `kyosei/gate-tags.yml` at all, which reads as "this project declares no gate
+project waits on is a claim about *that* project; a store with no
+`kyosei/gate-tags.yml` at all reads as "this project declares no gate
 tags", and every gate in it carries none.
 
 ## Saved views: `kyosei/bases.yml` and `kyo base`
@@ -461,7 +463,13 @@ kyo base list                   # what this project has saved, and the file they
 kyo base run open-work          # run one, read-only
 kyo base run open-work --json   # rows, applied columns/sort, grouping, per-row detail,
                                 # and the db/export currency direction
+kyo base run open-work --group-by status   # the same rows, arranged by another field
 ```
+
+`--group-by FIELD` is the one binding `kyo base run` overrides, because grouping
+rearranges rows a run already produced, while the source, filters and columns decide
+which rows exist and stay in the file. The field is validated by the rule the stored
+`group-by` gets, and `applied.group-by` in `--json` reports the field used.
 
 ### The three sources
 
@@ -475,7 +483,7 @@ record has an id and a file has a path.
 
 | source | what a row is | its fields | its filters |
 |---|---|---|---|
-| `records` | one record | `id`, `seq`, `kind`, `scope`, `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at` | `kind`, `scope`, `status`, `plan`, `gate-tag` — exactly `kyo list`'s filters; its row-count flags `--unsettled` and `--limit` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
+| `records` | one record | `id`, `seq`, `kind`, `scope`, `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at`, `people` (the persons with a current credit on the record) | `kind`, `scope`, `status`, `plan`, `gate-tag`, `person`, `decided-by` — exactly `kyo list`'s filters; its flags `--unsettled`, `--overrode` and `--limit` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
 | `ideas` | one file under `ideas/` | `id` (its path), `title`, `stamped`, `promoted`, `promoted_at`, `section_count`, `promoted_section_count`, `properties` | `path`, `contains`, any field, `properties.<key>` |
 | `docs` | one file under `docs/` | `id` (its path), `title`, `section_count`, `governs`, `governs_broken`, `amended`, `staleness`, `staleness_says`, `properties` | the same four |
 
@@ -542,8 +550,8 @@ fails if one surface ever gains a filter the other lacks.
 
 `sort` takes field names most-significant-first and a leading `-` reverses one; the
 default is `seq` for records (the order `kyo list` prints) and `id` for the two file
-sources (path order). A field a base declares as a list — `gate_tags`, `promoted`,
-`governs` — can be shown and filtered on but never grouped by, since a row with two
+sources (path order). A field a base declares as a list — `gate_tags`, `gate_types`,
+`people`, `promoted`, `governs` — can be shown and filtered on but never grouped by, since a row with two
 values belongs to two groups.
 
 The counted/not-counted split in `summary` is each source's own: for records it is
@@ -555,12 +563,12 @@ Every `--json` run states the db/export currency direction (`in-step`, `db-ahead
 `export-ahead`, `cannot-tell`) so a rendering has somewhere to paint *could not tell*
 instead of defaulting to clean.
 
-`kyo init` ships `bases.yml` declaring none, with the shape and two commented examples.
+`kyo init` ships `bases.yml` declaring none, with the shape and four commented examples.
 The reason it is empty is sharper than for `scopes.yml`: a seeded base would have to name
 a status or a kind out of this project's own registries, so a project that renamed its
 ladder would hold a `bases.yml` that fails to load — taking every base it had written
-itself down with it. A store created before this release has no `kyosei/bases.yml` at
-all, which reads as "this project has saved no views".
+itself down with it. A store with no `kyosei/bases.yml` at
+all reads as "this project has saved no views".
 
 Bases are **config, not store data**: no record field is added, no schema version moves,
 and nothing in `kyo` writes the file — it is edited and reviewed the way `kinds.yml` is.
