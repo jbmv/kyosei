@@ -133,9 +133,13 @@ export function historyRows(history: string[], rows: RecordRow[]): RecordRow[] {
 
 // ------------------------------------------------------------------------------ record ids
 
-const REF = /^([A-Z][A-Z0-9]*-\d+)(\.[a-z]+\d+)?$/;
+// An entry of a report has a second part: `KYO-740.r1.p1` (KYO-757).
+const REF = /^([A-Z][A-Z0-9]*-\d+)(\.[a-z]+\d+){0,2}$/;
 
-/** The record an id belongs to: `KYO-732` for `KYO-732.c1`. Null when it is not an id. */
+/**
+ * The record an id belongs to: `KYO-732` for `KYO-732.c1` and for `KYO-732.r1.p1`. Null when
+ * it is not an id.
+ */
 export function recordOf(ref: string): string | null {
   return REF.exec(ref)?.[1] ?? null;
 }
@@ -180,7 +184,7 @@ export function refParts(text: string, prefixes: Iterable<string>): TextPart[] {
   const known = [...new Set(prefixes)].filter((prefix) => /^[A-Z][A-Z0-9]*$/.test(prefix));
   if (!known.length || !text) return text ? [{ text }] : [];
   const pattern = new RegExp(
-    `(?<![A-Za-z0-9-])(?:${known.join("|")})-\\d+(?:\\.[a-z]+\\d+)?(?![A-Za-z0-9])`, "g");
+    `(?<![A-Za-z0-9-])(?:${known.join("|")})-\\d+(?:\\.[a-z]+\\d+){0,2}(?![A-Za-z0-9])`, "g");
   const parts: TextPart[] = [];
   let from = 0;
   for (const match of text.matchAll(pattern)) {
@@ -204,7 +208,10 @@ export interface Line {
   text: string;
   /** A heading drawn above this line, where a new group of lines begins. */
   group?: string;
-  /** The id the line can be anchored by, as a criterion's can: a verdict's criterion. */
+  /**
+   * The id the line can be anchored by, as a criterion's can: the id of a report's false
+   * premise, disagreement, corrected number or verdict (KYO-757).
+   */
   ref?: string;
 }
 
@@ -363,38 +370,58 @@ function dispatchItem(dispatch: Doc, covered = false): Item {
  * worker departed from it, what it did and why, corrected numbers, each criterion's verdict,
  * the docs verdicts, and the commits. `supersededBy` names the report that replaced this one,
  * which is then drawn folded.
+ *
+ * A false premise, a disagreement, a corrected number and a verdict each carry the id the
+ * server gives the entry in `entry_ids`, which lists the ids of each array of the body in the
+ * array's order (KYO-757). The id is the server's to derive, so a report from a server that
+ * sends none has lines that cannot be anchored to. A verdict is anchored by its own id and
+ * not its criterion's: the anchor is to what the worker said, and the criterion has its own
+ * line on the page.
  */
 export function reportItem(report: Doc, supersededBy: string | null = null): Item {
   const body: Doc = report.body && typeof report.body === "object" ? report.body : {};
   const group = (name: string, lines: Line[]): Line[] =>
     lines.length ? [{ ...lines[0], group: name }, ...lines.slice(1)] : [];
+  const ids: Doc = report.entry_ids && typeof report.entry_ids === "object" ? report.entry_ids : {};
+  /** The entries of one array of the body, each with its id when the server gave one. */
+  const entries = (array: string): { entry: Doc; ref?: string }[] =>
+    (Array.isArray(body[array]) ? body[array] as unknown[] : [])
+      .map((entry, index) => ({
+        entry, ref: (Array.isArray(ids[array]) && word(ids[array][index])) || undefined,
+      }))
+      .filter((one): one is { entry: Doc; ref: string | undefined } =>
+        Boolean(one.entry) && typeof one.entry === "object");
+  const anchored = (ref: string | undefined): { ref?: string } => (ref ? { ref } : {});
   const lines: Line[] = [
-    ...group("False premises", list(body.premise_false).map((premise) => ({
+    ...group("False premises", entries("premise_false").map(({ entry: premise, ref }) => ({
       label: "premise false",
       text: words(
         premise.claim, premise.correction && `Correction: ${premise.correction}`,
         premise.impact && `Impact: ${premise.impact}`).join("\n"),
+      ...anchored(ref),
     }))),
-    ...group("Disagreements with the brief", list(body.disagreements).map((disagreement) => ({
+    ...group("Disagreements with the brief", entries("disagreements").map(({ entry: disagreement, ref }) => ({
       label: "disagreement",
       text: words(
         disagreement.topic, disagreement.brief_said && `The brief said: ${disagreement.brief_said}`,
         disagreement.worker_did && `The worker did: ${disagreement.worker_did}`,
         disagreement.rationale && `Because: ${disagreement.rationale}`).join("\n"),
+      ...anchored(ref),
     }))),
     ...group("What the worker did and why", line("summary", body.summary)),
-    ...group("Corrected numbers", list(body.corrected_numbers).map((number) => ({
+    ...group("Corrected numbers", entries("corrected_numbers").map(({ entry: number, ref }) => ({
       label: "corrected number",
       text: words(
         number.claim, number.brief_value && `The brief said: ${number.brief_value}`,
         number.actual_value && `Measured: ${number.actual_value}`,
         number.method && `By: ${number.method}`).join("\n"),
+      ...anchored(ref),
     }))),
-    ...group("Verdicts", list(body.criteria_verdicts).map((verdict) => ({
+    ...group("Verdicts", entries("criteria_verdicts").map(({ entry: verdict, ref }) => ({
       label: words(verdict.criterion_id, verdict.verdict, verdict.method).join(" · "),
       text: words(
         verdict.evidence, verdict.reason && `Reason: ${verdict.reason}`, verdict.notes).join("\n"),
-      ref: word(verdict.criterion_id) ?? undefined,
+      ...anchored(ref),
     }))),
     ...group("Docs verdicts", list(body.docs_verdicts).map((docs) => ({
       label: words(docs.verdict, docs.method).join(" · "),

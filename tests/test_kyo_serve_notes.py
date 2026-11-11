@@ -1468,6 +1468,131 @@ def test_c1_a_record_the_store_does_not_hold_names_the_list_and_other_ids_are_re
     assert status == 400 and "criterion, gate, dispatch, note or claim" in refused["error"]
 
 
+# ---------------------------------------------- KYO-757: anchors to an entry of a report
+
+
+@pytest.fixture
+def reported(bed: Bed, elements: dict[str, str], tmp_path: Path) -> dict[str, str]:
+    """A report on the record's dispatch with one of each entry that has an id."""
+    kyo = kyo_of(bed)
+    record, dispatch = elements["record"], elements["dispatch"]
+    body = {
+        "dispatch_id": dispatch,
+        "record_id": record,
+        "worked_from_sha": kyo("show", dispatch, "--json").json["worked_from_sha"],
+        "premise_false": [
+            {"claim": "the cache is warm when the first widget is drawn", "correction": "cold"}
+        ],
+        "disagreements": [
+            {
+                "topic": "where the eviction is fixed",
+                "brief_said": "in the reader",
+                "worker_did": "in the writer",
+                "rationale": "the writer holds the lock",
+            }
+        ],
+        "corrected_numbers": [
+            {"claim": "widgets drawn", "brief_value": "3", "actual_value": "4", "method": "ran"}
+        ],
+        "criteria_verdicts": [
+            {
+                "criterion_id": elements["criterion"],
+                "verdict": "met",
+                "method": "machine-checked",
+                "evidence": "the cold start test passes",
+            }
+        ],
+        "commits": [],
+    }
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(body), encoding="utf-8")
+    filed = kyo("report", dispatch, "--file", str(path), "--json")
+    assert filed.code == 0, filed
+    report = filed.json["report_id"]
+    return {"report": report, "record": record, "path": str(path)} | {
+        letter: f"{report}.{letter}1" for letter in "pxnv"
+    }
+
+
+def test_kyo757_a_paragraph_is_anchored_to_each_entry_of_a_report(
+    bed: Bed, notes_path: str, can_send: str, reported: dict[str, str]
+) -> None:
+    """The line is the entry's id and its words, and `kyo show` reads the id."""
+    anchors = [{"kind": "record", "id": reported[letter]} for letter in "pxnv"]
+    status, sent = post(bed, SEND_PROMPT, one_mark(*anchors), can_send)
+    assert status == 200, sent
+    assert sent["message"].splitlines() == [
+        f'on record {reported["p"]} "the cache is warm when the..."',
+        f'on record {reported["x"]} "where the eviction is fixed"',
+        f'on record {reported["n"]} "widgets drawn"',
+        f'on record {reported["v"]} "the cold start test passes"',
+        "about this",
+    ]
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, sent["held"]["id"])) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, sent["held"]["id"])
+    # Stored as a record anchor by the entry's id, with no new key and no schema change.
+    assert note["anchors"] == [{"kind": "record", "target": reported[letter]} for letter in "pxnv"]
+    kyo = kyo_of(bed)
+    for letter in "pxnv":
+        assert kyo("show", reported[letter]).code == 0
+    # A note on an entry is found from its record, and the marks route gives it as a place.
+    found = on_the_cli(bed, "list", "--on", reported["record"])
+    assert [item["id"] for item in found["notes"]] == [note["id"]]
+    (mark,) = marks_of(bed, can_send)
+    assert mark["anchors"] == [{"kind": "record", "id": reported[letter]} for letter in "pxnv"]
+
+
+def test_kyo757_an_entry_of_a_superseded_report_is_still_anchored_to(
+    bed: Bed, can_send: str, reported: dict[str, str]
+) -> None:
+    """An amendment mints a report with ids of its own and leaves the first one's readable."""
+    kyo = kyo_of(bed)
+    body = json.loads(Path(reported["path"]).read_text(encoding="utf-8"))
+    body["amends"] = reported["report"]
+    body["premise_false"][0]["claim"] = "the cache is cold at the first widget"
+    Path(reported["path"]).write_text(json.dumps(body), encoding="utf-8")
+    amended = kyo("report", body["dispatch_id"], "--file", reported["path"], "--json")
+    assert amended.code == 0, amended
+    second = amended.json["report_id"]
+    anchors = [{"kind": "record", "id": reported["p"]}, {"kind": "record", "id": f"{second}.p1"}]
+    status, sent = post(bed, SEND_PROMPT, one_mark(*anchors), can_send)
+    assert status == 200, sent
+    assert on_lines(sent) == [
+        f'on record {reported["p"]} "the cache is warm when the..."',
+        f'on record {second}.p1 "the cache is cold at the..."',
+    ]
+
+
+def test_kyo757_an_entry_the_report_does_not_hold_is_refused_and_a_listed_id_clears_it(
+    bed: Bed, can_send: str, reported: dict[str, str]
+) -> None:
+    report, record = reported["report"], reported["record"]
+    missing = f"{report}.x9"
+    status, refused = post(bed, SEND_PROMPT, one_mark({"kind": "record", "id": missing}), can_send)
+    assert status == 400, refused
+    assert f"no disagreement {missing!r} in this store" in refused["error"]
+    assert f"`kyo show {report}` prints the ids of that report's entries" in refused["error"]
+    assert get(bed, HELD_ROUTE, can_send)[1]["held"] is None
+    # The remedy: an id that command prints.
+    shown = kyo_of(bed)("show", report)
+    listed = next(word for word in shown.out.split() if word.startswith(f"{report}.x"))
+    status, sent = post(bed, SEND_PROMPT, one_mark({"kind": "record", "id": listed}), can_send)
+    assert status == 200, sent
+    assert on_lines(sent)[0].startswith(f"on record {listed}")
+    # A report the record does not hold is answered with the record's own listing.
+    absent = one_mark({"kind": "record", "id": f"{record}.r9.p1"})
+    status, refused = post(bed, SEND_PROMPT, absent, can_send)
+    assert status == 400, refused
+    assert f"`kyo show {record}` prints the ids that record holds" in refused["error"]
+    assert report in kyo_of(bed)("show", record).out
+    # A docs verdict and a commit have no id, and the refusal says which entries have.
+    status, refused = post(
+        bed, SEND_PROMPT, one_mark({"kind": "record", "id": f"{report}.c1"}), can_send
+    )
+    assert status == 400 and "KYO-12.r1.p1, .x1, .n1 or .v1" in refused["error"]
+
+
 SOURCE = "import os\n\n\ndef reformat(text):\n    return text.strip()\n\nLIMIT = 3\n"
 PLAN = (
     "# The plan\n"

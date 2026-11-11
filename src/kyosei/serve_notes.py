@@ -79,8 +79,16 @@ reads the line and cannot open the client, so each line carries what finds the p
     on file notes/plan.md in the scratchpad line 3 "The second chunk waits on..." at "waits"
 
 A record's line is its id, which ``kyo show`` reads, and the first words the element holds now
-(:func:`kyosei.cmd_notes.element_words`); a dispatch has no words and is its id alone. A
-file's line is its path relative to its root, the root when it is not the code repository
+(:func:`kyosei.cmd_notes.element_words`); a dispatch has no words and is its id alone. An
+entry of a stored report is anchored the same way and stored as the same kind (KYO-757): a
+false premise, a disagreement, a corrected number and a verdict have the ids
+``KYO-740.r1.p1``, ``.x1``, ``.n1`` and ``.v1``, read from the report's body by place
+(:mod:`kyosei.report_entries`), and the line quotes the premise's or the number's claim, the
+disagreement's topic, or the verdict's evidence:
+
+    on record KYO-740.r1.x1 "ids for a report's entries"
+
+A file's line is its path relative to its root, the root when it is not the code repository
 (``in the store repository``, ``in the scratchpad``, and ``in the scratchpad of session
 <id>`` when the scratchpad is another session's), its lines counted from 1 (``line 3`` for one,
 ``lines 12-14`` for a span), and its words as a turn's are quoted: a selection of fewer than

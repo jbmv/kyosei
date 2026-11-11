@@ -16,7 +16,8 @@ AN ANCHOR addresses a place and holds no words from it:
 =========  ==================================================================
 turn       a transcript record (session, uuid), a character range, a digest
 record     a record's id, or the id of one of its criteria, gates,
-           dispatches, notes or claims
+           dispatches, notes or claims, or of an entry of one of its
+           reports
 document   a path at a commit, with a line range or a character range
 file       a path at a commit, with a line range
 note       another note's id, so a reply can be threaded
@@ -26,7 +27,10 @@ AN ELEMENT OF A RECORD (KYO-737) is addressed by its own id in the ``record`` ki
 ``id`` key, as a criterion and a gate always were: ``KYO-12.d1``, ``KYO-12.n2`` and
 ``KYO-12.m1`` name a dispatch, a note and a claim. An id is stable and never reused, so it is
 the whole address, and ``kyo show`` reads each of them. :func:`element_words` gives the words
-the element now holds, read when a message is made and never stored.
+the element now holds, read when a message is made and never stored. A false premise, a
+disagreement, a corrected number and a verdict of a stored report are addressed the same way
+(KYO-757): ``KYO-12.r1.p1``, ``.x1``, ``.n1`` and ``.v1``, ids read from the report's body
+(:mod:`kyosei.report_entries`).
 
 A FILE AS IT IS SERVED (KYO-737). ``kyo serve`` files a ``document`` or ``file`` anchor for a
 span of a file a person read in a client (:mod:`kyosei.serve_notes`). Such an anchor carries,
@@ -86,7 +90,7 @@ from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
-from . import events_ledger, export, git_queries, ids, ledgers
+from . import events_ledger, export, git_queries, ids, ledgers, report_entries
 from .cmd_sessions import recorded_transcript_path
 from .commands import Context, Output
 from .config import transcripts_opted_in
@@ -172,10 +176,15 @@ def element_words(store: Store, target: str) -> str | None:
 
     A record's are its title, a criterion's and a note's their text, a claim's its statement
     and a gate's its detail, or its type when it has none. A dispatch has no words of its
-    own and gives the empty string.
+    own and gives the empty string. An entry of a report (KYO-757) gives what
+    :func:`kyosei.report_entries.words` reads from it.
     """
     if ids.is_record_id(target):
         return store.record(target)["title"] if store.record_exists(target) else None
+    if report_entries.is_entry_id(target):
+        # KYO-757: an entry of a stored report, read from the report's body by its place.
+        found = report_entries.find(store, target)
+        return None if found is None else report_entries.words(found["kind"], found["entry"])
     kind = ids.child_kind(target)
     try:
         if kind == "criterion":
@@ -416,18 +425,26 @@ def _id_anchor(store: Store, kind: str, target: object, where: str) -> dict:
         if store.person_note(target) is None:
             raise NotFound(f"{where}: no note {target!r}: nothing was written")
         return {"kind": ANCHOR_NOTE, "target": target}
+    entry = report_entries.parse(target)
     kind = "record" if ids.is_record_id(target) else ids.child_kind(target)
-    if kind != "record" and kind not in RECORD_ELEMENTS:
+    if entry is not None:
+        kind = report_entries.NAMES[entry[1]]
+    elif kind != "record" and kind not in RECORD_ELEMENTS:
         raise UsageError(
-            f"{where}: {target!r} is not the id of a record or of a criterion, gate, "
-            "dispatch, note or claim of one. A record anchor takes KYO-12, KYO-12.c3, "
-            "KYO-12.g1, KYO-12.d1, KYO-12.n2 or KYO-12.m1"
+            f"{where}: {target!r} is not the id of a record, of a criterion, gate, "
+            "dispatch, note or claim of one, or of an entry of a report. A record anchor "
+            "takes KYO-12, KYO-12.c3, KYO-12.g1, KYO-12.d1, KYO-12.n2, KYO-12.m1, or "
+            "KYO-12.r1.p1, .x1, .n1 or .v1 for a report's false premise, disagreement, "
+            "corrected number or verdict"
         )
     if element_words(store, target) is None:
-        owner = target if kind == "record" else ids.record_of_child(target)
+        owner = target if kind == "record" else ids.record_of_child(entry[0] if entry else target)
+        report_held = entry is not None and any(r["id"] == entry[0] for r in store.reports(owner))
         listing = (
             "`kyo list` prints the ids of the records"
             if kind == "record" or not store.record_exists(owner)
+            else f"`kyo show {entry[0]}` prints the ids of that report's entries"
+            if entry is not None and report_held
             else f"`kyo show {owner}` prints the ids that record holds"
         )
         raise NotFound(

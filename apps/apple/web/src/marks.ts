@@ -371,10 +371,13 @@ export function lineAt(text: string, at: number): [number, number] | null {
   return (text.split("\n")[line] ?? "").trim() ? [line + 1, line + 1] : null;
 }
 
-/** `on record KYO-717.c4 "first words..."`, as `kyo serve` writes it above a paragraph. */
+/**
+ * `on record KYO-717.c4 "first words..."`, as `kyo serve` writes it above a paragraph. The id
+ * of an entry of a report has a second part, `KYO-740.r1.p1` (KYO-757).
+ */
 export interface RecordLine { id: string; words: string }
 
-const RECORD_LINE = /^on record ([A-Z][A-Z0-9]{1,15}-[1-9]\d*(?:\.[a-z][1-9]\d*)?)(?: "(.*)"| \(not in the store\))?$/;
+const RECORD_LINE = /^on record ([A-Z][A-Z0-9]{1,15}-[1-9]\d*(?:\.[a-z][1-9]\d*){0,2})(?: "(.*)"| \(not in the store\))?$/;
 
 export function recordLine(line: string): RecordLine | null {
   const read = RECORD_LINE.exec(line);

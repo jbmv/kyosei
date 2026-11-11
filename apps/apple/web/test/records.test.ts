@@ -232,6 +232,10 @@ const work = {
       premise_false: [{ claim: "The stream is followed", correction: "It is polled", impact: "Added" }],
       disagreements: [], corrected_numbers: [], commits: [{ sha: "abc1234", subject: "The page" }],
     },
+    entry_ids: {
+      premise_false: ["KYO-9.r1.p1"], disagreements: [], corrected_numbers: [],
+      criteria_verdicts: ["KYO-9.r1.v1"],
+    },
   }],
   notes: [{ id: "KYO-9.n1", text: "A note", created_at: "2026-11-10T19:30:00.000Z" }],
   claims: [{ id: "KYO-9.k1", statement: "It renders", level: "observed", method: "ran it", author: "worker" }],
@@ -294,8 +298,10 @@ test("a work record's page carries each part kyo show prints, with its id", () =
   assert.equal(report.lines![0].label, "premise false");
   assert.equal(report.lines![0].group, "False premises");
   assert.match(report.lines![0].text, /Correction: It is polled/);
+  // KYO-757: a false premise and a verdict are anchored by the ids the server gives them.
+  assert.equal(report.lines![0].ref, "KYO-9.r1.p1");
   assert.deepEqual(report.lines![1], {
-    label: "KYO-9.c1 · met · machine-checked", text: "tests pass", group: "Verdicts", ref: "KYO-9.c1",
+    label: "KYO-9.c1 · met · machine-checked", text: "tests pass", group: "Verdicts", ref: "KYO-9.r1.v1",
   });
   assert.deepEqual(report.lines!.at(-1), { label: "commit", text: "abc1234 The page", group: "Commits" });
 
@@ -370,6 +376,10 @@ const FULL_REPORT = {
     commits: [{ sha: "abc1234", subject: "S" }],
     touched_files: ["a.ts", "b.ts"],
   },
+  entry_ids: {
+    premise_false: ["KYO-9.r1.p1"], disagreements: ["KYO-9.r1.x1"],
+    corrected_numbers: ["KYO-9.r1.n1"], criteria_verdicts: ["KYO-9.r1.v1", "KYO-9.r1.v2"],
+  },
 };
 
 test("a report is drawn in the order an orchestrator reviews it, every field of it", () => {
@@ -378,13 +388,56 @@ test("a report is drawn in the order an orchestrator reviews it, every field of 
     item.lines!.filter((one) => one.group).map((one) => one.group),
     ["False premises", "Disagreements with the brief", "What the worker did and why",
       "Corrected numbers", "Verdicts", "Docs verdicts", "Commits", "Files touched"]);
-  const verdicts = item.lines!.filter((one) => one.ref);
-  assert.deepEqual(verdicts.map((one) => one.ref), ["KYO-9.c1", "KYO-9.c2"]);
-  assert.match(verdicts[1].text, /Reason: needs a person/);
+  // KYO-757: each false premise, disagreement, corrected number and verdict carries its
+  // own id, and its text opens with the words the server quotes for it.
+  const anchored = item.lines!.filter((one) => one.ref);
+  assert.deepEqual(
+    anchored.map((one) => [one.ref, one.label, one.text.split("\n")[0]]),
+    [
+      ["KYO-9.r1.p1", "premise false", "A"],
+      ["KYO-9.r1.x1", "disagreement", "T"],
+      ["KYO-9.r1.n1", "corrected number", "N"],
+      ["KYO-9.r1.v1", "KYO-9.c1 · met · machine-checked", "pass"],
+      ["KYO-9.r1.v2", "KYO-9.c2 · unmet-unobserved · reasoned-about", "Reason: needs a person"],
+    ]);
+  // The summary, the docs verdicts, the commits and the touched files have no id.
+  assert.equal(item.lines!.filter((one) => !one.ref).length, 4);
   const docs = item.lines!.find((one) => one.group === "Docs verdicts")!;
   assert.equal(docs.label, "not-affected · reasoned-about");
   assert.match(docs.text, /docs\/a\.md § Intro/);
   assert.equal(item.collapsed, undefined);
+});
+
+test("a report's entries are anchored only by ids the server gave", () => {
+  // The ids are derived by the server from the stored body. A server that sends none, or
+  // fewer than the body has entries, leaves those lines without an anchor and not a guess.
+  const none = reportItem({ ...FULL_REPORT, entry_ids: undefined });
+  assert.deepEqual(none.lines!.filter((one) => one.ref), []);
+  assert.equal(none.lines!.length, reportItem(FULL_REPORT).lines!.length);
+  const some = reportItem({
+    ...FULL_REPORT, entry_ids: { criteria_verdicts: ["KYO-9.r1.v1"], premise_false: "KYO-9.r1.p1" },
+  });
+  assert.deepEqual(some.lines!.filter((one) => one.ref).map((one) => one.ref), ["KYO-9.r1.v1"]);
+  // An amending report's entries carry its own ids, and the superseded one's keep theirs.
+  const amending = {
+    ...FULL_REPORT, id: "KYO-9.r2", body: { ...FULL_REPORT.body, amends: "KYO-9.r1" },
+    entry_ids: { ...FULL_REPORT.entry_ids, premise_false: ["KYO-9.r2.p1"] },
+  };
+  const [old, current] = recordPage({ ...work, reports: [FULL_REPORT, amending] })
+    .sections.find((part) => part.name === "Reports")!.items;
+  assert.equal(old.lines![0].ref, "KYO-9.r1.p1");
+  assert.equal(current.lines![0].ref, "KYO-9.r2.p1");
+});
+
+test("the id of a report's entry names its record and is linked whole", () => {
+  assert.equal(recordOf("KYO-740.r1.p1"), "KYO-740");
+  assert.equal(recordOf("KYO-740.r1.p1.q2"), null);
+  assert.deepEqual(
+    parseLink("kyosei://kyosei/KYO-740.r1.x2"), { record: "KYO-740", ref: "KYO-740.r1.x2" });
+  assert.deepEqual(refParts("See KYO-740.r1.p1.", ["KYO"]), [
+    { text: "See " }, { text: "KYO-740.r1.p1", link: { record: "KYO-740", ref: "KYO-740.r1.p1" } },
+    { text: "." },
+  ]);
 });
 
 test("a report that was amended is marked and folded, and the amending one is current", () => {

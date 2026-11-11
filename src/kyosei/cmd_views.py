@@ -36,6 +36,7 @@ from . import (
     kinds,
     prior_art,
     query,
+    report_entries,
     stop_audit,
     worker_tokens,
 )
@@ -2009,6 +2010,7 @@ def _show_report(store: Store, report_id: str) -> Output:
         result_value("worked from sha", report["worked_from_sha"]),
         result_value("amends", chain["amends"] or "(nothing -- a first report)"),
         result_value("amended by", chain["amended_by"] or "(nothing amends it)"),
+        *_report_entry_listing(report),
         "body:",
         json.dumps(report["body"], indent=2, ensure_ascii=False),
     ]
@@ -2017,10 +2019,100 @@ def _show_report(store: Store, report_id: str) -> Output:
         {
             "object": "report",
             "record_id": row["record_id"],
-            **report,
+            **_with_entry_ids(report),
             "standing": chain["standing"],
             "amends": chain["amends"],
             "amended_by": chain["amended_by"],
+        },
+    )
+
+
+def _with_entry_ids(report: dict) -> dict:
+    """``report`` with ``entry_ids`` beside its ``body`` (KYO-757): for each of the body's
+    arrays whose entries have ids, the ids in the array's order. They sit beside the body
+    and not in it, because the body is what an amendment is written from and the report
+    schema refuses a key it does not name. Derived on read, as the credit fields are, so
+    the export does not carry them."""
+    return {**report, "entry_ids": report_entries.entry_ids(report["id"], report["body"])}
+
+
+def _report_entry_listing(report: dict) -> list[str]:
+    """The ids of a report's entries with the words an anchor quotes, one per line, so that
+    ``kyo show <report-id>`` is where an entry id can be looked up."""
+    by_array = report_entries.entry_ids(report["id"], report["body"])
+    lines = [
+        f"  {entry_id}  {report_entries.NAMES[array]}: "
+        f"{' '.join(report_entries.words(array, entry).split())}"
+        for array, held in by_array.items()
+        for entry_id, entry in zip(held, report["body"][array], strict=True)
+    ]
+    return [f"entries ({len(lines)}):", *(lines or ["  (none)"])]
+
+
+def _show_report_entry(store: Store, entry_id: str) -> Output:
+    """``kyo show <report-id>.pN``, ``.xN``, ``.nN`` or ``.vN`` (KYO-757): one false premise,
+    disagreement, corrected number or verdict of a stored report.
+
+    An anchor in a prompt can name one (:mod:`kyosei.report_entries`), and this is how the
+    agent that receives the prompt reads it. The entry is printed with its keys as the
+    report holds them, under a heading naming the owning record, with the report's standing:
+    an entry of a superseded report stays readable, and the reader is told it was amended.
+    """
+    report_id, array, _place = report_entries.parse(entry_id) or ("", "", 0)
+    name = report_entries.NAMES[array]
+    record_id = ids.record_of_child(report_id) or ""
+    found = report_entries.find(store, entry_id)
+    if found is None:
+        title = store.record(record_id)["title"]  # an unknown record keeps its own answer
+        reports = [export._report(r) for r in store.reports(record_id)]
+        report = next((r for r in reports if r["id"] == report_id), None)
+        if report is None:
+            existing = ", ".join(r["id"] for r in reports)
+            raise NotFound(
+                f"no {name} {entry_id!r}: record {record_id} ({title}) has "
+                + (f"these reports: {existing}" if existing else "no reports at all")
+            )
+        held = report_entries.entry_ids(report_id, report["body"])[array]
+        raise NotFound(
+            f"no {name} {entry_id!r}: report {report_id} holds {name} ids "
+            f"{', '.join(held) or 'none'}; `kyo show {report_id}` lists every entry it holds"
+        )
+    title = store.record(record_id)["title"]
+    siblings = [
+        export._report(r) for r in store.reports(record_id)
+        if r["dispatch_id"] == found["dispatch_id"]
+    ]
+    dispatch = export._dispatch(store.dispatch(found["dispatch_id"]))
+    chain = report_standings({"dispatches": [dispatch], "reports": siblings})[report_id]
+    lines = [
+        element_heading(name, entry_id, record_id, title),
+        f"  in report {report_id}  dispatch: {found['dispatch_id']}  [{chain['standing']}]",
+    ]
+    if chain["amended_by"]:
+        lines.append(
+            f"  the report was SUPERSEDED by {chain['amended_by']}; this entry is what was "
+            "said before the correction"
+        )
+    for key in report_entries.KEYS[array]:
+        value = found["entry"].get(key)
+        if value is None:
+            continue
+        first, *rest = str(value).split("\n")
+        lines.append(f"  {key}: {first}")
+        lines.extend(f"    {more}" for more in rest)
+    return Output(
+        ["\n".join(lines)],
+        {
+            "object": "report-entry",
+            "id": entry_id,
+            "kind": array,
+            "report_id": report_id,
+            "dispatch_id": found["dispatch_id"],
+            "record_id": record_id,
+            "record_title": title,
+            "standing": chain["standing"],
+            "amended_by": chain["amended_by"],
+            "entry": found["entry"],
         },
     )
 
@@ -2041,6 +2133,10 @@ SHOWABLE_SHAPES: tuple[tuple[str, str], ...] = (
     ("PREFIX-N.fN", "a sweep flag"),
     ("PREFIX-N.dN", "a dispatch, printing its frozen brief back"),
     ("PREFIX-N.rN", "a stored report, its amendment chain and its body"),
+    (
+        "PREFIX-N.rN.pN, .xN, .nN or .vN",
+        "a false premise, disagreement, corrected number or verdict of a stored report",
+    ),
     ("PREFIX-SN", "a shift note"),
 )
 
@@ -2130,6 +2226,8 @@ def _show(ctx: Context, args: Namespace) -> Output:
         return _show_evidence(store, args.id)
     if child_kind == "report":
         return _show_report(store, args.id)
+    if report_entries.is_entry_id(args.id):
+        return _show_report_entry(store, args.id)
     if not ids.is_record_id(args.id):
         # Everything left is a shape this command does not accept, INCLUDING the child
         # shapes above that have no reader. A record id that names nothing still falls
@@ -2195,6 +2293,10 @@ def _show(ctx: Context, args: Namespace) -> Output:
             # is not in the export document, no schema version moves for it, and
             # `kyo rebuild` has nothing new to reconstruct.
             "covered_by_dispatches": covered_by,
+            # KYO-757: each report carries the ids of its entries, derived from its body
+            # on read, so a client can offer an anchor to a false premise or a
+            # disagreement. Additive and not in the export, as `standing` is.
+            "reports": [_with_entry_ids(report) for report in doc["reports"]],
             # KYO-587: a recx search artifact carries the lines
             # `kyo show <evidence-id>` prints before it, so the desktop app shows the
             # same words without a second recognition rule. Every other artifact is

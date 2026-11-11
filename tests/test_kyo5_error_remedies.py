@@ -2579,6 +2579,37 @@ def _showing_an_element_the_record_does_not_hold(at: Path) -> Provocation:
     return Provocation(root, ("show", "TST-1.c9"))
 
 
+def _showing_an_entry_the_report_does_not_hold(at: Path) -> Provocation:
+    # KYO-757: a report with no false premise, asked for its first one. The refusal names
+    # the report and `kyo show <report>`, which lists every entry the report holds.
+    root, record = _project_with_a_record(at)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "-m", "work")
+    kyo = _runner(root)
+    dispatched = kyo("dispatch", record, "--json")
+    assert dispatched.code == 0, dispatched
+    report = at / "entries-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "dispatch_id": dispatched.json["dispatch_id"],
+                "record_id": record,
+                "worked_from_sha": dispatched.json["worked_from_sha"],
+                "criteria_verdicts": [],
+                "premise_false": [],
+                "disagreements": [],
+                "corrected_numbers": [],
+                "commits": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingested = kyo("report", dispatched.json["dispatch_id"], "--file", str(report), "--json")
+    assert ingested.code == 0, ingested
+    return Provocation(root, ("show", f"{ingested.json['report_id']}.p1"))
+
+
 def _showing_a_brief_that_does_not_exist(at: Path) -> Provocation:
     # KYO-454: `kyo briefs <id>` for a brief run this store never recorded.
     root, _ = _project_with_a_record(at)
@@ -3661,6 +3692,12 @@ PROVOKED: dict[str, Expectation] = {
     # exits 0 and the id asked for stays absent from it, so it is offered, not a rerun.
     "cmd_views.py:_show_element#0": Expectation(
         _showing_an_element_the_record_does_not_hold,
+        clears_by_rerun=False,
+    ),
+    # KYO-757: the offered `kyo show TST-1.r1` is the listing of the report's entries; it
+    # exits 0 and the id asked for stays absent from it, so it is offered, not a rerun.
+    "cmd_views.py:_show_report_entry#1": Expectation(
+        _showing_an_entry_the_report_does_not_hold,
         clears_by_rerun=False,
     ),
     # KYO-454: about the INVOCATION, so `clears_by_rerun=False`. `kyo briefs` is the

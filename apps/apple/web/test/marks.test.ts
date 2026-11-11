@@ -281,12 +281,18 @@ test("a record's line is read with its id and its words, and a dispatch's with n
   assert.deepEqual(recordLine("on record KYO-717.d1"), { id: "KYO-717.d1", words: "" });
   assert.deepEqual(recordLine('on record KYO-717 "Records view"'), { id: "KYO-717", words: "Records view" });
   assert.deepEqual(recordLine("on record KYO-9.g1 (not in the store)"), { id: "KYO-9.g1", words: "" });
+  // KYO-757: an entry of a report, whose id has a second part.
+  assert.deepEqual(
+    recordLine('on record KYO-740.r1.p1 "the brief names no id..."'),
+    { id: "KYO-740.r1.p1", words: "the brief names no id..." });
+  assert.deepEqual(recordLine("on record KYO-740.r1.x2 (not in the store)"), { id: "KYO-740.r1.x2", words: "" });
 });
 
 test("a line that only resembles a record's is not one", () => {
   assert.equal(recordLine("on record KYO-717.c4 and then some words"), null);
   assert.equal(recordLine("on record keeping, generally"), null);
   assert.equal(recordLine("on KYO-717.c4"), null);
+  assert.equal(recordLine('on record KYO-740.r1.p1.q2 "three parts"'), null);
   assert.equal(recordLine('on note KYO-N41'), null);
 });
 
