@@ -4,18 +4,18 @@ The day-to-day workflow of a consumer project, and the literal commands that fit
 
 ## Operating a Kyosei project
 
-Everything below is what a consumer project actually needs day to day — no
-reading of this repo's own
-[`docs/design/charter.md`](../../design/charter.md) (the *design* charter for
-building Kyosei itself, not an operating manual for using it) required. See
+This section describes what a consumer project needs day to day. It does not
+require reading this repository's
+[`docs/design/charter.md`](../../design/charter.md), which is the design record for
+building Kyosei itself. See
 "Quick start" just below for the literal commands; this section is the
 workflow they fit into.
 
-**Three roles, three surfaces.** A *human* writes to `ideas/` (zero ceremony —
+**Three roles, three surfaces.** A *human* writes to `ideas/` (no structure required:
 one file per idea, and the app's Scratchpad at `~/kyosei/<project>/scratchpad.md`
 for stray thoughts) and files
 `kyo new bug` directly for defects found by hand; nothing there needs
-criteria, touches, or scope. A *orchestrator* session (a Claude Code session, or
+criteria, touches, or scope. An *orchestrator* session (a Claude Code session, or
 you, driving `kyo` by hand) promotes, dispatches, ingests reports, verifies
 criteria, and moves status — everything that turns a raw thought into
 something acted on and checked off. A *dispatched worker* only ever sees what
@@ -26,16 +26,16 @@ its frozen brief grants it (`write_scope`, and the files/symbols in
 (`--defaults`, `--in-repo` or `--store DIR`) and `--read-transcripts yes` or `no`
 scaffolds `ideas/` and `kyosei/` — by default
 *outside* the code repository, at `~/kyosei/<project>/` (see "Where the store
-lives" in [store.md](store.md), and decide that before you have a hundred records). Bare
+lives" in [store.md](store.md), and decide that before the store holds many records). Bare
 `kyo init` in a project with no store writes nothing and names those routes (KYO-558).
 Kyosei's
 Claude Code plugin (`kyo harness install claude-code`, the default), or on the copies `kyo
 install-hooks`, wires `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`Stop`/`SessionEnd`/`SubagentStop` so
-briefing and closeout happen automatically instead of by discipline (see
+briefing and closeout run automatically (see
 `templates/hooks/README.md` for exactly what each hook does and why, and
 [install.md](install.md) for the two routes).
 
-**After every upgrade, three commands, because three of the things `kyo init`
+**After every upgrade, run three commands, because three of the things `kyo init`
 gave you are *copies* rather than code** (on the copies; a project on the plugin
 reads the hooks and the skill from the installed build, so only the third applies
 there, KYO-595): `kyo install-hooks` re-merges the
@@ -50,9 +50,9 @@ change without writing it, and `kyo doctor` reports a missing or older section),
 and `kyo
 install-procedures` adds the standing rules this build ships that your
 `kyosei/procedures.md` does not have yet. The third one **merges rather than
-overwrites**, and that is not a detail: your rule ledger is yours to edit —
-`kyo init` copies the packaged default in precisely so the project can then own
-it — so a packaged rule you are missing is inserted where the packaged file
+overwrites**, because the rule ledger is the project's to edit
+(`kyo init` copies the packaged default in so that the project owns
+it): a packaged rule you are missing is inserted where the packaged file
 puts it, a rule whose text you changed is left exactly as you wrote it, and a
 rule only you carry is never touched. A rule you never edited moves with the
 build: when its text is exactly a wording an earlier build installed (the build
@@ -73,27 +73,24 @@ for when the packaged rewording is the one you want: it rewrites exactly that
 rule (or the preamble) from the packaged default, prints what it replaced, and
 refuses a rule the packaged default does not ship or one already identical
 (KYO-151.c2) — everything else about the command is unchanged, so a plain `kyo
-install-procedures` still never rewrites a rule you already have. Before this,
-a rule added to the packaged default reached no project that already had a
-store, and no surface said so.
+install-procedures` never rewrites a rule you already have.
 
-The third command carries one more top-up, for the same reason and with the same
-manners: it appends to `<store>/kyosei/.gitignore` any pattern this build
+The third command carries one more top-up, made in the same way: it appends to `<store>/kyosei/.gitignore` any pattern this build
 scaffolds that your copy does not have, additively and idempotently, leaving your
 own lines alone. It rides with `install-procedures` rather than with
 `install-hooks` because that file is in the *store's* repository, which under the
 split layout is not the repository `install-hooks` configures (KYO-322).
 
-**If your project is the one that *builds* Kyosei, those checks run the other
-way round, and they know it (KYO-309).** For a consumer the packaged copy is the
+**If your project is the one that *builds* Kyosei, those checks run in the other
+direction (KYO-309).** For a consumer the packaged copy is the
 source and your file is the copy, so a difference means your copy is stale and
-`kyo install-skill` / `kyo install-procedures` is the remedy — that is
-everything above, and it is unchanged. In Kyosei's own repository
+`kyo install-skill` / `kyo install-procedures` is the remedy, as described
+above. In Kyosei's own repository
 the skill's packaged source (`src/kyosei/harness/claude-code/plugin/skills/kyosei/`,
 KYO-593) and `kyosei/procedures.md` are what the *next*
 package is made of and the installed `kyo` is a build from before the last edit,
-so comparing against it turned `kyo doctor` red after every skill edit and named
-a remedy that would have overwritten the newer skill with the older one. A
+so a comparison against it would fail `kyo doctor` after every skill edit and name
+a remedy that overwrites the newer skill with the older one. A
 checkout carrying `src/kyosei/defaults/` is therefore checked against *that*
 directory, and the build's own age is a separate **notice**,
 `installed_build_lag`, whose remedy is this build's own upgrade route (`make
@@ -101,23 +98,21 @@ install-tool` for an unreleased uv tool, `uv tool upgrade kyosei` for a release;
 KYO-450) — never an `install-*` command. The detector is the presence of that directory and nothing
 else: no project name, no id prefix, so a consumer cannot fall into it.
 
-**The commands themselves ask the same question, and KYO-318 is where they
-learned to (the hooks with them).** A check that stops *naming* the destructive
-remedy still leaves it a command a person can type: `kyo install-skill` run by
-hand in this repository from an older build wrote that build's skill over the
-newer one and said it had worked. So `kyo install-skill`, `kyo install-procedures`
+**The commands themselves make the same comparison, and so does the hook check
+(KYO-318).** A check that does not *name* the destructive
+remedy still leaves it a command a person can type, and `kyo install-skill` run by
+hand in this repository from an older build would write that build's skill over the
+newer one. So `kyo install-skill`, `kyo install-procedures`
 (`--adopt` included) and `kyo install-hooks` each refuse before writing anything
 when this checkout is the source and the running build's packaged copy differs
 from it, naming which way round the two are and what to do instead. `kyo doctor`'s
-hook check moved with them, because it had the same reversal one step removed and
-it was measured rather than assumed: it compared `.claude/settings.json` against
-the *running build's* fragments, so a hook group deleted from
-`src/kyosei/defaults/hooks/` and from the settings file was reported as one the
-project was missing, with `kyo install-hooks` named beside it — and that command
-merges additively, so running it would have put the deleted group back. It now
-compares against this repository's own fragments, and the build's age joins the
-same `installed_build_lag` notice. `--print` is exempt throughout: a preview that
-touches nothing is exactly what lets you see the situation.
+hook check compares `.claude/settings.json` against this repository's own
+fragments and not the *running build's*, so a hook group deleted from
+`src/kyosei/defaults/hooks/` and from the settings file is not reported as one the
+project is missing (`kyo install-hooks` merges additively, and would put the
+deleted group back). The build's age is reported by the
+same `installed_build_lag` notice. `--print` is exempt throughout, since a preview
+writes nothing.
 
 **An orchestrator session, start to finish:**
 
@@ -127,11 +122,11 @@ touches nothing is exactly what lets you see the situation.
    handoff: the last shift note your predecessor wrote before your session began,
    in full, however many briefs have run since. Never re-derive this by reading
    files.
-2. **Promote structure at the moment it's worth spending judgment on**:
+2. **Promote an idea when its structure can be stated**:
    `kyo promote ideas/some-idea.md --kind bug --criteria-file c.txt
-   --touches-file t.txt` turns a zero-ceremony idea into a record with
-   criteria and a declared file scope, validated against the repo *now* — a
-   stale idea fails loudly right here, not later. A human can still file a
+   --touches-file t.txt` turns an unstructured idea into a record with
+   criteria and a declared file scope, validated against the repository at that
+   moment, so a stale idea fails at promotion. A human can still file a
    defect directly with `kyo new bug --title ... --touches-file t.txt`, which
    takes the same validated scope; promotion is for a defect that arrived as
    something written up rather than something typed at a prompt. A touches file
@@ -144,27 +139,27 @@ touches nothing is exactly what lets you see the situation.
    and nothing else, and taking no `#symbol` either (KYO-225). Use the second
    when the work adds a file beside existing ones — claiming the whole enclosing
    directory there overstates the scope and collides with every other dispatch
-   under it. An unmarked path must exist now, which is what keeps a typo a typo,
+   under it. An unmarked path must exist now, so a mistyped path is refused,
    and the refusal for one that does not names both markers. `path#+` is a third
    marked form and the only `#symbol` not looked for in the file: an **additive
    claim** on a file that *is* there, meaning "this work adds to it and edits
    nothing already in it". Use it when what you are adding has no name yet — a
    new type in `protocol.ts`, a new rule in `shell.css` — so the only other
-   honest claim would be the whole file (KYO-300).
-   **`path#symbol` is the form that pays on a file many records claim.** The
+   accurate claim would be the whole file (KYO-300).
+   **`path#symbol` is the form to use on a file many records claim.** The
    symbol is any phrase found in the file, so it is a function or type name in
    code and a section heading in a document (`README.md#Upgrading`,
-   `docs/NOTES.md#Rate limits` — matched wrap-tolerantly, KYO-66). What it buys
+   `docs/NOTES.md#Rate limits` — matched wrap-tolerantly, KYO-66). Its effect
    is at dispatch time: two claims on one file that both name symbols, and name
    different ones, do not collide, while a plain `path` claims the whole file and
    collides with everything in it. Without it, two records that each edit one
    section of a large document can only be dispatched together with `--force`,
-   and an override that is needed most of the time stops meaning anything
+   and an override that is needed most of the time carries no information
    (in one measured wave, four of six dispatches were forced over whole-file
    claims and none of them conflicted at merge, KYO-301). It is a finer prediction
-   and so a likelier wrong one; spend it on the files your records keep meeting
-   on, and leave a file only this record touches as a plain path. It buys two
-   more things since KYO-300, both about the file *while the record sits open*:
+   and so more likely to be wrong; use it on the files several of your records
+   claim, and leave a file only this record touches as a plain path. It has two
+   further effects (KYO-300), both about the file *while the record sits open*:
    `kyo sweep`'s touch-changed flags a symbol claim only when the change reached
    that symbol's region and says which symbol it was, and `kyo touch-drift`
    distinguishes "edited a file this record claims by symbol, outside the symbols
@@ -173,8 +168,8 @@ touches nothing is exactly what lets you see the situation.
    exactly; anything else's is every line its name appears on, each widened to the
    unbroken run of non-blank lines around it and then taken to the next non-blank
    line at the same or a shallower indentation that is not a bare closing bracket. **Anything the approximation cannot place counts as
-   changed**, never as clean — a false "this does not concern you" is a staleness
-   flag that never fires, and nothing would say so. An additive claim (`path#+`)
+   changed**, never as clean, because a region wrongly judged unchanged would suppress a
+   staleness flag with nothing to report the omission. An additive claim (`path#+`)
    is held to the same way: `kyo touch-drift` reports a branch that changed or
    removed existing lines of a file it claimed only additively.
 3. **Dispatch ready work**: `kyo dispatch <id>` freezes a brief generated
@@ -186,8 +181,8 @@ touches nothing is exactly what lets you see the situation.
    of them, not just the primary one (KYO-12/KYO-13.c4).
 4. **Ingest the report**: `kyo report <dispatch-id> --file .kyosei-report.json`
    stores it structurally — read `premise_false[]` and `disagreements[]`
-   first, every time; they are the highest-value output of a dispatch, not a
-   footnote. `.kyosei-report.json` is the path every generated brief names,
+   first, every time, because they report where the brief was wrong.
+   `.kyosei-report.json` is the path every generated brief names,
    gitignored by `kyo init` and `kyo install-hooks` so a worker commits its
    work without committing its report (KYO-206).
 5. **Apply verdicts and move status**: `kyo verify <criterion-id> --verdict
@@ -195,7 +190,7 @@ touches nothing is exactly what lets you see the situation.
    `kyo move <id> <status>` enforces its transition contract at the moment of
    the move, naming the unmet item if it fails. A report's verdicts are never
    auto-applied — that stays a reviewed, deliberate act.
-6. **Close out with hooks, not a checklist**: `Stop` already runs
+6. **Close out through the hooks**: `Stop` runs
    `kyo sweep --hook` (staleness flags — touch-changed, touch-missing, near-duplicate
    criteria), then `kyo doctor --hook` (invariant checks). `SessionEnd` runs neither
    (KYO-774). `Stop` also runs `kyo turns --hook`, which in a project that reads
@@ -226,13 +221,11 @@ touches nothing is exactly what lets you see the situation.
    --hook --json` names the mode under `hook_forms`. A failing round-trip is never
    cached, so a finding always comes from a real rebuild. `kyo doctor` sorts what it finds into
    **problems** and **notices**, printed under their own headings: a problem
-   exits 3 and the chain stops, a notice is printed in full and exits 0. That
-   split is what keeps the chain quiet (KYO-214) — Claude Code renders any hook
-   exiting nonzero as an error block, so `unresolved_stops`, whose own text says
-   it "is not a block and never was" and which clears itself once the dispatches
-   it names stop running, used to render as a hook error on *every* stop for the
-   whole duration of *every* dispatch. It is a notice now; its text, its count
-   and the worktrees it names are unchanged. Read what they flag; there is no
+   exits 3 and the chain stops, a notice is printed in full and exits 0. The
+   split exists because Claude Code renders any hook exiting nonzero as an error
+   block (KYO-214): `unresolved_stops`, which clears itself once the dispatches
+   it names stop running, is a notice, so it does not render as a hook error on
+   every stop for the duration of every dispatch. Read what they flag; there is no
    handoff document to write by hand — `kyo note --shift` during the session
    covers the judgment a store can't derive, and the next `kyo brief`
    surfaces it.
@@ -261,8 +254,8 @@ declared bases (KYO-200) — name a file or symbol that no longer exists (Layer 
 in [docs-governance.md](docs-governance.md), and `kyosei/documents.yml` for which files a project counts as
 documents); `kyo check-branch [<branch>] [--against <ref>]` fails if a branch
 diffs anything under `kyosei/` or `ideas/` — a worker's worktree has no
-legitimate write path into either, so a diff there is a mistake to catch
-before merge, not after; and `kyo check-clean` fails if a worktree holds
+legitimate write path into either, so a diff there is a mistake, caught
+before the merge; and `kyo check-clean` fails if a worktree holds
 uncommitted work *outside* those same two directories, reading its exclusions
 from the very constant `check-branch` reads its prohibitions from, so the pair
 cannot contradict each other. The hooks (the plugin, or `kyo install-hooks` on the
@@ -280,27 +273,26 @@ way, naming the key to add. The `SubagentStop` hook's `--against main` is a
 *spelling* for the resolved trunk, not a branch name — the command line is unchanged,
 so an installed hook needs no re-install — and it compares against the matched
 dispatch's recorded base (KYO-285), the later point the branch was cut from the
-resolved trunk (KYO-294), or the trunk itself on a stop that matches no dispatch. `--against` naming any other ref still wins outright. Before this, a
-`master` repository's stop hook exited 1 with "'main' is not a known git ref", which
-Claude Code treats as a non-blocking error, so the store guard silently did not run.
+resolved trunk (KYO-294), or the trunk itself on a stop that matches no dispatch. `--against` naming any other ref takes precedence. A hook that
+compared against a literal `main` would exit 1 in a `master` repository with "'main' is not a known git ref", which
+Claude Code treats as a non-blocking error, and the store guard would not run.
 `check-clean` likewise pins its own `git status` listing (`--untracked-files=all
 --ignore-submodules=none`) instead of inheriting it, so `status.showUntrackedFiles=no`
-in your git config no longer hides a worker's uncommitted new files from it.
+in your git config does not hide a worker's uncommitted new files from it.
 
 **`check-clean` excludes one file as well (KYO-206): `.kyosei-report.json`.**
 That is the path every generated brief tells a worker to write its structured
 report to, and it is the worker's *output* — `kyo report` ingests it and the
 store keeps it, so the code repository never needs a copy. `kyo init` and `kyo
 install-hooks` add the entry to the code repository's root `.gitignore`, and
-`kyo touch-drift` never names it either. Before this, the brief named no path
-and said "commit your work before you stop" in the same breath, so the only way
-to satisfy both sentences was to commit the report: the report got committed
-with the work and conflicted on later merges, and `kyo touch-drift` then proposed
-the same file as a touch whose `kyo edit --touches-file` line failed validation once it was dropped.
+`kyo touch-drift` never names it either. Without a named and excluded path,
+a brief that says "commit your work before you stop" can be satisfied only by
+committing the report, which then conflicts on later merges and is proposed by
+`kyo touch-drift` as a touch.
 The exclusion is in the command, not only in `.gitignore`, so a project that
-predates the entry is fixed by upgrading rather than by editing a file by hand.
+predates the entry is covered by upgrading, with no file to edit by hand.
 
-**And one guard aimed at the push rather than the branch (KYO-60).** `kyo
+**One guard applies to the push rather than the branch (KYO-60).** `kyo
 check-push` fails if pushing this repository would publish a Kyosei store that
 lives inside it and that nobody has accepted publishing — see "Before your
 first push" in [store.md](store.md). The hooks wire it into `PreToolUse` for agents, and
@@ -310,21 +302,20 @@ sends carries a private term or home path in its message or author name (KYO-669
 
 ### The whole suite is the orchestrator's: `orchestrator_only_commands` (KYO-298)
 
-**Opt-in, in one config key, and a project that declares nothing is unaffected.**
-Nothing below fires until you name the commands yourself.
+**This is opt-in, through one config key, and a project that declares nothing is
+unaffected.** Nothing below applies until the project names the commands.
 
-**The measurement, so you can decide rather than take our word for it.** In one
+**The measurement behind it.** In one
 measured wave of five workers, two ran the whole suite inside their own worktrees.
-Each of those runs was ten to seventeen minutes of a worker doing nothing, and each
-was followed by a *full-context re-write* — 172,733 and 325,752 tokens of cache
-creation, 28% of all the prompt cache that wave's workers wrote — because
-the harness's prompt cache expired while the worker sat there. Both desktop test
+Each of those runs took ten to seventeen minutes in which the worker did nothing
+else, and each was followed by a *full-context re-write* (172,733 and 325,752
+tokens of cache creation, 28% of all the prompt cache that wave's workers wrote),
+because the harness's prompt cache expired during the wait. Both desktop test
 failures in that wave were those same runs contending with the orchestrator's own
 suite for the display. The standing rule "run the tests that cover your change, not
-the whole suite" was already in every one of those briefs. It lost to another line
-of the *same brief* — the project's own `worktree_setup` — which told the worker to
-run `make test`. A rule that
-loses to a contradiction inside its own brief needs a mechanism.
+the whole suite" was in every one of those briefs, and another line
+of the *same brief*, the project's own `worktree_setup`, told the worker to
+run `make test`. The rule is therefore enforced by a mechanism as well as stated.
 
 **The config key.** In `kyosei/config.yml`, a list of command lines:
 
