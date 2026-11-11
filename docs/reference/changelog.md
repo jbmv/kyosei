@@ -632,6 +632,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## (no scope declared)
 
 - **2026-11-11** — `KYO-819` (task) — Files search: names before contents across roots, documents first, one row per file
+- **2026-11-11** — `KYO-816` (task) — Mac app: search in Files over both roots, and the recently opened files
 - **2026-11-11** — `KYO-815` (task) — Mac app: the chat's side bar lists the chat's links, and the open view's name in the top bar goes home
 - **2026-11-11** — `KYO-814` (task) — kyo serve: search the served files by name and contents, and keep the files opened in the app per project
 - **2026-11-11** — `KYO-813` (bug) — The Mac app aborted at launch on both machines while the other stores were rebuilt to schema 34
