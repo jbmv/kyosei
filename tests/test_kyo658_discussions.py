@@ -449,3 +449,69 @@ def test_the_one_writer_refuses_an_absent_reference_carrying_a_stamp(kyo, projec
         assert ref == f"{discussion}.s2"
     finally:
         store.close()
+
+
+# ------------------------------------------------------------------------- KYO-749.c2
+
+
+def _spawn_task(kyo, opened: str, tmp_path: Path, title: str, *extra: str):
+    return kyo(
+        "spawn", opened, "--kind", "task", "--title", title, *extra,
+        "--criteria-file", _file(tmp_path, "c.txt", "it works\n"),
+        "--touches-file", _file(tmp_path, "t.txt", ""), "--force", "--json",
+    )  # fmt: skip
+
+
+def test_keep_open_files_the_record_and_leaves_the_discussion_open(
+    kyo, indexed: Path, tmp_path: Path
+) -> None:
+    opened = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    first = _spawn_task(kyo, opened, tmp_path, "Server side", "--keep-open")
+    assert first.code == 0, first
+    assert [r["role"] for r in _refs(kyo, opened)] == ["opened"]
+    second = _spawn_task(kyo, opened, tmp_path, "App side")
+    assert second.code == 0, second
+    last = _refs(kyo, opened)[-1]
+    assert last["role"] == "closed" and last["produced_id"] == second.json["record_id"]
+
+
+def test_without_keep_open_the_output_says_the_discussion_was_closed(
+    kyo, indexed: Path, tmp_path: Path
+) -> None:
+    opened = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    kept = kyo(
+        "spawn", opened, "--kind", "task", "--title", "One", "--keep-open",
+        "--criteria-file", _file(tmp_path, "c.txt", "it works\n"),
+        "--touches-file", _file(tmp_path, "t.txt", ""),
+    )  # fmt: skip
+    assert kept.code == 0 and f"left open: {opened}" in kept.out, kept
+    plain = kyo(
+        "spawn", opened, "--kind", "task", "--title", "Two",
+        "--criteria-file", _file(tmp_path, "c.txt", "it works\n"),
+        "--touches-file", _file(tmp_path, "t.txt", ""),
+    )  # fmt: skip
+    assert plain.code == 0 and f"this filing closed {opened}" in plain.out, plain
+
+
+def test_a_record_spawned_from_a_closed_discussion_is_refused_naming_discuss_open(
+    kyo, indexed: Path, tmp_path: Path
+) -> None:
+    opened = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    assert _spawn_task(kyo, opened, tmp_path, "First").code == 0
+    refused = _spawn_task(kyo, opened, tmp_path, "Second")
+    assert refused.code != 0
+    assert "spawn-from-closed-discussion" in refused.err and "kyo discuss open" in refused.err
+    assert "--keep-open" in refused.err
+    # the remedy it names runs: a fresh discussion takes the record
+    fresh = kyo("discuss", "open", "--title", "y", "--json").json["id"]
+    assert _spawn_task(kyo, fresh, tmp_path, "Second").code == 0
+
+
+def test_keep_open_with_no_discussion_is_refused(kyo, indexed: Path, tmp_path: Path) -> None:
+    bug = kyo("new", "bug", "--title", "A bug", "--json").json["id"]
+    refused = kyo(
+        "spawn", bug, "--kind", "task", "--title", "T", "--keep-open",
+        "--criteria-file", _file(tmp_path, "c.txt", "it works\n"),
+        "--touches-file", _file(tmp_path, "t.txt", ""),
+    )  # fmt: skip
+    assert refused.code != 0 and "--keep-open" in refused.err

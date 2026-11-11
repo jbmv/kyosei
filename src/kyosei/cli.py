@@ -968,7 +968,7 @@ def build_parser() -> KyoseiParser:
         metavar="FILE",
         help="file the new record from one markdown file instead of --title/"
         "--description-file/--criteria-file/--touches-file: front matter for title/"
-        "scope/touches, a '## Criteria' section (one criterion per list item), "
+        "scope/plan/touches, a '## Criteria' section (one criterion per list item), "
         "everything else the description; refused together with any of those flags "
         "(KYO-330)",
     )
@@ -983,6 +983,17 @@ def build_parser() -> KyoseiParser:
     )
     credits.add_credit_flags(p_spawn, decision=True, span=True)
     cmd_discuss.add_filing_flags(p_spawn)  # KYO-658
+    p_spawn.add_argument(
+        "--plan",
+        metavar="ID",
+        help="plan record the new record belongs to, as `kyo new --plan` (KYO-749)",
+    )
+    p_spawn.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="spawning from a discussion closes it; with this the discussion stays open, "
+        "for a discussion that produces more than one record (KYO-749)",
+    )
     p_spawn.add_argument(
         "--check",
         action="store_true",
