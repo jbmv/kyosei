@@ -9,7 +9,7 @@ import {
 } from "./marks";
 import {
   type Answer, type ChatLink, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
-  addressLink, answerOf, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
+  type FoundGroup, type Recent, SEARCH_MIN_CHARS, addressLink, answerOf, foundGroup, recentEntries, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
   languageOf, lineCount, linkPlace, localPath, looksOutside, webAddresses, withLink, mentioned, nameOf, pathSpans, rootLabel,
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
@@ -5070,6 +5070,13 @@ let rootsRead = false;
 let rootsProblem: string | null = null;
 let chosenRoot = stored<string>(FILES_ROOT_KEY, "code");
 let showDotfiles = stored<boolean>(FILES_DOTFILES_KEY, false) === true;
+/** The Files search (KYO-814): the text asked about, and each root's answer as it comes. */
+let filesQuery = "";
+const filesFound = new Map<string, FoundGroup | "waiting" | { problem: string }>();
+let filesSearchTimer: number | undefined;
+/** The files opened in the app for the project, on any device, newest first (KYO-814). */
+let recentFiles: Recent[] = [];
+const RECENT_SHOWN = 12;
 const listings = new Map<string, Entry[]>();
 const listingTexts = new Map<string, string>();
 const openDirs = new Set<string>();
@@ -5541,6 +5548,7 @@ function showFile(
     const same = openFile?.root === root && openFile.path === path;
     if (!same) {
       if (!stepping) fileHistory = visitPlace(fileHistory, { root, path }, sameFile);
+      if (!stepping) noteOpened(root, path);
       fileImages.clear();
       openFile = {
         root, path, line, lineEnd, lineWaits: line !== null, entry: entry ?? entryAt(root, path),
@@ -5575,6 +5583,116 @@ function showFilePlace(): void {
 }
 
 /** Home: the file browser as when no file is open, with the files opened kept behind. */
+/** Records an opened file on the server, for the Recently opened list on every device. */
+function noteOpened(root: string, path: string): void {
+  if (root !== "code" && root !== "store") return;
+  if (recentFiles[0]?.root === root && recentFiles[0]?.path === path) return;
+  post("files", { want: "opened", root, path });
+}
+
+/** A text with each case-insensitive occurrence of `query` marked. */
+function marked(text: string, query: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const lower = text.toLowerCase();
+  const needle = query.toLowerCase();
+  let at = 0;
+  for (let found = lower.indexOf(needle); needle && found >= 0; found = lower.indexOf(needle, at)) {
+    fragment.append(text.slice(at, found));
+    const mark = document.createElement("mark");
+    mark.textContent = text.slice(found, found + needle.length);
+    fragment.append(mark);
+    at = found + needle.length;
+  }
+  fragment.append(text.slice(at));
+  return fragment;
+}
+
+/** Asks every served code and store root about the field's text, one root at a time. */
+function searchFiles(text: string): void {
+  const query = text.trim();
+  if (query === filesQuery) return;
+  filesQuery = query;
+  filesFound.clear();
+  if (query.length >= SEARCH_MIN_CHARS) {
+    for (const info of fileRoots) {
+      if (info.name !== "code" && info.name !== "store") continue;
+      filesFound.set(info.name, "waiting");
+      post("files", { want: "search", q: query, root: info.name });
+    }
+  }
+  drawFound();
+}
+
+function foundRow(className: string, root: string, path: string, line: number | null): HTMLElement {
+  const row = document.createElement("div");
+  row.className = className;
+  row.dataset.foundRoot = root;
+  row.dataset.foundPath = path;
+  if (line !== null) row.dataset.foundLine = String(line);
+  return row;
+}
+
+/** The search's answers in the side bar, grouped by root, in place of the tree and lists. */
+function drawFound(): void {
+  const searching = filesQuery.length >= SEARCH_MIN_CHARS;
+  document.getElementById("files-side")!.classList.toggle("searching", searching);
+  const holder = document.getElementById("files-found")!;
+  holder.hidden = !searching;
+  if (!searching) return;
+  const rows: HTMLElement[] = [];
+  for (const [root, answer] of filesFound) {
+    const head = document.createElement("h4");
+    head.textContent = rootLabel(root);
+    rows.push(head);
+    if (answer === "waiting") {
+      rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: "Searching…" }));
+      continue;
+    }
+    if ("problem" in answer) {
+      rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: answer.problem }));
+      continue;
+    }
+    if (!answer.files.length) rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: "Nothing found." }));
+    for (const file of answer.files) {
+      const row = foundRow("found-file", root, file.path, null);
+      const name = span("mention-name", "");
+      name.append(file.byName ? marked(nameOf(file.path), filesQuery) : nameOf(file.path));
+      const folder = folderOf(file.path);
+      const place = span("mention-place", "");
+      place.append(file.byName ? marked(folder, filesQuery) : folder);
+      row.append(name, place);
+      rows.push(row);
+      for (const { line, text } of file.lines) {
+        const item = foundRow("found-line", root, file.path, line);
+        item.append(span("found-at", String(line)), marked(text.trim(), filesQuery));
+        rows.push(item);
+      }
+    }
+    if (answer.more) {
+      rows.push(Object.assign(document.createElement("div"), {
+        className: "found-note", textContent: "More were found than are shown; a longer search narrows them.",
+      }));
+    }
+  }
+  holder.replaceChildren(...rows);
+}
+
+function recentRow(item: Recent): HTMLElement {
+  const row = foundRow("mention-row", item.root, item.path, null);
+  const folder = folderOf(item.path);
+  const opened = when(item.opened_at);
+  row.append(
+    span("mention-name", nameOf(item.path)),
+    span("mention-place", `${rootLabel(item.root)}${folder ? ` · ${folder}` : ""}${opened ? ` · ${opened}` : ""}`));
+  return row;
+}
+
+/** The project's recently opened files, newest first, in Files' side bar. */
+function drawRecent(): void {
+  const rows = recentFiles.slice(0, RECENT_SHOWN).map(recentRow);
+  fill(document.getElementById("files-recent")!, rows.length ? rows : [emptyRow("No file opened yet.")]);
+}
+
 function filesHome(): void {
   fileHistory = visitPlace(fileHistory, null, sameFile);
   showFilePlace();
@@ -5601,6 +5719,7 @@ function refreshTree(): void {
 }
 
 function enterFiles(): void {
+  post("files", { want: "recent" });
   if (!rootsAsked) {
     rootsAsked = true;
     post("files", { want: "roots" });
@@ -5774,6 +5893,22 @@ const fileFrames = {
     drawFile();
   },
 
+  /** One root's answer to the Files search, kept only while its text is still the one asked. */
+  filesSearched(frame: { q: string; root: string; status?: number; document?: unknown; error?: string | null }): void {
+    if (frame.q !== filesQuery || !filesFound.has(frame.root)) return;
+    const group = frame.status === 200 ? foundGroup(frame.root, frame.document) : null;
+    filesFound.set(frame.root, group ?? { problem: frame.error || "The server did not answer the search." });
+    drawFound();
+  },
+
+  /** The project's recently opened files, read or just added to. */
+  filesRecent(frame: { status?: number; document?: unknown }): void {
+    const entries = frame.status === 200 ? recentEntries(frame.document) : null;
+    if (!entries) return;
+    recentFiles = entries;
+    drawRecent();
+  },
+
   /** Where one path is, by the resolve route. A refusal of the token ends the asking. */
   filesResolved(frame: { given: string; status?: number; document?: unknown }): void {
     pathsOut = Math.max(0, pathsOut - 1);
@@ -5855,9 +5990,27 @@ document.addEventListener("click", (event) => {
     }
     return;
   }
+  const found = target.closest<HTMLElement>("[data-found-root]");
+  if (found?.dataset.foundRoot && found.dataset.foundPath) {
+    const line = Number(found.dataset.foundLine) || null;
+    showFile(found.dataset.foundRoot, found.dataset.foundPath, line, entryAt(found.dataset.foundRoot, found.dataset.foundPath));
+    return;
+  }
   const mention = target.closest<HTMLElement>("[data-mention]");
   const item = mention ? mentions[Number(mention.dataset.mention)] : undefined;
   if (item) showFile(item.root, item.path, item.line, item.entry);
+});
+
+const filesSearchField = document.getElementById("files-search") as HTMLInputElement;
+filesSearchField.addEventListener("input", () => {
+  window.clearTimeout(filesSearchTimer);
+  filesSearchTimer = window.setTimeout(() => searchFiles(filesSearchField.value), 250);
+});
+filesSearchField.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  filesSearchField.value = "";
+  window.clearTimeout(filesSearchTimer);
+  searchFiles("");
 });
 
 navIcons("files", {
@@ -5959,6 +6112,7 @@ drawRecordLists();
 drawFilesSide();
 drawFile();
 drawMentions();
+drawRecent();
 drawChatLinks();
 
 (window as any).kyo = Object.assign(kyo, recordFrames, fileFrames);

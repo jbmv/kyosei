@@ -545,3 +545,63 @@ export function serverPath(roots: RootInfo[], root: string, path: string): strin
   if (!base) return null;
   return path ? `${trimmed(base)}/${path}` : base;
 }
+
+// ------------------------------------------------------------------- searching the files
+
+/** The shortest text the Files search asks the server about. */
+export const SEARCH_MIN_CHARS = 2;
+
+/** One file the search found, with the lines of it that hold the text. */
+export interface FoundFile {
+  path: string;
+  /** Whether the file's path holds the text. */
+  byName: boolean;
+  lines: { line: number; text: string }[];
+}
+
+/** One root's part of a search's answer, as the Files view draws it. */
+export interface FoundGroup {
+  root: string;
+  files: FoundFile[];
+  /** Whether the server found more than it returned. */
+  more: boolean;
+}
+
+/**
+ * One root's answer from `files/search` (KYO-814), its results gathered by file: the files
+ * found by name first, in the server's order, then the others in the order of their first
+ * line. Null when the document is not such an answer.
+ */
+export function foundGroup(root: string, document: unknown): FoundGroup | null {
+  const results = (document as { results?: unknown })?.results;
+  if (!Array.isArray(results)) return null;
+  const byPath = new Map<string, FoundFile>();
+  for (const result of results as Record<string, unknown>[]) {
+    if (result?.root !== root || typeof result.path !== "string") continue;
+    const file = byPath.get(result.path) ?? { path: result.path, byName: false, lines: [] };
+    byPath.set(result.path, file);
+    if (result.match === "name") file.byName = true;
+    else if (result.match === "contents" && typeof result.line === "number") {
+      file.lines.push({ line: result.line, text: typeof result.text === "string" ? result.text : "" });
+    }
+  }
+  const files = [...byPath.values()];
+  return {
+    root,
+    files: [...files.filter((file) => file.byName), ...files.filter((file) => !file.byName)],
+    more: (document as { more?: unknown }).more === true,
+  };
+}
+
+/** A file the person opened in the app, as `files/recent` lists it. */
+export interface Recent { root: string; path: string; opened_at: string }
+
+/** The entries of a `files/recent` answer, newest first, or null when it is not one. */
+export function recentEntries(document: unknown): Recent[] | null {
+  const entries = (document as { entries?: unknown })?.entries;
+  if (!Array.isArray(entries)) return null;
+  return (entries as Record<string, unknown>[]).filter(
+    (entry): entry is Record<string, unknown> & Recent =>
+      typeof entry?.root === "string" && typeof entry.path === "string"
+      && typeof entry.opened_at === "string");
+}

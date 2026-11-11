@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
+  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, foundGroup, recentEntries, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
   headOf, hrefPath, inOrder, languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, webAddresses, withLink,
   pathSpans, rootLabel, rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
   withoutLine,
@@ -443,4 +443,40 @@ test("a prompt's web addresses are found without the punctuation around them", (
     webAddresses("See https://example.org/notes, then (https://a.example/x) and http://b.example/w_(c)."),
     ["https://example.org/notes", "https://a.example/x", "http://b.example/w_(c)"]);
   assert.deepEqual(webAddresses("no address here, nor example.org"), []);
+});
+
+// ------------------------------------------------------------------------- searching the files
+
+// What `files/search?q=guide&root=code` returned from a scratch server (KYO-814), with a
+// result of another root that a root's group must leave out.
+const searched = {
+  ok: true, limit: 200, more: true,
+  results: [
+    { root: "code", path: "docs/guide.md", match: "name" },
+    { root: "code", path: "README.md", match: "contents", line: 4, text: "See the guide." },
+    { root: "code", path: "docs/guide.md", match: "contents", line: 1, text: "# The guide" },
+    { root: "code", path: "README.md", match: "contents", line: 9, text: "The guide again." },
+    { root: "store", path: "ideas/guide.md", match: "name" },
+  ],
+};
+
+test("a root's search answer is gathered by file, the files found by name first", () => {
+  const group = foundGroup("code", searched)!;
+  assert.equal(group.more, true);
+  assert.deepEqual(group.files.map((file) => [file.path, file.byName, file.lines.map((l) => l.line)]), [
+    ["docs/guide.md", true, [1]],
+    ["README.md", false, [4, 9]],
+  ]);
+  assert.equal(foundGroup("code", { error: "x" }), null);
+});
+
+test("the recently opened files are read from the route's answer, and nothing else is", () => {
+  const entries = recentEntries({ ok: true, limit: 50, entries: [
+    { root: "store", path: "docs/proposals/native-apps.md", opened_at: "2026-11-11T19:00:00Z" },
+    { root: "code", path: 7, opened_at: "x" },
+  ] });
+  assert.deepEqual(entries, [
+    { root: "store", path: "docs/proposals/native-apps.md", opened_at: "2026-11-11T19:00:00Z" },
+  ]);
+  assert.equal(recentEntries({ error: "refused" }), null);
 });

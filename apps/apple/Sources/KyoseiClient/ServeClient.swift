@@ -832,12 +832,18 @@ extension ServeClient {
     /// body is the server's own document, so it is returned rather than thrown. With
     /// `ifNoneMatch` the blob route answers 304 and no bytes when the file is unchanged; the
     /// system's own cache is not consulted, so that the status is the server's.
+    /// With `post`, the body is sent as JSON by POST, which only `files/recent` takes (KYO-814).
     public func files(
         project: String, segments: [String], query: [(name: String, value: String)] = [],
-        token: String?, ifNoneMatch: String? = nil
+        token: String?, ifNoneMatch: String? = nil, post: Data? = nil
     ) async throws -> FileReply {
         var request = URLRequest(url: filesURL(project: project, segments: segments, query: query))
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let post {
+            request.httpMethod = "POST"
+            request.httpBody = post
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
         let (data, response) = try await URLSession.shared.data(for: request)

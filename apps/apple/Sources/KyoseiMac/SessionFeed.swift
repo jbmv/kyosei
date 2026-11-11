@@ -1591,6 +1591,33 @@ final class SessionFeed {
                     #"{"given": \#(quoted(given)), "status": \#(reply?.status ?? 0), "document": "#
                         + #"\#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
             }
+        case "search":
+            // One root at a time, so that a common word in one root cannot fill the server's
+            // cap and leave the other root out (KYO-814).
+            guard let text = body["q"] as? String else { return }
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: ["search"],
+                    query: [(name: "q", value: text), (name: "root", value: root)], token: token)
+                guard project == self.project else { return }
+                send(
+                    "filesSearched",
+                    #"{"q": \#(quoted(text)), "root": \#(quoted(root)), "status": \#(reply?.status ?? 0), "#
+                        + #""document": \#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
+            }
+        case "recent", "opened":
+            // `opened` records a file the person opened; both answer with the list.
+            let post = body["want"] as? String == "opened"
+                ? try? JSONSerialization.data(withJSONObject: ["root": root, "path": path]) : nil
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: ["recent"], token: token, post: post)
+                guard project == self.project else { return }
+                send(
+                    "filesRecent",
+                    #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
+                        + #""error": \#(filesProblem(reply))}"#)
+            }
         case "exists":
             let here = NSString(string: path).expandingTildeInPath
             let exists = path.hasPrefix("/") || path.hasPrefix("~/")
