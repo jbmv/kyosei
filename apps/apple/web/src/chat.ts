@@ -9,7 +9,7 @@ import {
 } from "./marks";
 import {
   type Answer, type ChatLink, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
-  type FoundFile, type Recent, SEARCH_MIN_CHARS, addressLink, answerOf, foundFiles, orderFound, recentEntries, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
+  type FileSort, type FoundFile, type Recent, BY_NAME, SEARCH_MIN_CHARS, iconOf, kindWords, addressLink, answerOf, foundFiles, orderFound, recentEntries, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
   languageOf, lineCount, linkPlace, localPath, looksOutside, webAddresses, withLink, mentioned, nameOf, pathSpans, rootLabel,
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
@@ -92,6 +92,14 @@ const live = document.getElementById("live")!;
 const scroller = document.getElementById("page")!;
 const STICK_DISTANCE = 80;
 const elements = new Map<string, HTMLElement>();
+// State that start-up reads before the code that uses it is reached (KYO-835): which drawers
+// are docked per view, how the Files list is sorted, and the starred files.
+const DOCK_KEY = "docked";
+let docked = stored<Record<string, boolean>>(DOCK_KEY, {}) ?? {};
+const FILES_SORT_KEY = "files-sort";
+let fileSort: FileSort = stored<FileSort>(FILES_SORT_KEY, BY_NAME) ?? BY_NAME;
+/** The project's starred files (KYO-837), from the server, newest first. */
+let starredFiles: Recent[] = [];
 const rendered = new Map<string, string>();
 
 function log(message: string): void {
@@ -245,6 +253,8 @@ const ICONS = {
   down: '<path d="M5.5 9.5L12 16l6.5-6.5"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
+  code: '<path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5.5l-3 13"/>',
+  image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5L20 17"/>',
   history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.2 4.8v3.6h3.6"/><path d="M12 8v4.3l2.8 1.7"/>',
 };
 
@@ -5509,6 +5519,39 @@ function modifiedWords(entry: Entry | null): string {
   return when(new Date(entry.mtime_ns / 1e6).toISOString()) ?? "";
 }
 
+const isStarred = (root: string, path: string) => starredFiles.some((item) => item.root === root && item.path === path);
+const FILE_ICONS = { folder: "folder", document: "page", code: "code", image: "image", file: "page" } as const;
+
+/** A row of the Files home's list, in Finder's manner: name, date modified, size and kind (KYO-835). */
+function columnRow(root: string, row: TreeRow): HTMLElement {
+  const item = treeRow(root, row);
+  const { entry } = row;
+  const name = document.createElement("div");
+  name.className = "file-name";
+  name.style.paddingLeft = `${row.depth * 16}px`;
+  const glyph = icon(FILE_ICONS[iconOf(entry)]);
+  if (entry.type === "dir") glyph.classList.add("folder");
+  name.append(...Array.from(item.childNodes), glyph);
+  name.insertBefore(glyph, name.querySelector(".tree-name"));
+  if (entry.type !== "dir" && (root === "code" || root === "store")) {
+    const star = document.createElement("button");
+    const on = isStarred(root, entry.path);
+    star.className = on ? "file-star on" : "file-star";
+    star.textContent = on ? "★" : "☆";
+    star.title = on ? "Unstar" : "Star";
+    star.dataset.star = entry.path;
+    star.dataset.starRoot = root;
+    name.append(star);
+  }
+  item.style.paddingLeft = "";
+  item.replaceChildren(
+    name,
+    span("file-cell", modifiedWords(entry)),
+    span("file-cell", entry.type === "dir" ? "--" : sizeWords(entry.size)),
+    span("file-cell", kindWords(entry)));
+  return item;
+}
+
 function treeRow(root: string, row: TreeRow): HTMLElement {
   const { entry } = row;
   const item = document.createElement("div");
@@ -5664,6 +5707,7 @@ function drawFilesSide(): void {
     toggle.hidden = !root;
   });
   const rows = root ? treeRows(root, listings, openDirs, showDotfiles) : [];
+  const sorted = root ? treeRows(root, listings, openDirs, showDotfiles, fileSort) : [];
   const nothing = rootsProblem
     ? "The files could not be read."
     : root && rootProblems.has(root) ? rootProblems.get(root)!
@@ -5671,8 +5715,13 @@ function drawFilesSide(): void {
       ? "Reading the files."
       : "This folder shows no file.";
   document.querySelectorAll<HTMLElement>(".files-tree").forEach((holder) => {
-    fill(holder, rows.length ? rows.map((row) => treeRow(root!, row)) : [emptyRow(nothing)]);
+    const columns = holder.classList.contains("files-columns");
+    const shown = columns ? sorted : rows;
+    fill(holder, shown.length
+      ? shown.map((row) => (columns ? columnRow(root!, row) : treeRow(root!, row)))
+      : [emptyRow(nothing)]);
   });
+  drawFilesHome(root);
   drawNav("files", !openFile, fileHistory);
   setText("files-path", openFile ? `${rootLabel(openFile.root)} / ${openFile.path}` : "");
   document.getElementById("files-path")!.title = openFile
@@ -5819,6 +5868,8 @@ function drawFile(): void {
   const file = openFile;
   if (!file) {
     fileArticle.replaceChildren();
+    drawFileOutline();
+    drawFileStar();
     return;
   }
   const top = filesPane.scrollTop;
@@ -5865,6 +5916,8 @@ function drawFile(): void {
   const code = fileArticle.querySelector(".file-code");
   if (code) code.scrollLeft = left;
   showFileLine(file);
+  drawFileOutline();
+  drawFileStar();
 }
 
 /**
@@ -5947,6 +6000,90 @@ function showFilePlace(): void {
 }
 
 /** Home: the file browser as when no file is open, with the files opened kept behind. */
+
+/** The Files home's fixed column: the roots as Locations, then Recents, Mentioned and Starred. */
+function drawFilesHome(root: string | null): void {
+  const locations = fileRoots.map((info) => {
+    const row = document.createElement("div");
+    row.className = info.name === root ? "location-row current" : "location-row";
+    row.dataset.root = info.name;
+    if (info.path) row.title = info.path;
+    row.append(icon("folder"), span("tree-name", rootLabel(info.name)));
+    return row;
+  });
+  fill(document.getElementById("files-locations")!, locations.length ? locations : [emptyRow("Reading the files.")]);
+  const list = (items: Recent[], none: string) => items.length
+    ? items.slice(0, 10).map(recentRow) : [emptyRow(none)];
+  fill(document.getElementById("files-home-recent")!, list(recentFiles, "None yet."));
+  fill(document.getElementById("files-home-mentioned")!,
+    mentions.length ? mentions.slice(0, 10).map(mentionRow) : [emptyRow("None yet.")]);
+  fill(document.getElementById("files-home-starred")!, list(starredFiles, "Star a file from its row."));
+  setText("files-home-root", root ? rootLabel(root) : "");
+  document.querySelectorAll<HTMLElement>(".files-head [data-sort]").forEach((button) => {
+    if (button.dataset.sort === fileSort.by) {
+      button.setAttribute("aria-sort", fileSort.descending ? "descending" : "ascending");
+    } else button.removeAttribute("aria-sort");
+  });
+}
+
+function toggleStar(root: string, path: string): void {
+  post("files", { want: isStarred(root, path) ? "unstar" : "star", root, path });
+}
+
+/** The open file's star in the top bar, for a file of the code or the store root. */
+function drawFileStar(): void {
+  const button = document.getElementById("files-star")!;
+  const file = openFile;
+  button.hidden = !file || (file.root !== "code" && file.root !== "store");
+  if (!file) return;
+  const on = isStarred(file.root, file.path);
+  button.classList.toggle("on", on);
+  button.textContent = on ? "★" : "☆";
+  button.title = on ? "Unstar this file" : "Star this file";
+}
+document.getElementById("files-star")!.addEventListener("click", () => {
+  if (openFile) toggleStar(openFile.root, openFile.path);
+});
+
+/** The open markdown file's headings in the right drawer, set in by level, each folding what is under it. */
+const foldedHeadings = new Set<string>();
+function drawFileOutline(): void {
+  const holder = document.getElementById("file-outline")!;
+  const headings = openFile && !fileArticle.hidden
+    ? Array.from(fileArticle.querySelectorAll<HTMLElement>(".file-body h1, .file-body h2, .file-body h3, .file-body h4"))
+    : [];
+  const levels = headings.map((heading) => Number(heading.tagName.slice(1)));
+  const rows: HTMLElement[] = [];
+  let hiddenBelow = Infinity;
+  headings.forEach((heading, index) => {
+    const level = levels[index];
+    if (level <= hiddenBelow) hiddenBelow = Infinity;
+    const key = `${openFile!.root}:${openFile!.path}#${index}`;
+    const hasChildren = levels[index + 1] !== undefined && levels[index + 1] > level;
+    const line = document.createElement("div");
+    line.className = "heading-row";
+    line.style.paddingLeft = `${(level - 1) * 12}px`;
+    line.hidden = level > hiddenBelow;
+    const caret = span("chevron", hasChildren ? "›" : "");
+    const folded = foldedHeadings.has(key);
+    if (hasChildren && !folded) line.classList.add("open");
+    caret.addEventListener("click", () => {
+      if (foldedHeadings.has(key)) foldedHeadings.delete(key);
+      else foldedHeadings.add(key);
+      drawFileOutline();
+    });
+    const label = document.createElement("div");
+    label.className = "outline-row";
+    label.textContent = heading.textContent ?? "";
+    label.addEventListener("click", () => heading.scrollIntoView({ block: "start" }));
+    line.append(caret, label);
+    rows.push(line);
+    if (hasChildren && folded && hiddenBelow === Infinity) hiddenBelow = level;
+  });
+  holder.replaceChildren(...rows);
+  applyDocks();
+}
+
 /** Records an opened file on the server, for the Recently opened list on every device. */
 function noteOpened(root: string, path: string): void {
   if (root !== "code" && root !== "store") return;
@@ -6139,6 +6276,7 @@ function refreshTree(): void {
 
 function enterFiles(): void {
   post("files", { want: "recent" });
+  post("files", { want: "starred" });
   if (!rootsAsked) {
     rootsAsked = true;
     post("files", { want: "roots" });
@@ -6322,6 +6460,15 @@ const fileFrames = {
     drawFound();
   },
 
+  /** The project's starred files, read or just changed (KYO-837). */
+  filesStarred(frame: { status?: number; document?: unknown }): void {
+    const entries = frame.status === 200 ? recentEntries(frame.document) : null;
+    if (!entries) return;
+    starredFiles = entries;
+    drawFilesSide();
+    drawFileStar();
+  },
+
   /** The project's recently opened files, read or just added to. */
   filesRecent(frame: { status?: number; document?: unknown }): void {
     const entries = frame.status === 200 ? recentEntries(frame.document) : null;
@@ -6384,7 +6531,20 @@ document.addEventListener("click", (event) => {
     else if (answer?.kind === "outside") showPathMenu(event.clientX, event.clientY, answer.path);
     return;
   }
-  const chip = target.closest<HTMLElement>(".files-roots [data-root]");
+  const star = target.closest<HTMLElement>("[data-star]");
+  if (star?.dataset.star && star.dataset.starRoot) {
+    toggleStar(star.dataset.starRoot, star.dataset.star);
+    return;
+  }
+  const sortBy = target.closest<HTMLElement>(".files-head [data-sort]");
+  if (sortBy) {
+    const by = sortBy.dataset.sort as FileSort["by"];
+    fileSort = { by, descending: fileSort.by === by ? !fileSort.descending : by === "modified" };
+    store(FILES_SORT_KEY, fileSort);
+    drawFilesSide();
+    return;
+  }
+  const chip = target.closest<HTMLElement>(".files-roots [data-root], #files-locations [data-root]");
   if (chip?.dataset.root) {
     chosenRoot = chip.dataset.root;
     store(FILES_ROOT_KEY, chosenRoot);
@@ -6699,8 +6859,6 @@ function drawOpened(): void {
 // ---- drawers (KYO-835): the side bar and the outline slide out under the pointer and stay
 // when their icon is pressed, each view and each device keeping its own choice.
 
-const DOCK_KEY = "docked";
-let docked = stored<Record<string, boolean>>(DOCK_KEY, {}) ?? {};
 
 function applyDocks(): void {
   document.body.classList.toggle("view-chat", currentView === "chat");
@@ -6708,7 +6866,9 @@ function applyDocks(): void {
   document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
   document.body.classList.toggle("has-outline",
     (currentView === "history" && !historyReader.hidden)
-    || (currentView === "records" && openRecordId !== null && !recordArticle.hidden));
+    || (currentView === "records" && openRecordId !== null && !recordArticle.hidden)
+    || (currentView === "files" && openFile !== null && !fileArticle.hidden
+      && document.getElementById("file-outline")!.childElementCount > 0));
 }
 
 function toggleDock(side: "left" | "right"): void {

@@ -844,11 +844,11 @@ extension ServeClient {
     /// With `post`, the body is sent as JSON by POST, which only `files/recent` takes (KYO-814).
     public func files(
         project: String, segments: [String], query: [(name: String, value: String)] = [],
-        token: String?, ifNoneMatch: String? = nil, post: Data? = nil
+        token: String?, ifNoneMatch: String? = nil, post: Data? = nil, method: String? = nil
     ) async throws -> FileReply {
         try await route(
             filesURL(project: project, segments: segments, query: query), token: token,
-            ifNoneMatch: ifNoneMatch, post: post)
+            ifNoneMatch: ifNoneMatch, post: post, method: method)
     }
 
     /// The transcript search and the history of opened results (KYO-825), which answer as the
@@ -862,13 +862,15 @@ extension ServeClient {
             token: token, post: post)
     }
 
+    /// `method` names another verb for a body than POST, as unstarring a file is a DELETE.
     private func route(
-        _ url: URL, token: String?, ifNoneMatch: String? = nil, post: Data? = nil
+        _ url: URL, token: String?, ifNoneMatch: String? = nil, post: Data? = nil,
+        method: String? = nil
     ) async throws -> FileReply {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if let post {
-            request.httpMethod = "POST"
+            request.httpMethod = method ?? "POST"
             request.httpBody = post
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }

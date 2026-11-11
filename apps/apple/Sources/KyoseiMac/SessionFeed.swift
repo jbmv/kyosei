@@ -1605,6 +1605,21 @@ final class SessionFeed {
                     #"{"q": \#(quoted(text)), "root": \#(quoted(root)), "status": \#(reply?.status ?? 0), "#
                         + #""document": \#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
             }
+        case "starred", "star", "unstar":
+            // The project's starred files (KYO-837): read, or one starred or unstarred.
+            let want = body["want"] as? String ?? "starred"
+            let post = want == "starred"
+                ? nil : try? JSONSerialization.data(withJSONObject: ["root": root, "path": path])
+            Task {
+                let reply = try? await client.files(
+                    project: project, segments: ["starred"], token: token, post: post,
+                    method: want == "unstar" ? "DELETE" : nil)
+                guard project == self.project else { return }
+                send(
+                    "filesStarred",
+                    #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
+                        + #""error": \#(filesProblem(reply))}"#)
+            }
         case "recent", "opened":
             // `opened` records a file the person opened; both answer with the list.
             let post = body["want"] as? String == "opened"

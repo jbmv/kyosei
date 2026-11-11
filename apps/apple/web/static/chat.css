@@ -1033,10 +1033,10 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 #files-mentioned { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #files-recent { flex: 1; min-height: 0; max-height: 30%; overflow-y: auto; overscroll-behavior: contain; }
 #files-side > .files-search { flex: none; width: auto; align-self: stretch; box-sizing: border-box; margin: 0 4px; }
-#files-landing > .files-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.files-home-main > .files-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 /* While a search is shown it takes the side bar, or the page, and the tree and the lists wait beneath. */
 #files-side.searching > :not(.files-search):not(.files-found),
-#files-landing.searching > :not(.files-search):not(.files-found) { display: none; }
+#files-landing.searching .files-home-main > :not(.files-search):not(.files-found) { display: none; }
 #files-side > .files-found { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .files-found[hidden] { display: none; }
 .found-file, .found-line { padding: 4px 10px; border-radius: 7px; cursor: default; }
@@ -1170,6 +1170,47 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 .outline-items { padding-left: 16px; }
 .outline-items[hidden] { display: none; }
 .outline-items .outline-row { font-size: 12.5px; color: var(--muted); }
+
+/* ---------------------------------------------------------------- The Files home (KYO-835) */
+/* A fixed column in Finder's manner beside a list with columns, which scrolls sideways when narrow. */
+#view-files #files-landing { max-width: none; }
+.files-home { display: flex; }
+#files-landing:not([hidden]) { display: flex; gap: 22px; align-items: flex-start; }
+.files-home-side { flex: none; width: 190px; position: sticky; top: 0; font-size: 13px; }
+.files-home-side h5 { margin: 14px 8px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
+.files-home-side h5:first-child { margin-top: 0; }
+.files-home-side .mention-row { padding: 3px 8px; font-size: 13px; }
+.files-home-side .mention-place { display: none; }
+.location-row { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-radius: 6px; cursor: default; }
+.location-row:hover { background: var(--panel); }
+.location-row.current { background: var(--line); }
+.location-row .icon { width: 15px; height: 15px; color: var(--link); }
+.files-home-main { flex: 1; min-width: 0; }
+#files-home-root { color: var(--muted); font-size: 13px; }
+.files-list { overflow-x: auto; }
+.files-head, .files-columns .tree-row { display: grid; grid-template-columns: minmax(260px, 1fr) 190px 90px 130px; column-gap: 12px; min-width: 700px; }
+.files-head { padding: 0 8px 4px; border-bottom: 1px solid var(--soft-line); }
+.files-head button { padding: 0; border: 0; background: none; color: var(--muted); font: 600 12px -apple-system, system-ui, sans-serif; text-align: left; cursor: default; }
+.files-head button[aria-sort="ascending"]::after { content: " ▴"; }
+.files-head button[aria-sort="descending"]::after { content: " ▾"; }
+.files-columns .tree-row { align-items: center; min-height: 28px; padding: 0 8px; border-radius: 0; font-size: 13.5px; }
+.files-columns .tree-row:nth-child(even) { background: color-mix(in srgb, var(--panel) 55%, transparent); }
+.files-columns .tree-row:hover { background: var(--line); }
+.file-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.file-name .icon { flex: none; width: 15px; height: 15px; }
+.file-name .icon.folder { color: var(--link); }
+.file-name .tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-cell { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-star { flex: none; padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; visibility: hidden; }
+.tree-row:hover .file-star, .file-star.on { visibility: visible; }
+.file-star.on { color: var(--kind-decision); }
+#files-star[hidden] { display: none; }
+#files-star.on { color: var(--kind-decision); }
+/* The outline of an open markdown file: its headings, set in by level, each folding what is under it. */
+.heading-row { display: flex; align-items: baseline; gap: 4px; }
+.heading-row .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; cursor: default; }
+.heading-row.open .chevron { transform: rotate(90deg); }
+.heading-row .outline-row { flex: 1; min-width: 0; }
 
 /* ---------------------------------------------------------------- Drawers (KYO-835) */
 /* The left drawer is the side bar; the right one the outline. Each slides out under the

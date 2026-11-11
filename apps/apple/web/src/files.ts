@@ -81,12 +81,54 @@ export function isDotfile(name: string): boolean {
 }
 
 /** Folders before files, each by name without regard to case. */
-export function inOrder(entries: Entry[]): Entry[] {
+/** What the Files list is sorted by (KYO-835), as a Finder list's column headers sort it. */
+export interface FileSort { by: "name" | "modified" | "size" | "kind"; descending: boolean }
+export const BY_NAME: FileSort = { by: "name", descending: false };
+
+/**
+ * A folder's entries in the order shown: folders before files, then by the sort's column,
+ * ties by name. A descending sort reverses the column's order and keeps folders first.
+ */
+export function inOrder(entries: Entry[], sort: FileSort = BY_NAME): Entry[] {
   const folder = (entry: Entry) => (entry.type === "dir" ? 0 : 1);
+  const byName = (a: Entry, b: Entry) =>
+    a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.name.localeCompare(b.name);
+  const column = (a: Entry, b: Entry): number => {
+    if (sort.by === "modified") return (a.mtime_ns ?? 0) - (b.mtime_ns ?? 0);
+    if (sort.by === "size") return (a.size ?? -1) - (b.size ?? -1);
+    if (sort.by === "kind") return kindWords(a).localeCompare(kindWords(b));
+    return byName(a, b);
+  };
   return [...entries].sort((a, b) =>
-    folder(a) - folder(b)
-    || a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-    || a.name.localeCompare(b.name));
+    folder(a) - folder(b) || (sort.descending ? -column(a, b) : column(a, b)) || byName(a, b));
+}
+
+const KINDS: Record<string, string> = {
+  md: "Markdown", markdown: "Markdown", txt: "Text", rst: "Text", json: "JSON", jsonl: "JSON lines",
+  yml: "YAML", yaml: "YAML", toml: "TOML", py: "Python", ts: "TypeScript", tsx: "TypeScript",
+  js: "JavaScript", mjs: "JavaScript", swift: "Swift", sh: "Shell script", css: "CSS",
+  html: "HTML", png: "PNG image", jpg: "JPEG image", jpeg: "JPEG image", gif: "GIF image",
+  svg: "SVG image", pdf: "PDF", lock: "Lock file",
+};
+
+/** A file's kind in words, as the Kind column shows it. */
+export function kindWords(entry: Pick<Entry, "name" | "type">): string {
+  if (entry.type === "dir") return "Folder";
+  const base = nameOf(entry.name);
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "File";
+  const suffix = base.slice(dot + 1).toLowerCase();
+  return KINDS[suffix] ?? `${suffix.toUpperCase()} file`;
+}
+
+/** Which simple icon a row of the Files list carries. */
+export function iconOf(entry: Pick<Entry, "name" | "type">): "folder" | "document" | "code" | "image" | "file" {
+  if (entry.type === "dir") return "folder";
+  const kind = kindWords(entry);
+  if (/image$/.test(kind)) return "image";
+  if (kind === "Markdown" || kind === "Text" || kind === "PDF") return "document";
+  if (languageOf(entry.name) || kind === "Shell script") return "code";
+  return "file";
 }
 
 export interface TreeRow {
@@ -105,11 +147,11 @@ export interface TreeRow {
  */
 export function treeRows(
   root: string, listings: ReadonlyMap<string, Entry[]>, open: ReadonlySet<string>,
-  dotfiles: boolean,
+  dotfiles: boolean, sort: FileSort = BY_NAME,
 ): TreeRow[] {
   const rows: TreeRow[] = [];
   const walk = (path: string, depth: number) => {
-    for (const entry of inOrder(listings.get(dirKey(root, path)) ?? [])) {
+    for (const entry of inOrder(listings.get(dirKey(root, path)) ?? [], sort)) {
       if (!dotfiles && isDotfile(entry.name)) continue;
       const isOpen = entry.type === "dir" && open.has(dirKey(root, entry.path));
       rows.push({
@@ -626,12 +668,19 @@ export function orderFound(
 /** A file the person opened in the app, as `files/recent` lists it. */
 export interface Recent { root: string; path: string; opened_at: string }
 
-/** The entries of a `files/recent` answer, newest first, or null when it is not one. */
+/**
+ * The entries of a `files/recent` answer, newest first, or null when it is not one. A
+ * `files/starred` answer (KYO-837) is read the same way, its `starred_at` standing for the time.
+ */
 export function recentEntries(document: unknown): Recent[] | null {
   const entries = (document as { entries?: unknown })?.entries;
   if (!Array.isArray(entries)) return null;
-  return (entries as Record<string, unknown>[]).filter(
-    (entry): entry is Record<string, unknown> & Recent =>
-      typeof entry?.root === "string" && typeof entry.path === "string"
-      && typeof entry.opened_at === "string");
+  const found: Recent[] = [];
+  for (const entry of entries as Record<string, unknown>[]) {
+    const at = typeof entry?.opened_at === "string" ? entry.opened_at : entry?.starred_at;
+    if (typeof entry?.root === "string" && typeof entry.path === "string" && typeof at === "string") {
+      found.push({ root: entry.root, path: entry.path, opened_at: at });
+    }
+  }
+  return found;
 }

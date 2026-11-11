@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, foundFiles, isDocument, orderFound, recentEntries, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
+  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, foundFiles, iconOf, isDocument, kindWords, orderFound, recentEntries, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
   headOf, hrefPath, inOrder, languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, webAddresses, withLink,
   pathSpans, rootLabel, rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
   withoutLine,
@@ -502,4 +502,35 @@ test("the recently opened files are read from the route's answer, and nothing el
     { root: "store", path: "docs/proposals/native-apps.md", opened_at: "2026-11-11T19:00:00Z" },
   ]);
   assert.equal(recentEntries({ error: "refused" }), null);
+});
+
+// ------------------------------------------------------------- the Finder-style list (KYO-835)
+
+test("a folder's entries sort by any column, folders first, ties by name", () => {
+  const entries = [
+    { name: "b.md", path: "b.md", type: "file", mtime_ns: 3, size: 10 },
+    { name: "a.py", path: "a.py", type: "file", mtime_ns: 1, size: 300 },
+    { name: "docs", path: "docs", type: "dir", mtime_ns: 2 },
+    { name: "c.md", path: "c.md", type: "file", mtime_ns: 2, size: 10 },
+  ];
+  const names = (sort?: Parameters<typeof inOrder>[1]) => inOrder(entries, sort).map((entry) => entry.name);
+  assert.deepEqual(names(), ["docs", "a.py", "b.md", "c.md"]);
+  assert.deepEqual(names({ by: "modified", descending: true }), ["docs", "b.md", "c.md", "a.py"]);
+  assert.deepEqual(names({ by: "size", descending: false }), ["docs", "b.md", "c.md", "a.py"]);
+  assert.deepEqual(names({ by: "kind", descending: false }), ["docs", "b.md", "c.md", "a.py"]);
+});
+
+test("a file's kind is named in words, and its icon is one of five", () => {
+  assert.equal(kindWords({ name: "plan.md", type: "file" }), "Markdown");
+  assert.equal(kindWords({ name: "docs", type: "dir" }), "Folder");
+  assert.equal(kindWords({ name: "Makefile", type: "file" }), "File");
+  assert.equal(kindWords({ name: "x.weird", type: "file" }), "WEIRD file");
+  assert.deepEqual(
+    ["docs", "a.md", "b.py", "c.png", "d.zip"].map((name, i) => iconOf({ name, type: i ? "file" : "dir" })),
+    ["folder", "document", "code", "image", "file"]);
+});
+
+test("a starred files answer is read as the recent one is, its time from starred_at", () => {
+  assert.deepEqual(recentEntries({ ok: true, entries: [{ root: "store", path: "a.md", starred_at: "2026-11-11T20:00:00Z" }] }),
+    [{ root: "store", path: "a.md", opened_at: "2026-11-11T20:00:00Z" }]);
 });

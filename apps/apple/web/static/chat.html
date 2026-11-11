@@ -67,6 +67,7 @@
           <button id="files-forward" class="nav-icon" data-nav-icon="forward" title="Forward" aria-label="Forward"></button>
         </span>
         <span id="files-path"></span>
+        <button id="files-star" class="nav-icon" title="Star this file" aria-label="Star this file" hidden></button>
         <span id="files-meta"></span>
       </span>
       <!-- Search (KYO-741, KYO-754): in the chat, the open record or the open file, whichever view shows;
@@ -230,6 +231,10 @@
         </svg>
       </button>
       <div id="outline-panel">
+        <div data-view="files" hidden>
+          <h4>Outline</h4>
+          <div id="file-outline"></div>
+        </div>
         <div data-view="records" hidden>
           <h4>Outline</h4>
           <div id="record-outline"></div>
@@ -257,13 +262,34 @@
       <div class="files-inner">
         <div id="files-note" hidden></div>
         <div id="files-landing">
-          <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
-          <div class="files-found" hidden></div>
-          <div class="files-bar">
-            <div class="files-roots"></div>
-            <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
+          <!-- KYO-835: the Files home, a fixed Finder-style column beside a list with columns. -->
+          <nav class="files-home-side">
+            <h5>Locations</h5>
+            <div id="files-locations"></div>
+            <h5>Recents</h5>
+            <div id="files-home-recent"></div>
+            <h5>Mentioned</h5>
+            <div id="files-home-mentioned"></div>
+            <h5>Starred</h5>
+            <div id="files-home-starred"></div>
+          </nav>
+          <div class="files-home-main">
+            <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
+            <div class="files-found" hidden></div>
+            <div class="files-bar">
+              <span id="files-home-root"></span>
+              <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
+            </div>
+            <div class="files-list">
+              <div class="files-head">
+                <button data-sort="name">Name</button>
+                <button data-sort="modified">Date Modified</button>
+                <button data-sort="size">Size</button>
+                <button data-sort="kind">Kind</button>
+              </div>
+              <div class="files-tree files-columns"></div>
+            </div>
           </div>
-          <div class="files-tree"></div>
         </div>
         <article id="file" hidden></article>
       </div>
