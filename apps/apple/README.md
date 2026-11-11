@@ -1,9 +1,46 @@
 # Kyosei for Apple platforms
 
-Native clients of `kyo serve`, built for the maintainer's own devices and the current
-macOS. A client displays what the server returns and holds no store logic. The server's
-routes are described in
+A native Mac app for working with the Claude Code sessions of a Kyosei project. It is a
+client of `kyo serve`, built for the maintainer's own devices and the current macOS. A client
+displays what the server returns and holds no store logic. The server's routes are described
+in
 [`docs/reference/topics/serve-and-desktop.md`](../../docs/reference/topics/serve-and-desktop.md).
+
+## What the app adds to a session
+
+The app draws a session's conversation as rendered markdown and sends prompts to it through
+the server, which types them into the session's pane. Beside the conversation it shows the
+project's records and files, and a terminal on the pane. To a session run in a terminal it
+adds the following.
+
+- **Anchors.** A paragraph of a prompt can be anchored to a place: a sentence or a selection
+  in a reply or an earlier prompt, a record or an element of one, such as a criterion or
+  a gate, or lines of a file. A right-click on the place offers Anchor. When the prompt is delivered,
+  the server types a line above the paragraph that names the place and quotes its first
+  words, so the agent reads which passage the paragraph is about. A place in the conversation
+  stays highlighted after the prompt is sent.
+- **Tags.** A paragraph can also carry tags. At delivery the server files each anchored or
+  tagged paragraph in the store as a note, with its text, anchors and tags, and
+  `kyo notes list --tag` later finds what the person wrote on a subject. A tag is not typed
+  to the agent.
+- **Attachments.** A file or a pasted image can be attached to a paragraph. The server saves
+  it on the machine the session runs on and types its path above the paragraph.
+- **The session's task list.** A live session has one list that the person and the
+  orchestrator both write. The person keeps reminders on it in the app, above the composer,
+  and the orchestrator keeps its plan there with `kyo agenda`. The hooks print the unchecked
+  items into the session on each prompt and name the person's at each stop.
+- **Drafts kept on the server.** The server saves the unsent prompts of each session and of
+  the project. A prompt written on one device is found on another, and one written while no
+  session runs is carried into the next session.
+- **Held prompts.** A prompt sent while the agent is in a turn is held by the server and
+  delivered when the session's screen is idle. Until then it can be taken back or sent at
+  once.
+
+All of these need a device token with the `send` permission, and anchors and tags need
+`notes` as well; [Running it](#running-it) describes the token. The sections below describe
+how the app draws each and where its code is.
+
+## Layout of the source
 
 `Sources/KyoseiClient` holds the code that does not draw: requests to the server and the
 parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds the views.
@@ -77,7 +114,9 @@ The app's part is `showAgenda` and `saveAgenda` in `SessionFeed.swift`; the page
 
 The app opens on the project it last showed. On a first run, or when the server no longer
 lists that project, it shows the list of projects in place of the chat. The logic is in
-`web/src/projects.ts`, and the switch is `SessionFeed.open`.
+`web/src/projects.ts`, and the switch is `SessionFeed.open`. File > Projects… (Command-O)
+shows that list in place of everything under the top bar (KYO-766), and choosing it again
+returns to the project the window was showing.
 
 ## Views
 
@@ -95,8 +134,9 @@ marked, and none inside a shut fold: the web view was measured stalling for abou
 millisecond for each marked range that lies in a shut fold. The matching is in
 `web/src/search.ts`.
 
-Records shows the project's records, one at a time. With none open it lists them all by
-kind; the side bar lists them newest first above the records viewed most recently. Search
+Records shows the project's records, one at a time. With none open it lists them all,
+newest first and without groups (KYO-759); the side bar lists them in the same order above
+the records viewed most recently. Search
 and the three filters (Open, Dispatchable, Awaiting you) apply to both lists, as does a Kind
 control beside the search field (KYO-785): a dropdown of the kinds the store holds, with a
 checkbox each. A `kind:plan` or `kind:plan,task` token typed in the search field checks the
@@ -160,7 +200,8 @@ names the one a launch opens on. Sending needs a device
 token from `kyo devices issue`, entered in Settings and kept in the Keychain. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
 permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
-the `terminal` permission; without it the drawer shows the pane's text and the server's reason.
+the `terminal` permission; without it the drawer shows the pane's text and the server's reason. While it is open the
+terminal covers the chat pane (KYO-753), which keeps its scroll place beneath.
 Files and file links need it to hold the `files` permission.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,

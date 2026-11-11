@@ -26,6 +26,7 @@ AGENTS.md first.
 - [AGENTS.md](AGENTS.md): building, testing and contributing; the venv rules and the store rules for dispatched workers
 - [Design charter](docs/design/charter.md): the laws, the architecture and the reasoning behind them
 - [Desktop app](apps/desktop/README.md): the Electron viewer that reads projects through `kyo serve`, built from source with its own checks
+- [Mac app](apps/apple/README.md): a native macOS client of `kyo serve` that shows a project's sessions, records and files and sends prompts to a session, built from source
 
 ## Optional
 

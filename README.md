@@ -130,7 +130,9 @@ make lint    # ruff
 ```
 
 The desktop app under `apps/desktop/` is a separate Electron project with its own checks;
-see its README. Kyosei's own development is tracked with Kyosei. Source comments, tests
+see its README. The Mac app under `apps/apple/` is a native client of `kyo serve` that shows
+a project's sessions, records and files and sends prompts to a session, and
+[its README](apps/apple/README.md) describes what it adds. Kyosei's own development is tracked with Kyosei. Source comments, tests
 and these documents cite its records as `KYO-n`, the id of a record in that tracker, with
 a suffix such as `.c2` or `.d1` for a criterion or dispatch within one;
 `kyo changelog --all` lists the completed records with their titles.
