@@ -130,6 +130,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-11** — `KYO-775` (task) — The stop announcement of dispatches in flight is said once per session
+- **2026-11-11** — `KYO-774` (bug) — The sweep and doctor chain is cancelled at SessionEnd; it runs at Stop only
 - **2026-11-09** — `KYO-706` (task) — kyo serve note API: create, find, tag and send notes
 - **2026-11-09** — `KYO-703` (task) — kyo serve: saved composer drafts, and messages held until the turn ends
 - **2026-11-09** — `KYO-701` (task) — Session API: total lines added and removed, the session and its subagents together
@@ -622,7 +624,9 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-773` (task) — A dispatch's brief says each thing once: touches by path, and its length by section
 - **2026-11-11** — `KYO-770` (task) — A session's task list, kept by kyo serve and edited by the person and the orchestrator
+- **2026-11-11** — `KYO-768` (bug) — kyo docs settle without --method crashes where it should refuse
 - **2026-11-11** — `KYO-764` (bug) — The remedy ledger does not see an error raised through a helper that returns it
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
 - **2026-11-11** — `KYO-749` (task) — kyo spawn takes a plan, and a discussion can produce more than one record
