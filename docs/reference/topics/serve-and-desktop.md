@@ -739,7 +739,7 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 | A prompt | `on my prompt <uuid> "<words>..."` |
 | Of another session | either of those, with `in session <id>` before the words |
 | A record, or a criterion, gate, dispatch, note or claim of one | `on record KYO-717.c4 "<words>..."` |
-| Lines of a served file | `on file <path> lines 333-345 "<words>..."` |
+| Lines of a served file | `on file <path> lines 333-345 "<words>..."`, or `line 333` for one line |
 | A document or file filed with a commit | `on document <path> at <commit> lines 3-9 "<words>..."` |
 | Another note | `on note <id>` |
 
@@ -752,12 +752,13 @@ id the store does not hold is refused when the message is held, naming the comma
 the ids.
 
 A file's line carries the path relative to its root, the lines counted from 1 in the file's
-source, and the words at them. The root is the code repository unless the line says otherwise:
+source, and the words at them. A span is written `lines 12-14` and a single line `line 3`;
+lines sent before KYO-755 wrote a single line as `lines 3-3`, and a reader takes all three. The root is the code repository unless the line says otherwise:
 
 ```
 on file src/kyosei/serve_notes.py lines 333-345 "def find( server: Any, root_of:..."
 on file docs/plan.md in the store repository lines 12-14 "The app is built in small..."
-on file notes/plan.md in the scratchpad lines 3-3 "The second chunk waits on..." at "waits"
+on file notes/plan.md in the scratchpad line 3 "The second chunk waits on..." at "waits"
 ```
 
 `in the scratchpad` is the scratchpad of the session the prompt was sent to, and `in the

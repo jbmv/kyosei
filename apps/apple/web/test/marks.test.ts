@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  blockLines, codePoints, drawnSpan, fileLine, heldLine, lineAt, lineOf, nearest, placeAnchor, placeKey,
+  blockLines, codePoints, drawnSpan, fileLine, lineWords, heldLine, lineAt, lineOf, nearest, placeAnchor, placeKey,
   recordLine, samePlace, scrollToShow, sentenceAt, shiftLines, sourceIndex, sourceSpan, spanPlace,
 } from "../src/marks.ts";
 
@@ -390,4 +390,21 @@ test("a sent line and the marks route's anchor for it have one key", () => {
     placeKey({ kind: "path", ...read }),
     placeKey({ kind: "document", root: "store", path: "docs/plan.md", lines: [5, 6] }));
   assert.equal(placeKey({ kind: "record", id: "KYO-1.g2" }), "record:KYO-1.g2");
+});
+
+test("a file's line reads `line N`, `lines N-M` and the older `lines N-N` as the same places", () => {
+  const one = fileLine('on file src/tidy.py line 5 "return text.strip()"');
+  const old = fileLine('on file src/tidy.py lines 5-5 "return text.strip()"');
+  const span = fileLine('on file src/tidy.py lines 4-5 "def reformat"');
+  assert.deepEqual(one?.lines, [5, 5]);
+  assert.deepEqual(one, old);
+  assert.deepEqual(span?.lines, [4, 5]);
+  assert.deepEqual(fileLine("on file src/tidy.py line 5 (words unavailable)")?.lines, [5, 5]);
+  assert.equal(fileLine('on file src/tidy.py line 0 "x"'), null);
+  assert.deepEqual(fileLine('on file a.md in the scratchpad line 3 "x"')?.root, "scratch");
+});
+
+test("a single line's chip is worded `line N` and a span's `lines N-M`", () => {
+  assert.equal(lineWords([5, 5]), "line 5");
+  assert.equal(lineWords([4, 5]), "lines 4-5");
 });

@@ -5,7 +5,7 @@ import {
   FOLD_ABOVE, HISTORY_LIMIT, awaitingIds, byKind, dispatchableIds, historyFrom, historyRows, isFolded,
   latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
-  pressed,
+  pressed, reportItem, taskOf,
 } from "../src/records.ts";
 
 const rows = [
@@ -280,14 +280,24 @@ test("a work record's page carries each part kyo show prints, with its id", () =
   const dispatch = section("Dispatches").items[0];
   assert.equal(dispatch.ref, "KYO-9.d1");
   assert.equal(dispatch.tone, "running");
-  assert.deepEqual(dispatch.folded, [{ label: "Brief", text: "# Dispatch brief" }]);
+  assert.deepEqual(dispatch.folded, [{ label: "Brief, 16 characters", text: "# Dispatch brief" }]);
+  assert.deepEqual(
+    dispatch.lines!.filter((line) => ["model", "branch", "base"].includes(line.label)),
+    [
+      { label: "model", text: "claude-fable-5-2" }, { label: "branch", text: "kyo-9-page" },
+      { label: "base", text: "0841dc98" },
+    ]);
   assert.ok(dispatch.lines!.some((line) => line.label === "report" && line.text === "KYO-9.r1"));
 
   const report = section("Reports").items[0];
-  assert.deepEqual(report.lines![0], { label: "KYO-9.c1 · met · machine-checked", text: "tests pass" });
-  assert.equal(report.lines![1].label, "premise false");
-  assert.match(report.lines![1].text, /Correction: It is polled/);
-  assert.deepEqual(report.lines!.at(-1), { label: "commit", text: "abc1234 The page" });
+  // The review order: false premises first, then the verdicts, then the commits.
+  assert.equal(report.lines![0].label, "premise false");
+  assert.equal(report.lines![0].group, "False premises");
+  assert.match(report.lines![0].text, /Correction: It is polled/);
+  assert.deepEqual(report.lines![1], {
+    label: "KYO-9.c1 · met · machine-checked", text: "tests pass", group: "Verdicts", ref: "KYO-9.c1",
+  });
+  assert.deepEqual(report.lines!.at(-1), { label: "commit", text: "abc1234 The page", group: "Commits" });
 
   assert.equal(section("Notes").items[0].citable, true);
   assert.equal(section("Claims").items[0].text, "It renders");
@@ -343,4 +353,76 @@ test("Awaiting you never stands with Open or Dispatchable", () => {
   const open = { open: true, dispatchable: false, awaiting: false, search: "" };
   assert.deepEqual(pressed(open, "dispatchable"), { open: true, dispatchable: true, awaiting: false, search: "" });
   assert.deepEqual(pressed(waiting, "awaiting"), { open: false, dispatchable: false, awaiting: false, search: "" });
+});
+
+const FULL_REPORT = {
+  id: "KYO-9.r1", dispatch_id: "KYO-9.d1", author: "orchestrator", created_at: "2026-11-10T19:00:00.000Z",
+  body: {
+    summary: "Built the page.",
+    criteria_verdicts: [
+      { criterion_id: "KYO-9.c1", verdict: "met", method: "machine-checked", evidence: "pass" },
+      { criterion_id: "KYO-9.c2", verdict: "unmet-unobserved", method: "reasoned-about", reason: "needs a person" },
+    ],
+    premise_false: [{ claim: "A", correction: "B" }],
+    disagreements: [{ topic: "T", brief_said: "X", worker_did: "Y", rationale: "Z" }],
+    corrected_numbers: [{ claim: "N", brief_value: "1", actual_value: "2", method: "wc" }],
+    docs_verdicts: [{ doc_path: "docs/a.md", section: "Intro", verdict: "not-affected", method: "reasoned-about", reason: "none" }],
+    commits: [{ sha: "abc1234", subject: "S" }],
+    touched_files: ["a.ts", "b.ts"],
+  },
+};
+
+test("a report is drawn in the order an orchestrator reviews it, every field of it", () => {
+  const item = reportItem(FULL_REPORT);
+  assert.deepEqual(
+    item.lines!.filter((one) => one.group).map((one) => one.group),
+    ["False premises", "Disagreements with the brief", "What the worker did and why",
+      "Corrected numbers", "Verdicts", "Docs verdicts", "Commits", "Files touched"]);
+  const verdicts = item.lines!.filter((one) => one.ref);
+  assert.deepEqual(verdicts.map((one) => one.ref), ["KYO-9.c1", "KYO-9.c2"]);
+  assert.match(verdicts[1].text, /Reason: needs a person/);
+  const docs = item.lines!.find((one) => one.group === "Docs verdicts")!;
+  assert.equal(docs.label, "not-affected · reasoned-about");
+  assert.match(docs.text, /docs\/a\.md § Intro/);
+  assert.equal(item.collapsed, undefined);
+});
+
+test("a report that was amended is marked and folded, and the amending one is current", () => {
+  const amending = { ...FULL_REPORT, id: "KYO-9.r2", body: { ...FULL_REPORT.body, amends: "KYO-9.r1" } };
+  const page = recordPage({ ...work, reports: [FULL_REPORT, amending] });
+  const [old, current] = page.sections.find((part) => part.name === "Reports")!.items;
+  assert.equal(old.state, "superseded");
+  assert.match(old.meta!.join(" "), /superseded by KYO-9\.r2/);
+  assert.match(old.collapsed!, /^Superseded report/);
+  assert.equal(current.collapsed, undefined);
+  assert.match(current.meta!.join(" "), /amends KYO-9\.r1/);
+});
+
+test("the task prose of a brief is found between its Task and Report headings", () => {
+  const brief = "# Dispatch brief\n\n## Standing stance\n\nx\n\n---\n\n## Task\n\nDo it.\n\n- one\n\n## Report\n\nWrite it.\n";
+  assert.equal(taskOf(brief), "Do it.\n\n- one");
+  assert.equal(taskOf("# Dispatch brief\n\nno task"), null);
+  assert.equal(taskOf("## Task\n\nlast"), "last");
+  const dispatch = recordPage({ ...work, dispatches: [{ id: "KYO-9.d1", brief, state: "reported" }] })
+    .sections.find((part) => part.name === "Dispatches")!.items[0];
+  assert.deepEqual(dispatch.folded!.map((one) => one.label.split(",")[0]), ["Task", "Brief"]);
+});
+
+test("a record a dispatch covers draws the dispatch and its report, which it once drew as nothing", () => {
+  // KYO-724 was covered by KYO-726.d1 and held no dispatch or report of its own: its page
+  // showed neither, whatever `kyo show` printed under "covered by".
+  const covered = {
+    ...work, id: "KYO-24", dispatches: [], reports: [], touches: [],
+    covered_by_dispatches: [{ id: "KYO-9.d1", primary_record_id: "KYO-9", report_id: "KYO-9.r1", state: "reported" }],
+  };
+  const bare = recordPage(covered);
+  assert.equal(bare.sections.find((part) => part.name === "Dispatches")!.items[0].ref, "KYO-9.d1");
+  assert.equal(bare.sections.find((part) => part.name === "Reports"), undefined);
+  const page = recordPage(covered, new Map(), new Map([["KYO-9", { ...work, reports: [FULL_REPORT] }]]));
+  const dispatch = page.sections.find((part) => part.name === "Dispatches")!.items[0];
+  assert.equal(dispatch.citable, false);
+  assert.equal(dispatch.lines!.find((one) => one.label === "branch")!.text, "kyo-9-page");
+  const report = page.sections.find((part) => part.name === "Reports")!.items[0];
+  assert.equal(report.ref, "KYO-9.r1");
+  assert.ok(report.lines!.some((one) => one.group === "Verdicts"));
 });
