@@ -14,9 +14,10 @@ import {
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
 import { highlight, render } from "./pipeline";
+import { chipPieces } from "./chipwords";
 import {
-  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
-  dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, pressed,
+  dispatchableIds, historyFrom, historyRows, narrow, newestFirst, parseLink, prefixOf,
   recordOf, recordPage, refParts, visit, when,
 } from "./records";
 import {
@@ -119,8 +120,22 @@ function drawEnded(): void {
   sessionEnded = !!row && !row.live;
   endedAt = sessionEnded ? row?.ended_at ?? row?.last_seen ?? "" : null;
   document.body.classList.toggle("ended", sessionEnded);
+  drawEmptyChat();
   if (sessionEnded) document.getElementById("interrupt")!.hidden = true;
   drawWorking();
+}
+
+/** True once a batch of the followed session's turns has been drawn, even an empty one. */
+let turnsLoaded = false;
+
+/**
+ * KYO-752: a live session whose chat has no turns says it is waiting for its first prompt,
+ * so the empty window does not read as one that failed to load. It is not shown while the
+ * turns are still loading or for a session that has ended.
+ */
+function drawEmptyChat(): void {
+  const waiting = turnsLoaded && !sessionEnded && !!menu?.current && elements.size === 0 && !chat.childElementCount;
+  document.getElementById("empty-chat")!.hidden = !waiting;
 }
 
 /** What the last press of Start orchestrator came to, until a session is live again. */
@@ -353,18 +368,41 @@ function drawPlaceLine(line: string): HTMLElement | null {
   if (record) {
     const words = record.words.replace(/\.\.\.$/, "…");
     chip.dataset.place = placeKey({ kind: "record", id: record.id });
-    chip.append(icon("records"), words ? `${record.id} ${words}` : record.id);
+    chip.append(icon("records"), record.id, ...(words ? [" ", ...drawChipWords(words)] : []));
     chip.addEventListener("click", () => revealPlace({ kind: "record", id: record.id, words }));
   } else if (file) {
     const words = (file.selection ?? file.words).replace(/\.\.\.$/, "…");
     chip.dataset.place = placeKey({ kind: "path", ...file });
-    chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}${words ? ` ${words}` : ""}`);
+    chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}`, ...(words ? [" ", ...drawChipWords(words)] : []));
     chip.addEventListener("click", () => revealPlace({
       kind: "path", root: file.root, path: file.path, lines: file.lines, words,
       ...(file.session ? { session: file.session } : {}),
     }));
   }
   return chip;
+}
+
+/** A chip's quoted words as inline markdown; the chip's title and click keep the source words (KYO-758). */
+function drawChipWords(words: string): Node[] {
+  return chipPieces(words).map((piece) => {
+    let node: Node = document.createTextNode(piece.text);
+    if (piece.code) {
+      const code = document.createElement("code");
+      code.append(node);
+      node = code;
+    }
+    if (piece.italic) {
+      const em = document.createElement("em");
+      em.append(node);
+      node = em;
+    }
+    if (piece.bold) {
+      const strong = document.createElement("strong");
+      strong.append(node);
+      node = strong;
+    }
+    return node;
+  });
 }
 
 function drawTurn(turn: Turn): HTMLElement {
@@ -408,7 +446,7 @@ function drawTurn(turn: Turn): HTMLElement {
     const words = (anchor[3] ?? anchor[2] ?? "").replace(/\.\.\.$/, "…");
     const chip = document.createElement("span");
     chip.className = "turn-anchor";
-    chip.append(icon("anchor"), words || "words unavailable");
+    chip.append(icon("anchor"), ...(words ? drawChipWords(words) : ["words unavailable"]));
     chip.title = line;
     chip.addEventListener("click", () => revealRecord(anchor[1], words));
     element.append(chip);
@@ -925,6 +963,21 @@ function setText(id: string, text: string): void {
   document.getElementById(id)!.textContent = text;
 }
 
+/**
+ * A list's "N finished" line with its disclosure mark (KYO-751). The mark is one drawing, a
+ * chevron centred in a square box, that is turned about the box's centre when the list is open;
+ * swapping one text glyph for another put the open mark off the closed one's centre.
+ */
+function drawFinished(id: string, count: number, open: boolean): void {
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  mark.setAttribute("viewBox", "0 0 10 10");
+  mark.setAttribute("class", open ? "disclosure open" : "disclosure");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M3.5 2 L6.5 5 L3.5 8");
+  mark.append(path);
+  document.getElementById(id)!.replaceChildren(`${count} finished `, mark);
+}
+
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
   setText("top-title", session?.title ?? menu?.project ?? windowProject);
@@ -942,7 +995,7 @@ function drawSide(): void {
       ? finishedOwn.map((call) => ({ label: ownLabel(call), took: tookWords(call) }))
       : [],
   );
-  setText("side-finished", `${finishedOwn.length} finished ${showFinishedTasks ? "⌄" : "›"}`);
+  drawFinished("side-finished", finishedOwn.length, showFinishedTasks);
 }
 
 function tookWords(call: ToolCall): string | undefined {
@@ -1048,7 +1101,7 @@ function drawAgents(): void {
   document.getElementById("side-agents-done")!.replaceChildren(
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
-  setText("side-agents-finished", `${finished.length} finished ${showFinishedAgents ? "⌄" : "›"}`);
+  drawFinished("side-agents-finished", finished.length, showFinishedAgents);
   // The status bar lists the running ones: what each is, and since when.
   (window as any).webkit?.messageHandlers?.strip?.postMessage({
     subagents: running.length,
@@ -1376,6 +1429,8 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 
 const kyo = {
   clear(): void {
+    turnsLoaded = false;
+    drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();
     elements.clear();
@@ -1521,6 +1576,8 @@ const kyo = {
     for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.command_outputs]) {
       for (const item of list ?? []) if (item.at > latestAt) latestAt = item.at;
     }
+    turnsLoaded = true;
+    drawEmptyChat();
     drawWorking();
     log(`items ${elements.size}`);
   },
@@ -1656,6 +1713,7 @@ const kyo = {
     scope = frame.scope ?? windowProject;
     document.body.classList.toggle("no-project", !windowProject);
     if (scope !== leaving) {
+      closeProjectList();
       // A save that was waiting is the project's that is left. The page sends it before it
       // asks for another project; when the app turned the window by itself there is no
       // session left to save it to, and the prompts are kept here all the same.
@@ -1707,6 +1765,11 @@ const kyo = {
   projects(frame: ProjectsFrame): void {
     projectsFrame = frame;
     drawProjects();
+  },
+
+  /** File > Projects…: the list of projects, or back to the project the window was showing. */
+  projectList(): void {
+    toggleProjectList();
   },
 
   /** What a press of Start orchestrator came to (KYO-719). */
@@ -3133,6 +3196,8 @@ let wanted: { name: string; session: string | null } | null = null;
  */
 function chooseProject(name: string, session: string | null = null): void {
   closeProjects();
+  // The list shown from File > Projects… closes on the project the window already shows.
+  if (name === windowProject && !session) closeProjectList();
   if (sendGate.current !== null || retracting) {
     wanted = { name, session };
     return;
@@ -3193,6 +3258,39 @@ function closeProjects(): void {
   projectPopup.hidden = true;
   projectButton.setAttribute("aria-expanded", "false");
 }
+
+/**
+ * KYO-766: File > Projects… shows the list of projects in place of everything under the top
+ * bar, as a first run does, and the same item or Escape returns to what was showing. Nothing
+ * of the project is cleared, so its chat, composer and view stand as they were.
+ */
+function projectListShown(): boolean {
+  return document.body.classList.contains("pick-project");
+}
+
+function closeProjectList(): void {
+  document.body.classList.remove("pick-project");
+}
+
+function toggleProjectList(): void {
+  // With no project the list already stands there.
+  if (!windowProject) return;
+  if (projectListShown()) {
+    closeProjectList();
+    return;
+  }
+  closeProjects();
+  document.body.classList.add("pick-project");
+  post("projects", { want: "list" });
+  focusProject(windowProject, document.getElementById("projects-list")!)
+    || focusProject(null, document.getElementById("projects-list")!);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !projectListShown()) return;
+  event.preventDefault();
+  closeProjectList();
+}, true);
 
 function openProjects(): void {
   projectPopup.hidden = false;
@@ -3275,7 +3373,6 @@ projectButton.addEventListener("keydown", (event) => {
 // --------------------------------------------------------------------- Records (KYO-732)
 
 const FILTERS_KEY = "records-filters";
-const FOLDS_KEY = "records-folds";
 const REVEAL_MS = 1600;
 const recordsPane = document.getElementById("view-records")!;
 const recordsNote = document.getElementById("records-note")!;
@@ -3296,7 +3393,6 @@ const narrowing: Narrowing = {
   ...stored<Partial<Narrowing>>(FILTERS_KEY, {}),
 };
 narrowing.search = "";
-let kindFolds = stored<Record<string, boolean>>(FOLDS_KEY, {});
 let viewedRecords: string[] = [];
 /** The records opened, in order, with the landing page as home (KYO-738). */
 let recordPlaces: History<string> = fresh();
@@ -3396,7 +3492,7 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
     head.append(id, kindLabel(row.kind));
     item.append(head, title);
   } else {
-    item.append(id, title);
+    item.append(id, kindLabel(row.kind), title);
     if (row.status && row.status !== "open") item.append(span("rec-status", row.status));
   }
   return item;
@@ -3434,24 +3530,9 @@ function drawRecordLists(): void {
       ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
       : [emptyRow("No record has been viewed.")]);
 
-  const groups: HTMLElement[] = [];
-  for (const group of byKind(shown)) {
-    const folded = isFolded(group.kind, group.rows.length, kindFolds);
-    const head = document.createElement("div");
-    head.className = folded ? "kind-head" : "kind-head open";
-    head.setAttribute("role", "button");
-    head.setAttribute("aria-expanded", String(!folded));
-    head.append(span("chevron", "›"), kindLabel(group.kind), span("kind-count", String(group.rows.length)));
-    head.addEventListener("click", () => {
-      kindFolds = { ...kindFolds, [group.kind]: !folded };
-      store(FOLDS_KEY, kindFolds);
-      drawRecordLists();
-    });
-    groups.push(head);
-    if (!folded) groups.push(...group.rows.map((row) => recordRow(row, "landing")));
-  }
+  // The landing page lists the same rows in the same order, without groups (KYO-759).
   document.getElementById("records-groups")!.replaceChildren(
-    ...(groups.length ? groups : [emptyRow(nothing)]));
+    ...(shown.length ? shown.map((row) => recordRow(row, "landing")) : [emptyRow(nothing)]));
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";

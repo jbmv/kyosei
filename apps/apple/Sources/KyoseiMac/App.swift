@@ -34,6 +34,14 @@ struct KyoseiMacApp: App {
                 .navigationTitle(feed.project.isEmpty ? "Kyosei" : feed.project)
         }
         .defaultSize(width: 980, height: 860)
+        .commands {
+            // The File menu's one item of the app's own (KYO-766): the list of projects, which
+            // a first run shows, and which nothing else returns to once a project is chosen.
+            CommandGroup(replacing: .newItem) {
+                Button("Projects…") { feed.toggleProjectList() }
+                    .keyboardShortcut("o", modifiers: .command)
+            }
+        }
 
         Settings {
             SettingsView(feed: feed)
