@@ -161,13 +161,12 @@ def test_a_token_with_only_send_is_refused_and_the_remedy_clears_it(
     only_send = issue("ipad", device_tokens.PERMISSION_SEND)
     status, refused = post(served, START, only_send)
     assert status == 403 and refused["reason"] == "no-start-permission"
-    assert "kyo devices revoke ipad" in refused["error"]
-    assert "kyo devices issue <name> --permission start" in refused["error"]
+    assert "`kyo devices grant ipad --permission start`" in refused["error"]
     assert sessions(env) == []
 
-    # The remedy, as the sentence gives it: revoke, and issue with each permission needed.
-    assert invoke(["devices", "revoke", "ipad"]).code == 0
-    status, started = post(served, START, issue("ipad", "send", "start"))
+    # The remedy, as the sentence gives it (KYO-747): grant, and the same token then starts.
+    assert invoke(["devices", "grant", "ipad", "--permission", "start"]).code == 0
+    status, started = post(served, START, only_send)
     assert status == 200 and sessions(env) == ["TST"], started
 
 

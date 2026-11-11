@@ -17,7 +17,7 @@ from .test_kyo137_docs_obligations import (
     _governed_doc_and_a_branch_that_only_touches_code,
     _write,
 )
-from .test_kyo_accept_tip_and_summary import _dispatch_with_a_report, _met
+from .test_kyo_accept_tip_and_summary import _dispatch_with_a_report
 
 
 def _commit(project: Path, branch: str, text: str, subject: str) -> str:

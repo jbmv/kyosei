@@ -325,7 +325,9 @@ def test_token_only_prints_the_token_alone_with_no_trailing_newline(store_home: 
     assert "\n" not in alone.out and " " not in alone.out
     token = alone.out
     digest = device_tokens.token_digest(token)
-    devices = device_tokens.read_devices(device_tokens.tokens_path({"KYOSEI_HOME": str(store_home)}))
+    devices = device_tokens.read_devices(
+        device_tokens.tokens_path({"KYOSEI_HOME": str(store_home)})
+    )
     assert [d.name for d in devices if d.digest == digest] == ["phone"]
     assert invoke(["devices", "revoke", "ipad", "--token-only"]).code != 0
     assert invoke(["devices", "revoke", "ipad"]).code == 0, "dropping the flag clears it"

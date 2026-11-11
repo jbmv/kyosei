@@ -400,15 +400,14 @@ def test_a_token_without_the_permission_is_refused_and_the_remedy_clears_it(
         refused = body_json(body)
         assert status == 403 and refused["reason"] == "no-files-permission", refused
         assert b"# Read me" not in body
-    assert "kyo devices revoke phone" in refused["error"]
-    assert "`kyo devices issue <name> --permission files`" in refused["error"]
+    assert "`kyo devices grant phone --permission files`" in refused["error"]
 
-    # The remedy, as the sentence spells it: revoke, and issue with the permission.
+    # The remedy, as the sentence spells it (KYO-747): grant, and the same token reads.
+    assert invoke(["devices", "grant", "phone", "--permission", "files"]).code == 0
+    assert files.get("code/blob/README.md", token=other)[0] == 200
+    assert files.json("code/tree", token=other)[0] == 200
+    # A revoked token is refused from then on.
     assert invoke(["devices", "revoke", "phone"]).code == 0
-    again = issue("phone", "files")
-    assert files.get("code/blob/README.md", token=again)[0] == 200
-    assert files.json("code/tree", token=again)[0] == 200
-    # The revoked token is refused from then on.
     status, refused = files.json("code/tree", token=other)
     assert status == 401 and refused["reason"] == "revoked-token"
 

@@ -226,7 +226,7 @@ def test_a_token_with_only_send_is_refused_and_the_remedy_clears_it(
     refused = opened(sender)
     assert refused.status == 403 and refused.refusal["reason"] == "no-terminal-permission"
     assert "--permission terminal" in refused.refusal["error"]
-    assert "kyo devices revoke ipad" in refused.refusal["error"]
+    assert "`kyo devices grant ipad --permission terminal`" in refused.refusal["error"]
     status, typed = post(bed, INPUT, {"connection": "any", "data": "x"}, sender)
     assert status == 403 and typed["reason"] == "no-terminal-permission"
     status, sized = post(bed, RESIZE, {"connection": "any", "cols": 80, "rows": 24}, sender)
@@ -234,9 +234,9 @@ def test_a_token_with_only_send_is_refused_and_the_remedy_clears_it(
     # No client was attached to the pane's session, and nothing reached the pane.
     assert pane.control_clients() == [] and pane.screen() == ""
 
-    # The remedy the refusal names: revoke, and issue with the permission.
-    assert invoke(["devices", "revoke", "ipad"]).code == 0
-    holder = issue("ipad", "send", "terminal")
+    # The remedy the refusal names (KYO-747): grant, and the same token then opens it.
+    assert invoke(["devices", "grant", "ipad", "--permission", "terminal"]).code == 0
+    holder = sender
     stream = opened(holder)
     connection = ready(stream)
     stream.event("screen")

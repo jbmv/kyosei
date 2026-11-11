@@ -163,10 +163,10 @@ def test_a_token_without_notes_permission_is_refused_and_the_remedy_clears_it(
     document = {"text": "x", "entered": "typed"}
     status, refused = post(bed, notes_path, document, send_only)
     assert status == 403 and refused["reason"] == "no-notes-permission"
-    assert "kyo devices revoke ipad" in refused["error"]
-    assert "--permission notes" in refused["error"]
-    assert invoke(["devices", "revoke", "ipad"]).code == 0
-    assert post(bed, notes_path, document, issue("ipad", "notes", "send"))[0] == 201
+    assert "`kyo devices grant ipad --permission notes`" in refused["error"]
+    # The remedy the refusal names (KYO-747): grant, and the same token is then taken.
+    assert invoke(["devices", "grant", "ipad", "--permission", "notes"]).code == 0
+    assert post(bed, notes_path, document, send_only)[0] == 201
 
 
 def test_a_revoked_token_is_refused_at_once(

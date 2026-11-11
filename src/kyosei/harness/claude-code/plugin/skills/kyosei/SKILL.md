@@ -147,9 +147,9 @@ individually (`kyo edit <id> --plan <plan-id>`, `--plan` on `kyo new`, `--no-pla
 Consult `kyosei/kinds.yml` for what a kind accepts and produces. All three write paths enforce
 it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo spawn` the source
 record's own kind (KYO-50). Before answering a turn that puts a choice to the person, run
-`kyo discuss open --title "<topic>"`, which stamps it (KYO-658); file the decision from it, `kyo
+`kyo discuss open --title "<topic>"` (KYO-658); file the decision from it, `kyo
 spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
-(KYO-644). With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
+(KYO-644; `--keep-open` for more). With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
 needing design work first is a proposal.
 
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing
@@ -244,8 +244,8 @@ schema `kyo report-schema` prints (KYO-149).
 `SubagentStop` guards -- `kyo check-clean` and `kyo check-branch` -- run *after* the worker's
 final message, and a worker they block goes back and commits, rebases or amends, so shas ingested
 on the hand-back alone can stop existing. A repeat stop is not blocked (KYO-592). Read the
-report when it arrives; hold the merge until the stop verdict is in. If you merged early and the branch was rewritten, the correction is a
-second report carrying `"amends": "<report id>"`.
+report when it arrives; hold the merge until the stop verdict is in. If you merged early and the branch was rewritten, the correction is
+`kyo report <dispatch-id> --amend-with-branch`.
 
 **Nor is a notice that the worker "stopped with background work of its own still running"**. If
 it says the worker "has not reported yet", there is nothing to ingest: wait for the hand-back.
@@ -348,8 +348,8 @@ Verdicts (`kyo verify <cid> --verdict <v> --method <m> --evidence-file f.txt`) f
 (KYO-264, KYO-265) -- only gates are findable (Awaiting, `kyo list --gate-tag`):
 `kyo gate <id> awaiting:human-run --do "<what to look at>"` naming the criterion (`--do-file`,
 `--tag`). **When they approve, `kyo confirm <id> --quote-file q.txt` verifies met
-(human-observed, words as evidence), ungates and moves the record** (KYO-494; `--no-close` for
-a decision gate on unfinished work, `--gate` when it asks), crediting the person: q.txt is
+(human-observed), ungates and moves the record** (KYO-494; `--no-close` for
+a decision gate on open work, `--gate` or `--all-unobserved` when it asks), crediting the person: q.txt is
 their words alone, checked against the session transcript (KYO-644). On completion it commits
 the `close_wave: generate:` files (KYO-577). A "no" is `kyo verify`, credited; your own
 look `kyo verify --method agent-observed`; a lapsed wait `kyo ungate --withdrawn`;

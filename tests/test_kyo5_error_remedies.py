@@ -3874,6 +3874,35 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-745 and KYO-749: each refusal is provoked, and its remedy run, by the test cited.
+    "report_ingest.py:_amend_document_from_branch#1": (
+        "not provoked by this walk: needs a branch this clone cannot read, and the remedy is to "
+        "run in the repository "
+        "that holds it or to hand-write the amendment, which this check cannot author"
+    ),
+    "report_ingest.py:_amend_document_from_branch#0": (
+        "not provoked by this walk: "
+        "needs a dispatch with no ingested report and a worker's report file to file first; "
+        "proved by test_a_dispatch_with_no_ingested_report_is_refused_and_the_filing_is_the_remedy"
+    ),
+    "report_ingest.py:_amend_document_from_branch#2": (
+        "not provoked by this walk: "
+        "needs a dispatch whose branch holds nothing beyond its report; proved, and the "
+        "`kyo accept` it names run to exit 0, by "
+        "test_a_branch_with_nothing_beyond_the_report_is_refused_and_accept_is_the_remedy"
+    ),
+    "cmd_discuss.py:_refuse_closed_source#0": (
+        "not provoked by this walk: "
+        "`kyo discuss open` files a fresh discussion and the spawn is repeated from it; "
+        "proved by test_a_record_spawned_from_a_closed_discussion_is_refused_naming_discuss_open"
+    ),
+    "cmd_accept.py:_refuse_if_branch_moved#0": (
+        "not provoked by this walk: "
+        "a hand-written amending report: the worker (or the orchestrator) adds the missing "
+        "commit(s) to commits[], sets amends, and files it; this check "
+        "cannot author a report's contents. Proved by tests/test_kyo_accept_tip_and_summary.py"
+        "::test_an_amending_report_ending_on_the_tip_clears_the_refusal"
+    ),
     # KYO-735.d2: `kyo sessions` remedies, each run by the test the reason names.
     "cmd_sessions.py:record_scratch_dir#0": (
         "the same command run inside the session, where the harness sets "
@@ -4442,31 +4471,7 @@ UNREACHED: dict[str, str] = {
 #: the message and the entry moved into :data:`PROVOKED`, which is the transition this
 #: table exists to force. The mechanism is kept for the next finding, and
 #: ``test_a_finding_is_wired_to_a_provoker`` is what stops it rotting while unused.
-FINDINGS: dict[str, str] = {    # KYO-745 and KYO-749: remedies that run `kyo` lines, listed with the cited proofs.
-    "report_ingest.py:_amend_document_from_branch#0": (
-        "needs a dispatch with no ingested report and a worker's report file to file first; "
-        "proved by test_a_dispatch_with_no_ingested_report_is_refused_and_the_filing_is_the_remedy"
-    ),
-    "report_ingest.py:_amend_document_from_branch#1": (
-        "needs a branch this clone cannot read, and the remedy is to run in the repository "
-        "that holds it or to hand-write the amendment, which this check cannot author"
-    ),
-    "report_ingest.py:_amend_document_from_branch#2": (
-        "needs a dispatch whose branch holds nothing beyond its report; proved, and the "
-        "`kyo accept` it names run to exit 0, by "
-        "test_a_branch_with_nothing_beyond_the_report_is_refused_and_accept_is_the_remedy"
-    ),
-    "cmd_discuss.py:_refuse_closed_source#0": (
-        "`kyo discuss open` files a fresh discussion and the spawn is repeated from it; "
-        "proved by test_a_record_spawned_from_a_closed_discussion_is_refused_naming_discuss_open"
-    ),
-    "cmd_accept.py:_refuse_if_branch_moved#0": (
-        "a hand-written amending report: the worker (or the orchestrator) adds the missing "
-        "commit(s) to commits[], sets amends, and files it; this check "
-        "cannot author a report's contents. Proved by tests/test_kyo_accept_tip_and_summary.py"
-        "::test_an_amending_report_ending_on_the_tip_clears_the_refusal"
-    ),
-}
+FINDINGS: dict[str, str] = {}
 
 
 #: KYO-84.c2, the half of the surface this check can only RECORD. Each of these names a

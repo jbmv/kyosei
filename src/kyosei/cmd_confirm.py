@@ -836,7 +836,10 @@ def _resolution_line(record_id: str, resolved: dict, gate) -> str:
             "unsettled criterion/criteria to verify"
         )
     if rule == RULE_ALL_UNOBSERVED:
-        return f"resolved: --all-unobserved -> {count} criterion/criteria; gate in scope: {gate_part}"
+        return (
+            f"resolved: --all-unobserved -> {count} criterion/criteria; "
+            f"gate in scope: {gate_part}"
+        )
     if rule == RULE_SOLE_UNOBSERVED:
         return (
             f"resolved: {record_id}'s sole unmet-unobserved criterion; gate in scope: {gate_part}"
