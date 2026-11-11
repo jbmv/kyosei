@@ -633,6 +633,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 - **2026-11-11** — `KYO-813` (bug) — The Mac app aborted at launch on both machines while the other stores were rebuilt to schema 34
 - **2026-11-11** — `KYO-812` (task) — Transcript search: a derived local index of prompts and replies, a command and a kyo serve route (E6)
+- **2026-11-11** — `KYO-809` (bug) — A held prompt taken back on another device loses its anchors and tags
 - **2026-11-11** — `KYO-808` (task) — The public documents are reworded where they sell, sloganise or narrate their own history
 - **2026-11-11** — `KYO-805` (investigation) — How often a not-affected docs verdict is contradicted by its own diff
 - **2026-11-11** — `KYO-803` (task) — The Quick start and the getting-started walkthrough run as a test
