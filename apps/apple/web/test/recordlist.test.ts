@@ -1,5 +1,5 @@
-// Run with `npm test`. What a filter chip of the Records view costs on a store of several
-// hundred records (KYO-833), in a headless Chrome fed the frames the app would send; a machine
+// Run with `npm test`. What the Records view's lists cost on a store of several hundred
+// records (KYO-833), as laid out by KYO-835: the drawer's results and the home page's groups, in a headless Chrome fed the frames the app would send; a machine
 // with no Chrome skips these.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -54,93 +54,102 @@ async function open(rows: Row[] = ROWS): Promise<Page> {
   return opened;
 }
 
-interface Pressed { took: number; landing: string[]; side: string[]; pressed: string; count: string }
+/** Types in the drawer's search field, whose results are the drawer's list (KYO-835). */
+const search = (opened: Page, text: string) => opened.run(`(() => {
+  const field = document.querySelector("#records-side .records-search");
+  field.value = ${JSON.stringify(text)};
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+})()`);
+
+interface Pressed { took: number; side: string[]; pressed: string }
 
 /**
- * Presses a chip of the landing page or of the side bar, and reads the two lists once the
- * frame that shows them has been drawn. `took` is from the press to the end of that frame:
- * the handler, the style and layout it leaves to do, and the paint.
+ * Presses the drawer's Open only chip and reads its list once the frame that shows it has
+ * been drawn. `took` is from the press to the end of that frame.
  */
-const press = (opened: Page, place: "landing" | "side", name: string) => opened.run<Pressed>(`new Promise((done) => {
-  const chip = document.querySelector("#records-${place} .chip[data-filter=${name}]");
-  const ids = (list) => [...document.querySelectorAll(list + " [data-open]")].map((row) => row.dataset.open);
+const press = (opened: Page) => opened.run<Pressed>(`new Promise((done) => {
+  const chip = document.querySelector("#records-side .chip[data-filter=open]");
   const began = performance.now();
   chip.click();
   requestAnimationFrame(() => {
     const channel = new MessageChannel();
     channel.port1.onmessage = () => done({
       took: performance.now() - began,
-      landing: ids("#records-groups"),
-      side: ids("#records-list"),
+      side: [...document.querySelectorAll("#records-list [data-open]")].map((row) => row.dataset.open),
       pressed: chip.getAttribute("aria-pressed"),
-      count: document.getElementById("records-count").textContent,
     });
     channel.port2.postMessage(0);
   });
 })`);
 
-test("a chip turned on or off redraws both lists within 100 ms, with the same records in the same order", async (t) => {
+test("Open only narrows the drawer's results and puts them back within 100 ms, in the same order", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
-  const steps: [string, string[]][] = [
-    ["open", OPEN], ["open", ALL],
-    ["dispatchable", READY], ["dispatchable", ALL],
-    ["awaiting", AWAITING], ["awaiting", ALL],
-  ];
-  for (const place of ["landing", "side"] as const) {
-    for (const [name, expected] of steps) {
-      const found = await press(opened, place, name);
-      const what = `${name} pressed ${found.pressed} on the ${place}`;
-      assert.deepEqual(found.landing, expected, `${what}: the landing page`);
-      assert.deepEqual(found.side, expected, `${what}: the side bar`);
-      assert.equal(
-        found.count, expected.length === SIZE ? `${SIZE} records` : `${expected.length} of ${SIZE} records`, what);
-      // The limit the criterion states. Measured at about 20 ms with every record put back,
-      // and about 30 ms before the rows were kept and left undrawn off screen.
-      assert.ok(found.took < 100, `${what} took ${found.took} ms`);
-    }
+  await search(opened, "record");
+  for (const expected of [OPEN, ALL, OPEN, ALL]) {
+    const found = await press(opened);
+    assert.deepEqual(found.side, expected, `Open only ${found.pressed}`);
+    // Measured at about 20 ms with every record put back (KYO-833.r1).
+    assert.ok(found.took < 100, `Open only ${found.pressed} took ${found.took} ms`);
   }
 });
 
 test("a press puts back the rows already drawn, and a row out of the window is not laid out", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
-  // Each row is marked, the done ones are filtered out and put back, and the marks are counted.
-  await opened.run(`document.querySelectorAll("#records-groups [data-open], #records-list [data-open]")
-    .forEach((row) => { row.marked = true; })`);
-  await press(opened, "landing", "open");
-  await press(opened, "landing", "open");
-  const found = await opened.run<{
-    landing: number; side: number; marked: number; first: boolean; last: boolean; sideRule: string; height: number;
-  }>(`(() => {
-    const landing = [...document.querySelectorAll("#records-groups [data-open]")];
+  await search(opened, "record");
+  await opened.run(`document.querySelectorAll("#records-list [data-open]").forEach((row) => { row.marked = true; })`);
+  await press(opened);
+  await press(opened);
+  const found = await opened.run<{ side: number; marked: number; rule: string }>(`(() => {
     const side = [...document.querySelectorAll("#records-list [data-open]")];
-    const drawn = (row) => row.querySelector(".rec-title").checkVisibility({ contentVisibilityAuto: true });
     return {
-      landing: landing.length,
       side: side.length,
-      marked: [...landing, ...side].filter((row) => row.marked).length,
-      first: drawn(landing[0]),
-      last: drawn(landing.at(-1)),
-      sideRule: getComputedStyle(side[0]).contentVisibility,
-      height: document.getElementById("records-groups").getBoundingClientRect().height / landing.length,
+      marked: side.filter((row) => row.marked).length,
+      rule: getComputedStyle(side[0]).contentVisibility,
     };
   })()`);
-  assert.equal(found.landing, SIZE);
   assert.equal(found.side, SIZE);
-  assert.equal(found.marked, 2 * SIZE, "every row is the element it was before the two presses");
-  assert.equal(found.first, true, "the first row is in the window and drawn");
-  assert.equal(found.last, false, "the last row is far below the window and not drawn");
-  assert.equal(found.sideRule, "auto");
-  // A row not drawn takes the room it takes when drawn, so the page is as long as it was.
-  const drawnHeight = await opened.run<number>(
-    `document.querySelector("#records-groups [data-open]").getBoundingClientRect().height`);
-  assert.ok(Math.abs(found.height - drawnHeight) < 0.05, `a row is ${drawnHeight}px drawn and ${found.height}px on average`);
+  assert.equal(found.marked, SIZE, "every row is the element it was before the two presses");
+  assert.equal(found.rule, "auto", "a row out of the window is not laid out");
+});
+
+test("the home page groups every record by what it waits on, Closed folded and drawn a hundred at a time", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  const groups = () => opened.run<{ name: string; count: string; rows: number; open: boolean }[]>(`
+    [...document.querySelectorAll("#records-groups .home-group")].map((group) => ({
+      name: group.dataset.group,
+      count: group.querySelector(".home-group-count").textContent,
+      rows: group.querySelectorAll("[data-open]").length,
+      open: group.classList.contains("open"),
+    }))`);
+  const awaiting = AWAITING.length;
+  const ready = READY.filter((id) => !AWAITING.includes(id)).length;
+  const otherOpen = OPEN.filter((id) => !AWAITING.includes(id) && !READY.includes(id)).length;
+  const closed = SIZE - awaiting - ready - otherOpen;
+  assert.deepEqual(await groups(), [
+    { name: "Awaiting you", count: String(awaiting), rows: awaiting, open: true },
+    { name: "Dispatchable", count: String(ready), rows: ready, open: true },
+    { name: "Other open", count: String(otherOpen), rows: otherOpen, open: true },
+    { name: "Closed", count: String(closed), rows: 0, open: false },
+  ]);
+  await opened.run(`document.querySelector('[data-home-group="Closed"]').click()`);
+  assert.equal((await groups())[3].rows, 100);
+  await opened.run(`document.querySelector('[data-home-more="Closed"]').click()`);
+  assert.equal((await groups())[3].rows, 200);
+  // The drawer's list holds the records viewed, not the home page's rows, until a search.
+  const drawer = await opened.run<{ results: boolean; history: boolean }>(`({
+    results: !document.getElementById("records-list").hidden,
+    history: !document.getElementById("records-history").hidden,
+  })`);
+  assert.deepEqual(drawer, { results: false, history: true });
 });
 
 test("a kept row follows the record that is open, and a new list from the server is drawn anew", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open(records(40));
+  await search(opened, "record");
   const current = () => opened.run<{ side: string[]; changed: number }>(`(() => ({
     side: [...document.querySelectorAll("#records-list .rec-row.current")].map((row) => row.dataset.open),
     changed: window.listChanges ?? 0,
@@ -149,7 +158,7 @@ test("a kept row follows the record that is open, and a new list from the server
     window.listChanges = 0;
     new MutationObserver((changes) => { window.listChanges += changes.length; })
       .observe(document.getElementById("records-list"), { childList: true });
-    document.querySelector('#records-groups [data-open="KYO-7"]').click();
+    document.querySelector('#records-list [data-open="KYO-7"]').click();
   })()`);
   // Opening a record changes no row of the list, which is left as it stands.
   assert.deepEqual(await current(), { side: ["KYO-7"], changed: 0 });

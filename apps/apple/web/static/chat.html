@@ -92,12 +92,11 @@
             </div>
           </div>
           <div class="records-filters">
-            <button class="chip" data-filter="open" aria-pressed="false">Open</button>
-            <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>
-            <button class="chip" data-filter="awaiting" aria-pressed="false">Awaiting you</button>
+            <button class="chip" data-filter="open" aria-pressed="false">Open only</button>
           </div>
-          <div id="records-list"></div>
-          <h4>History</h4>
+          <!-- KYO-835: one list, the records viewed while the field is empty, the results while it is not. -->
+          <div id="records-list" hidden></div>
+          <h4 id="records-history-head">History</h4>
           <div id="records-history"></div>
         </div>
         <!-- Files (KYO-736): a chip for each root the server serves, the chosen root's tree,
@@ -216,21 +215,6 @@
       <div class="records-inner">
         <div id="records-note" hidden></div>
         <div id="records-landing">
-          <div class="records-tools">
-            <div class="records-searchrow">
-              <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
-              <div class="kind-control">
-                <button class="kind-button" type="button" aria-haspopup="true" aria-expanded="false">Kind</button>
-                <button class="kind-clear" type="button" aria-label="Clear the kind filter" title="Clear the kind filter" hidden>&times;</button>
-                <div class="kind-menu" role="group" aria-label="Kinds" hidden></div>
-              </div>
-            </div>
-            <div class="records-filters">
-              <button class="chip" data-filter="open" aria-pressed="false">Open</button>
-              <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>
-            <button class="chip" data-filter="awaiting" aria-pressed="false">Awaiting you</button>
-            </div>
-          </div>
           <div id="records-groups"></div>
         </div>
         <article id="record" hidden></article>
@@ -246,6 +230,10 @@
         </svg>
       </button>
       <div id="outline-panel">
+        <div data-view="records" hidden>
+          <h4>Outline</h4>
+          <div id="record-outline"></div>
+        </div>
         <div data-view="history" hidden>
           <h4>Outline</h4>
           <div id="history-outline"></div>

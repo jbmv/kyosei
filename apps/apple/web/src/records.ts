@@ -709,3 +709,28 @@ export function recordPage(
     none: all.filter((section) => !section.items.length).map((section) => section.name),
   };
 }
+
+/** The statuses of work under way, shown with the open records on the Records home. */
+const UNDER_WAY = new Set(["open", "working", "built", "verified"]);
+
+/** One group of the Records home (KYO-835). */
+export interface HomeGroup<T> { name: "Awaiting you" | "Dispatchable" | "Other open" | "Closed"; rows: T[] }
+
+/**
+ * The Records home's groups, each record in one, in the order of `rows`: those awaiting the
+ * person, then those ready to dispatch, then the rest of the work under way, then everything
+ * settled, a current decision included.
+ */
+export function homeGroups<T extends RecordRow>(
+  rows: T[], ready: ReadonlySet<string>, awaiting: ReadonlySet<string>,
+): HomeGroup<T>[] {
+  const groups: HomeGroup<T>[] = [
+    { name: "Awaiting you", rows: [] }, { name: "Dispatchable", rows: [] },
+    { name: "Other open", rows: [] }, { name: "Closed", rows: [] },
+  ];
+  for (const row of rows) {
+    const at = awaiting.has(row.id) ? 0 : ready.has(row.id) ? 1 : UNDER_WAY.has(row.status ?? "") ? 2 : 3;
+    groups[at].rows.push(row);
+  }
+  return groups;
+}

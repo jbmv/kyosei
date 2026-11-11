@@ -1153,6 +1153,24 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 .outline-row.person { padding-left: 34px; color: var(--muted); }
 .outline-row.current { background: var(--line); }
 
+/* The Records home (KYO-835): folding groups by what each record waits on. */
+.home-group { margin: 0 0 14px; }
+.home-group-head { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0 0 6px; padding: 6px 2px; border: 0; border-bottom: 1px solid var(--soft-line); background: none; color: var(--text); font: 600 15px/1.4 -apple-system, system-ui, sans-serif; text-align: left; cursor: default; }
+.home-group-head .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; }
+.home-group.open .home-group-head .chevron { transform: rotate(90deg); }
+.home-group-count { color: var(--muted); font-weight: 400; font-size: 13px; }
+.home-group:not(.open) .home-group-body { display: none; }
+.home-more { margin: 4px 0 0; }
+#records-list[hidden], #records-history[hidden], #records-history-head[hidden] { display: none; }
+/* The outline of an open record: its sections, each with a caret that lists its items. */
+.outline-section { display: flex; align-items: baseline; gap: 6px; }
+.outline-section .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; cursor: default; }
+.outline-section.open .chevron { transform: rotate(90deg); }
+.outline-section .outline-row { flex: 1; min-width: 0; }
+.outline-items { padding-left: 16px; }
+.outline-items[hidden] { display: none; }
+.outline-items .outline-row { font-size: 12.5px; color: var(--muted); }
+
 /* ---------------------------------------------------------------- Drawers (KYO-835) */
 /* The left drawer is the side bar; the right one the outline. Each slides out under the
    pointer and stays docked when its icon is pressed, the view's pane making room. */

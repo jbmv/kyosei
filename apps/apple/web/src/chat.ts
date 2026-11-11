@@ -17,7 +17,7 @@ import { highlight, render } from "./pipeline";
 import { chipPieces } from "./chipwords";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
-  dispatchableIds, historyFrom, historyRows, narrow, newestFirst, parseLink, prefixOf,
+  dispatchableIds, historyFrom, historyRows, homeGroups, narrow, newestFirst, parseLink, prefixOf,
   recordOf, recordPage, refParts, visit, when, withKinds,
 } from "./records";
 import {
@@ -4641,15 +4641,23 @@ function drawRecordLists(): void {
   drawKindControls();
   const shown = narrow(rowsNewestFirst(), narrowing, readyRecords, awaitingRecords);
   const nothing = !listsRead ? "Reading the records." : "No record matches.";
-  fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
-  fill(
-    recordsHistoryList,
-    viewedRecords.length
-      ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
-      : [emptyRow("No record has been viewed.")]);
+  // KYO-835: the drawer's one list is the results while the field holds anything, and the
+  // records viewed while it is empty, so that it never repeats the home page.
+  const searching = narrowing.search.trim() !== "";
+  recordsList.hidden = !searching;
+  recordsHistoryList.hidden = searching;
+  document.getElementById("records-history-head")!.hidden = searching;
+  if (searching) fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
+  else {
+    fill(
+      recordsHistoryList,
+      viewedRecords.length
+        ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
+        : [emptyRow("No record has been viewed.")]);
+  }
 
-  // The landing page lists the same rows in the same order, without groups (KYO-759).
-  fill(recordsGroups, shown.length ? shown.map((row) => keptRow(row, "landing")) : [emptyRow(nothing)]);
+  // The home page: every record in one folding group by what it waits on (KYO-835).
+  drawHomeGroups(nothing);
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";
@@ -4659,6 +4667,125 @@ function drawRecordLists(): void {
     : shown.length === recordRows.length
       ? plural(recordRows.length, "record")
       : `${shown.length} of ${plural(recordRows.length, "record")}`;
+}
+
+const HOME_FOLDED_KEY = "records-home-folded";
+/** The groups folded on the home page; Closed starts folded, being most of the store. */
+let homeFolded = new Set<string>(stored<string[]>(HOME_FOLDED_KEY, ["Closed"]) ?? ["Closed"]);
+/** How many rows of each long group are drawn, a hundred more at each press. */
+const homeShown = new Map<string, number>();
+const HOME_STEP = 100;
+
+function drawHomeGroups(nothing: string): void {
+  if (!listsRead || !recordRows.length) {
+    fill(recordsGroups, [emptyRow(nothing)]);
+    return;
+  }
+  const groups = homeGroups(rowsNewestFirst(), readyRecords, awaitingRecords);
+  fill(recordsGroups, groups.map((group) => {
+    const box = document.createElement("section");
+    box.className = "home-group";
+    box.dataset.group = group.name;
+    const open = !homeFolded.has(group.name);
+    if (open) box.classList.add("open");
+    const head = document.createElement("button");
+    head.className = "home-group-head";
+    head.dataset.homeGroup = group.name;
+    head.append(span("chevron", "›"), group.name, span("home-group-count", String(group.rows.length)));
+    const body = document.createElement("div");
+    body.className = "home-group-body";
+    // A folded group's rows are not drawn, so that the thousand closed records cost nothing.
+    if (open) {
+      const limit = homeShown.get(group.name) ?? HOME_STEP;
+      body.append(...(group.rows.length
+        ? group.rows.slice(0, limit).map((row) => keptRow(row, "landing"))
+        : [emptyRow("None.")]));
+      if (group.rows.length > limit) {
+        const more = document.createElement("button");
+        more.className = "text-button home-more";
+        more.dataset.homeMore = group.name;
+        more.textContent = `Show ${Math.min(HOME_STEP, group.rows.length - limit)} more of ${group.rows.length - limit}`;
+        body.append(more);
+      }
+    }
+    box.append(head, body);
+    return box;
+  }));
+}
+
+recordsGroups.addEventListener("click", (event) => {
+  const target = event.target as Element;
+  const head = target.closest<HTMLElement>("[data-home-group]");
+  if (head) {
+    const name = head.dataset.homeGroup!;
+    if (homeFolded.has(name)) homeFolded.delete(name);
+    else homeFolded.add(name);
+    store(HOME_FOLDED_KEY, [...homeFolded]);
+    drawHomeGroups("");
+    return;
+  }
+  const more = target.closest<HTMLElement>("[data-home-more]");
+  if (more) {
+    const name = more.dataset.homeMore!;
+    homeShown.set(name, (homeShown.get(name) ?? HOME_STEP) + HOME_STEP);
+    drawHomeGroups("");
+  }
+});
+
+/** The open record's outline in the right drawer: its sections, each listing its items. */
+const openOutline = new Set<string>();
+function drawRecordOutline(): void {
+  const holder = document.getElementById("record-outline")!;
+  if (openRecordId === null || !openRecordDoc) {
+    holder.replaceChildren();
+    return;
+  }
+  const rows: HTMLElement[] = [];
+  const title = recordArticle.querySelector("h1");
+  if (title) {
+    const row = document.createElement("div");
+    row.className = "outline-row";
+    row.textContent = openRecordId;
+    row.addEventListener("click", () => title.scrollIntoView({ block: "start" }));
+    rows.push(row);
+  }
+  for (const heading of Array.from(recordArticle.querySelectorAll<HTMLElement>("h2"))) {
+    const name = heading.firstChild?.textContent ?? heading.textContent ?? "";
+    const items: HTMLElement[] = [];
+    for (let next = heading.nextElementSibling; next && next.tagName !== "H2"; next = next.nextElementSibling) {
+      if (next.classList.contains("rec-item")) items.push(next as HTMLElement);
+    }
+    const line = document.createElement("div");
+    line.className = "outline-section";
+    if (openOutline.has(name)) line.classList.add("open");
+    const caret = span("chevron", items.length ? "›" : "");
+    const label = document.createElement("div");
+    label.className = "outline-row";
+    label.textContent = `${name} ${heading.querySelector("small")?.textContent ?? ""}`.trim();
+    label.addEventListener("click", () => heading.scrollIntoView({ block: "start" }));
+    line.append(caret, label);
+    const list = document.createElement("div");
+    list.className = "outline-items";
+    list.hidden = !openOutline.has(name);
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "outline-row";
+      const ref = item.dataset.ref ?? "";
+      const state = item.querySelector(".rec-state")?.textContent ?? "";
+      row.textContent = [ref.replace(`${openRecordId}.`, ""), state].filter(Boolean).join(" · ")
+        || firstWords(item.textContent ?? "", 6);
+      row.addEventListener("click", () => item.scrollIntoView({ block: "center" }));
+      list.append(row);
+    }
+    caret.addEventListener("click", () => {
+      if (openOutline.has(name)) openOutline.delete(name);
+      else openOutline.add(name);
+      line.classList.toggle("open", openOutline.has(name));
+      list.hidden = !openOutline.has(name);
+    });
+    rows.push(line, list);
+  }
+  holder.replaceChildren(...rows);
 }
 
 function recordLine(line: Line, wide: boolean): HTMLElement {
@@ -4763,6 +4890,8 @@ function drawRecord(): void {
   recordArticle.hidden = openRecordId === null;
   if (openRecordId === null) {
     recordArticle.replaceChildren();
+    drawRecordOutline();
+    applyDocks();
     return;
   }
   const place = recordsPane.scrollTop;
@@ -4806,6 +4935,8 @@ function drawRecord(): void {
     parts.push(none);
   }
   recordArticle.replaceChildren(...parts);
+  drawRecordOutline();
+  applyDocks();
   recordsPane.scrollTop = place;
   if (revealRef) {
     const target = [...recordArticle.querySelectorAll<HTMLElement>("[data-ref]")]
@@ -6575,7 +6706,9 @@ function applyDocks(): void {
   document.body.classList.toggle("view-chat", currentView === "chat");
   document.body.classList.toggle("dock-left", docked[`left:${currentView}`] === true);
   document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
-  document.body.classList.toggle("has-outline", currentView === "history" && !historyReader.hidden);
+  document.body.classList.toggle("has-outline",
+    (currentView === "history" && !historyReader.hidden)
+    || (currentView === "records" && openRecordId !== null && !recordArticle.hidden));
 }
 
 function toggleDock(side: "left" | "right"): void {

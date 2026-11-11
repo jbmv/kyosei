@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  HISTORY_LIMIT, awaitingIds, dispatchableIds, historyFrom, historyRows,
+  HISTORY_LIMIT, awaitingIds, dispatchableIds, historyFrom, historyRows, homeGroups,
   kindControlText, kindsOf, kindsPresent, textOf, withKinds, latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
   pressed, reportItem, taskOf,
@@ -516,4 +516,19 @@ test("the Kind control names the kinds checked, and says when one is no kind of 
   assert.deepEqual(kindControlText("mac", present), { text: "Kind", active: false, unknown: [] });
   assert.deepEqual(kindControlText("kind:plan,task", present), { text: "Kind: plan, task", active: true, unknown: [] });
   assert.deepEqual(kindControlText("kind:foo", present), { text: "Kind: foo (no such kind)", active: true, unknown: ["foo"] });
+});
+
+test("the Records home puts each record in one group: awaiting, dispatchable, other open, closed", () => {
+  const rows = [
+    { id: "K-1", kind: "task", title: "a", status: "open" },
+    { id: "K-2", kind: "bug", title: "b", status: "open" },
+    { id: "K-3", kind: "task", title: "c", status: "built" },
+    { id: "K-4", kind: "task", title: "d", status: "done" },
+    { id: "K-5", kind: "decision", title: "e", status: "current" },
+    { id: "K-6", kind: "task", title: "f", status: "open" },
+  ];
+  const groups = homeGroups(rows, new Set(["K-2", "K-1"]), new Set(["K-1"]));
+  assert.deepEqual(groups.map((group) => [group.name, group.rows.map((row) => row.id)]), [
+    ["Awaiting you", ["K-1"]], ["Dispatchable", ["K-2"]], ["Other open", ["K-3", "K-6"]], ["Closed", ["K-4", "K-5"]],
+  ]);
 });

@@ -1,4 +1,4 @@
-// Run with `npm test`. The Records list's Kind control (KYO-785), in a headless Chrome fed the
+// Run with `npm test`. The Records drawer's Kind control (KYO-785, KYO-835), in a headless Chrome fed the
 // frames the app would send; a machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -33,7 +33,9 @@ interface Seen {
 
 /** Reads the landing page's list, field and Kind control. */
 const seen = (opened: Page) => opened.run<Seen>(`(() => {
-  const root = document.getElementById("records-landing");
+  // KYO-835: the search field and the Kind control are the left drawer's, and their results
+  // are its one list, which holds the records viewed while nothing is typed or checked.
+  const root = document.getElementById("records-side");
   const control = root.querySelector(".kind-control");
   const button = control.querySelector(".kind-button");
   const probe = document.createElement("span");
@@ -42,7 +44,7 @@ const seen = (opened: Page) => opened.run<Seen>(`(() => {
   const accent = getComputedStyle(probe).color;
   probe.remove();
   return {
-    ids: [...document.querySelectorAll("#records-groups [data-open]")].map((row) => row.dataset.open),
+    ids: [...document.querySelectorAll("#records-list:not([hidden]) [data-open]")].map((row) => row.dataset.open),
     label: button.textContent,
     color: getComputedStyle(button).color,
     accent,
@@ -58,13 +60,13 @@ const seen = (opened: Page) => opened.run<Seen>(`(() => {
 const landing = (opened: Page) => opened.run(`document.querySelector("[data-view-id=records], #views [data-view=records]")?.click()`);
 
 const type = (opened: Page, text: string) => opened.run(`(() => {
-  const field = document.querySelector("#records-landing .records-search");
+  const field = document.querySelector("#records-side .records-search");
   field.value = ${JSON.stringify(text)};
   field.dispatchEvent(new Event("input", { bubbles: true }));
 })()`);
 
 const check = (opened: Page, kind: string) => opened.run(`(() => {
-  const box = [...document.querySelectorAll("#records-landing .kind-menu input")].find((b) => b.value === ${JSON.stringify(kind)});
+  const box = [...document.querySelectorAll("#records-side .kind-menu input")].find((b) => b.value === ${JSON.stringify(kind)});
   box.click();
 })()`);
 
@@ -74,8 +76,8 @@ test("the Kind control lists the kinds the store holds, and the list shows only 
   await landing(opened);
   let now = await seen(opened);
   assert.deepEqual(now.boxes, ["decision", "plan", "task"]);
-  assert.equal(now.ids.length, 4, "with none checked every kind is shown");
-  await opened.run(`document.querySelector("#records-landing .kind-button").click()`);
+  assert.equal(now.ids.length, 0, "with none checked the drawer lists the records viewed, not results");
+  await opened.run(`document.querySelector("#records-side .kind-button").click()`);
   assert.equal((await seen(opened)).menuShut, false);
   await check(opened, "plan");
   now = await seen(opened);
@@ -86,7 +88,7 @@ test("the Kind control lists the kinds the store holds, and the list shows only 
   await check(opened, "plan");
   await check(opened, "task");
   now = await seen(opened);
-  assert.equal(now.ids.length, 4);
+  assert.equal(now.ids.length, 0);
   assert.equal(now.field.trim(), "", "unchecking the last kind removes the token");
 });
 
@@ -104,11 +106,11 @@ test("the control reads Kind in the ordinary colour, and names the kinds in the 
   assert.equal(active.label, "Kind: plan, task");
   assert.equal(active.color, active.accent);
   assert.equal(active.clearShown, true);
-  await opened.run(`document.querySelector("#records-landing .kind-clear").click()`);
+  await opened.run(`document.querySelector("#records-side .kind-clear").click()`);
   const cleared = await seen(opened);
   assert.equal(cleared.label, "Kind");
   assert.equal(cleared.clearShown, false);
-  assert.equal(cleared.ids.length, 4);
+  assert.equal(cleared.ids.length, 0);
   assert.equal(cleared.field, "");
 });
 
@@ -128,7 +130,7 @@ test("kind:plan in the search field checks the kind and searches the rest as tex
   assert.deepEqual(now.ids.sort(), ["KYO-1", "KYO-2", "KYO-3"]);
   // Clearing from the control takes the token out of the field and leaves the words.
   await type(opened, "kind:plan mac app");
-  await opened.run(`document.querySelector("#records-landing .kind-clear").click()`);
+  await opened.run(`document.querySelector("#records-side .kind-clear").click()`);
   now = await seen(opened);
   assert.equal(now.field, "mac app");
   assert.deepEqual(now.ids.sort(), ["KYO-1", "KYO-2", "KYO-4"]);
