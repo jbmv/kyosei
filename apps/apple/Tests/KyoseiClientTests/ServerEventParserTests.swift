@@ -653,3 +653,67 @@ private let screenIdle = #"{"ok": true, "screen": {"state": "idle"}, "terminal":
     #expect(server.requests(to: "/screen").isEmpty)
     #expect(ContinuousClock.now - started < .seconds(2))
 }
+
+// MARK: The project switcher (KYO-761)
+
+@Test func theServersProjectsAreReadWithWhatCannotBeOpened() throws {
+    let json = #"""
+        {"ok": true, "registry": "/r/projects.json", "projects": [
+          {"name": "alpha", "root": "/a", "store_root": "/s/a", "prefix": "ALP",
+           "can_open": true, "problem": null},
+          {"name": "beta", "root": "/b", "store_root": null, "prefix": null,
+           "can_open": false, "problem": "the store is missing"}]}
+        """#
+    let rows = try ServeClient.projects(in: Data(json.utf8))
+    #expect(
+        rows == [
+            ProjectRow(name: "alpha", can_open: true),
+            ProjectRow(name: "beta", can_open: false, problem: "the store is missing"),
+        ])
+}
+
+private func object(_ json: String) throws -> [String: Any] {
+    try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+}
+
+@Test func theProjectsFrameCarriesOnlyLiveSessions() throws {
+    let frame = try object(
+        ProjectsFrame.json(
+            project: "alpha",
+            projects: [ProjectRow(name: "alpha", can_open: true)],
+            problem: nil,
+            live: [
+                "alpha": [
+                    SessionRow(session_id: "s1", live: true, has_pane: true, title: "One"),
+                    SessionRow(session_id: "s2", live: false, has_pane: false, title: "Two"),
+                ]
+            ]))
+    #expect(frame["project"] as? String == "alpha")
+    #expect(frame["problem"] is NSNull)
+    let projects = try #require(frame["projects"] as? [[String: Any]])
+    #expect(projects.map { $0["name"] as? String } == ["alpha"])
+    #expect(projects.first?["can_open"] as? Bool == true)
+    let live = try #require((frame["live"] as? [String: Any])?["alpha"] as? [[String: Any]])
+    #expect(live.map { $0["session_id"] as? String } == ["s1"])
+    #expect(live.first?["title"] as? String == "One")
+    #expect(live.first?["has_pane"] as? Bool == true)
+}
+
+@Test func aProjectsFrameBeforeTheListIsReadSaysSoAndWhy() throws {
+    let frame = try object(
+        ProjectsFrame.json(
+            project: "", projects: nil, problem: "kyo serve cannot be reached.", live: [:]))
+    #expect(frame["projects"] is NSNull)
+    #expect(frame["problem"] as? String == "kyo serve cannot be reached.")
+}
+
+@Test func anUnchangedProjectsFrameIsTheSameText() {
+    let rows = [ProjectRow(name: "b", can_open: true), ProjectRow(name: "a", can_open: true)]
+    let live = [
+        "a": [SessionRow(session_id: "s1", live: true, has_pane: true)],
+        "b": [SessionRow(session_id: "s2", live: true, has_pane: true)],
+    ]
+    let first = ProjectsFrame.json(project: "a", projects: rows, problem: nil, live: live)
+    let second = ProjectsFrame.json(project: "a", projects: rows, problem: nil, live: live)
+    #expect(first == second)
+}

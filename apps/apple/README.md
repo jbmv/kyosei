@@ -14,9 +14,30 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
 kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
 
+## Projects
+
+The window shows one project at a time. The bar above the top bar begins with a dropdown that
+names it and lists every project the server serves (`GET /v1/projects`); a project whose store
+cannot be opened is listed with the server's reason and cannot be chosen. Choosing a project
+turns the window to it: the chat, the side panel, Records, Files and the status bar are then
+that project's. After the dropdown the bar holds a link for each project that has a live session
+in a pane, which turns the window to that project and follows that session. The server has no
+route that lists live sessions across projects, so the app reads each project's session list
+every five seconds, and the list of projects every thirty and whenever the dropdown is opened.
+
+The composer's unsent prompts belong to the project they were written in. The server keeps a
+draft for each session, and a save that is waiting is sent before the window leaves the
+session. The page also keeps each project's prompts in its own storage, under the server and
+the project, which is what a project with no session or a device with no token has.
+
+The app opens on the project it last showed. On a first run, or when the server no longer
+lists that project, it shows the list of projects in place of the chat. The logic is in
+`web/src/projects.ts`, and the switch is `SessionFeed.open`.
+
 ## Views
 
-A bar above the top bar lists the views, and choosing one replaces the pane under it. The
+After the dropdown and the links, the bar lists the views, and choosing one replaces the pane
+under it. The
 chat stays drawn beneath the others and keeps following its session, so returning to it
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
@@ -76,8 +97,9 @@ cd web && npm ci && npm run build && cd ..
 swift run KyoseiMac
 ```
 
-The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name another server
-and project, which `KYOSEI_SERVE_URL` and `KYOSEI_PROJECT` override. Sending needs a device
+The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name another server,
+which `KYOSEI_SERVE_URL` overrides. The project is chosen in the window, and `KYOSEI_PROJECT`
+names the one a launch opens on. Sending needs a device
 token from `kyo devices issue`, entered in Settings and kept in the Keychain. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
 permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold

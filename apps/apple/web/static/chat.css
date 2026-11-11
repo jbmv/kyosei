@@ -705,18 +705,59 @@ body.ended #live { opacity: 0.55; }
    the accent colour marks the current one, and the others darken under the pointer. */
 #views {
   position: fixed;
-  z-index: 4;
+  /* Above the panes and the side bar, which the project dropdown opens over. */
+  z-index: 6;
   top: 0;
   left: 0;
   right: calc(var(--composer-width) + 6px);
   height: var(--views-height);
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 16px;
   padding: 0 16px;
   background: var(--background);
   border-bottom: 1px solid var(--soft-line);
 }
+#view-items { display: flex; flex: none; align-items: center; gap: 22px; }
+
+/* The project switcher (KYO-761). The bar begins with the dropdown, then a link for each
+   project with a live orchestrator session, then a divider, then the views. The links give
+   way first when the bar is narrow: they scroll sideways and the rest keeps its place. */
+#project-switch { position: relative; flex: none; }
+#project-button { display: inline-flex; align-items: center; gap: 7px; max-width: 240px; height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: none; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+#project-button:hover, #project-button[aria-expanded="true"] { background: var(--panel); }
+#project-button svg { flex: none; color: var(--muted); }
+#project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#project-popup { position: absolute; top: 29px; left: 0; width: max-content; min-width: 220px; max-width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--background); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.16); }
+#project-popup[hidden] { display: none; }
+.project-rows { display: flex; flex-direction: column; gap: 1px; }
+.project-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 5px 10px 5px 24px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+.project-row:hover, .project-row:focus-visible { background: var(--panel); outline: none; }
+.project-row[aria-selected="true"] { font-weight: 600; background-image: radial-gradient(circle, var(--link) 0 3px, transparent 3.5px); background-size: 8px 8px; background-repeat: no-repeat; background-position: 9px 10px; }
+.project-row[aria-disabled="true"] { cursor: default; }
+.project-row[aria-disabled="true"]:hover { background: none; }
+.project-row[aria-disabled="true"] .project-row-name { color: var(--muted); }
+.project-row-problem { color: var(--failed); font-size: 12px; font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+.project-note { padding: 5px 10px 6px; color: var(--muted); font-size: 12.5px; white-space: normal; }
+#session-links { display: flex; flex: 0 1 auto; align-items: center; gap: 14px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+#session-links::-webkit-scrollbar { display: none; }
+#session-links:empty { display: none; }
+.session-link { flex: none; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; cursor: pointer; }
+.session-link:hover { color: var(--text); }
+.session-link[aria-current="true"] { color: var(--text); font-weight: 600; }
+#views-divider { flex: none; width: 1px; height: 16px; background: var(--line); }
+
+/* With no project the list of them stands in place of everything under the bar, and the
+   bar holds no view to choose. */
+#projects-pane { display: none; position: fixed; z-index: 5; top: var(--views-height); left: 0; right: 0; bottom: 0; overflow-y: auto; background: var(--background); }
+body.no-project #projects-pane { display: block; }
+body.no-project #views { right: 0; }
+body.no-project #views-divider, body.no-project #view-items { display: none; }
+.projects-inner { max-width: 560px; margin: 0 auto; padding: 34px 28px 40px; }
+.projects-inner h2 { margin: 0 0 4px; font-size: 19px; }
+.projects-inner p { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+#projects-list .project-row { padding-top: 7px; padding-bottom: 7px; font-size: 14px; }
+#projects-list .project-row[aria-selected="true"] { background-position: 9px 13px; }
 .view-item { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
 .view-item:hover { color: var(--text); }
 .view-item[aria-current="page"] { color: var(--link); font-weight: 600; }

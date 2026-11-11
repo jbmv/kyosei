@@ -22,6 +22,9 @@ import {
 import {
   type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
 } from "./history";
+import {
+  type ProjectsFrame, choices, keepBoxes, keptBoxes, listNote, sessionLinks, typedChoice,
+} from "./projects";
 import { SendGate } from "./sending";
 import { findSpans, fold, queryTerms, step, tally } from "./search";
 import { type StartFrame, startView } from "./start";
@@ -881,6 +884,8 @@ const SESSIONS_SHOWN = 4;
 let allSessions = false;
 
 function select(session: string): void {
+  // The prompts being typed are the session's that is left, and are saved to it first.
+  flushDraft();
   (window as any).webkit?.messageHandlers?.select?.postMessage({ session });
 }
 
@@ -922,7 +927,7 @@ function setText(id: string, text: string): void {
 
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
-  setText("top-title", session?.title ?? menu?.project ?? "");
+  setText("top-title", session?.title ?? menu?.project ?? windowProject);
   drawActivity();
   drawAgents();
 
@@ -1431,8 +1436,8 @@ const kyo = {
   },
 
   menu(data: Menu): void {
-    // Another project's press says nothing about this one.
-    if (menu && menu.project !== data.project) startFrame = null;
+    // A list the app read for the project the window has left is not this one's.
+    if (data.project !== windowProject) return;
     menu = data;
     followFilesSession(data.current);
     drawMenu();
@@ -1557,6 +1562,7 @@ const kyo = {
       // A refusal ends the send, so the prompt stays and Send can be pressed again.
       sendGate.end();
       drawSending();
+      switchWhenFree();
       return;
     }
     composerNote.textContent = "";
@@ -1566,10 +1572,12 @@ const kyo = {
     drawSending();
     if (!textAreas().length) addBox();
     remember();
+    switchWhenFree();
   },
 
   /** A held message taken back, to edit. */
   retracted(frame: { text: string }): void {
+    retracting = false;
     showHeld(null);
     const held = stored<SavedBox | null>(HELD_KEY, null);
     showTexts([frame.text, ...currentTexts()], [...(held ? [held] : []), ...currentBoxes()]);
@@ -1588,7 +1596,7 @@ const kyo = {
     const saved = frame.boxes.filter((box) => box.text || box.marks?.length);
     showTexts(saved.map((box) => box.text), saved);
     loadingDraft = false;
-    store(CURRENT_KEY, currentBoxes());
+    keepCurrent();
     adoptShelf();
   },
 
@@ -1629,6 +1637,76 @@ const kyo = {
 
   note(frame: { text: string }): void {
     composerNote.textContent = frame.text;
+    // A message that could not be taken back is answered with a note.
+    if (retracting) {
+      retracting = false;
+      switchWhenFree();
+    }
+  },
+
+  /**
+   * The project the window shows, sent before any other frame of it (KYO-761); the empty
+   * string is no project, and the list of them is then shown in place of the chat. `scope`
+   * names the server and the project. Everything the page held of the project it showed
+   * goes, and the composer takes the prompts that were left unsent in this one.
+   */
+  project(frame: { project?: string; scope?: string }): void {
+    const leaving = scope;
+    windowProject = frame.project ?? "";
+    scope = frame.scope ?? windowProject;
+    document.body.classList.toggle("no-project", !windowProject);
+    if (scope !== leaving) {
+      // A save that was waiting is the project's that is left. The page sends it before it
+      // asks for another project; when the app turned the window by itself there is no
+      // session left to save it to, and the prompts are kept here all the same.
+      if (draftSave !== undefined) clearTimeout(draftSave);
+      draftSave = undefined;
+      if (leaving !== null) keepBoxes(kept, leaving, currentBoxes());
+      wanted = null;
+      retracting = false;
+      sendGate.end();
+      coldConfirm = null;
+      uploads.clear();
+      hideMark();
+      // Shown without a save: the server's draft for the session replaces these when the
+      // session opens, and a save made before then would be of the wrong prompts.
+      loadingDraft = true;
+      const boxes = keptBoxes<SavedBox | string>(kept, scope, windowProject !== "")
+        .map((box) => (typeof box === "string" ? { text: box } : box))
+        .filter((box) => box.text || box.marks?.length);
+      showTexts(boxes.map((box) => box.text), boxes);
+      loadingDraft = false;
+      drawSending();
+    }
+    kyo.clear();
+    menu = null;
+    startFrame = null;
+    allSessions = false;
+    document.getElementById("sessions")!.replaceChildren();
+    document.getElementById("sessions-more")!.hidden = true;
+    chatPlace = null;
+    sentMarks_ = [];
+    storeTags = [];
+    paintAnchors();
+    composerNote.textContent = "";
+    showHeld(null);
+    followFilesSession(null);
+    // The terminal drawer shows the session's pane, which the app opens again for the next.
+    emulator?.reset();
+    showTerminalNote("");
+    showEmulator(false);
+    kyo.terminal({ terminal: null });
+    kyo.screen({ screen: null });
+    drawEnded();
+    drawStart();
+    drawSide();
+    drawProjects();
+  },
+
+  /** The server's projects and their live sessions, sent when any of it changes (KYO-761). */
+  projects(frame: ProjectsFrame): void {
+    projectsFrame = frame;
+    drawProjects();
   },
 
   /** What a press of Start orchestrator came to (KYO-719). */
@@ -2598,7 +2676,6 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   return area;
 }
 
-const CURRENT_KEY = "composer-current";
 const SHELF_KEY = "composer-shelf";
 const WIDTH_KEY = "composer-width";
 interface Shelved { at: string; texts: string[] }
@@ -2638,10 +2715,31 @@ function currentBoxes(): SavedBox[] {
   });
 }
 
-/** What this window last kept. Before marks it kept the texts alone. */
-function storedBoxes(): SavedBox[] {
-  return stored<(SavedBox | string)[]>(CURRENT_KEY, [])
-    .map((box) => (typeof box === "string" ? { text: box } : box));
+/**
+ * The window's project and the name its unsent prompts are kept under, which the app states
+ * in its `project` frame (KYO-761); `scope` is null until the first one arrives.
+ */
+let windowProject = "";
+let scope: string | null = null;
+
+/** The window's storage, named inside each call: where it is denied, naming it throws. */
+const kept = {
+  getItem: (key: string) => localStorage.getItem(key),
+  setItem: (key: string, value: string) => localStorage.setItem(key, value),
+  removeItem: (key: string) => localStorage.removeItem(key),
+};
+
+/** Keeps the boxes in this window's storage, under the project they were written for. */
+function keepCurrent(): void {
+  if (scope !== null) keepBoxes(kept, scope, currentBoxes());
+}
+
+/** Sends a save that was waiting for a pause, when the window is about to leave its session. */
+function flushDraft(): void {
+  if (draftSave === undefined) return;
+  clearTimeout(draftSave);
+  draftSave = undefined;
+  post("saveDraft", { boxes: currentBoxes() });
 }
 
 const DRAFT_SAVE_DELAY_MS = 700;
@@ -2666,7 +2764,7 @@ function adoptShelf(): void {
 /** Keeps the boxes in this window's storage at once, and on the server after a pause. */
 function remember(): void {
   if (loadingDraft) return;
-  store(CURRENT_KEY, currentBoxes());
+  keepCurrent();
   if (draftSave !== undefined) clearTimeout(draftSave);
   draftSave = window.setTimeout(() => {
     draftSave = undefined;
@@ -2850,8 +2948,20 @@ function showHeld(id: string | null): void {
     : "Sending…";
 }
 
+/** Whether a held message has been asked back and the server has not answered. */
+let retracting = false;
+/** How long a switch waits on an answer to a retraction before it goes ahead. */
+const RETRACT_WAIT_MS = 5000;
+
 document.getElementById("held-edit")!.addEventListener("click", () => {
-  if (heldId) post("retract", { id: heldId });
+  if (!heldId) return;
+  retracting = true;
+  window.setTimeout(() => {
+    if (!retracting) return;
+    retracting = false;
+    switchWhenFree();
+  }, RETRACT_WAIT_MS);
+  post("retract", { id: heldId });
 });
 
 document.getElementById("held-send-now")!.addEventListener("click", () => {
@@ -2937,8 +3047,11 @@ band.addEventListener("mousedown", (event) => {
 const savedWidth = stored<number | null>(WIDTH_KEY, null);
 if (savedWidth !== null) setComposerWidth(savedWidth);
 
-const startBoxes = storedBoxes().filter((box) => box.text || box.marks?.length);
-showTexts(startBoxes.map((box) => box.text), startBoxes);
+// One empty prompt until the app names the project, whose unsent prompts then replace it.
+// It is shown without a save, which would replace the session's draft with nothing.
+loadingDraft = true;
+showTexts([]);
+loadingDraft = false;
 const newPromptButton = document.getElementById("new-prompt")!;
 // The click leaves the focus where it is until the new prompt takes it.
 newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());
@@ -2976,7 +3089,7 @@ let currentView = "chat";
 let chatPlace: { top: number; following: boolean } | null = null;
 
 function drawViews(): void {
-  document.getElementById("views")!.replaceChildren(...VIEWS.map((view) => {
+  document.getElementById("view-items")!.replaceChildren(...VIEWS.map((view) => {
     const item = document.createElement("button");
     item.className = "view-item";
     if (view.id === currentView) item.setAttribute("aria-current", "page");
@@ -3002,6 +3115,162 @@ function showView(id: string): void {
   }
   VIEWS.find((view) => view.id === id)?.entered?.();
 }
+
+// ------------------------------------------------------- the project switcher (KYO-761)
+
+const projectButton = document.getElementById("project-button")!;
+const projectName = document.getElementById("project-name")!;
+const projectPopup = document.getElementById("project-popup")!;
+let projectsFrame: ProjectsFrame | null = null;
+/** The project asked for while the composer waits on the server, to turn to once it answers. */
+let wanted: { name: string; session: string | null } | null = null;
+
+/**
+ * Turns the window to another project, or to a session a link names. The prompts being typed
+ * are saved to the session that is left first. While a prompt is on its way to the server,
+ * or a held one is being taken back, the answer belongs to this project's composer, so the
+ * switch waits for it.
+ */
+function chooseProject(name: string, session: string | null = null): void {
+  closeProjects();
+  if (sendGate.current !== null || retracting) {
+    wanted = { name, session };
+    return;
+  }
+  wanted = null;
+  if (name === windowProject && !session) return;
+  flushDraft();
+  post("project", session ? { name, session } : { name });
+}
+
+function switchWhenFree(): void {
+  if (!wanted || sendGate.current !== null || retracting) return;
+  chooseProject(wanted.name, wanted.session);
+}
+
+/** The rows of the server's projects, for the dropdown and for the list in place of the chat. */
+function projectRows(): HTMLElement[] {
+  const rows: HTMLElement[] = [];
+  const note = listNote(projectsFrame);
+  if (note) {
+    const line = document.createElement("div");
+    line.className = "project-note";
+    line.textContent = note;
+    rows.push(line);
+  }
+  for (const choice of choices(projectsFrame)) {
+    const row = document.createElement("button");
+    row.className = "project-row";
+    row.dataset.project = choice.name;
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(choice.current));
+    const name = document.createElement("span");
+    name.className = "project-row-name";
+    name.textContent = choice.name;
+    row.append(name);
+    if (choice.openable) {
+      row.addEventListener("click", () => chooseProject(choice.name));
+    } else {
+      // Listed with its problem, and it takes no press.
+      row.setAttribute("aria-disabled", "true");
+      row.tabIndex = -1;
+      const problem = document.createElement("span");
+      problem.className = "project-row-problem";
+      problem.textContent = `Cannot be opened: ${choice.problem}`;
+      row.append(problem);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function projectsOpen(): boolean {
+  return !projectPopup.hidden;
+}
+
+function closeProjects(): void {
+  if (!projectsOpen()) return;
+  projectPopup.hidden = true;
+  projectButton.setAttribute("aria-expanded", "false");
+}
+
+function openProjects(): void {
+  projectPopup.hidden = false;
+  projectButton.setAttribute("aria-expanded", "true");
+  // The list is read again each time it is opened; the rows shown meanwhile are the last read.
+  post("projects", { want: "list" });
+  focusProject(windowProject) || focusProject(null);
+}
+
+/** Moves the focus to a project's row in the open list, or to its first row that takes one. */
+function focusProject(name: string | null, within: HTMLElement = projectPopup): boolean {
+  const rows = [...within.querySelectorAll<HTMLElement>(".project-row:not([aria-disabled])")];
+  const row = name === null ? rows[0] : rows.find((item) => item.dataset.project === name);
+  row?.focus();
+  return !!row;
+}
+
+/** The dropdown, the session links and the list in place of the chat, from the last frames. */
+function drawProjects(): void {
+  projectName.textContent = windowProject || "Choose a project";
+  const focused = document.activeElement instanceof HTMLElement
+    ? document.activeElement.dataset.project ?? null : null;
+  const holder = document.activeElement?.closest<HTMLElement>("#project-popup, #projects-list");
+  projectPopup.replaceChildren(...projectRows());
+  document.getElementById("projects-list")!.replaceChildren(...projectRows());
+  // A list redrawn while it is in use keeps the row the keys were on.
+  if (holder && focused) focusProject(focused, holder);
+  document.getElementById("session-links")!.replaceChildren(
+    ...sessionLinks(projectsFrame).map((link) => {
+      const item = document.createElement("button");
+      item.className = "session-link";
+      if (link.current) item.setAttribute("aria-current", "true");
+      item.textContent = link.project;
+      item.title = link.title
+        ? `${link.project}: ${link.title}` : `${link.project}'s live session`;
+      item.addEventListener("click", () => {
+        // A link follows the session, which is read in the chat.
+        showView("chat");
+        chooseProject(link.project, link.session);
+      });
+      return item;
+    }),
+  );
+}
+
+projectButton.addEventListener("click", () => (projectsOpen() ? closeProjects() : openProjects()));
+document.addEventListener("mousedown", (event) => {
+  if (!(event.target instanceof Node)) return;
+  if (!document.getElementById("project-switch")!.contains(event.target)) closeProjects();
+});
+// The arrows and a typed letter move among the rows of whichever list holds the focus, and
+// Escape closes the dropdown; Return and Space press the row, as they do any button.
+for (const list of [projectPopup, document.getElementById("projects-list")!]) {
+  list.addEventListener("keydown", (event) => {
+    const rows = [...list.querySelectorAll<HTMLElement>(".project-row:not([aria-disabled])")];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      rows[(at + step + rows.length) % rows.length]?.focus();
+    } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey && event.key !== " ") {
+      const name = typedChoice(choices(projectsFrame), event.key, rows[at]?.dataset.project ?? null);
+      if (name) focusProject(name, list);
+    }
+  });
+}
+document.getElementById("project-switch")!.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !projectsOpen()) return;
+  event.stopPropagation();
+  closeProjects();
+  projectButton.focus();
+});
+projectButton.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  if (projectsOpen()) focusProject(windowProject) || focusProject(null);
+  else openProjects();
+});
 
 // --------------------------------------------------------------------- Records (KYO-732)
 
@@ -4603,6 +4872,7 @@ document.getElementById("side-mentioned-more")!.addEventListener("click", () => 
 });
 
 drawViews();
+drawProjects();
 drawRecordLists();
 drawFilesSide();
 drawFile();
