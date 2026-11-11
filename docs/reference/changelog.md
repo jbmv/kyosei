@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-815` (task) — Mac app: the chat's side bar lists the chat's links, and the open view's name in the top bar goes home
 - **2026-11-11** — `KYO-814` (task) — kyo serve: search the served files by name and contents, and keep the files opened in the app per project
 - **2026-11-11** — `KYO-813` (bug) — The Mac app aborted at launch on both machines while the other stores were rebuilt to schema 34
 - **2026-11-11** — `KYO-812` (task) — Transcript search: a derived local index of prompts and replies, a command and a kyo serve route (E6)
@@ -642,6 +643,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-801` (task) — kyo docs coverage, and the docs_coverage doctor check
 - **2026-11-11** — `KYO-798` (task) — A draft changed on one device appears in the composer on another without reopening
 - **2026-11-11** — `KYO-797` (proposal) — Documents govern the code they describe, and Kyosei says when they do not
+- **2026-11-11** — `KYO-796` (bug) — The composer underlines misspelled words without correcting or capitalising them
 - **2026-11-11** — `KYO-795` (task) — The kyo serve documents describe the server as built: writes, tokens and session access
 - **2026-11-11** — `KYO-794` (task) — The README, llms.txt and AGENTS.md name the Mac app, and the app's README describes what it adds
 - **2026-11-11** — `KYO-793` (task) — The charter and the dispatch, governance, store and registry references match the CLI
