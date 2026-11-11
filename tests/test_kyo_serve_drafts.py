@@ -532,3 +532,14 @@ def test_a_session_whose_state_cannot_be_read_keeps_its_draft(bed: Bed, token: s
     put(bed, token, KILLED_DRAFT, ["perhaps still running"])
     assert texts(bed, token, PROJECT_DRAFT) == []
     assert texts(bed, token, KILLED_DRAFT) == ["perhaps still running"]
+
+
+def test_the_reference_states_the_project_draft_route_and_its_two_moves() -> None:
+    topic = (
+        Path(__file__).parent.parent / "docs" / "reference" / "topics" / "serve-and-desktop.md"
+    ).read_text(encoding="utf-8")
+    assert "| `/v1/projects/<name>/draft` | GET |" in topic
+    assert "| `/v1/projects/<name>/draft` | PUT |" in topic
+    assert f"composer/{serve_files.PROJECT_DRAFTS}/<name>.json" in topic
+    assert "A session that has ended leaves its boxes to the project" in topic
+    assert "A live session with no draft of its own takes the project's" in topic

@@ -15,7 +15,8 @@ WHAT IS WRITABLE. Exactly two things per project:
 And for this machine rather than a project: the send log, and the composer's unsent text
 (KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json`` (and, KYO-709,
 ``unfiled/<message id>.json``; KYO-763, ``project-drafts/<project>.json``), private to this
-account and refused if it would lie inside a git repository. KYO-715 adds the files a prompt attaches,
+account and refused if it would lie inside a git repository. KYO-715 adds the files a prompt
+attaches,
 ``$KYOSEI_HOME/composer/attachments/<project>/<session id>/<sha256>.<extension>``, written
 once by :func:`write_attachment` under a name it checks itself and never replaced.
 

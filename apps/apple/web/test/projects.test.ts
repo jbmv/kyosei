@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type Keep, type ProjectsFrame, LEGACY_KEY, choices, keepBoxes, keptBoxes, keptKey, listNote,
-  orchestrator, sessionLinks, typedChoice,
+  type Keep, type ProjectsFrame, LEGACY_KEY, anchorGoneNote, anchorOpens, choices, keepBoxes,
+  keptBoxes, keptKey, listNote, meetDraft, metKey, orchestrator, sessionLinks, typedChoice,
 } from "../src/projects.ts";
 
 const frame = (over: Partial<ProjectsFrame> = {}): ProjectsFrame => ({
@@ -172,4 +172,57 @@ test("storage that cannot be read or written keeps nothing and throws nothing", 
   assert.deepEqual(keptBoxes(broken, "s alpha", true), []);
   const garbled = memory(new Map([[keptKey("s alpha"), "{not json"]]));
   assert.deepEqual(keptBoxes(garbled, "s alpha", false), []);
+});
+
+// ------------------------------------------- KYO-763: a prompt carried between sessions
+
+const box = (text: string) => ({ text });
+
+test("the server's draft replaces the prompts the window kept", () => {
+  const keep = memory(new Map([[metKey("s alpha"), "1"]]));
+  const met = meetDraft(keep, "s alpha", [box("from the server")], [box("kept here")]);
+  assert.deepEqual(met, { boxes: [box("from the server")], merged: false });
+});
+
+test("the first draft a project is given keeps the prompts only this device held, once", () => {
+  const keep = memory();
+  const server = [box("from the server"), box("in both")];
+  const local = [box("in both"), box("written before the upgrade")];
+  const first = meetDraft(keep, "s alpha", server, local);
+  assert.deepEqual(first.boxes.map((b) => b.text), ["from the server", "in both", "written before the upgrade"]);
+  assert.equal(first.merged, true);
+  // From then on a prompt deleted on another device is not brought back by this one.
+  const second = meetDraft(keep, "s alpha", server, local);
+  assert.deepEqual(second, { boxes: server, merged: false });
+  // Another project has not met its draft yet.
+  assert.equal(meetDraft(keep, "s beta", [], [box("beta's")]).merged, true);
+});
+
+test("a first draft that holds everything kept here is shown as it is", () => {
+  const met = meetDraft(memory(), "s alpha", [box("same")], [box("same")]);
+  assert.deepEqual(met, { boxes: [box("same")], merged: false });
+});
+
+test("a window whose storage is denied shows the server's draft", () => {
+  const denied: Keep = {
+    getItem: () => { throw new Error("denied"); },
+    setItem: () => { throw new Error("denied"); },
+    removeItem: () => { throw new Error("denied"); },
+  };
+  assert.deepEqual(meetDraft(denied, "s alpha", [box("server")], [box("local")]).boxes, [box("server")]);
+});
+
+test("an anchor opens only in the session it was made in", () => {
+  assert.equal(anchorOpens("session-a", "session-a"), true);
+  assert.equal(anchorOpens("session-a", "session-b"), false);
+  // With no session followed there is no chat to go to.
+  assert.equal(anchorOpens("session-a", null), false);
+  assert.equal(anchorOpens("session-a", undefined), false);
+  // An anchor with no session recorded is the followed session's.
+  assert.equal(anchorOpens("", "session-b"), true);
+});
+
+test("an anchor that cannot be opened says whether its session has ended", () => {
+  assert.match(anchorGoneNote(false), /session that has ended.*sent with its words.*no longer be opened/);
+  assert.match(anchorGoneNote(true), /another session.*sent with its words/);
 });

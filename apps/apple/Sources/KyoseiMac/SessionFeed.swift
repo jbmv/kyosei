@@ -83,11 +83,35 @@ final class SessionFeed {
     private(set) var ahead: Int?
     var runningSubagents = 0
     var runningAgents: [RunningAgent] = []
-    private var draftSession: String?
-    /// The draft's etag for each session opened. A save still on its way when the window
-    /// turns to another session answers for its own session and not the one shown (KYO-761).
+    /// Where the composer's boxes are read from and saved to (KYO-763): the followed
+    /// session's draft while it is live, and the project's when no session is live. The
+    /// server moves the boxes between the two itself, when a session has ended and when a
+    /// new one first asks for its draft, so the app only chooses which to ask for.
+    /// The rows of the project's session list, which the menu's frame carries whole.
+    private struct ListedSessions: Decodable {
+        let sessions: [SessionRow]
+    }
+
+    private enum DraftPlace: Equatable {
+        case session(String)
+        case project
+    }
+    /// The place the composer's draft was last asked of, or nil before any was.
+    private var draftPlace: DraftPlace?
+    /// The place whose draft the page's boxes were last given from, which is where a save
+    /// goes: until the draft of the place just turned to has arrived, the boxes on the
+    /// screen are still the ones written under the place that was left.
+    private var shownPlace: DraftPlace?
+    /// The session whose sent marks were last asked for, so that they are asked for once.
+    private var marksSession: String?
+    /// The etag of each draft read, by its path. A save still on its way when the window
+    /// turns to another session answers for its own draft and not the one shown (KYO-761).
     private var draftEtags: [String: String] = [:]
+    /// The reads and saves of drafts, which run one at a time in the order they were asked.
     private var draftTask: Task<Void, Never>?
+    /// The wait between asking the page for a save that is pending and reading the draft
+    /// of the place the composer turns to.
+    private static let draftFlushWait = Duration.milliseconds(300)
     private var startWatch: Task<Void, Never>?
     /// Whether the terminal drawer is open, and the size of its view once the page has
     /// measured one (KYO-721).
@@ -179,13 +203,16 @@ final class SessionFeed {
             servedProblem = nil
             liveSessions = [:]
             projectVerified = false
+            draftEtags = [:]
             client = ServeClient(base: server)
         }
         self.project = project
         selected = session
         current = nil
         currentLive = false
-        draftSession = nil
+        draftPlace = nil
+        shownPlace = nil
+        marksSession = nil
         facts = nil
         remote = nil
         ahead = nil
@@ -413,24 +440,72 @@ final class SessionFeed {
         }
     }
 
-    /// Brings a session's saved draft into the composer, once for each session opened.
-    private func loadDraft(session: String) {
-        guard draftSession != session, let token = Self.deviceToken() else { return }
-        draftSession = session
-        loadMarks(session: session)
+    private func draftPath(_ place: DraftPlace) -> String {
+        switch place {
+        case .session(let session): sessionPath(session, "draft")
+        case .project: "v1/projects/\(project)/draft"
+        }
+    }
+
+    /// Brings the saved draft of `place` into the composer, once each time the composer
+    /// turns to it. A session's sent marks are read with its draft, once for each session.
+    ///
+    /// When the composer turns from another draft of the same project, the page is first
+    /// asked for any save it was holding, which goes to the draft that is left, and the
+    /// frame says `turned`: the boxes on the screen are then that other draft's, and a place
+    /// with no draft of its own does not take them as its own.
+    private func loadDraft(_ place: DraftPlace) {
+        if case .session(let session) = place, marksSession != session {
+            marksSession = session
+            loadMarks(session: session)
+        }
+        guard draftPlace != place, let token = Self.deviceToken() else { return }
+        draftPlace = place
+        let turned = shownPlace != nil
+        if turned { send("flushDraft", "null") }
         let client = client
-        let path = sessionPath(session, "draft")
-        // A save of this session's draft still on its way is read after it has landed, as it
-        // is when the window left the session a moment ago and has come back (KYO-761).
-        let saving = draftTask
+        let path = draftPath(place)
         Task {
-            await saving?.value
-            guard
-                let reply = try? await client.authorised("GET", path, token: token),
-                reply.status == 200, session == current
-            else { return }
-            draftEtags[session] = etag(in: reply.data)
-            send("draft", String(decoding: reply.data, as: UTF8.self))
+            if turned { try? await Task.sleep(for: Self.draftFlushWait) }
+            guard place == draftPlace, client.base == self.client.base else { return }
+            // A save still on its way is read after it has landed, as it is when the window
+            // left a session a moment ago and has come back (KYO-761), and a save asked for
+            // while this read is out is made after it.
+            let previous = draftTask
+            draftTask = Task {
+                await previous?.value
+                guard let reply = try? await client.authorised("GET", path, token: token)
+                else {
+                    // The server was not reached. The draft is asked for again when the
+                    // session is next read or listed, and until then nothing is saved over it.
+                    if place == draftPlace, client.base == self.client.base { draftPlace = nil }
+                    return
+                }
+                guard
+                    reply.status == 200, place == draftPlace, client.base == self.client.base,
+                    var frame = try? JSONSerialization.jsonObject(with: reply.data)
+                        as? [String: Any]
+                else { return }
+                frame["turned"] = turned
+                guard let json = try? JSONSerialization.data(withJSONObject: frame) else { return }
+                draftEtags[path] = frame["etag"] as? String
+                shownPlace = place
+                send("draft", String(decoding: json, as: UTF8.self))
+            }
+        }
+    }
+
+    /// The followed session is live or is not, as a list of the project's sessions just
+    /// read says. A session that has ended leaves its unsent boxes to the project, and the
+    /// composer turns to the project's draft, where the server has put what the session's
+    /// draft held. Reading it from the server, and not keeping what this window shows, is
+    /// what makes the newest copy win when another device saved to the session last.
+    private func followedSession(_ session: String, live: Bool) {
+        guard session == current else { return }
+        let place: DraftPlace = live ? .session(session) : .project
+        // A draft that could not be read is asked for again here.
+        if draftPlace == nil || draftPlace == (live ? .project : .session(session)) {
+            loadDraft(place)
         }
     }
 
@@ -438,31 +513,32 @@ final class SessionFeed {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["etag"] as? String
     }
 
-    /// Replaces the session's draft. Saves run one at a time, so each uses the last etag.
+    /// Replaces the draft the composer was last given. Saves run one at a time, so each
+    /// uses the last etag.
     func saveDraft(body: [String: Any]) {
-        guard let session = current, session == draftSession, let token = Self.deviceToken(),
+        guard let place = shownPlace, let token = Self.deviceToken(),
             let data = try? JSONSerialization.data(withJSONObject: body)
         else { return }
         let previous = draftTask
-        // The server, the session and its project are those of the moment the page asked.
-        // The page asks just before it leaves a project, and the save is then made after
-        // the window has turned to the next one (KYO-761).
+        // The server and the draft are those of the moment the page asked. The page asks
+        // just before it leaves a project, and the save is then made after the window has
+        // turned to the next one (KYO-761).
         let client = client
-        let path = sessionPath(session, "draft")
+        let path = draftPath(place)
         draftTask = Task {
             await previous?.value
-            let etag = draftEtags[session]
+            let etag = draftEtags[path]
             guard
                 let reply = try? await client.authorised(
                     "PUT", path, token: token, body: data, ifMatch: etag,
                     ifNoneMatch: etag == nil ? "*" : nil)
             else { return }
             if reply.status == 200 || reply.status == 201 {
-                draftEtags[session] = self.etag(in: reply.data)
+                draftEtags[path] = self.etag(in: reply.data)
             } else if reply.status == 412 {
                 // Another device saved first. Keep this text, and let the next edit replace it.
-                draftEtags[session] = self.etag(in: reply.data)
-                guard session == current else { return }
+                draftEtags[path] = self.etag(in: reply.data)
+                guard place == shownPlace, client.base == self.client.base else { return }
                 send("note", #"{"text": "This draft also changed on another device."}"#)
             }
         }
@@ -1201,6 +1277,14 @@ final class SessionFeed {
             guard !Task.isCancelled else { return }
         }
         takeRemote(from: changes)
+        // The list is how the app learns that the followed session has ended (KYO-717), and
+        // so when its unsent boxes become the project's (KYO-763).
+        if let current, project == self.project,
+            let rows = try? JSONDecoder().decode(ListedSessions.self, from: sessions).sessions,
+            let row = rows.first(where: { $0.session_id == current })
+        {
+            followedSession(current, live: row.live)
+        }
         let json =
             #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "changes": "#
             + (changes.map { String(decoding: $0, as: UTF8.self) } ?? "null")
@@ -1266,6 +1350,8 @@ final class SessionFeed {
                     currentLive = false
                     if terminalOpen, terminalSession != nil { openTerminal() }
                     send("clear", "null")
+                    // A project with no session keeps its boxes in the project's draft.
+                    loadDraft(.project)
                     state = .noSession
                     retry.reset()
                     try await Task.sleep(for: .seconds(3))
@@ -1279,7 +1365,9 @@ final class SessionFeed {
                 send("apply", String(decoding: turns, as: UTF8.self))
                 if terminalOpen, terminalSession != row.session_id { openTerminal() }
                 takeFacts(from: turns)
-                loadDraft(session: row.session_id)
+                // With no live session the boxes are the project's, whichever ended session
+                // the chat shows (KYO-763).
+                loadDraft(row.live ? .session(row.session_id) : .project)
                 await sendMenu()
                 try Task.checkCancellation()
                 guard row.live else {

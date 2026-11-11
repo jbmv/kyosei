@@ -24,7 +24,8 @@ import {
   type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
 } from "./history";
 import {
-  type ProjectsFrame, choices, keepBoxes, keptBoxes, listNote, sessionLinks, typedChoice,
+  type ProjectsFrame, anchorGoneNote, anchorOpens, choices, keepBoxes, keptBoxes, listNote,
+  meetDraft, sessionLinks, typedChoice,
 } from "./projects";
 import { SendGate } from "./sending";
 import { findSpans, fold, queryTerms, step, tally } from "./search";
@@ -1640,21 +1641,46 @@ const kyo = {
     showTexts([frame.text, ...currentTexts()], [...(held ? [held] : []), ...currentBoxes()]);
   },
 
-  /** The server's draft for a session just opened: none yet is `etag: null`. */
-  draft(frame: { boxes: SavedBox[]; etag: string | null }): void {
+  /**
+   * The server's draft for the composer: the followed session's while it is live, and the
+   * project's when no session is live (KYO-763), which is where a session's unsent prompts
+   * go when it ends and what the next session takes. None yet is `etag: null`. `turned` says
+   * the composer came here from another draft of the project, whose prompts are the ones on
+   * the screen.
+   */
+  draft(frame: { boxes: SavedBox[]; etag: string | null; turned?: boolean }): void {
+    const saved = frame.boxes.filter((box) => box.text || box.marks?.length);
+    // The server's draft carries each prompt's marks, so a prompt opens the same on any device.
+    const met = scope === null
+      ? { boxes: saved, merged: false }
+      : meetDraft(kept, scope, saved, frame.etag === null ? [] : currentBoxes());
     if (frame.etag === null) {
-      // Nothing saved for this session: what is in the boxes becomes its draft.
-      adoptShelf();
-      remember();
+      // Nothing saved here yet. Prompts this window kept for the project become the draft.
+      // Prompts shown from another draft are saved there already: they stay on the screen,
+      // and are saved here only once they are edited, so that looking at another session
+      // does not copy them into its draft.
+      if (!frame.turned) {
+        adoptShelf();
+        remember();
+      }
       return;
     }
     loadingDraft = true;
-    // The server's draft carries each prompt's marks, so a prompt opens the same on any device.
-    const saved = frame.boxes.filter((box) => box.text || box.marks?.length);
-    showTexts(saved.map((box) => box.text), saved);
+    showTexts(met.boxes.map((box) => box.text), met.boxes);
     loadingDraft = false;
     keepCurrent();
     adoptShelf();
+    // Prompts only this device held are now part of the draft, and are saved to it.
+    if (met.merged) remember();
+  },
+
+  /**
+   * The app is about to read the composer's draft from another place, as it does when the
+   * followed session ends: a save that was waiting for a pause is sent first, to the draft
+   * the prompts were written under.
+   */
+  flushDraft(): void {
+    flushDraft();
   },
 
   /** The server's answer to a pasted file: its id and path, or why it was refused. */
@@ -1957,6 +1983,11 @@ function showCaret(area: HTMLTextAreaElement): void {
 }
 
 /** The icon of one thing a mark holds: a record's and a file's are their views'. */
+/** Whether the project's session list shows a session as running; false before it is known. */
+function sessionRuns(session: string): boolean {
+  return menu?.sessions.sessions.find((row) => row.session_id === session)?.live ?? false;
+}
+
 function itemIcon(item: Item): keyof typeof ICONS {
   return item.kind === "record" ? "records" : item.kind === "path" ? "page" : item.kind;
 }
@@ -1975,7 +2006,10 @@ function drawMarks(area: HTMLTextAreaElement): void {
     const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(area, id));
     if (items.length === 1) mark.append(icon(itemIcon(items[0])));
     mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
-      : item.kind === "file" ? `attached: ${item.name}` : `anchor: ${item.words}`)).join("\n");
+      : item.kind === "file" ? `attached: ${item.name}`
+      : item.kind === "anchor" && !anchorOpens(item.session, menu?.current)
+        ? `anchor: ${item.words} (${sessionRuns(item.session) ? "another session" : "session ended"})`
+      : `anchor: ${item.words}`)).join("\n");
     mark.style.top = `${lineTop(marks, line)}px`;
     return [mark];
   });
@@ -2033,6 +2067,15 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
         chip.append(icon("file"));
       }
       chip.append(item.pending ? `${item.name} (uploading)` : item.name);
+    } else if (item.kind === "anchor" && !anchorOpens(item.session, menu?.current)) {
+      // KYO-763: an anchor carried here from another session has no place in this chat. It
+      // is still sent as its line of words, and its chip takes no press.
+      const place = boxButton("mark-anchor gone", item.words, () => {});
+      place.disabled = true;
+      place.prepend(icon("anchor"));
+      chip.title = anchorGoneNote(sessionRuns(item.session));
+      chip.classList.add("gone");
+      chip.append(place);
     } else if (item.kind === "anchor") {
       // An anchor's chip goes to the place it names.
       const place = boxButton("mark-anchor", item.words, () => reveal(item));

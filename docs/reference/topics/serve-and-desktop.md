@@ -535,12 +535,15 @@ moving between devices. Both kinds live under `$KYOSEI_HOME/composer/`, in files
 your account, and the write is refused if that directory would lie inside a git repository.
 Each route needs a device token with the `send` permission, sent as for the send routes, and
 refuses a query string. A project must have opted in to reading transcripts and record the
-session. The routes are under `/v1/projects/<name>/sessions/<id>/`.
+session. The routes are under `/v1/projects/<name>/sessions/<id>/`, except the project's own
+draft, which is `/v1/projects/<name>/draft`.
 
 | Route | Method | Purpose |
 |---|---|---|
 | `draft` | GET | The saved boxes, or `boxes: []` and `etag: null` when there are none |
 | `draft` | PUT | Replace them: `{"boxes": [{"text": ...}, ...]}` |
+| `/v1/projects/<name>/draft` | GET | The project's draft, in the same shape (KYO-763) |
+| `/v1/projects/<name>/draft` | PUT | Replace it, as a session's draft is replaced |
 | `held` | POST | Hold a message: the body of `send` |
 | `held` | GET | The held message with its text, or `held: null` |
 | `held` | DELETE | Retract it, with `If-Match: <its id>` |
@@ -551,6 +554,30 @@ a writer holding an older etag is refused with 412 and the current etag, so one 
 overwrite another's newer draft. The etag covers the stored file, including the time of the
 write. A box may carry keys beside `text`; the server keeps them unread. Sending need not be
 switched on, since a draft does not touch a session.
+
+**The project's draft** (KYO-763) holds the boxes written while no session of the project is
+live, so that a prompt written between sessions on one device is found on another. It is
+read and written as a session's draft is, with the same permission and the same etag rule,
+and is stored in `$KYOSEI_HOME/composer/project-drafts/<name>.json`. The server moves boxes
+between the two kinds of draft itself, from the copies it stores, at two moments:
+
+- A session that has ended leaves its boxes to the project. The server is not told when a
+  session ends, so the move is made when the project's draft is next read. Each ended
+  session's boxes are appended to the project's draft, the session that ended first going
+  first, and the session's draft is left empty. A box already in the project's draft word
+  for word is not added a second time.
+- A live session with no draft of its own takes the project's. The first `GET` of such a
+  session's `draft` writes the project's boxes as the session's draft, empties the project's
+  draft, and answers with the boxes. A second device that asks afterwards reads the
+  session's draft, so the boxes are handed over once however many devices are open. This is
+  the one `GET` among these routes that writes. A session that has ended, and a session whose
+  draft exists and is empty, take nothing.
+
+A session counts as ended when the project's session list records it so, or records it as
+running while no process runs it. A session whose state cannot be read keeps its draft. Each
+move writes the destination before it empties the source, and empties the source only if no
+device has saved to it since it was read, so an interrupted or contested move can repeat a
+box and cannot lose one.
 
 **A held message** is kept until the session's screen is idle and then delivered as `send`
 would type it. It passes the checks a send makes, so holding needs `serve_send: true`. A
