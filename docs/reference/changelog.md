@@ -625,6 +625,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
 - **2026-11-11** — `KYO-727` (bug) — Mac app composer: an empty prompt vanishes, an anchor lands on a new line, and the view jumps while typing
+- **2026-11-11** — `KYO-719` (task) — kyo serve starts an orchestrator session, and the Mac app has a Start button
 - **2026-11-11** — `KYO-717` (task) — Mac app: an ended session shown as ended, weekly use this session, the project in the window title, and commits ahead of the remote
 - **2026-11-10** — `KYO-741` (task) — Mac app: search in the chat
 - **2026-11-10** — `KYO-739` (task) — kyo show reads a criterion, gate, note or claim by its id
