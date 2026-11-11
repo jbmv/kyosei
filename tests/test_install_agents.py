@@ -6,6 +6,7 @@ model and effort; it refuses to overwrite a differing file without ``--force``; 
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -134,16 +135,20 @@ def test_a_type_named_twice_is_refused(project: Path) -> None:
     assert install(project, "--type", "worker=sonnet").code == 0
 
 
-@pytest.mark.parametrize(("template", "effort"), [("worker", "medium"), ("designer", "high")])
-def test_the_templates_are_this_repositorys_hand_written_types(template: str, effort: str) -> None:
+@pytest.mark.parametrize("template", ["worker", "designer"])
+def test_the_templates_are_this_repositorys_hand_written_types(template: str) -> None:
     # The hand-written files in this repository are the model for the templates
-    # (KYO-607); rendered with the same model and effort they must read the same.
+    # (KYO-607); rendered with the same model and effort they must read the same. The files
+    # are local and gitignored, and the maintainer changes their model and effort (KYO-743),
+    # so both are read from the file and not stated here.
     hand_written = REPO_ROOT / ".claude" / "agents" / f"kyosei-{template}.md"
     if not hand_written.is_file():
         pytest.skip("not Kyosei's own repository")
-    assert cmd_install_agents.render(template, "opus", effort) == hand_written.read_text(
-        encoding="utf-8"
-    )
+    text = hand_written.read_text(encoding="utf-8")
+    model = re.search(r"^model: (.+)$", text, re.MULTILINE)
+    effort = re.search(r"^effort: (.+)$", text, re.MULTILINE)
+    assert model and effort, "the hand-written type states a model and an effort"
+    assert cmd_install_agents.render(template, model.group(1), effort.group(1)) == text
 
 
 # ------------------------------------------------- c3: kyo onboard --check reads them
