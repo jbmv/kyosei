@@ -690,6 +690,11 @@ def _coverage_data(ctx: Context, coverage, config, documents_in) -> dict:
             for reach in coverage.broad_targets
         ],
         "broad_target_limit": docs_coverage.BROAD_TARGET_FILES,
+        "symbol_only": [
+            {"path": entry.path, "symbols": list(entry.symbols)}
+            for entry in coverage.symbol_only
+        ],
+        "symbol_only_count": len(coverage.symbol_only),
         "documents": [
             {
                 "doc_path": reach.doc_path,
@@ -797,6 +802,14 @@ def _cmd_docs_coverage(ctx: Context, args: Namespace) -> Output:
             lines.append(
                 f"    {reach.doc_path} [{reach.section}] {reach.target}: {reach.files} files"
             )
+    if coverage.symbol_only:
+        lines.append(
+            f"  {len(coverage.symbol_only)} governed file(s) are governed by `#symbol` "
+            "targets only, so a change outside the named symbols, a new function "
+            "included, raises nothing (symbols in --json):"
+        )
+        for entry in coverage.symbol_only:
+            lines.append(f"    {entry.path}: {len(entry.symbols)} symbol(s)")
     quiet = [reach for reach in coverage.documents if reach.governing_nothing]
     if quiet:
         lines.append("  sections that govern nothing, by document (names in --json):")
