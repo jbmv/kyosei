@@ -33,6 +33,13 @@ fails if another ``kyosei.serve*`` module reaches them). The one thing these rou
 to be written is the layer's own log of an uncatalogued screen under
 ``$KYOSEI_HOME/pane-unrecognised``, outside any repository.
 
+A DEVICE TOKEN (KYO-791). Every route here is refused with 401 unless the request carries
+the token of a device this machine issued one to and has not revoked
+(:func:`kyosei.serve_send.require_reader`, called by ``serve.py``'s ``_session_route``
+before anything else). The token may hold any permission or none: these routes change
+nothing, so they ask who is reading and not what the reader may do. Without it, an account
+on this machine or a device on the tailnet that reaches the server reads no session.
+
 OPT-IN (KYO-656). Every route refuses, naming ``read_transcripts``, in a project that has not
 opted in. The check is made first, before ``sessions.json`` is read. A session is also
 served only by the project whose ``sessions.json`` records it, so an opted-in project cannot
@@ -721,8 +728,8 @@ class ProjectSessions:
 def _agenda_etag(environ: dict[str, str], session_id: str) -> str | None:
     """The etag of the session's stored task list (KYO-770); None when it has none.
 
-    The etag and no item: this stream asks for no device token, and the list is read
-    behind one.
+    The etag and no item: this stream is open to a device token of any permission, and
+    the list is read with one holding ``send``.
     """
     from . import cmd_agenda, serve_files
 

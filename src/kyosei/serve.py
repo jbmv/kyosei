@@ -1028,9 +1028,14 @@ class ServeHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ session routes
 
     def _session_route(self, name: str, rest: list[str], query: str) -> tuple | None:
-        """Every session route, opt-in checked first (:mod:`kyosei.serve_sessions`)."""
-        from . import serve_sessions
+        """Every session read route (:mod:`kyosei.serve_sessions`).
 
+        The device token is checked first, before the project is looked up or its opt-in
+        read, so a request without one learns nothing from the refusal (KYO-791).
+        """
+        from . import serve_send, serve_sessions
+
+        serve_send.require_reader(self.server.environ, self.headers.get("Authorization"))
         root = self.server.project(name).root
         project = serve_sessions.ProjectSessions(root, self.server.environ)
         cursor = _session_cursor(query)
