@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 
-from . import docs_suggest, scaffold
+from . import docs_coverage, docs_parse, docs_suggest, scaffold
 from . import kinds as kinds_module
 from . import registry as registry_module
 from .config import CONFIG_NAME, KYOSEI_DIR
+from .errors import KyoseiError
 from .store import Store
 
 
@@ -62,6 +63,56 @@ def check_docs_suggestions(store: Store) -> list[str]:
         "problem depends on any of this. Considered them and want none? "
         f"`docs_suggest_notice: false` in {KYOSEI_DIR}/{CONFIG_NAME} stops this line"
     ]
+
+
+def _docs_coverage_findings(store: Store, level: str) -> list[str]:
+    """The coverage findings when this project's effective level is ``level``, else none.
+
+    Both checks below read the declaration through :func:`kyosei.docs_coverage.read_config`
+    and each speaks for one level only, so at most one of them speaks. A declaration that
+    does not parse is the problem check's to name (the other is silent), because a notice
+    is the wrong tier for a file that is wrong.
+    """
+    try:
+        config = docs_coverage.read_config(store.config.root, store.config.repo_root)
+    except KyoseiError as exc:
+        return [str(exc)] if level == docs_coverage.LEVEL_PROBLEM else []
+    if docs_coverage.effective_level(config) != level:
+        return []
+    try:
+        documents_in = docs_parse.document_set(store.config.kyosei_dir)
+    except registry_module.RegistryError:
+        return []
+    coverage = docs_coverage.measure(store.config.repo_root, documents_in, config)
+    return docs_coverage.finding(coverage, config)
+
+
+def check_docs_coverage(store: Store) -> list[str]:
+    """KYO-801.c3: code that no document section governs, at the notice level. A NOTICE.
+
+    One finding with the count and the directories holding the most, and the command that
+    prints the files. It is the default: a project that has not answered gets it.
+
+    The bar :data:`kyosei.doctor.NOTICE_CHECKS` states is met the way ``docs_suggestions``'s
+    is. An incomplete map is an EXPECTED state (most projects start there), the reader
+    cannot clear it by acting now except by the work of writing a map, and exit 3 from the
+    ``Stop`` and ``SessionEnd`` hooks would paint every stop red over it. A project that
+    wants it to fail chooses ``level: problem``, which :func:`check_docs_coverage_required`
+    reports instead, and ``level: off`` silences both. Silent in a project with no
+    documents, where nothing could govern.
+    """
+    return _docs_coverage_findings(store, docs_coverage.LEVEL_NOTICE)
+
+
+def check_docs_coverage_required(store: Store) -> list[str]:
+    """KYO-801.c3: the same finding where the project chose ``level: problem``. A PROBLEM.
+
+    The project chose it and declared the list of code it applies to (the parser refuses
+    ``level: problem`` without one), and the remedy is one edit available now: a
+    ``governs:`` target or an ``unmapped`` entry. Also names a ``docs_coverage`` value that
+    does not parse. Never speaks beside :func:`check_docs_coverage`.
+    """
+    return _docs_coverage_findings(store, docs_coverage.LEVEL_PROBLEM)
 
 
 def check_kind_registry(store: Store) -> list[str]:

@@ -2160,6 +2160,17 @@ CONFIG_CONSUMERS: dict[str, tuple[str, ...]] = {
     # each reader through `config.read_guard_tests`, on `close_wave`'s terms: a malformed
     # value refuses `kyo dispatch`, is named by `kyo doctor`, and never blinds a hook.
     "guard_tests": ("cmd_dispatch._cmd_dispatch_create", "doctor_install.check_guard_tests"),
+    # KYO-801. Whether, and how strictly, a project hears of code that no document section
+    # governs: a level (off, notice, problem), an optional declared list of the code
+    # globs (required for problem) and the paths not expected to be governed, each with a
+    # reason. Parsed by each reader through `docs_coverage.read_config`, on `guard_tests`'s
+    # terms: a malformed value refuses `kyo docs coverage`, is named by `kyo doctor`, and
+    # never blinds a hook.
+    "docs_coverage": (
+        "cmd_views._cmd_docs_coverage",
+        "doctor_registry.check_docs_coverage",
+        "doctor_registry.check_docs_coverage_required",
+    ),
 }
 
 #: Config keys a project may legitimately not carry (KYO-60).
@@ -2245,6 +2256,9 @@ OPTIONAL_CONFIG_KEYS: frozenset[str] = frozenset(
         # KYO-744: absent in every project that has declared no guard test, and then a
         # brief says nothing about them.
         "guard_tests",
+        # KYO-801: absent in every project that has not answered, and then the notice
+        # applies, which is the default.
+        "docs_coverage",
     }
 )
 

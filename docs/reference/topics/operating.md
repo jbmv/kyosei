@@ -1111,6 +1111,13 @@ kyo docs suggest                           # draft the documents.yml declaration
                                             # paste. Writes nothing, enforces nothing; one
                                             # doctor NOTICE, off with docs_suggest_notice:
                                             # false (KYO-303)
+kyo docs coverage [--level LEVEL]          # the code no document section governs, by
+                                            # directory, with the files only a pointer
+                                            # comment reaches, the targets reaching more
+                                            # than 20 files and the sections governing
+                                            # nothing; read-only. --level records
+                                            # docs_coverage.level (off, notice, problem)
+                                            # in kyosei/config.yml (KYO-801)
 kyo check-branch feature --against main    # merge guard: fails if the branch diffs
                                             # kyosei/ or ideas/ (wired into SubagentStop),
                                             # or adds a numbered section to a declared

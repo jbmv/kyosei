@@ -2370,6 +2370,24 @@ CONFIG_KEY_EXAMPLES: dict[str, str] = {
         "#\n"
         "# worker_command_timeout_ceiling_seconds: 240"
     ),
+    "docs_coverage": (
+        "# KYO-801. `kyo docs coverage` lists the code that no document section governs,\n"
+        "# so a change to it asks nobody to check a document. `level` is `notice` (the\n"
+        "# default: one `kyo doctor` notice), `problem` (a doctor problem, which needs\n"
+        "# the `code:` list, since the default rule for what is code is a heuristic) or\n"
+        "# `off`. `unmapped` lists globs not expected to be governed, each with a\n"
+        "# one-line `why`. `kyo docs coverage --level <level>` records the level. A kyo\n"
+        "# older than this key refuses it, so declare it only once every kyo that reads\n"
+        "# this store has it.\n"
+        "#\n"
+        "# docs_coverage:\n"
+        "#   level: notice\n"
+        "#   code:\n"
+        "#     - src/**/*.py\n"
+        "#   unmapped:\n"
+        "#     - glob: src/**/__init__.py\n"
+        "#       why: no behaviour of its own"
+    ),
     "docs_suggest_notice": (
         "# KYO-303. `kyo docs suggest` drafts the documents.yml declarations this\n"
         "# repository looks like it wants -- a numbered: block for a document whose\n"

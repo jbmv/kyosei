@@ -21,6 +21,7 @@ from . import (
     commands,
     currency,
     docs_check,
+    docs_coverage,
     docs_history,
     docs_numbered,
     docs_obligations,
@@ -152,6 +153,11 @@ def cmd_docs(ctx: Context, args: Namespace) -> Output:
     # :func:`_cmd_docs_suggest`.
     if args.action == "suggest":
         return _cmd_docs_suggest(ctx, args)
+    # KYO-801: the seventh action. Read-only and store-free like `check`, except with
+    # --level, which writes one key of the store's config.yml — see
+    # :func:`_cmd_docs_coverage`.
+    if args.action == "coverage":
+        return _cmd_docs_coverage(ctx, args)
     # KYO-502: the sixth action. Store-free like `check`; it writes generated files in
     # the CODE tree, or with --check writes nothing — see :func:`_cmd_docs_index`.
     if args.action == "index":
@@ -636,6 +642,175 @@ def _cmd_docs_suggest(ctx: Context, args: Namespace) -> Output:
     ]
     lines += docs_suggest.suggestion_lines(found)
     lines.append(f"  {SUGGEST_WRITES_NOTHING}")
+    return Output(lines, data)
+
+
+#: KYO-801. The steps `kyo docs coverage` prints after its measurement. Printed by the
+#: command rather than written into a skill, so they cannot fall behind the build.
+COVERAGE_STEPS = (
+    "to a map: (1) declare `code:` under `docs_coverage:` in kyosei/config.yml, so the "
+    "list of code is yours and not a heuristic's; (2) draft `governs:` lines per document "
+    "set by reading each section against the directories above; (3) list what is not "
+    "expected to be governed under `unmapped:`, each with a one-line `why`; (4) run "
+    "`kyo docs check`; (5) choose the level: `kyo docs coverage --level "
+    "notice|problem|off`. `off` is a valid answer for a project whose documents are not "
+    "maintained, and `problem` needs the `code:` list"
+)
+
+
+def _coverage_data(ctx: Context, coverage, config, documents_in) -> dict:
+    return {
+        "ok": True,
+        "command": "docs coverage",
+        "wrote_to_store": False,
+        "root": str(ctx.root),
+        "code_root": str(ctx.code_root),
+        "document_paths": list(documents_in.globs),
+        "has_documents": coverage.has_documents,
+        "listed": coverage.listed,
+        "level": config.level,
+        "effective_level": docs_coverage.effective_level(config),
+        "code_declared": coverage.code_declared,
+        "code_files": len(coverage.code),
+        "governed": len(coverage.governed),
+        "ungoverned": [
+            {"directory": directory, "files": names}
+            for directory, names in docs_coverage.by_directory(coverage.ungoverned)
+        ],
+        "ungoverned_count": len(coverage.ungoverned),
+        "pointer_only": list(coverage.pointer_only),
+        "excluded": list(coverage.excluded),
+        "broad_targets": [
+            {
+                "doc_path": reach.doc_path,
+                "section": reach.section,
+                "target": reach.target,
+                "files": reach.files,
+            }
+            for reach in coverage.broad_targets
+        ],
+        "broad_target_limit": docs_coverage.BROAD_TARGET_FILES,
+        "documents": [
+            {
+                "doc_path": reach.doc_path,
+                "sections": reach.sections,
+                "governing": reach.governing,
+                "governing_nothing": list(reach.governing_nothing),
+            }
+            for reach in coverage.documents
+        ],
+        "unmatched_unmapped": list(coverage.unmatched_unmapped),
+    }
+
+
+def _cmd_docs_coverage_level(ctx: Context, args: Namespace) -> Output:
+    """``kyo docs coverage --level <level>``: record the level and echo what was stored."""
+    import yaml
+
+    from .config import read_raw_config, refuse_store_write
+
+    level = args.level
+    refuse_store_write(
+        None if ctx.layout is None else ctx.layout.store_via_main_checkout,
+        ctx.code_root,
+        "record the docs coverage level",
+    )
+    current = read_raw_config(ctx.root).get(docs_coverage.DOCS_COVERAGE_KEY)
+    block = dict(current) if isinstance(current, dict) else {}
+    block["level"] = level
+    # The refusal `level: problem` without `code:` prints its draft, and nothing is written.
+    docs_coverage.parse(
+        block, docs_coverage.config_path_for(ctx.root), code_root=ctx.code_root
+    )
+    path = docs_coverage.write_level(ctx.root, level)
+    stored = yaml.safe_load(path.read_text(encoding="utf-8"))[docs_coverage.DOCS_COVERAGE_KEY]
+    return Output(
+        [
+            echo_value("docs_coverage level", str(stored["level"])),
+            f"  in {path}; code: {'declared' if 'code' in stored else 'not declared'}, "
+            f"unmapped: {len(stored.get('unmapped') or [])} entr"
+            f"{'y' if len(stored.get('unmapped') or []) == 1 else 'ies'}",
+        ],
+        {
+            "ok": True,
+            "command": "docs coverage",
+            "wrote_to_store": True,
+            "config_path": str(path),
+            "level": stored["level"],
+            "stored": stored,
+        },
+    )
+
+
+def _cmd_docs_coverage(ctx: Context, args: Namespace) -> Output:
+    """``kyo docs coverage [--json] [--level LEVEL]`` — KYO-801.c1, c5.
+
+    Prints the ungoverned code by directory, the files reached only by a pointer comment,
+    the targets that reach more than :data:`kyosei.docs_coverage.BROAD_TARGET_FILES` files,
+    the sections that govern nothing, and the steps to a map. Opens no store and writes
+    nothing. With ``--level`` it writes one key, ``docs_coverage.level``, and nothing else.
+    """
+    if args.level is not None:
+        return _cmd_docs_coverage_level(ctx, args)
+    documents_in = docs_parse.document_set(ctx.root / KYOSEI_DIR)
+    config = docs_coverage.read_config(ctx.root, ctx.code_root)
+    coverage = docs_coverage.measure(ctx.code_root, documents_in, config)
+    data = _coverage_data(ctx, coverage, config, documents_in)
+    if not coverage.has_documents:
+        return Output(
+            [f"docs coverage: no documents — {documents_in.says}, so nothing could govern code"],
+            data,
+        )
+    if not coverage.listed:
+        return Output(
+            [f"docs coverage: git could not list the files of {ctx.code_root}, so the code "
+             "was not measured"],
+            data,
+        )
+    level = docs_coverage.effective_level(config)
+    declared = "declared" if config.level else "not declared, so the default"
+    rule = "declared `code:`" if coverage.code_declared else "source-suffix default rule"
+    lines = [
+        f"docs coverage: {len(coverage.ungoverned)} of {len(coverage.code)} code files "
+        f"({rule}) are governed by no document section; level {level} ({declared})",
+        f"  scanned: {documents_in.says}",
+    ]
+    if coverage.excluded:
+        lines.append(f"  {len(coverage.excluded)} file(s) are named by `unmapped:` and not counted")
+    if coverage.ungoverned:
+        lines.append("  ungoverned code, by directory:")
+        for directory, names in docs_coverage.by_directory(coverage.ungoverned):
+            lines.append(f"    {directory}/ ({len(names)}): {', '.join(sorted(names))}")
+    if coverage.pointer_only:
+        lines.append(
+            f"  {len(coverage.pointer_only)} of those are reached only by a `src/` pointer "
+            "comment into a document, which asks for the region around the comment and "
+            "not for the section's whole subject:"
+        )
+        lines.append(f"    {', '.join(coverage.pointer_only)}")
+    if coverage.broad_targets:
+        lines.append(
+            f"  broad targets (more than {docs_coverage.BROAD_TARGET_FILES} files each; "
+            "reported, not refused):"
+        )
+        for reach in coverage.broad_targets:
+            lines.append(
+                f"    {reach.doc_path} [{reach.section}] {reach.target}: {reach.files} files"
+            )
+    quiet = [reach for reach in coverage.documents if reach.governing_nothing]
+    if quiet:
+        lines.append("  sections that govern nothing, by document (names in --json):")
+        for reach in quiet:
+            lines.append(
+                f"    {reach.doc_path}: {reach.governing} of {reach.sections} sections govern code"
+            )
+    for glob in coverage.unmatched_unmapped:
+        lines.append(f"  `unmapped` glob {glob!r} matches no tracked file: correct or remove it")
+    lines.append(f"  steps {COVERAGE_STEPS}")
+    lines.append(
+        "  nothing was written: this command reads the tree; `--level` is the one flag "
+        "that writes, and only the `level` key"
+    )
     return Output(lines, data)
 
 
