@@ -770,6 +770,10 @@ LINK_TYPES: tuple[str, ...] = (
     "same-question-as",
     "needs-same-change-as",
     "produced-by",
+    # KYO-786: `src implements dst` says the work in src carries out the decision on dst.
+    # `kyo dossier` lists src under what happened next. `--implements` on `kyo new` and
+    # `kyo spawn` writes the same edge at filing.
+    "implements",
 )
 
 #: Law 6 — dependency writes refuse cycles at write time.

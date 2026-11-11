@@ -56,7 +56,8 @@ no transcript is opened, for the quote, the refining turn or a discussion span.
 
 ROLES. ``observed``: the person looked at something (a verdict, a gate). ``decided``: the
 person decided a decision record, with ``--decision-file`` saying what was recommended,
-by whom, the outcome (accepted, refined, overrode, unprompted) and the alternatives; a
+by whom, the outcome (accepted, refined, overrode, unprompted) and the alternatives,
+each with who proposed it where the file says (``proposed_by``, KYO-786); a
 ``refined`` outcome cites the refining turn beside the accepting one. ``authorized``
 (KYO-644.c8): a go-ahead approving a plan already stated ("sounds good", "build it now"),
 credited as authorizing the work to proceed and never as deciding its content, so it
@@ -151,6 +152,18 @@ DECISION_FILE_KEYS = frozenset(
     }
 )
 
+#: The keys one entry of a decision file's ``alternatives`` may carry.
+ALTERNATIVE_KEYS = frozenset({"text", "chosen", "proposed_by"})
+
+#: KYO-786: who may be named as the proposer of an alternative besides a person. An
+#: alternative that names nobody is read as :data:`PROPOSER_DEFAULT`.
+AGENT_PROPOSERS: tuple[str, ...] = ("orchestrator", "worker")
+PROPOSER_DEFAULT = "orchestrator"
+#: The earlier name of the orchestrator, accepted and stored as the current one.
+AGENT_PROPOSER_ALIASES = {"controller": "orchestrator"}
+#: ``proposed_by: person`` names the person the credit itself names.
+PROPOSER_PERSON = "person"
+
 
 # ------------------------------------------------------------------------ the flags
 
@@ -194,8 +207,9 @@ def add_credit_flags(
             "--decision-file",
             metavar="FILE",
             help="YAML: recommended, recommended_by, outcome (accepted | refined | overrode "
-            "| unprompted), alternatives [{text, chosen}], and refining_turn for a "
-            "refined outcome",
+            "| unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is "
+            "person, orchestrator or worker and an entry without one is read as the "
+            "agent's, and refining_turn for a refined outcome",
         )
     if span:
         parser.add_argument(
@@ -547,11 +561,10 @@ def _decision(
         isinstance(a, dict) and isinstance(a.get("text"), str) and a["text"].strip()
         for a in alternatives
     ):
-        raise UsageError("--decision-file alternatives is a list of {text, chosen} entries")
-    alternatives = [
-        {"text": single_line(a["text"], what="an alternative"), "chosen": a.get("chosen") is True}
-        for a in alternatives
-    ]
+        raise UsageError(
+            "--decision-file alternatives is a list of {text, chosen, proposed_by} entries"
+        )
+    alternatives = [_alternative(store, a, credit) for a in alternatives]
     if alternatives and not any(a["chosen"] for a in alternatives):
         raise UsageError("--decision-file lists alternatives and marks none `chosen: true`")
     refining_turn = raw.get("refining_turn")
@@ -582,6 +595,48 @@ def _decision(
         "refining_session": str(refining_session) if refining_session else None,
         "refining_turn": str(refining_turn) if refining_turn else None,
     }
+
+
+def _alternative(store, raw: dict, credit: Credit) -> dict:
+    """One alternative as stored: its text, whether it was chosen, and who proposed it when
+    the file says (KYO-786).
+
+    ``proposed_by`` is ``person`` (the person the credit names), a key under ``people:``,
+    or one of :data:`AGENT_PROPOSERS`. An entry that names no proposer stores none, and a
+    reader credits the agent (:func:`proposer_of`): the maintainer's rule is that an option
+    is the person's only when their own words introduced it, so the person is credited
+    with an option only where the file says so.
+    """
+    extra = sorted(set(map(str, raw)) - ALTERNATIVE_KEYS)
+    if extra:
+        raise UsageError(
+            f"--decision-file gives an alternative {', '.join(extra)}; an alternative "
+            f"reads {', '.join(sorted(ALTERNATIVE_KEYS))}"
+        )
+    out = {
+        "text": single_line(raw["text"], what="an alternative"),
+        "chosen": raw.get("chosen") is True,
+    }
+    proposer = raw.get("proposed_by")
+    if proposer is None:
+        return out
+    proposer = AGENT_PROPOSER_ALIASES.get(str(proposer), str(proposer))
+    if proposer == PROPOSER_PERSON:
+        proposer = credit.person
+    elif proposer not in AGENT_PROPOSERS and proposer not in store.config.people:
+        raise UsageError(
+            f"--decision-file gives an alternative proposed_by {proposer!r}; it is "
+            f"`{PROPOSER_PERSON}` for the person the credit names, a key under `people:` "
+            f"in kyosei/config.yml, or one of {', '.join(AGENT_PROPOSERS)}"
+        )
+    return {**out, "proposed_by": proposer}
+
+
+def proposer_of(alternative: dict) -> str:
+    """Who proposed a stored alternative: what the credit recorded, or the orchestrator
+    where it recorded nothing (KYO-786). A credit written before alternatives carried a
+    proposer reads the same way."""
+    return alternative.get("proposed_by") or PROPOSER_DEFAULT
 
 
 def _require_person_turn(ctx: Context, store, session: str, turn: str) -> None:

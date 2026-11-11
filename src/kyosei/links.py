@@ -102,6 +102,11 @@ EDGE_CONSEQUENCE: dict[str, str] = {
     "same-question-as": "{src} and {dst} ask the same question; answering one answers both",
     "needs-same-change-as": "whatever change resolves {src} must also be made to {dst}",
     "produced-by": "{src} was produced by {dst}, and traces back to it",
+    # KYO-786: the edge `kyo dossier` reads for part seven of the page on {dst}.
+    "implements": (
+        "{src} carries out the decision on {dst}, and the dossier of {dst} lists it "
+        "under what happened next"
+    ),
 }
 
 

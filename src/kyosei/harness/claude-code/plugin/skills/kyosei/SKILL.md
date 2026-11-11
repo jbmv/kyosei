@@ -136,10 +136,10 @@ criteria/touches on the same terms, and copying neither the source's text (use
 `--description-file`) nor its status. Approving a proposal is
 `kyo confirm <proposal> --criterion <cid> --quote-file q.txt`, then spawn.
 
-**Every other relation is an edge you add yourself** -- `blocks`, `duplicates`, `supersedes`,
-`same-question-as`, `needs-same-change-as` -- and exists only if you run
-`kyo link <from-id> <edge> <to-id>`. Check the direction in the echo; `kyo unlink <link-id>
---why` retracts a wrong one, which is what to reach for at a cycle refusal (KYO-21).
+**Other relations are edges you add** (`blocks`, `duplicates`, `supersedes`,
+`same-question-as`, `needs-same-change-as`) with `kyo link <from> <edge> <to>`; check the
+direction in the echo. `kyo unlink <id> --why` retracts one, as at a cycle refusal (KYO-21).
+Work a decision led to takes `--implements <id>` on `kyo new`/`kyo spawn`, or that edge later.
 
 **A plan record is created the moment a plan goes active** -- `kyo new plan --title ...` or
 `kyo promote <idea-file> --kind plan` -- and carries no criteria of its own. Members join

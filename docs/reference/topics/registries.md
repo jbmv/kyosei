@@ -126,7 +126,8 @@ waiting on the operator becomes one with `kyo spawn <reminder-id> --kind decisio
 **The person who decided (KYO-644).** The packaged `decision` also sets `requires_credit`,
 so every filing of one, by `kyo new` or by any `kyo spawn`, carries a `decided` credit: the
 person's words alone in `--quote-file` (which also serves as the evidence when
-`--evidence-file` is not given), what was recommended, the outcome and the alternatives in
+`--evidence-file` is not given), what was recommended, the outcome and the alternatives (each
+with `proposed_by` where the person's own words introduced the option, KYO-786) in
 `--decision-file`, the person (`--person`, defaulting to the only one declared under
 `people:`), and where the words were said (`--session`, defaulting to
 `$CLAUDE_CODE_SESSION_ID`, whose transcript is checked where the project set

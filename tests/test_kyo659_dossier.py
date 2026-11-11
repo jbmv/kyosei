@@ -111,7 +111,10 @@ def test_the_parts_are_drawn_from_the_credit_the_discussion_and_the_index(
 ) -> None:
     page = kyo("dossier", live["decision"]).out
     assert page.startswith("# The cache stays\n")
-    assert "- keep the cache (chosen)\n- drop the cache" in page
+    assert (
+        "- keep the cache (chosen), proposed by the agent\n"
+        "- drop the cache, proposed by the agent" in page
+    )
     assert "The agent (orchestrator) recommended: keep the cache." in page
     assert f"{TEST_PERSON} decided, accepting the recommendation." in page
     assert f"> {DECIDING_WORDS}" in page

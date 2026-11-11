@@ -628,9 +628,12 @@ never silent omission.
 `awaiting:human-review` are different asks and are never flattened.
 
 **Link types**: `blocks`, `duplicates`, `supersedes`, `same-question-as`,
-`needs-same-change-as`, `produced-by`. `blocks` is cycle-refused at write time, and it
-is the one type that changes readiness: `A blocks B` keeps B out of `kyo next`'s ready
-list and makes `kyo dispatch B` refuse without `--force` until A is settled (KYO-570).
+`needs-same-change-as`, `produced-by`, `implements`. `blocks` is cycle-refused at write
+time, and it is the one type that changes readiness: `A blocks B` keeps B out of
+`kyo next`'s ready list and makes `kyo dispatch B` refuse without `--force` until A is
+settled (KYO-570). `A implements B` records that the work in A carries out the decision
+on B; `--implements B` on `kyo new` and `kyo spawn` writes it at filing, and
+`kyo dossier B` lists A under what happened next (KYO-786).
 
 ## Reading the store
 
@@ -719,11 +722,11 @@ line naming what in the store it was drawn from:
 | --- | --- |
 | The decision | the record's title |
 | The problem | the opening of the record's description, at most three sentences, and the titles of the records it was filed from |
-| What was on the table | the decided credit's recommendation, who made it, and its alternatives; the notes of the discussion |
+| What was on the table | the decided credit's recommendation, who made it, and its alternatives with the proposer of each; the notes of the discussion |
 | Who decided, and how | the credit's person, its outcome, and the person's words, quoted verbatim |
 | Timeline | the discussion's turn references, the turn index, and the timestamps of credits, records and dispatches |
 | Depth | the message count, reply count and active time measured when the credit was written |
-| What happened next | records linked to the decision, and work records that name it, with each one's dispatches, the method of the latest verdict on each met criterion, and the person's credited observations |
+| What happened next | records linked to the decision (filed from it, linked as implementing it, or recorded as waiting on it), and work records that name it, with each one's dispatches, the method of the latest verdict on each met criterion, and the person's credited observations |
 | How this record was made | whether the credit was written live or reconstructed, the approval a reconstructed credit rests on, the transcript check, how the discussion was opened, and the seal |
 
 The command reads the store and the turn index and opens no transcript, so the only words
@@ -733,9 +736,12 @@ is left as written. A credit of role `authorized` is printed as a go-ahead, apar
 decision, and a record holding only a go-ahead is said to have no credit naming who decided
 it. A work record that only names the decision in its text is listed apart from linked
 work, with a sentence saying that the store does not record whether it follows from the
-decision. Where the store lacks something the page says so: a credit's alternatives carry
-no proposer, a span that was never measured has no depth, and a credit without a
-`span_seal` is "not sealed". Excerpt packs are not built, so no page attaches one.
+decision. An alternative in the decision file may name who proposed it (`proposed_by`:
+`person`, a key under `people:`, `orchestrator` or `worker`), and the page names the
+proposer of each option. An option whose proposer the credit does not name is credited to
+the agent, and the page says that it applied that rule (KYO-786). Where the store lacks
+something the page says so: a span that was never measured has no depth, and a credit
+without a `span_seal` is "not sealed". Excerpt packs are not built, so no page attaches one.
 Markdown is the one form: it reads as text in a terminal and converts to HTML or PDF with
 ordinary tools. `--json` carries the parts as data (`parts[]`, each with `heading`,
 `blocks` and `source`), the `references[]`, and the page itself as `markdown`.

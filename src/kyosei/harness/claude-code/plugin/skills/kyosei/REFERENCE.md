@@ -304,7 +304,8 @@ rule the tool would not have enforced.
 
 ### Links are not written as a side effect (KYO-21)
 
-`kyo spawn` writes `produced-by` for you; `blocks`, `duplicates`, `supersedes`,
+`kyo spawn` writes `produced-by` for you, and `--implements` on `kyo new` or `kyo spawn` writes
+`implements` (KYO-786, below); `blocks`, `duplicates`, `supersedes`,
 `same-question-as` and `needs-same-change-as` have no command that writes them as a side effect,
 so they exist only if you run `kyo link`. Do it the moment you notice the relation -- a dependency
 you record in a note is invisible to `kyo show`, `kyo brief` and the desktop's link graph, all of
@@ -315,6 +316,28 @@ A wrong edge is not permanent: `kyo unlink <link-id> --why` retracts it, and `--
 because retracting an edge someone deliberately filed is not bookkeeping. Reach for it rather
 than working around a cycle refusal; a `blocks` edge pointing the wrong way makes its own
 correction a cycle, which is the case the inverse exists for (KYO-21).
+
+### Work a decision led to is linked to it (KYO-786)
+
+`kyo dossier <decision>` sets one decision out for a reader outside the project, and its part
+"What happened next" lists only what the store ties to the decision. A work record's title does
+not do that, and a record that merely names the decision's id is listed apart, with the sentence
+that the store does not record whether it follows from it. The tie is the edge `implements`:
+`<work> implements <decision>`.
+
+Write it when you file work because of a decision: `--implements <decision-id>` on `kyo new` or
+`kyo spawn`, which writes the edge in the same act and prints it. Write it with
+`kyo link <work-id> implements <decision-id>` when the work was filed first, or when a decision
+changes the direction of work already open. Link the records that carry the decision out, not
+every record that mentions it. The target is a `decision` record, or a record that holds a
+decided credit; `--implements` refuses any other. The edge changes nothing else: it does not
+block, order or settle either record.
+
+In a decision file, each entry of `alternatives` may carry `proposed_by`: `person` for the person
+the credit names (or a key under `people:`), `orchestrator`, or `worker`. Leave it out for an
+option an agent raised, which is how the dossier reads an entry without one. Write `person` only
+where the person's own words introduced the option; accepting or choosing an option an agent
+offered does not make it theirs.
 
 ### Plans: the member carries the membership (KYO-210)
 

@@ -779,6 +779,13 @@ def build_parser() -> KyoseiParser:
     )
     p_new.add_argument("--plan", metavar="ID", help="plan record this belongs to")
     p_new.add_argument(
+        "--implements",
+        metavar="ID",
+        help="the record of the decision this work carries out; writes the link "
+        "`<new record> implements ID`, which `kyo dossier ID` lists under what happened "
+        "next. `kyo link` adds the same link to a record already filed (KYO-786)",
+    )
+    p_new.add_argument(
         "--scope",
         metavar="SCOPE",
         help="the part of the system this work belongs to, from kyosei/scopes.yml; "
@@ -996,6 +1003,13 @@ def build_parser() -> KyoseiParser:
         "--plan",
         metavar="ID",
         help="plan record the new record belongs to, as `kyo new --plan` (KYO-749)",
+    )
+    p_spawn.add_argument(
+        "--implements",
+        metavar="ID",
+        help="the record of the decision this work carries out; writes the link "
+        "`<new record> implements ID`, which `kyo dossier ID` lists under what happened "
+        "next. `kyo link` adds the same link to a record already filed (KYO-786)",
     )
     p_spawn.add_argument(
         "--keep-open",

@@ -64,6 +64,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--actor",
         "--prefix",
         "--plan",
+        "--implements",  # a record id (KYO-786)
         "--criterion",
         "--gate",  # a gate id `kyo confirm` answers, not prose (KYO-494)
         "--state",
