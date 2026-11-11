@@ -193,6 +193,21 @@ def edge_sentence(
     ]
 
 
+def prompt_label(prompt: dict) -> str:
+    """One line naming the prompt a dispatch answered (KYO-661), for ``kyo dispatch`` and
+    ``kyo show``. It says when the work began and who opened the turn, not that anyone
+    approved it."""
+    named = (prompt.get("prompt_id") or prompt.get("turn") or "?")[:8]
+    origin = prompt.get("origin")
+    if origin == "human":
+        who = "typed by the person"
+    elif origin == "unconfirmed" or not origin:
+        who = "origin not confirmed by the transcript"
+    else:
+        who = f"opened by a notification, not typed by the person ({origin})"
+    return f"prompt {named} at {prompt['at']} ({who})"
+
+
 def _quoted(title: str | None) -> str:
     return MISSING_TITLE if title is None else f'"{title}"'
 
@@ -1111,6 +1126,17 @@ def show_text(
         out.append(
             "      worker model: "
             + (dispatch["worker_model"] or "(none declared — nothing said what ran this)")
+        )
+        # KYO-661: always a line, as the worker model's is. It says what the index held
+        # when the dispatch was made, and that it is not approval.
+        answered = dispatch.get("answered_prompt")
+        out.append(
+            "      answered prompt: "
+            + (
+                prompt_label(answered)
+                if answered
+                else "(not recorded — no session, no turn index or no line for it)"
+            )
         )
         if dispatch["report_id"]:
             # KYO-90.c3: when a dispatch carries more than one report, the line that

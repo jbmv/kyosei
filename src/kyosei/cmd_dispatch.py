@@ -65,7 +65,7 @@ from .git_queries import (
     worktree_remove,
 )
 from .prose import fingerprint, read_prose
-from .render import echo_block, echo_value
+from .render import echo_block, echo_value, prompt_label
 from .touch_drift import (
     _cooccurrence_lines,
     declaration_provenance,
@@ -153,6 +153,49 @@ MODEL_SOURCE_LABELS: dict[str, str] = {
         "policy.worker_model, not `kyo dispatch --model`"
     ),
 }
+
+
+def answered_prompt(ctx: Context, store) -> tuple[dict | None, str]:
+    """KYO-661 (decision KYO-654, DC9, C4'): the prompt this dispatch is made in reply to.
+
+    Returns ``(prompt, said)``. ``prompt`` is the session's latest prompt line in the turn
+    index, ``{session, prompt_id, turn, at, origin}``, after folding in the transcript as
+    the Stop hook would (the line of the turn being answered is ``unconfirmed`` until
+    then); ``origin`` is ``human`` for a turn the person opened, the transcript's own name
+    for one a notification or a subagent's report opened, and ``unconfirmed`` when the
+    transcript could not say. ``prompt`` is None, recording nothing, with no session, no
+    opted-in index or no line for the session; ``said`` is then the reason and otherwise
+    a one-line statement for ``kyo dispatch`` to echo. It states that the work began in
+    reply to that message and when, never that the person approved it.
+    """
+    from .cmd_discuss import _refresh_index, _session_of
+    from .cmd_turns import ASSISTANT, read_lines
+    from .config import transcripts_opted_in
+
+    session = _session_of(ctx)
+    if session is None:
+        return None, "no Claude Code session ($CLAUDE_CODE_SESSION_ID is unset)"
+    if not transcripts_opted_in(store.config):
+        return None, "this project has not opted in to reading transcripts, so no turn index"
+    _refresh_index(ctx, session)
+    lines = [
+        line
+        for line in read_lines(ctx.root)
+        if line.get("session") == session
+        and line.get("role") != ASSISTANT
+        and isinstance(line.get("at"), str)
+    ]
+    if not lines:
+        return None, f"the turn index holds no prompt of session {session[:8]}"
+    line = max(lines, key=lambda held: held["at"])
+    prompt = {
+        "session": session,
+        "prompt_id": line.get("prompt_id"),
+        "turn": line.get("turn"),
+        "at": line["at"],
+        "origin": line.get("origin"),
+    }
+    return prompt, prompt_label(prompt)
 
 
 def resolve_worker_model(
@@ -701,6 +744,9 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     if args.model is not None and not args.model.strip():
         raise UsageError("--model was given an empty name; pass a model name or omit the flag")
     worker_model, model_source = resolve_worker_model(store.config, kind_def, args.model)
+    # KYO-661: read before the row is written, so a dispatch records the prompt it answered
+    # at the moment it was made.
+    prompt, prompt_said = answered_prompt(ctx, store)
 
     # KYO-13.c4 / KYO-12: a dispatch may formally declare additional records it
     # covers. Each must exist (store.record raises NotFound loudly, law 6) and
@@ -965,9 +1011,10 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             creation.run()
         store.conn.execute(
             "INSERT INTO dispatches (id, record_id, seq, state, brief, worked_from_sha,"
-            " worktree, branch, worker_model, touch_override_json, covers_json, report_id,"
+            " worktree, branch, worker_model, touch_override_json, covers_json,"
+            " answered_prompt_json, report_id,"
             " terminated_why, closed_at, tick_audit_json, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)",
             (
                 dispatch_id,
                 record_id,
@@ -980,6 +1027,7 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
                 worker_model,
                 override_json,
                 covers_json,
+                json.dumps(prompt, sort_keys=True) if prompt else None,
                 stamp,
                 stamp,
             ),
@@ -1083,6 +1131,12 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             f"{explanations.say('worker-model-not-enforced')})"
             if worker_model
             else f"(not declared — {MODEL_SOURCE_LABELS[MODEL_SOURCE_NONE]})",
+        )
+    )
+    lines.append(
+        echo_value(
+            "answered prompt",
+            prompt_said if prompt else f"(not recorded — {prompt_said})",
         )
     )
     if measurements:
@@ -1240,6 +1294,9 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             # or "this build does not know" — `worker_model_source` says which.
             "worker_model": worker_model,
             "worker_model_source": model_source,
+            # KYO-661: the prompt answered, or null with the reason.
+            "answered_prompt": prompt,
+            "answered_prompt_note": None if prompt else prompt_said,
             "measurement_warnings": measurements,
             # KYO-773.c2: the stored brief's length by section, in order; the `chars`
             # sum to the brief's length.

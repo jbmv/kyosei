@@ -742,6 +742,9 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # index, whose chain commits every line before it. A real DDL change, so a real
         # new hash.
         33: "fabcb9af44ea15cc15bc3538d85acf8a47f513317dfc31a59d7fb38019da65eb",
+        # KYO-661: dispatches gains answered_prompt_json -- the prompt the dispatch was
+        # made in reply to. A real DDL change, so a real new hash.
+        34: "70b5951201caf8e8fbdf72ffa7d3e399c18eb69525ca99bccab630808e14bda9",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2855,12 +2858,15 @@ def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -
 
 def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
     """KYO-658 was built on schema 31 (KYO-709) and bumped it by one, to 32; KYO-663 was
-    built on 32 and bumps it by one, to 33."""
+    built on 32 and bumps it by one, to 33; KYO-661 was built on 33 and bumps it to 34."""
     from kyosei.schema import CREDIT_FIELD_DEFAULTS, EXPORT_FIELD_DEFAULTS
 
-    assert SCHEMA_VERSION == 33
+    assert SCHEMA_VERSION == 34
     assert EXPORT_FIELD_DEFAULTS[32] == {"turn_refs": []}
     assert CREDIT_FIELD_DEFAULTS[33] == {"span_seal": None}
+    from kyosei.schema import DISPATCH_FIELD_DEFAULTS
+
+    assert DISPATCH_FIELD_DEFAULTS[34] == {"answered_prompt": None}
 
 
 def _a_discussion(kyo, project: Path, monkeypatch: pytest.MonkeyPatch) -> str:

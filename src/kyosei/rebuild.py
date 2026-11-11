@@ -928,10 +928,10 @@ def _load(
                     "INSERT INTO dispatches (id, record_id, seq, state, brief,"
                     " worked_from_sha, worktree, branch, worker_model,"
                     " touch_override_json,"
-                    " covers_json, report_id, terminated_why, closed_at,"
-                    " tick_audit_json, created_at,"
+                    " covers_json, answered_prompt_json, report_id, terminated_why,"
+                    " closed_at, tick_audit_json, created_at,"
                     " updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         dispatch["id"],
                         doc["id"],
@@ -973,6 +973,12 @@ def _load(
                         else None,
                         json.dumps(dispatch["covers"], sort_keys=True)
                         if dispatch.get("covers")
+                        else None,
+                        # KYO-661: schema.DISPATCH_FIELD_DEFAULTS[34] has already filled
+                        # this in as None for a document exported under schema_version
+                        # < 34, which is what was true of it.
+                        json.dumps(dispatch["answered_prompt"], sort_keys=True)
+                        if dispatch.get("answered_prompt")
                         else None,
                         dispatch["report_id"],
                         dispatch["terminated_why"],

@@ -475,6 +475,10 @@ def _dispatch(row: sqlite3.Row) -> dict:
             json.loads(row["touch_override_json"]) if row["touch_override_json"] else None
         ),
         "covers": json.loads(row["covers_json"]) if row["covers_json"] else [],
+        # KYO-661: the prompt the dispatch answered, or null when none was recorded.
+        "answered_prompt": (
+            json.loads(row["answered_prompt_json"]) if row["answered_prompt_json"] else None
+        ),
         "report_id": row["report_id"],
         "terminated_why": row["terminated_why"],
         "closed_at": row["closed_at"],
