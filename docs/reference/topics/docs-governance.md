@@ -4,7 +4,7 @@ Layer 3: `governs:` sections, `kyo docs check`, documentation obligations and th
 
 ## Layer 3: the docs-SOT skeleton validator
 
-governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_obligations.py, src/kyosei/docs_parse.py, src/kyosei/docs_regions.py, src/kyosei/docs_staleness.py, src/kyosei/docs_suggest.py, src/kyosei/docs_targets.py, src/kyosei/docs_coverage.py, src/kyosei/docs_history.py, src/kyosei/docs_index.py, src/kyosei/docs_ssot.py, src/kyosei/defaults/documents.yml
+governs: src/kyosei/docs_check.py#check_docs, src/kyosei/docs_check.py#DocsCheck, src/kyosei/docs_check.py#GovernsProblem, src/kyosei/docs_parse.py#Section, src/kyosei/docs_parse.py#_sections, src/kyosei/docs_parse.py#_read_section_metadata, src/kyosei/docs_parse.py#_split_targets, src/kyosei/docs_parse.py#read_document, src/kyosei/docs_targets.py#resolve_target, src/kyosei/docs_targets.py#_resolve_target, src/kyosei/docs_targets.py#_resolve_glob, src/kyosei/docs_targets.py#_brace_expand, src/kyosei/docs_targets.py#broken_governs_targets
 
 A project's documents state what is *currently true* about it, and its history
 belongs in commit messages and decision records. `kyo docs
@@ -37,7 +37,11 @@ record's `touches`. `kyo docs check` reports every unresolved target in one pass
 3, the same family as `kyo doctor`'s invariant failures) rather than stopping
 at the first.
 
-**A section's status and its links agree (KYO-499).** A section a later one
+### A section's status and its links agree (KYO-499)
+
+governs: src/kyosei/docs_check.py#SectionStatusProblem, src/kyosei/docs_check.py#section_status_problems, src/kyosei/docs_check.py#_pairs_agree, src/kyosei/docs_check.py#_set_rules, src/kyosei/docs_check.py#_pointer_problems, src/kyosei/docs_check.py#_cites_number, src/kyosei/docs_parse.py#SectionStatusSet, src/kyosei/docs_parse.py#declared_section_status_sets, src/kyosei/docs_parse.py#section_is_dead, src/kyosei/docs_parse.py#link_values
+
+A section a later one
 changed says so on the lines directly under its heading, Layer 3's own keys,
 one per line, and a section with no `status:` reads as current:
 
@@ -95,6 +99,12 @@ the section and its remedy and fails the build like an unresolved target, and
 `src/` files a worker's branch changed, blocking with the same refusals
 (`section-status-disagrees`).
 
+### The generated section index: `kyo docs index` (KYO-502)
+
+governs: src/kyosei/docs_index.py
+
+A set's `section_status:` block may name a generated index of its sections.
+
 `index` names a generated file that `kyo docs index` writes (KYO-502): a summary
 table with one row per document of the set (its sections, how many carry each
 status, and how many `src/` pointers reach it), then one table per document
@@ -124,6 +134,12 @@ command would write now; a project declaring no `index` is told so and exits 0.
 This repository commits `docs/reference/design-sections.md`, and
 `tests/test_kyo491_design_index.py` fails when it is stale.
 
+### Code pointers that raise obligations (KYO-500)
+
+governs: src/kyosei/docs_obligations.py#pointer_sources, src/kyosei/docs_obligations.py#pointer_obligations_on, src/kyosei/docs_obligations.py#_pointable, src/kyosei/docs_obligations.py#_PointerSite, src/kyosei/docs_obligations.py#_pointer_join, src/kyosei/docs_obligations.py#coarse_pointer_lines
+
+A set's `section_status:` block also decides whether pointers in code raise obligations.
+
 `pointer_obligations` (default true) makes the code's own pointers raise docs
 obligations (KYO-500). When a branch changes a `src/` file, every
 `<doc path>#<anchor>` pointer in it that names a live section of a set with the
@@ -138,7 +154,11 @@ at file granularity" beside the pointers its regions quieted. These obligations
 are previewed, answered in `docs_verdicts[]`, settled and block `complete`
 exactly as `governs:` obligations do.
 
-**`ssot:` sets: requirements with ids, one owner each (KYO-552).** A set whose
+### `ssot:` sets: requirements with ids, one owner each (KYO-552)
+
+governs: src/kyosei/docs_ssot.py, src/kyosei/docs_parse.py#SsotDeclaration, src/kyosei/docs_parse.py#ssot_declaration
+
+A set whose
 documents say what is true now, and are edited in place, may declare `ssot:` beside
 its `section_status:`. Each requirement then carries an id in its heading, and the
 id is the one name every other document cites it by:
@@ -214,7 +234,14 @@ apply through that resolution. The successor cites the tombstone back by its id
 reading every ssot document to resolve ids and refusing only what the branch's
 changed documents are part of, with `section-status-disagrees`.
 
-**The history lint (KYO-555).** An ssot document states what is true now. A sentence
+Ids as code pointers, parameter owners and freshness are later
+slices of KYO-551 and are not built.
+
+### The history lint (KYO-555)
+
+governs: src/kyosei/docs_history.py
+
+An ssot document states what is true now. A sentence
 narrating how it came to be belongs in a decision record or a commit message. Each ssot
 set, with or without ids, chooses what happens to such a sentence a branch adds:
 
@@ -269,7 +296,11 @@ every `Kyosei-History-OK` trailer on the dispatch's branch under its `disagreeme
 the orchestrator reviews each override before accepting. `kyo docs preview` lists the
 same matches, both grades, for the branch it previews, and says how many would block.
 
-**Decision obligations (KYO-554).** In an ssot set the decision record is the history
+### Decision obligations (KYO-554)
+
+governs: src/kyosei/docs_obligations.py#StandingObligations, src/kyosei/docs_obligations.py#standing_obligations, src/kyosei/docs_obligations.py#_doc_ref_obligations
+
+In an ssot set the decision record is the history
 and the section is the current state, so filing a decision that names a section obliges
 someone to bring that section into line, or to say it needs no change. A kind whose policy
 sets `raises_docs_obligations: true` (the packaged `decision` does; any knowledge kind may)
@@ -296,11 +327,11 @@ raises a **standing** docs obligation when a record of it is written:
   on the record settles its open standing obligations `not-affected`, method `void`,
   carrying the void's reason and author.
 
-Ids as code pointers, parameter owners and freshness are later
-slices of KYO-551 and are not built.
+### What a `#symbol` narrows, and on which files (KYO-153, KYO-351, KYO-352, KYO-363)
 
-**What a `#symbol` actually narrows, and on which files (KYO-153, KYO-351,
-KYO-352, KYO-363).** A `path#symbol` target raises its section only when the diff
+governs: src/kyosei/docs_regions.py, src/kyosei/docs_check.py#_narrowing_notice, src/kyosei/docs_check.py#_no_region_notice, src/kyosei/docs_obligations.py#_target_raises, src/kyosei/docs_obligations.py#_symbol_target_raises, src/kyosei/docs_obligations.py#whole_file_offer, src/kyosei/docs_obligations.py#suppression_lines
+
+A `path#symbol` target raises its section only when the diff
 touches that symbol's own lines — but only where the region can be located,
 which is a closed list of file types the instrument can read. Narrowed by
 `#symbol` on these suffixes and no others: `.py`, `.md`, `.ts`, `.tsx`, `.js`,
@@ -378,6 +409,18 @@ guess:
 is not a selector on its own and `&`-composition means the selector a document
 names is never the one written.
 
+That precision is opt-in and reversible, but a narrowing that goes wrong is not
+visible, because a section that is not raised is not shown, so `kyo docs preview` counts the
+sections a declared `#symbol` suppressed on every run and `--suppressed` lists
+them (`--json` always carries them). A project narrowing many targets at once
+should read that list once before relying on the narrowing. The same run counts the
+code pointers whose regions this branch did not change (KYO-500), and names
+every pointer obligation raised at file granularity.
+
+### Targets that name no path: a suffixless file and a bare symbol
+
+governs: src/kyosei/docs_targets.py#_named_file, src/kyosei/docs_targets.py#_resolve_symbol, src/kyosei/docs_targets.py#_SymbolIndex, src/kyosei/docs_targets.py#_may_define_in_python, src/kyosei/docs_check.py#_undefined_symbol_notice
+
 **A file whose name has no suffix (KYO-828).** A target with no `/` and no file
 suffix is spelled like a bare symbol, and `Makefile`, `LICENSE` and `Dockerfile`
 are spelled that way. Such a target names the file when the project root, or a
@@ -406,15 +449,11 @@ assignment in a class body: a dataclass field, a plain class attribute, a
 nested class's field. A bare field name alone locates it only when it is the
 file's one definition of that name.
 
-That precision is opt-in and reversible, but a narrowing that goes wrong is not
-visible, because a section that is not raised is not shown, so `kyo docs preview` counts the
-sections a declared `#symbol` suppressed on every run and `--suppressed` lists
-them (`--json` always carries them). A project narrowing many targets at once
-should read that list once before relying on the narrowing. The same run counts the
-code pointers whose regions this branch did not change (KYO-500), and names
-every pointer obligation raised at file granularity.
+### A change to comments and docstrings only raises nothing (KYO-530)
 
-**A change to comments and docstrings only raises nothing (KYO-530).** When a
+governs: src/kyosei/docs_regions.py#comment_only_change, src/kyosei/docs_regions.py#code_tokens, src/kyosei/docs_obligations.py#comment_only_paths
+
+When a
 branch's diff to a changed file leaves its code tokens identical, read by the
 language's own lexer on both sides, no section raises on that file, whether it
 governs the file whole, narrows it to a `#symbol`, is named by a pointer in
@@ -425,6 +464,10 @@ lex or parse, raises. The rule is per file: one changed code token
 and every section the file raises is raised. `kyo docs preview` counts what it
 quieted as "quieted as comment-only" and `--suppressed` names each section
 (`comment_only: true` in `--json`); nothing is stored for them.
+
+### Which files are documents: `documents.yml` and `kyo docs suggest`
+
+governs: src/kyosei/docs_suggest.py, src/kyosei/defaults/documents.yml, src/kyosei/docs_parse.py#DocumentSet, src/kyosei/docs_parse.py#document_set, src/kyosei/docs_parse.py#_iter_docs_files
 
 **Which files are documents is the project's declaration, not this tool's
 assumption (KYO-129).** `kyosei/documents.yml` names sets of documents by
@@ -500,7 +543,11 @@ every freshly written config). Every block it emits is run through the real `doc
 validator before it is offered, and anything that cannot be drafted validly is
 not drafted, so no draft is offered that the next command would refuse.
 
-**Code that no section governs (KYO-801).** A `governs:` line makes a branch that changes
+### Code that no section governs (KYO-801)
+
+governs: src/kyosei/docs_coverage.py
+
+A `governs:` line makes a branch that changes
 the named code raise an obligation on its section. Code that no live section names raises
 none, so a document can fall behind it with no one asked. `kyo docs coverage` reads the
 tree, writes nothing and opens no store, and prints the ungoverned code files by
@@ -533,11 +580,15 @@ it stored; it refuses from a linked worktree whose store is reached through the 
 checkout. Whether the sections that govern a file describe it, and whether their readers
 read them, is outside what the check can establish.
 
+### Numbered documents (KYO-299)
+
+governs: src/kyosei/docs_numbered.py
+
 **A second, independent mechanism lives in the same module and the same
 registry file (KYO-299).** A document set may also declare itself `numbered:` —
 append-only, with numbered section headings and an index its own command
 generates. That declaration is not about `governs:` targets at all and changes
-nothing this section describes: what it changes is *who writes a new section*.
+nothing the sections above describe: what it changes is *who writes a new section*.
 Workers write per-dispatch fragment files, `kyo docs assemble` appends them with
 the next number on the merged tree, and `kyo check-branch` refuses a branch that
 adds a numbered heading to the document directly. Adoption is described in

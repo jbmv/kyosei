@@ -96,12 +96,14 @@ describe.
 
 <!-- governs:
 - apps/apple/Sources/KyoseiMac/SessionFeed.swift
-- apps/apple/Sources/KyoseiMac/ChatView.swift
-- apps/apple/Sources/KyoseiClient/DraftSettlement.swift
-- apps/apple/web/src/chat.ts
 - apps/apple/web/src/projects.ts
-- apps/apple/web/src/drafts.ts
-- apps/apple/web/src/agenda.ts
+- apps/apple/web/src/chat.ts#projectRows
+- apps/apple/web/src/chat.ts#chooseProject
+- apps/apple/web/src/chat.ts#drawProjects
+- apps/apple/web/src/chat.ts#openProjects
+- apps/apple/web/src/chat.ts#closeProjects
+- apps/apple/web/src/chat.ts#toggleProjectList
+- apps/apple/web/src/chat.ts#focusProject
 -->
 
 The window shows one project at a time. The bar above the top bar begins with a dropdown that
@@ -112,6 +114,31 @@ that project's. After the dropdown the bar holds a link for each project that ha
 in a pane, which turns the window to that project and follows that session. The server has no
 route that lists live sessions across projects, so the app reads each project's session list
 every five seconds, and the list of projects every thirty and whenever the dropdown is opened.
+
+The app opens on the project it last showed. On a first run, or when the server no longer
+lists that project, it shows the list of projects in place of the chat. The logic is in
+`web/src/projects.ts`, and the switch is `SessionFeed.open`. File > Projects… (Command-O)
+shows that list in place of everything under the top bar (KYO-766), and choosing it again
+returns to the project the window was showing.
+
+### Drafts of unsent prompts
+
+<!-- governs:
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiClient/DraftSettlement.swift
+- apps/apple/web/src/drafts.ts
+- apps/apple/web/src/projects.ts
+- apps/apple/web/src/chat.ts#savedBox
+- apps/apple/web/src/chat.ts#currentBoxes
+- apps/apple/web/src/chat.ts#agreedWith
+- apps/apple/web/src/chat.ts#applyBoxes
+- apps/apple/web/src/chat.ts#keepCurrent
+- apps/apple/web/src/chat.ts#flushDraft
+- apps/apple/web/src/chat.ts#draftSave
+- apps/apple/web/src/chat.ts#adoptShelf
+- apps/apple/web/src/chat.ts#remember
+- apps/apple/web/src/chat.ts#showTexts
+-->
 
 The composer's unsent prompts belong to the project they were written in. The server keeps a
 draft for each session and one for the project (KYO-763). The app reads and saves the
@@ -153,6 +180,20 @@ from the session the anchor names. Its chip in the composer is drawn dimmed with
 outline and takes no press, because the chat on screen has no place for it to open. The choice
 of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
+### Anchors in an unsent prompt
+
+<!-- governs:
+- apps/apple/web/src/chat.ts#trackEdit
+- apps/apple/web/src/chat.ts#trackHistory
+- apps/apple/web/src/chat.ts#stepPlacing
+- apps/apple/web/src/chat.ts#addAnchor
+- apps/apple/web/src/chat.ts#anchorsHeld
+- apps/apple/web/src/chat.ts#anchoredBlocks
+- apps/apple/web/src/chat.ts#paintAnchors
+- apps/apple/web/src/chat.ts#paintStalePlaces
+- apps/apple/web/src/chat.ts#paintStaleAnchors
+-->
+
 Placing an anchor is a step of its own in a prompt's undo (KYO-780): Command-Z directly after
 it takes the anchor back and leaves the text as it was, and Shift-Command-Z puts it back. The
 text area's own history holds edits of the text only, so the page keeps the placings beside it
@@ -166,6 +207,18 @@ The page's tests are in `web/test/` and run with `npm test` in `web/`. Those in
 `anchors.test.ts` need a web view: they build the page, open it in a headless Chrome and feed
 it the frames the app would send, and are skipped on a machine with no Chrome.
 
+### A session's task list
+
+<!-- governs:
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/web/src/agenda.ts
+- apps/apple/web/src/chat.ts#agendaFrame
+- apps/apple/web/src/chat.ts#agendaItemsNow
+- apps/apple/web/src/chat.ts#saveAgenda
+- apps/apple/web/src/chat.ts#agendaRow
+- apps/apple/web/src/chat.ts#drawAgenda
+-->
+
 A live session's task list (KYO-770, KYO-771) is drawn above the composer's prompts, in a
 slightly dimmed bubble that is the first thing in the prompts' own scrolling column: it rises
 as the prompts grow and scrolls out of view with them when they need the room. The person
@@ -176,6 +229,12 @@ and a save the server refuses as stale leaves the typed words in their field and
 no live session there is no bubble, and a token that may not read the list is told why in it.
 The app's part is `showAgenda` and `saveAgenda` in `SessionFeed.swift`; the page's is
 `web/src/agenda.ts` and the section of `web/src/chat.ts` that draws it.
+
+### Spelling in the page's text fields
+
+<!-- governs:
+- apps/apple/Sources/KyoseiMac/ChatView.swift
+-->
 
 The page's text fields underline misspelled words and change nothing that is typed (KYO-796).
 WebKit on macOS takes both from the app's defaults rather than from the page: it underlines
@@ -189,21 +248,14 @@ kept. Smart quotes, smart dashes and text replacement have their own keys and st
 the system-wide settings. `Tests/KyoseiMacTests` builds the web view without a window and
 checks the keys and that typed text is left as typed.
 
-The app opens on the project it last showed. On a first run, or when the server no longer
-lists that project, it shows the list of projects in place of the chat. The logic is in
-`web/src/projects.ts`, and the switch is `SessionFeed.open`. File > Projects… (Command-O)
-shows that list in place of everything under the top bar (KYO-766), and choosing it again
-returns to the project the window was showing.
-
 ## Views
 
 <!-- governs:
-- apps/apple/web/src/chat.ts
 - apps/apple/web/static/chat.html
-- apps/apple/web/src/search.ts
-- apps/apple/web/src/records.ts
-- apps/apple/web/src/files.ts
-- apps/apple/web/src/searchhistory.ts
+- apps/apple/web/src/chat.ts#VIEWS
+- apps/apple/web/src/chat.ts#currentView
+- apps/apple/web/src/chat.ts#drawViews
+- apps/apple/web/src/chat.ts#showView
 -->
 
 After the dropdown and the links, the bar lists the views, and choosing one replaces the pane
@@ -212,6 +264,21 @@ chat stays drawn beneath the others and keeps following its session, so returnin
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
 
+### Search in a view
+
+<!-- governs:
+- apps/apple/web/src/search.ts
+- apps/apple/web/src/chat.ts#searchable
+- apps/apple/web/src/chat.ts#indexed
+- apps/apple/web/src/chat.ts#runSearch
+- apps/apple/web/src/chat.ts#hitsOnScreen
+- apps/apple/web/src/chat.ts#paintHits
+- apps/apple/web/src/chat.ts#refreshSearch
+- apps/apple/web/src/chat.ts#moveToHit
+- apps/apple/web/src/chat.ts#openSearch
+- apps/apple/web/src/chat.ts#closeSearch
+-->
+
 Command-F searches what the view shows: the chat, the open record or the open file (KYO-741,
 KYO-754). The query is matched as one phrase, without regard to case, against the text as it
 is drawn, and nothing in it is an operator. A record's unopened folds are searched too, and
@@ -219,6 +286,20 @@ stepping to a hit inside one opens it. Every hit is counted, but only the hits o
 marked, and none inside a shut fold: the web view was measured stalling for about a
 millisecond for each marked range that lies in a shut fold. The matching is in
 `web/src/search.ts`.
+
+### Records
+
+<!-- governs:
+- apps/apple/web/src/records.ts
+- apps/apple/web/src/chat.ts#drawKindControls
+- apps/apple/web/src/chat.ts#drawRecordLists
+- apps/apple/web/src/chat.ts#recordItem
+- apps/apple/web/src/chat.ts#drawRecord
+- apps/apple/web/src/chat.ts#enterRecords
+- apps/apple/web/src/chat.ts#openRecord
+- apps/apple/web/src/chat.ts#closeRecord
+- apps/apple/web/src/chat.ts#recordFrames
+-->
 
 Records shows the project's records, one at a time. With none open it lists them all,
 newest first and without groups (KYO-759); the side bar lists them in the same order above
@@ -233,6 +314,24 @@ names it in the accent colour, with an x that clears it. A
 project's event stream reports a change to the store. Its logic is in `web/src/records.ts`.
 The viewing history is kept in the app's own defaults for each server and project, not in
 the store.
+
+### Files
+
+<!-- governs:
+- apps/apple/web/src/files.ts
+- apps/apple/web/src/chat.ts#linkPaths
+- apps/apple/web/src/chat.ts#askPath
+- apps/apple/web/src/chat.ts#dressPathLink
+- apps/apple/web/src/chat.ts#drawFilesSide
+- apps/apple/web/src/chat.ts#fileMarkdown
+- apps/apple/web/src/chat.ts#fileSource
+- apps/apple/web/src/chat.ts#drawFile
+- apps/apple/web/src/chat.ts#showFile
+- apps/apple/web/src/chat.ts#refreshOpenFile
+- apps/apple/web/src/chat.ts#refreshTree
+- apps/apple/web/src/chat.ts#enterFiles
+- apps/apple/web/src/chat.ts#fileFrames
+-->
 
 Files shows the project's files as `kyo serve` serves them: the code repository and the store
 repository, each as git shows it, and the followed session's scratchpad directory when the
@@ -254,6 +353,20 @@ when one follows the path after a colon. The words asked about are absolute path
 they are. The logic is in `web/src/files.ts`. All of this needs the device token to hold the
 `files` permission. Without it the view shows the server's refusal and no path is a link.
 
+### History
+
+<!-- governs:
+- apps/apple/web/src/searchhistory.ts
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/web/src/chat.ts#enterHistory
+- apps/apple/web/src/chat.ts#askHistory
+- apps/apple/web/src/chat.ts#drawHistory
+- apps/apple/web/src/chat.ts#drawOpened
+- apps/apple/web/src/chat.ts#openMessage
+- apps/apple/web/src/chat.ts#revealPending
+- apps/apple/web/src/chat.ts#historyFrames
+-->
+
 History searches what was said in the project's sessions (KYO-825). It has a search field and
 two chips, You and Claude, which choose whose messages are searched. A query of two characters
 or more is sent to the server's `search` route, and each result names who wrote the message,
@@ -263,7 +376,7 @@ leaves a Results button in the top bar that returns to the list. The side bar li
 results opened most recently as the server keeps them, so that every device shows the same
 list. Command-Shift-F opens the view. It needs a device token of any permission and a project
 that has opted in to reading transcripts. The logic is in `web/src/searchhistory.ts`, and the
-app's part is `SessionFeed.history(body:)`.
+
 
 ### Files outside the served roots
 
