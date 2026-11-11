@@ -622,6 +622,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-727` (bug) — Mac app composer: an empty prompt vanishes, an anchor lands on a new line, and the view jumps while typing
 - **2026-11-10** — `KYO-741` (task) — Mac app: search in the chat
 - **2026-11-10** — `KYO-739` (task) — kyo show reads a criterion, gate, note or claim by its id
 - **2026-11-10** — `KYO-735` (task) — kyo serve: a project's files, as a tree and as bytes, behind a files permission
