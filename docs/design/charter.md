@@ -663,8 +663,10 @@ replaces both halves with mechanisms:
   moment of the thought — never authored retrospectively at closeout, so a crash loses at most
   the last unrecorded thought. Assertions in shift notes are claims and carry provenance levels
   like everything else; the next brief opens with the previous shift log, dated.
-- **Closeout is a hook, not a ritual.** `SessionEnd`/`Stop` hooks run `kyo doctor` + `kyo
-  sweep` + report-completeness checks. Nothing about ending a shift is remembered.
+- **Closeout is a hook, not a ritual.** The `Stop` hook runs `kyo sweep` and then `kyo
+  doctor`, with its report-completeness checks, after every turn. Nothing about ending a
+  shift is remembered. `SessionEnd` does not carry the chain, because Claude Code cancels it
+  on exit and `Stop` has already run it (KYO-774).
 - **A session's task list is carried by the brief, and is not a record** (KYO-770). The list
   holds the orchestrator's plan for its coming turns and the person's reminders for the
   session. It is session state kept beside the composer's draft, written by both, and nothing
