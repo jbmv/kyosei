@@ -43,7 +43,12 @@ Both `kyosei` and `kyo` are installed and are the same program.
    push" in [store.md](store.md)), and once the
    plugin is enabled it removes the setup-incomplete section `kyo init` wrote into
    CLAUDE.md. A `pre-push` hook of your own is never overwritten; the command names the
-   line to add to it instead.
+   line to add to it instead. The same holds for a hook Kyosei wrote that has since
+   gained lines of yours, where the command names the line to put in place of its `kyo
+   check-push` line (KYO-679). Where `core.hooksPath` points outside the repository's
+   own git directory, no hook is written there, since that directory is either shared
+   with other repositories or tracked in this one, and the command names the directory
+   and the line to add (KYO-416).
 
 The plugin is not offered by any hosted marketplace; the installed package is its only
 source, which keeps its skill and hooks the same version as the `kyo` that runs them. With
@@ -153,7 +158,7 @@ The section above says how to reinstall. This one says **when it is worth doing,
 and what you get**. Without it, a project can report a defect that its installed build
 already fixes, because nothing says which build is running (KYO-226).
 
-`kyo version` prints one line — the package version, the commit the wheel was
+`kyo version` prints the build on its first line — the package version, the commit the wheel was
 built from, that commit's date (in UTC, the clock every other date the store prints
 is on — KYO-398; `--json` carries the full `commit_time`), whether the tree it was built from was dirty, and
 now which kind of install this copy is (KYO-317): a uv tool install, a working
@@ -162,7 +167,9 @@ built from the commit tagged `v<version>` with a clean tree reads `(release)`,
 anything else `unreleased build <commit>`, followed by the last release it came
 after when one is reachable (KYO-445). `--json` carries `release`, `last_release`
 and the `schema_version` the build speaks. It is the same line `kyo brief` now opens a session with,
-so you never have to ask. Both the commit and the changelog are **build-time
+so you never have to ask. Four indented lines follow it: which kind of install this copy
+is, the `kyo changelog` command that lists what changed since the build, how to move to
+a newer build, and the commands to run in each project afterwards. Both the commit and the changelog are **build-time
 products**: the commit is stamped into the package when the wheel is built (`uv
 tool install .`, `pipx install .` and `make install-tool` each build one from the
 working tree at that instant), and the changelog entries are regenerated
@@ -229,7 +236,11 @@ needs depends on how it is wired into Claude Code. On the plugin, the hooks and 
 skill are read in place from the build the stable link names, so the upgrade itself
 updates them, and only the standing rules, a copy on every route, need `kyo
 install-procedures`. On the copies, the hooks and the skill are copies too, and only a
-rerun updates them, whichever route reinstalled the CLI itself. `kyo version` names
+rerun updates them, whichever route reinstalled the CLI itself. A rerun of `kyo
+install-hooks` also removes the sweep and doctor chain from `SessionEnd`, where earlier
+builds installed it, and reports the removal as a change: Claude Code cancels the chain
+at that event, and it runs at `Stop` (KYO-774). A `SessionEnd` hook of your own, or the
+chain with a step of yours added, is left as it is. `kyo version` names
 the commands for the project it runs in. `kyo install-procedures` **merges** — see
 "After every upgrade, three commands" in [operating.md](operating.md) for exactly what
 it will and will not rewrite.
@@ -282,7 +293,11 @@ consumer across a `schema_version` bump" just above: re-snapshot, `kyo rebuild
 
 This subsection is what a project's orchestrator has to **do** differently after moving to a
 build at schema 26 from one at schema 25, in the order it will meet it. `kyo changelog`
-lists every record the newer build carries.
+lists every record the newer build carries. Later schema steps have no subsection of
+their own: each is crossed by the sequence in "Upgrading a consumer across a
+`schema_version` bump" above, `kyo changelog --since <date>` lists what the newer build
+carries, and the registry entries a later build adds to the packaged `kinds.yml` are
+described where the registry is, in [registries.md](registries.md).
 
 1. **Migrate the store (schema 25 -> 26, KYO-498).** The first `kyo` command after the
    upgrade is refused with a schema mismatch naming these steps: `kyo rebuild --force`,
