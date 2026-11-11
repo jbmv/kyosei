@@ -104,6 +104,7 @@ from .prose import (
     single_line,
 )
 from .render import (
+    current_credits,
     echo_block,
     echo_value,
 )
@@ -870,10 +871,13 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         )
         scope, scopes = _checked_scope(store, args.scope)
     since_note_arg = getattr(args, "since_note", None)
+    implements = getattr(args, "implements", None)
 
     if check_only:
         if plan is not None:
             _require_plan(store, plan)
+        if implements is not None:
+            _require_decision(store, implements, new_kind=kind)
         return _from_check_output(
             command="new",
             kind=kind,
@@ -908,6 +912,11 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
     with store.transaction():
         if plan is not None:
             _require_plan(store, plan)
+        # KYO-786: the decision this work carries out, read before the link changes it.
+        implemented_before = {}
+        if implements is not None:
+            _require_decision(store, implements, new_kind=kind)
+            implemented_before[implements] = export.record_document(store, implements)
         record_id = store.new_record_id()
         seq = int(record_id.rsplit("-", 1)[1])
         stamp = now()
@@ -965,16 +974,25 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             discussion.write(ctx, store, record_id, title, stamp) if discussion else None
         )
         discussion_ids = [discussed["discussion_id"]] if discussed else []
+        # KYO-786: after the discussion, whose own write reads the records it changes.
+        implements_link = (
+            _write_implements(store, record_id, implements, stamp) if implements else None
+        )
+        also_changed = list(dict.fromkeys([*discussion_ids, *implemented_before]))
         # KYO-554: inside the same transaction, so the export carries them.
         standing_summary = raise_standing_obligations(ctx, store, record_id, stamp=stamp)
         after, events = commands._commit_and_export(
             store,
             command=f"new {kind}",
             actor=ctx.actor,
-            record_ids=[record_id, *discussion_ids],
-            before={record_id: None, **{rid: discussed_before.get(rid) for rid in discussion_ids}},
+            record_ids=[record_id, *also_changed],
+            before={
+                record_id: None,
+                **implemented_before,
+                **{rid: discussed_before.get(rid) for rid in discussion_ids},
+            },
         )
-    commands._finish_mutation(store, [record_id, *discussion_ids], events)
+    commands._finish_mutation(store, [record_id, *also_changed], events)
 
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added)
@@ -1010,6 +1028,7 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
         f"  {tid}  {path}" + (f"#{symbol}" if symbol else "")
         for tid, path, symbol in added_touches
     ]
+    lines += _implements_line(implements_link)
     if evidence is not None:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
@@ -1037,6 +1056,8 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             "credit_id": credit_id,  # KYO-644
             # KYO-658: the discussion it was filed from, or null.
             "discussion_id": discussed["discussion_id"] if discussed else None,
+            # KYO-786: the link `--implements` wrote, or null.
+            "implements_link": implements_link,
             "record_id": record_id,
             # KYO-521: the evidence `--evidence-file` attached, or null.
             "evidence_id": evidence[0] if evidence is not None else None,
@@ -1049,6 +1070,37 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             "scope_suggestion": scope_data,
         },
     )
+
+
+def _require_decision(store: Store, decision_id: str, *, new_kind: str) -> None:
+    """``--implements ID`` (KYO-786): ID is a record a dossier can be drawn from, which is
+    a ``decision`` or a record that holds a current credit of role ``decided``."""
+    doc = export.record_document(store, decision_id)
+    if doc["kind"] == "decision":
+        return
+    if any(c["role"] == "decided" for c in current_credits(doc)):
+        return
+    raise UsageError(
+        f"--implements names {decision_id}, a {doc['kind']!r} that no credit records a "
+        f"decision on; it takes the record of the decision this {new_kind} carries out"
+    )
+
+
+def _write_implements(store: Store, record_id: str, decision_id: str, stamp: str) -> dict:
+    """``record_id implements decision_id``, the link `kyo link` writes for that edge
+    (KYO-786), in the transaction that files ``record_id``."""
+    link_id, lseq = store.new_link_id()
+    store.conn.execute(
+        "INSERT INTO links (id, seq, src_id, edge_type, dst_id, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (link_id, lseq, record_id, "implements", decision_id, stamp),
+    )
+    _touch_record(store, decision_id)
+    return {"id": link_id, "src": record_id, "type": "implements", "dst": decision_id}
+
+
+def _implements_line(link: dict | None) -> list[str]:
+    return [f"link: {link['id']}  {link['src']} implements {link['dst']}"] if link else []
 
 
 def _checked_since_note(
@@ -2366,9 +2418,13 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     head = body or f"Spawned from {source_id} ({source_kind}): {source['title']}"
     description = f"{head}\n\n---\nSpawned from: {source_id}\n"
 
+    implements = getattr(args, "implements", None)
+
     if check_only:
         if plan is not None:
             _require_plan(store, plan)
+        if implements is not None:
+            _require_decision(store, implements, new_kind=args.kind)
         return _from_check_output(
             command="spawn",
             kind=args.kind,
@@ -2398,6 +2454,10 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         if plan is not None:
             _require_plan(store, plan)
         before = {source_id: export.record_document(store, source_id)}
+        # KYO-786: the decision this work carries out, read before the link changes it.
+        if implements is not None:
+            _require_decision(store, implements, new_kind=args.kind)
+            before.setdefault(implements, export.record_document(store, implements))
         record_id = store.new_record_id()
         seq = int(record_id.rsplit("-", 1)[1])
         stamp = now()
@@ -2454,6 +2514,17 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             if discussed and discussed["discussion_id"] != source_id
             else []
         )
+        # KYO-786: after the discussion, whose own write reads the records it changes.
+        implements_link = (
+            _write_implements(store, record_id, implements, stamp) if implements else None
+        )
+        also_changed = list(
+            dict.fromkeys(
+                rid
+                for rid in [*discussion_ids, *([implements] if implements else [])]
+                if rid != source_id
+            )
+        )
         # KYO-554: inside the transaction, so the export carries them.
         standing_summary = raise_standing_obligations(ctx, store, record_id, stamp=stamp)
 
@@ -2462,14 +2533,14 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             store,
             command=f"spawn {source_id} -> {record_id} ({source_kind} -> {args.kind})",
             actor=ctx.actor,
-            record_ids=[source_id, record_id, *discussion_ids],
+            record_ids=[source_id, record_id, *also_changed],
             before={
+                **{rid: discussed_before.get(rid) for rid in discussion_ids},
                 **before,
                 record_id: None,
-                **{rid: discussed_before.get(rid) for rid in discussion_ids},
             },
         )
-    commands._finish_mutation(store, [source_id, record_id, *discussion_ids], events)
+    commands._finish_mutation(store, [source_id, record_id, *also_changed], events)
 
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added_criteria)
@@ -2494,6 +2565,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         for tid, path, symbol in added_touches
     ]
     lines.append(f"link: {link_id}  {record_id} produced-by {source_id}")
+    lines += _implements_line(implements_link)
     if evidence is not None:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
@@ -2533,6 +2605,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             "record_id": record_id,
             "standing_obligations": standing_summary,  # KYO-554
             "link_id": link_id,
+            # KYO-786: the link `--implements` wrote, or null.
+            "implements_link": implements_link,
             # KYO-522: the evidence `--evidence-file` attached, or null.
             "evidence_id": evidence[0] if evidence is not None else None,
             "scope_suggestion": scope_data,

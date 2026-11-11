@@ -484,7 +484,7 @@ Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
@@ -951,7 +951,7 @@ Usage: `kyo link [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 ### Positional arguments
 
 - `FROM_ID` — **required**.
-- `EDGE` — **required**. blocks | duplicates | supersedes | same-question-as | needs-same-change-as | produced-by
+- `EDGE` — **required**. blocks | duplicates | supersedes | same-question-as | needs-same-change-as | produced-by | implements
 - `TO_ID` — **required**.
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -1036,7 +1036,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
+Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--implements ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
 
 ### Positional arguments
 
@@ -1046,6 +1046,7 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 
 - `--title TEXT` — optional. one-line title Optional exactly when --from supplies the title instead (KYO-330).
 - `--plan ID` — optional. plan record this belongs to
+- `--implements ID` — optional. the record of the decision this work carries out; writes the link `<new record> implements ID`, which `kyo dossier ID` lists under what happened next. `kyo link` adds the same link to a record already filed (KYO-786)
 - `--scope SCOPE` — optional. the part of the system this work belongs to, from kyosei/scopes.yml; refused if the registry does not declare it
 - `--since-note NOTE-ID` — optional. a carried kind only: the shift note (PREFIX-Sn) that first recorded this item, so its age counts from that note's time; refused for an unknown note or a non-carried kind (KYO-498)
 - `--description-file FILE` — optional. description from a file, or '-' for stdin (law 5: prose never as an argument)
@@ -1057,7 +1058,7 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
@@ -1574,7 +1575,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--plan ID] [--keep-open] [--check] [--force] [--no-prior-art] SOURCE_ID`
+Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--decision-file FILE] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--plan ID] [--implements ID] [--keep-open] [--check] [--force] [--no-prior-art] SOURCE_ID`
 
 ### Positional arguments
 
@@ -1595,7 +1596,7 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn UUID` — optional. the transcript record holding the words, when they occur in several turns
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen}], and refining_turn for a refined outcome
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
@@ -1603,6 +1604,7 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
 - `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
 - `--plan ID` — optional. plan record the new record belongs to, as `kyo new --plan` (KYO-749)
+- `--implements ID` — optional. the record of the decision this work carries out; writes the link `<new record> implements ID`, which `kyo dossier ID` lists under what happened next. `kyo link` adds the same link to a record already filed (KYO-786)
 - `--keep-open` — optional. spawning from a discussion closes it; with this the discussion stays open, for a discussion that produces more than one record (KYO-749)
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
 - `--force` — optional. file the record although one with an identical title and criteria was filed in this project within the last hour (KYO-538)

@@ -537,8 +537,8 @@ governs: src/kyosei/schema.py
   transcript, while a turn reference addresses a whole prompt from the index, which holds no
   text and outlives the transcript.
 - **links** (typed edges): `blocks`, `duplicates`, `supersedes`, `same-question-as`,
-  `needs-same-change-as`, `depends-on-decision <record#claim>`, `produced-by`. Cycle-checked
-  at write time.
+  `needs-same-change-as`, `depends-on-decision <record#claim>`, `produced-by`, `implements`
+  (a work record to the decision it carries out, KYO-786). Cycle-checked at write time.
 - **dispatches**: first-class object — record_id, generated brief (frozen copy), amendments
   (each re-brief is recorded), worker identity, state (`running | reported |
   terminated-no-report | withdrawn`), report_id, worked_from_sha. The fourth state is

@@ -13,9 +13,16 @@ printed verbatim: an id inside a person's quoted words is left as they wrote it.
 
 WHAT IT DOES NOT YET SHOW. Excerpt packs (KYO-660) are not built, so no page attaches one.
 Part eight reads the credit's ``span_seal`` (KYO-663) and says "not sealed" for a credit
-without one (:func:`seal_sentence`). The alternatives of a decided credit carry a text and
-whether it was chosen, and no proposer, so part three names who made the recommendation and
-says that the proposer of each option is not recorded.
+without one (:func:`seal_sentence`).
+
+WHO PROPOSED AN OPTION (KYO-786). An alternative of a decided credit may name its proposer.
+Part three names the proposer of each option, and credits the agent with an option whose
+proposer the credit does not name, saying that it did so. The rule is the maintainer's: an
+option is the person's only when their own words introduced it.
+
+THE WORK A DECISION LED TO (KYO-786). Part seven lists the records that hold an
+``implements`` link to the decision's record, beside the records filed from it and the
+records it was recorded as blocking.
 
 A GO-AHEAD IS NEVER A DECISION. A credit of role ``authorized`` approves a plan already
 stated (KYO-644.c8). It is printed as a go-ahead, apart from the credits that decided, and
@@ -39,6 +46,7 @@ from dataclasses import dataclass, field
 from . import cmd_discuss, cmd_turns, cmd_views, export, ids
 from .commands import Context, Output, _load_registry
 from .config import person_label
+from .credits import AGENT_PROPOSERS, proposer_of
 from .errors import NotFound, UsageError
 from .render import _instant, credit_reconstructed, current_credits, dossier_markdown
 from .store import Store
@@ -68,6 +76,16 @@ def seal_sentence(credit: dict | None) -> str:
 #: store does not say such a record follows from the decision, so part seven lists it apart
 #: from the linked work and the timeline leaves it out.
 NAMES_IT = "names this decision in its text"
+
+#: The relation of a record that holds an ``implements`` link to the decision (KYO-786).
+IMPLEMENTS_IT = "recorded as carrying out this decision"
+
+#: Part three's sentence when a credit names no proposer for an option (KYO-786).
+PROPOSER_DEFAULTED = (
+    "Where the credit names no proposer for an option, this page credits the agent. The "
+    "project's rule is that an option is the person's only when their own words "
+    "introduced it."
+)
 
 _OUTCOME_CLAUSE = {
     "accepted": "accepting the recommendation",
@@ -283,8 +301,9 @@ class _Page:
 
 def _related_ids(store: Store, doc: dict) -> list[tuple[str, str]]:
     """``(record id, how it relates)`` for the work the store ties to this decision: the
-    record itself when it carries criteria or hand-offs, records filed from it, records it
-    was recorded as blocking, and work records whose title or description names it."""
+    record itself when it carries criteria or hand-offs, records filed from it, records
+    linked as implementing it (KYO-786), records it was recorded as blocking, and work
+    records whose title or description names it."""
     registry = _load_registry(store)
     out: dict[str, str] = {}
     if doc["criteria"] or doc["dispatches"]:
@@ -292,6 +311,9 @@ def _related_ids(store: Store, doc: dict) -> list[tuple[str, str]]:
     for link in doc["links"]:
         if link["type"] == "produced-by" and link["direction"] == "incoming":
             out.setdefault(link["other"], "filed from this decision")
+    for link in doc["links"]:
+        if link["type"] == "implements" and link["direction"] == "incoming":
+            out.setdefault(link["other"], IMPLEMENTS_IT)
     for link in doc["links"]:
         if link["type"] == "blocks" and link["direction"] == "outgoing":
             out.setdefault(link["other"], "recorded as waiting on this decision")
@@ -406,6 +428,17 @@ def _recommender(page: _Page, credit: dict) -> str:
     return f"The agent ({by})"
 
 
+def _proposer(page: _Page, alternative: dict) -> str:
+    """Who proposed an option, in the page's words: a declared person by name, the
+    orchestrator as "the agent", a worker as an agent the work was handed to."""
+    by = proposer_of(alternative)
+    if by == "worker":
+        return "an agent the work was handed to"
+    if by in AGENT_PROPOSERS:
+        return "the agent"
+    return page.person(by)
+
+
 def _part_table(page: _Page) -> dict:
     blocks: list[str] = []
     for index, credit in enumerate(page.credits):
@@ -414,11 +447,14 @@ def _part_table(page: _Page) -> dict:
         if alternatives:
             own.append(
                 "\n".join(
-                    f"- {page.refs.scrub(a['text'])}" + (" (chosen)" if a.get("chosen") else "")
+                    f"- {page.refs.scrub(a['text'])}"
+                    + (" (chosen)" if a.get("chosen") else "")
+                    + f", proposed by {_proposer(page, a)}"
                     for a in alternatives
                 )
             )
-            own.append("The record does not say who first proposed each option.")
+            if not all(a.get("proposed_by") for a in alternatives):
+                own.append(PROPOSER_DEFAULTED)
         if credit.get("recommended"):
             recommended = page.refs.scrub(credit["recommended"]).rstrip()
             own.append(
@@ -441,7 +477,10 @@ def _part_table(page: _Page) -> dict:
             "The store holds no credit naming who decided this, and so no account of "
             "what was recommended or what else was weighed."
         )
-    source = "the recommendation and alternatives stored on the credit naming who decided"
+    source = (
+        "the recommendation, the alternatives and the proposer of each stored on the "
+        "credit naming who decided"
+    )
     if page.credits:
         source += " " + ", ".join(page.refs.cite(c["id"]) for c in page.credits)
     if notes:
@@ -721,8 +760,9 @@ def _part_next(page: _Page) -> dict:
         "next",
         "What happened next",
         blocks,
-        "the record's links (records filed from the decision, records it was recorded "
-        "as blocking) and a search of work records for its id; for each, its hand-offs "
+        "the record's links (records filed from the decision, records linked as "
+        "implementing it, records it was recorded as blocking) and a search of work "
+        "records for its id; for each, its hand-offs "
         "to agents, the method of the latest verdict on each met criterion, and the "
         "person's credited observations.",
     )
