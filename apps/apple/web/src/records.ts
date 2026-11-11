@@ -228,7 +228,14 @@ export function refParts(text: string, prefixes: Iterable<string>): TextPart[] {
 /** How an item's state is coloured: green for what runs now, and quiet for what is past. */
 export type Tone = "running" | "quiet" | "plain";
 
-export interface Line { label: string; text: string }
+export interface Line {
+  label: string;
+  text: string;
+  /** A heading drawn above this line, where a new group of lines begins. */
+  group?: string;
+  /** The id the line can be anchored by, as a criterion's can: a verdict's criterion. */
+  ref?: string;
+}
 
 export interface Item {
   /** The item's id. It is drawn as text, and names the item for a citation. */
@@ -243,6 +250,8 @@ export interface Item {
   lines?: Line[];
   /** Long text shown folded, such as a dispatch's brief. */
   folded?: Line[];
+  /** Set when the item's lines are drawn folded under this label, as a superseded report's. */
+  collapsed?: string;
 }
 
 export interface Section { name: string; count: string; items: Item[] }
@@ -336,59 +345,107 @@ function gateItem(gate: Doc): Item {
   };
 }
 
-function dispatchItem(dispatch: Doc): Item {
+/**
+ * The part of a dispatch's frozen brief an orchestrator wrote: what follows its `## Task`
+ * heading, up to the `## Report` heading the generator closes it with. Null when the brief
+ * has no such heading.
+ */
+export function taskOf(brief: unknown): string | null {
+  const text = word(brief);
+  if (!text) return null;
+  const start = /^## Task[ \t]*$/m.exec(text);
+  if (!start) return null;
+  const rest = text.slice(start.index + start[0].length);
+  const end = /^## Report[ \t]*$/m.exec(rest);
+  const task = (end ? rest.slice(0, end.index) : rest).trim();
+  return task || null;
+}
+
+/** `covered` marks a dispatch of another record, whose id this record's page cannot cite. */
+function dispatchItem(dispatch: Doc, covered = false): Item {
+  const brief = word(dispatch.brief);
+  const task = taskOf(brief);
   return {
     ref: word(dispatch.id) ?? undefined,
-    citable: true,
+    citable: !covered,
     state: word(dispatch.state) ?? undefined,
     tone: dispatch.state === "running" ? "running" : "quiet",
-    meta: words(dispatch.worker_model, when(dispatch.created_at)),
     lines: [
+      ...line("model", dispatch.worker_model),
       ...line("branch", dispatch.branch),
-      ...line("worked from", dispatch.worked_from_sha),
+      ...line("base", dispatch.worked_from_sha),
+      ...line("dispatched", when(dispatch.created_at)),
       ...line("report", dispatch.report_id),
       ...line("also covers", ...(Array.isArray(dispatch.covers) ? dispatch.covers : [])),
       ...line("closed", when(dispatch.closed_at)),
       ...line("ended because", dispatch.terminated_why),
     ],
-    folded: line("Brief", dispatch.brief),
+    folded: [
+      ...(task ? [{ label: "Task", text: task }] : []),
+      ...(brief ? [{ label: `Brief, ${brief.length.toLocaleString("en-US")} characters`, text: brief }] : []),
+    ],
   };
 }
 
-function reportItem(report: Doc): Item {
+/**
+ * A report in the order an orchestrator reviews it: what the brief got wrong, where the
+ * worker departed from it, what it did and why, corrected numbers, each criterion's verdict,
+ * the docs verdicts, and the commits. `supersededBy` names the report that replaced this one,
+ * which is then drawn folded.
+ */
+export function reportItem(report: Doc, supersededBy: string | null = null): Item {
   const body: Doc = report.body && typeof report.body === "object" ? report.body : {};
+  const group = (name: string, lines: Line[]): Line[] =>
+    lines.length ? [{ ...lines[0], group: name }, ...lines.slice(1)] : [];
+  const lines: Line[] = [
+    ...group("False premises", list(body.premise_false).map((premise) => ({
+      label: "premise false",
+      text: words(
+        premise.claim, premise.correction && `Correction: ${premise.correction}`,
+        premise.impact && `Impact: ${premise.impact}`).join("\n"),
+    }))),
+    ...group("Disagreements with the brief", list(body.disagreements).map((disagreement) => ({
+      label: "disagreement",
+      text: words(
+        disagreement.topic, disagreement.brief_said && `The brief said: ${disagreement.brief_said}`,
+        disagreement.worker_did && `The worker did: ${disagreement.worker_did}`,
+        disagreement.rationale && `Because: ${disagreement.rationale}`).join("\n"),
+    }))),
+    ...group("What the worker did and why", line("summary", body.summary)),
+    ...group("Corrected numbers", list(body.corrected_numbers).map((number) => ({
+      label: "corrected number",
+      text: words(
+        number.claim, number.brief_value && `The brief said: ${number.brief_value}`,
+        number.actual_value && `Measured: ${number.actual_value}`,
+        number.method && `By: ${number.method}`).join("\n"),
+    }))),
+    ...group("Verdicts", list(body.criteria_verdicts).map((verdict) => ({
+      label: words(verdict.criterion_id, verdict.verdict, verdict.method).join(" · "),
+      text: words(
+        verdict.evidence, verdict.reason && `Reason: ${verdict.reason}`, verdict.notes).join("\n"),
+      ref: word(verdict.criterion_id) ?? undefined,
+    }))),
+    ...group("Docs verdicts", list(body.docs_verdicts).map((docs) => ({
+      label: words(docs.verdict, docs.method).join(" · "),
+      text: words(
+        words(docs.doc_path, docs.section && `§ ${docs.section}`).join(" "), docs.reason).join("\n"),
+    }))),
+    ...group("Commits", list(body.commits).map((commit) => ({
+      label: "commit", text: words(commit.sha, commit.subject).join(" "),
+    }))),
+    ...group("Files touched", Array.isArray(body.touched_files) && body.touched_files.length
+      ? [{ label: "touched", text: words(...body.touched_files).join("\n") }] : []),
+  ];
+  const amends = word(body.amends);
   return {
     ref: word(report.id) ?? undefined,
-    meta: words(report.dispatch_id, report.author, when(report.created_at)),
-    lines: [
-      ...list(body.criteria_verdicts).flatMap((verdict) => [{
-        label: words(verdict.criterion_id, verdict.verdict, verdict.method).join(" · "),
-        text: words(verdict.evidence, verdict.reason, verdict.notes).join("\n"),
-      }]),
-      ...list(body.premise_false).map((premise) => ({
-        label: "premise false",
-        text: words(
-          premise.claim, premise.correction && `Correction: ${premise.correction}`,
-          premise.impact && `Impact: ${premise.impact}`).join("\n"),
-      })),
-      ...list(body.disagreements).map((disagreement) => ({
-        label: "disagreement",
-        text: words(
-          disagreement.topic, disagreement.brief_said && `The brief said: ${disagreement.brief_said}`,
-          disagreement.worker_did && `The worker did: ${disagreement.worker_did}`,
-          disagreement.rationale && `Because: ${disagreement.rationale}`).join("\n"),
-      })),
-      ...list(body.corrected_numbers).map((number) => ({
-        label: "corrected number",
-        text: words(
-          number.claim, number.brief_value && `The brief said: ${number.brief_value}`,
-          number.actual_value && `Measured: ${number.actual_value}`,
-          number.method && `By: ${number.method}`).join("\n"),
-      })),
-      ...list(body.commits).map((commit) => ({
-        label: "commit", text: words(commit.sha, commit.subject).join(" "),
-      })),
-    ],
+    state: supersededBy ? "superseded" : undefined,
+    tone: supersededBy ? "quiet" : "plain",
+    meta: words(
+      report.dispatch_id, report.author, when(report.created_at),
+      amends && `amends ${amends}`, supersededBy && `superseded by ${supersededBy}`),
+    lines,
+    collapsed: supersededBy ? `Superseded report, ${lines.length} entries` : undefined,
   };
 }
 
@@ -421,11 +478,55 @@ function creditItem(credit: Doc, evidence: Map<string, string>): Item {
 
 const LONG_TEXT = 700;
 
+/** The reports of `reports` with the id of the one that amended each, from the amending report. */
+function supersessions(reports: Doc[]): Map<string, string> {
+  const by = new Map<string, string>();
+  for (const report of reports) {
+    const amended = word(report.body?.amends);
+    if (amended && word(report.id)) by.set(amended, report.id);
+  }
+  return by;
+}
+
+/**
+ * The dispatches of other records that formally cover this one, and their reports, drawn
+ * from the covering record's own document where `covering` holds it. A record covered by a
+ * dispatch has no dispatch or report of its own, so without these its page showed neither.
+ */
+function coveredBy(doc: Doc, covering: ReadonlyMap<string, Doc>): { dispatches: Item[]; reports: Item[] } {
+  const dispatches: Item[] = [];
+  const reports: Item[] = [];
+  for (const entry of list(doc.covered_by_dispatches)) {
+    const primary = word(entry.primary_record_id);
+    const full = primary ? covering.get(primary) : undefined;
+    const dispatch = list(full?.dispatches).find((one) => one.id === entry.id);
+    if (dispatch) {
+      dispatches.push({ ...dispatchItem(dispatch, true), meta: words(`on ${primary}`) });
+    } else {
+      dispatches.push({
+        ref: word(entry.id) ?? undefined, state: word(entry.state) ?? undefined, tone: "quiet",
+        meta: words(primary && `on ${primary}`),
+        lines: line("report", entry.report_id),
+      });
+    }
+    const all = list(full?.reports);
+    const replaced = supersessions(all);
+    for (const report of all.filter((one) => one.dispatch_id === entry.id)) {
+      reports.push(reportItem(report, replaced.get(report.id) ?? null));
+    }
+  }
+  return { dispatches, reports };
+}
+
 /**
  * What a record page shows, from `kyo show --json`: the same parts `kyo show` prints, each
- * with its id. `titles` names the records a link or a member points at.
+ * with its id. `titles` names the records a link or a member points at, and `covering` holds
+ * the documents of the records whose dispatches cover this one, by id.
  */
-export function recordPage(doc: Doc, titles: ReadonlyMap<string, string> = new Map()): Page {
+export function recordPage(
+  doc: Doc, titles: ReadonlyMap<string, string> = new Map(),
+  covering: ReadonlyMap<string, Doc> = new Map(),
+): Page {
   const named = (id: unknown): string => {
     const text = word(id) ?? "";
     const title = titles.get(text);
@@ -450,6 +551,8 @@ export function recordPage(doc: Doc, titles: ReadonlyMap<string, string> = new M
   const gates = list(doc.gates);
   const openGates = gates.filter((gate) => !gate.cleared_at).length;
   const flags = list(doc.flags);
+  const cover = coveredBy(doc, covering);
+  const replaced = supersessions(list(doc.reports));
   const all: Section[] = [
     {
       name: "Criteria", count: String(list(doc.criteria).length),
@@ -476,12 +579,16 @@ export function recordPage(doc: Doc, titles: ReadonlyMap<string, string> = new M
       })),
     },
     {
-      name: "Dispatches", count: String(list(doc.dispatches).length),
-      items: list(doc.dispatches).map(dispatchItem),
+      name: "Dispatches",
+      count: String(list(doc.dispatches).length + cover.dispatches.length),
+      items: [...list(doc.dispatches).map((one) => dispatchItem(one)), ...cover.dispatches],
     },
     {
-      name: "Reports", count: String(list(doc.reports).length),
-      items: list(doc.reports).map(reportItem),
+      name: "Reports", count: String(list(doc.reports).length + cover.reports.length),
+      items: [
+        ...list(doc.reports).map((one) => reportItem(one, replaced.get(one.id) ?? null)),
+        ...cover.reports,
+      ],
     },
     {
       name: "Notes", count: String(list(doc.notes).length),

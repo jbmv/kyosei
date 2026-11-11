@@ -3,7 +3,7 @@
 // version replaces it in place.
 import { agentKind, shortModel } from "./agents";
 import {
-  type FilePlace, type Place, blockLines, drawnSpan, fileLine, heldLine, lineAt, lineOf, nearest,
+  type FilePlace, type Place, blockLines, drawnSpan, fileLine, lineWords, heldLine, lineAt, lineOf, nearest,
   placeAnchor, placeKey, recordLine as placedRecord, samePlace, scrollToShow, sentenceAt, shiftLines, sourceIndex,
   sourceSpan, spanPlace,
 } from "./marks";
@@ -354,9 +354,8 @@ function drawPlaceLine(line: string): HTMLElement | null {
     chip.addEventListener("click", () => revealPlace({ kind: "record", id: record.id, words }));
   } else if (file) {
     const words = (file.selection ?? file.words).replace(/\.\.\.$/, "…");
-    const span = file.lines[0] === file.lines[1] ? `${file.lines[0]}` : `${file.lines[0]}-${file.lines[1]}`;
     chip.dataset.place = placeKey({ kind: "path", ...file });
-    chip.append(icon("page"), `${nameOf(file.path)}:${span}${words ? ` ${words}` : ""}`);
+    chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}${words ? ` ${words}` : ""}`);
     chip.addEventListener("click", () => revealPlace({
       kind: "path", root: file.root, path: file.path, lines: file.lines, words,
       ...(file.session ? { session: file.session } : {}),
@@ -3038,6 +3037,9 @@ let openRecordId: string | null = null;
 let openRecordDoc: Record<string, unknown> | null = null;
 let openRecordText = "";
 let openRecordProblem: string | null = null;
+/** The records whose dispatches cover the open one, as `kyo show --json` printed them. */
+const coveringDocs = new Map<string, Record<string, unknown>>();
+const coveringAsked = new Set<string>();
 /** An element of the open record to scroll to once it is drawn, such as a criterion. */
 let revealRef: string | null = null;
 /** The folded texts a reader has opened on the record's page, by item and label. */
@@ -3195,9 +3197,11 @@ function drawRecordLists(): void {
 function recordLine(line: Line, wide: boolean): HTMLElement {
   const row = document.createElement("div");
   row.className = wide ? "rec-line wide" : "rec-line";
+  // A verdict in a report is anchored by its criterion's id, as the criterion is (KYO-740).
+  if (line.ref) row.dataset.recordRef = line.ref;
   const label = span("rec-label", "");
   label.append(linked(line.label));
-  const text = span("rec-line-text", "");
+  const text = span(line.ref ? "rec-line-text rec-text" : "rec-line-text", "");
   text.append(linked(line.text));
   row.append(label, text);
   return row;
@@ -3228,8 +3232,31 @@ function recordItem(section: string, item: Item): HTMLElement {
     if (plain) text.classList.add("plain");
     element.append(text);
   }
+  // A superseded report keeps its lines, folded under a label that says so.
+  let into: HTMLElement = element;
+  if (item.collapsed && item.lines?.length) {
+    const key = `${item.ref ?? section}/${item.collapsed}`;
+    const details = document.createElement("details");
+    details.className = "rec-superseded";
+    const summary = document.createElement("summary");
+    summary.textContent = item.collapsed;
+    details.append(summary);
+    details.open = openFolds.has(key);
+    details.addEventListener("toggle", () => {
+      if (details.open) openFolds.add(key);
+      else openFolds.delete(key);
+    });
+    element.append(details);
+    into = details;
+  }
   for (const line of item.lines ?? []) {
-    element.append(recordLine(line, section === "Reports" && line.label.includes(" · ")));
+    if (line.group) {
+      const heading = document.createElement("div");
+      heading.className = "rec-group";
+      heading.textContent = line.group;
+      into.append(heading);
+    }
+    into.append(recordLine(line, section === "Reports" && line.label.includes(" · ")));
   }
   for (const folded of item.folded ?? []) {
     const key = `${item.ref ?? section}/${folded.label}`;
@@ -3271,7 +3298,7 @@ function drawRecord(): void {
     return;
   }
   const titles = new Map(recordRows.map((row) => [row.id, row.title]));
-  const page = recordPage(openRecordDoc, titles);
+  const page = recordPage(openRecordDoc, titles, coveringDocs);
   const head = document.createElement("div");
   head.className = "record-head";
   head.dataset.recordRef = page.id;
@@ -3339,6 +3366,8 @@ function openRecord(target: LinkTarget, stepping = false): void {
     openRecordText = "";
     openRecordProblem = null;
     openFolds.clear();
+    coveringDocs.clear();
+    coveringAsked.clear();
   }
   revealRef = target.ref !== target.record ? target.ref : null;
   viewedRecords = visit(viewedRecords, target.record);
@@ -3410,6 +3439,14 @@ const recordFrames = {
 
   /** One record as `kyo show --json` prints it, or why it could not be read. */
   record(frame: { id: string; document?: Record<string, unknown> | null; error?: string | null }): void {
+    // A record whose dispatch covers the open one: its report is drawn on the open page.
+    if (frame.id !== openRecordId && coveringAsked.has(frame.id)) {
+      if (frame.document) {
+        coveringDocs.set(frame.id, frame.document);
+        if (openRecordDoc) drawRecord();
+      }
+      return;
+    }
     if (frame.id !== openRecordId) return;
     if (!frame.document) {
       // A refresh that failed leaves the page as it was.
@@ -3424,6 +3461,16 @@ const recordFrames = {
     openRecordDoc = frame.document;
     openRecordText = text;
     openRecordProblem = null;
+    // The dispatches of other records that cover this one hold the report it is owed.
+    const covered = (frame.document as { covered_by_dispatches?: { primary_record_id?: unknown }[] })
+      .covered_by_dispatches;
+    for (const entry of Array.isArray(covered) ? covered : []) {
+      const primary = entry?.primary_record_id;
+      if (typeof primary === "string" && primary !== openRecordId && !coveringAsked.has(primary)) {
+        coveringAsked.add(primary);
+        post("records", { want: "record", id: primary });
+      }
+    }
     drawRecord();
   },
 

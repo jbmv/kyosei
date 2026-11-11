@@ -76,14 +76,14 @@ reads the line and cannot open the client, so each line carries what finds the p
     on record KYO-717.c4 "A record's page shows its criteria with..."
     on file src/kyosei/serve_notes.py lines 333-345 "def find( server: Any, root_of:..."
     on file docs/plan.md in the store repository lines 12-14 "The app is built in small..."
-    on file notes/plan.md in the scratchpad lines 3-3 "The second chunk waits on..." at "waits"
+    on file notes/plan.md in the scratchpad line 3 "The second chunk waits on..." at "waits"
 
 A record's line is its id, which ``kyo show`` reads, and the first words the element holds now
 (:func:`kyosei.cmd_notes.element_words`); a dispatch has no words and is its id alone. A
 file's line is its path relative to its root, the root when it is not the code repository
 (``in the store repository``, ``in the scratchpad``, and ``in the scratchpad of session
-<id>`` when the scratchpad is another session's), its lines counted from 1, and its words as a
-turn's are quoted: a selection of fewer than :data:`ANCHOR_WORDS` words as its sentence and
+<id>`` when the scratchpad is another session's), its lines counted from 1 (``line 3`` for one,
+``lines 12-14`` for a span), and its words as a turn's are quoted: a selection of fewer than :data:`ANCHOR_WORDS` words as its sentence and
 ``at`` the selection, and in a markdown file the block's label after it. Lines are the source's
 lines whatever a client drew from them.
 
@@ -595,7 +595,8 @@ def _file_line(
     where = _ROOT_WORDS[name]
     if name == serve_tree.ROOT_SCRATCH and anchor["session"] != session_id:
         where += f" of session {anchor['session']}"
-    line = f"on file {anchor['target']}{where} lines {first}-{last}"
+    span = f"line {first}" if first == last else f"lines {first}-{last}"
+    line = f"on file {anchor['target']}{where} {span}"
     if text is None:
         return f"{line} (words unavailable)"
     markdown = anchor["kind"] == cmd_notes.ANCHOR_DOCUMENT

@@ -1531,13 +1531,13 @@ def test_c2_a_short_selection_quotes_its_sentence_and_a_long_one_is_quoted_itsel
     )
     assert status == 200, sent
     assert on_lines(sent) == [
-        'on file docs/plan.md lines 5-5 "The second chunk waits on the signing key that the..."'
+        'on file docs/plan.md line 5 "The second chunk waits on the signing key that the..."'
         ' at "waits" (list item)',
-        'on file docs/plan.md lines 5-5 "waits on the signing key that..." (list item)',
+        'on file docs/plan.md line 5 "waits on the signing key that..." (list item)',
         # A selection that is the whole of its sentence is the quote already.
-        'on file docs/plan.md lines 1-1 "The plan" (heading)',
+        'on file docs/plan.md line 1 "The plan" (heading)',
         # A source file has no blocks: the line is the sentence, and nothing is labelled.
-        'on file src/tidy.py lines 5-5 "return text.strip()" at "strip"',
+        'on file src/tidy.py line 5 "return text.strip()" at "strip"',
         # A few words over two lines are in no one sentence, and are quoted themselves.
         'on file src/tidy.py lines 4-5 "reformat(text): return"',
     ]
@@ -1557,8 +1557,8 @@ def test_c2_a_file_with_uncommitted_changes_is_anchored_as_it_is_served(
     status, sent = post(bed, SEND_PROMPT, document, with_files)
     assert status == 200, sent
     assert on_lines(sent) == [
-        'on file src/tidy.py lines 1-1 "# edited since the commit"',
-        'on file src/new.py lines 1-1 "fresh = True"',
+        'on file src/tidy.py line 1 "# edited since the commit"',
+        'on file src/new.py line 1 "fresh = True"',
     ]
 
 
@@ -1597,7 +1597,7 @@ def test_c2_reading_a_file_for_an_anchor_needs_the_files_permission_and_issuing_
     # A record needs no file read, so the same token still anchors to one.
     again = issue("studio", "notes", "send", "files")
     status, sent = post(bed, SEND_PROMPT, document, again)
-    assert status == 200 and on_lines(sent) == ['on file src/tidy.py lines 1-1 "import os"']
+    assert status == 200 and on_lines(sent) == ['on file src/tidy.py line 1 "import os"']
 
 
 def test_c2_a_repository_with_no_commit_is_refused_and_a_first_commit_clears_it(
@@ -1635,7 +1635,7 @@ def test_c2_a_scratchpad_file_names_its_root_and_its_session_stands_for_a_commit
     status, sent = post(bed, SEND_PROMPT, one_mark(anchor), with_files)
     assert status == 200, sent
     assert on_lines(sent) == [
-        'on file notes.md in the scratchpad lines 3-3 "Try the tunnel first."'
+        'on file notes.md in the scratchpad line 3 "Try the tunnel first."'
     ]
     bed.show(IDLE)
     wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
@@ -1658,7 +1658,7 @@ def test_c2_a_scratchpad_file_names_its_root_and_its_session_stands_for_a_commit
     finally:
         ctx.close()
     assert line == (
-        f'on file notes.md in the scratchpad of session {OLD} lines 3-3 "Try the tunnel first."'
+        f'on file notes.md in the scratchpad of session {OLD} line 3 "Try the tunnel first."'
     )
 
 
@@ -1816,7 +1816,7 @@ def test_c2_a_file_in_the_store_repository_names_that_root_by_its_commit(
     finally:
         ctx.close()
     assert line == (
-        'on file docs/plan.md in the store repository lines 3-3 "The first chunk is the reader,..."'
+        'on file docs/plan.md in the store repository line 3 "The first chunk is the reader,..."'
     )
     assert place["root"] == "store" and "stale" not in place
 
@@ -1836,7 +1836,7 @@ def test_c1_c2_a_set_of_notes_is_sent_with_the_same_lines(
     assert status == 200, sent
     assert on_lines(sent) == [
         f'on record {record} "The reader"',
-        'on file src/tidy.py lines 7-7 "LIMIT = 3"',
+        'on file src/tidy.py line 7 "LIMIT = 3"',
     ]
     # The file's words go into the message, so sending them needs the files permission too.
     status, refused = post(bed, SEND_NOTES, {"notes": [note["id"]]}, issue("pad", "notes", "send"))

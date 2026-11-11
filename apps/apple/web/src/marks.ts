@@ -382,7 +382,8 @@ export function recordLine(line: string): RecordLine | null {
 }
 
 /**
- * `on file docs/plan.md lines 12-14 "first words..."`, as `kyo serve` writes it. The root is
+ * `on file docs/plan.md lines 12-14 "first words..."`, as `kyo serve` writes it; one line is
+ * `line 12`, and the older `lines 12-12` is read as the same place. The root is
  * `code` unless the line names the store repository or a scratchpad, and `session` is set
  * when the scratchpad is another session's. `selection` is what follows `at` (KYO-733).
  */
@@ -391,16 +392,21 @@ export interface FileLine {
   words: string; selection: string | null;
 }
 
-const FILE_LINE = /^on file (.+?)(?: in the (store repository|scratchpad)(?: of session (\S+))?)? lines ([1-9]\d*)-([1-9]\d*) (?:"(.*?)"(?: at "(.*)")?(?: \((?:heading|list item|table cell|code block)\))?|\(words unavailable\))$/;
+const FILE_LINE = /^on file (.+?)(?: in the (store repository|scratchpad)(?: of session (\S+))?)? (?:line ([1-9]\d*)|lines ([1-9]\d*)-([1-9]\d*)) (?:"(.*?)"(?: at "(.*)")?(?: \((?:heading|list item|table cell|code block)\))?|\(words unavailable\))$/;
 /** The older line of an anchor filed with a commit, which names no root and is not drawn. */
 const AT_COMMIT = / at [0-9a-f]{7,40}$/;
+
+/** How a chip says where in a file: `line 5`, or `lines 4-5` for a span. */
+export function lineWords(lines: [number, number]): string {
+  return lines[0] === lines[1] ? `line ${lines[0]}` : `lines ${lines[0]}-${lines[1]}`;
+}
 
 export function fileLine(line: string): FileLine | null {
   const read = FILE_LINE.exec(line);
   if (!read || AT_COMMIT.test(read[1])) return null;
   return {
     root: read[2] === "store repository" ? "store" : read[2] === "scratchpad" ? "scratch" : "code",
-    path: read[1], session: read[3] ?? null, lines: [Number(read[4]), Number(read[5])],
-    words: read[6] ?? "", selection: read[7] ?? null,
+    path: read[1], session: read[3] ?? null, lines: read[4] ? [Number(read[4]), Number(read[4])] : [Number(read[5]), Number(read[6])],
+    words: read[7] ?? "", selection: read[8] ?? null,
   };
 }

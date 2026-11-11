@@ -848,6 +848,8 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 .rec-line.wide .rec-label { display: block; }
 .rec-label { color: var(--muted); overflow-wrap: anywhere; }
 .rec-line-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rec-group { margin-top: 12px; padding-top: 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); }
+.rec-superseded > summary { color: var(--muted); }
 .rec-item details { margin-top: 6px; font-size: 13.5px; }
 .rec-item summary { color: var(--link); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rec-item summary:hover { color: var(--pastel-blue); }
