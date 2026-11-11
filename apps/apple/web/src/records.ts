@@ -84,8 +84,52 @@ export function pressed<T extends { open: boolean; dispatchable: boolean; awaiti
   return next;
 }
 
+/** A `kind:plan` or `kind:plan,task` token, anywhere in the search text (KYO-785). */
+const KIND_TOKEN = /(^|\s)kind:(\S*)/gi;
+
+/** The kinds the search text names with `kind:` tokens, lower case, each once, in the order typed. */
+export function kindsOf(search: string): string[] {
+  const kinds: string[] = [];
+  for (const match of search.matchAll(KIND_TOKEN)) {
+    for (const kind of match[2].toLowerCase().split(",")) {
+      if (kind && !kinds.includes(kind)) kinds.push(kind);
+    }
+  }
+  return kinds;
+}
+
+/** The search text without its `kind:` tokens: what is searched for as words. */
+export function textOf(search: string): string {
+  return search.replace(KIND_TOKEN, "$1");
+}
+
+/**
+ * The search text with its `kind:` tokens replaced by one naming `kinds`, put first; none
+ * removes the token. A text that is only the token keeps a space after it, so that what is
+ * typed next is words and not part of the last kind.
+ */
+export function withKinds(search: string, kinds: string[]): string {
+  const rest = textOf(search).replace(/^\s+/, "");
+  if (!kinds.length) return rest;
+  return `kind:${kinds.join(",")} ${rest}`;
+}
+
 function searchWords(search: string): string[] {
-  return search.toLowerCase().split(/\s+/).filter(Boolean);
+  return textOf(search).toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** The kinds of `rows`, each once, in alphabetical order. */
+export function kindsPresent(rows: RecordRow[]): string[] {
+  return [...new Set(rows.map((row) => row.kind).filter(Boolean))].sort();
+}
+
+/** What the Kind control reads: the kinds checked, and whether any of them is no kind of the store. */
+export function kindControlText(search: string, present: string[]): { text: string; active: boolean; unknown: string[] } {
+  const kinds = kindsOf(search);
+  const unknown = kinds.filter((kind) => !present.includes(kind));
+  if (!kinds.length) return { text: "Kind", active: false, unknown };
+  const named = kinds.join(", ");
+  return { text: `Kind: ${named}${unknown.length ? " (no such kind)" : ""}`, active: true, unknown };
 }
 
 /** Whether every word typed is found in the record's id or its title. */
@@ -104,8 +148,10 @@ export function narrow<T extends RecordRow>(
   rows: T[], narrowing: Narrowing, ready: ReadonlySet<string>,
   awaiting: ReadonlySet<string> = new Set(),
 ): T[] {
+  const kinds = kindsOf(narrowing.search);
   return rows.filter((row) =>
-    (!narrowing.open || row.status === "open")
+    (!kinds.length || kinds.includes(row.kind.toLowerCase()))
+    && (!narrowing.open || row.status === "open")
     && (!narrowing.dispatchable || ready.has(row.id))
     && (!narrowing.awaiting || awaiting.has(row.id))
     && matchesSearch(row, narrowing.search));
