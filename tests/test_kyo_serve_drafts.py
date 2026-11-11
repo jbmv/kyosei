@@ -8,8 +8,10 @@ same test by that remedy and the repeated request.
 
 from __future__ import annotations
 
+import http.client
 import json
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,7 @@ from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
     Bed,
     bed,
     running,
+    stream,
 )
 
 DRAFT = f"{SESSIONS}/{OLD}/draft"
@@ -60,6 +63,12 @@ def create(bed: Bed, token: str, document: dict = BOXES) -> str:
     return made["etag"]
 
 
+def unnamed(boxes: list[dict]) -> list[dict]:
+    """The boxes without the id each is given (KYO-798), to compare with what was written."""
+    assert all(isinstance(box.get("id"), str) and box["id"] for box in boxes)
+    return [{key: value for key, value in box.items() if key != "id"} for box in boxes]
+
+
 def draft_file(store_home: Path) -> Path:
     return store_home / config.COMPOSER_DIRNAME / serve_files.DRAFTS / f"{OLD}.json"
 
@@ -80,13 +89,13 @@ def test_a_draft_is_created_read_and_replaced(bed: Bed, store_home: Path, token:
 
     status, headers, read = request(bed, "GET", None, token)
     assert status == 200 and headers["ETag"] == etag == read["etag"]
-    assert read["boxes"] == BOXES["boxes"]  # a box's other keys are kept as written
+    assert unnamed(read["boxes"]) == BOXES["boxes"]  # a box's other keys are kept as written
     assert read["device"]["name"] == "ipad" and read["updated_at"].endswith("Z")
 
     replacement = {"boxes": [{"text": "only one now"}]}
     status, headers, replaced = request(bed, "PUT", replacement, token, If_Match=etag)
     assert status == 200 and headers["ETag"] != etag
-    assert request(bed, "GET", None, token)[2]["boxes"] == replacement["boxes"]
+    assert unnamed(request(bed, "GET", None, token)[2]["boxes"]) == replacement["boxes"]
 
 
 def test_an_empty_list_is_an_empty_draft(bed: Bed, token: str) -> None:
@@ -105,7 +114,7 @@ def test_a_stale_writer_is_refused_and_reading_again_clears_it(bed: Bed, token: 
 
     assert status == 412 and refused["etag"] == written["etag"]
     assert "GET it again" in refused["error"]
-    assert request(bed, "GET", None, token)[2]["boxes"] == newer["boxes"]
+    assert unnamed(request(bed, "GET", None, token)[2]["boxes"]) == newer["boxes"]
 
     fresh = request(bed, "GET", None, token)[2]["etag"]  # the remedy the refusal named
     assert request(bed, "PUT", {"boxes": [{"text": "merged"}]}, token, If_Match=fresh)[0] == 200
@@ -151,7 +160,7 @@ def test_a_draft_survives_a_server_restart(
     create(bed, token)
     stop(bed.client)
     bed_two = Bed(project, tmp_path, running(environ=bed.server.environ))
-    assert request(bed_two, "GET", None, token)[2]["boxes"] == BOXES["boxes"]
+    assert unnamed(request(bed_two, "GET", None, token)[2]["boxes"]) == BOXES["boxes"]
 
 
 def test_a_draft_is_private_to_this_account(bed: Bed, store_home: Path, token: str) -> None:
@@ -316,7 +325,7 @@ def test_a_project_draft_is_saved_read_and_replaced_with_its_marks(
 
     status, headers, read = request(bed, "GET", None, token, path=PROJECT_DRAFT)
     assert status == 200 and headers["ETag"] == made["etag"] == read["etag"]
-    assert read["boxes"] == marked["boxes"] and read["device"]["name"] == "ipad"
+    assert unnamed(read["boxes"]) == marked["boxes"] and read["device"]["name"] == "ipad"
 
     path = project_draft_file(store_home)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -543,3 +552,170 @@ def test_the_reference_states_the_project_draft_route_and_its_two_moves() -> Non
     assert f"composer/{serve_files.PROJECT_DRAFTS}/<name>.json" in topic
     assert "A session that has ended leaves its boxes to the project" in topic
     assert "A live session with no draft of its own takes the project's" in topic
+
+
+# ------------------------------------- KYO-798: a box's id, and a save announced to other devices
+
+
+def test_a_box_keeps_the_id_its_device_gave_it_and_one_without_is_given_one(
+    bed: Bed, token: str
+) -> None:
+    written = {"boxes": [{"id": "from-the-laptop", "text": "one"}, {"text": "two"}]}
+    made = request(bed, "PUT", written, token, If_None_Match="*")[2]
+    first, second = made["boxes"]
+    assert first == {"id": "from-the-laptop", "text": "one"}
+    assert second["text"] == "two" and second["id"] not in ("", "from-the-laptop")
+    # Every device reading the draft is given the same ids, and a save keeps them.
+    assert request(bed, "GET", None, token)[2]["boxes"] == made["boxes"]
+    edited = {"boxes": [{**second, "text": "two, edited"}, first]}
+    again = request(bed, "PUT", edited, token, If_Match=made["etag"])[2]
+    assert [box["id"] for box in again["boxes"]] == [second["id"], "from-the-laptop"]
+
+
+def test_a_draft_stored_before_boxes_had_ids_reads_with_the_same_ids_on_every_device(
+    bed: Bed, store_home: Path, token: str
+) -> None:
+    create(bed, token)
+    path = draft_file(store_home)
+    stored = {"boxes": [{"text": "same"}, {"text": "same"}, {"text": "other"}]}
+    path.write_text(json.dumps(stored), encoding="utf-8")
+
+    first = request(bed, "GET", None, token)[2]
+    second = request(bed, "GET", None, token)[2]
+
+    ids = [box["id"] for box in first["boxes"]]
+    assert len(set(ids)) == 3 and all(ids)
+    assert second["boxes"] == first["boxes"]
+    assert json.loads(path.read_text(encoding="utf-8")) == stored  # a read wrote nothing
+
+
+def test_an_id_repeated_in_a_draft_is_replaced_on_the_later_box(bed: Bed, token: str) -> None:
+    twice = {"boxes": [{"id": "a", "text": "one"}, {"id": "a", "text": "two"}]}
+    made = request(bed, "PUT", twice, token, If_None_Match="*")[2]
+    assert made["boxes"][0]["id"] == "a" and made["boxes"][1]["id"] not in ("", "a")
+
+
+def test_an_id_that_is_not_a_string_is_refused_and_leaving_it_out_clears_it(
+    bed: Bed, token: str
+) -> None:
+    for bad in (7, "", None):
+        status, _, refused = request(
+            bed, "PUT", {"boxes": [{"id": bad, "text": "x"}]}, token, If_None_Match="*"
+        )
+        assert status == 400 and "leave the key out" in refused["error"]
+    assert request(bed, "PUT", {"boxes": [{"text": "x"}]}, token, If_None_Match="*")[0] == 201
+
+
+def test_boxes_keep_their_ids_from_a_sessions_draft_to_the_projects_and_into_the_next(
+    bed: Bed, token: str
+) -> None:
+    document = {"boxes": [{"id": "kept", "text": "left unsent"}]}
+    assert request(bed, "PUT", document, token, path=ENDED_DRAFT, If_None_Match="*")[0] == 201
+
+    gathered = request(bed, "GET", None, token, path=PROJECT_DRAFT)[2]
+    assert gathered["boxes"] == document["boxes"]
+    taken = request(bed, "GET", None, token)[2]
+    assert taken["boxes"] == document["boxes"]
+
+
+def test_a_box_already_moved_to_the_project_is_not_added_again_by_its_id(
+    bed: Bed, token: str
+) -> None:
+    """The emptying after a move failed, and the project's copy was edited since."""
+    left = {"boxes": [{"id": "moved", "text": "as the session left it"}]}
+    assert request(bed, "PUT", left, token, path=ENDED_DRAFT, If_None_Match="*")[0] == 201
+    edited = {"boxes": [{"id": "moved", "text": "edited between sessions"}]}
+    assert request(bed, "PUT", edited, token, path=PROJECT_DRAFT, If_None_Match="*")[0] == 201
+
+    assert texts(bed, token, PROJECT_DRAFT) == ["edited between sessions"]
+
+
+def test_a_session_draft_saved_from_one_device_is_announced_to_another_which_reads_it(
+    bed: Bed, stream
+) -> None:
+    """KYO-798.c1: two devices, each with its own token, against one server."""
+    laptop = issue("laptop", device_tokens.PERMISSION_SEND)
+    studio = issue("studio", device_tokens.PERMISSION_SEND)
+    following = stream()  # the stream the Studio's app already holds on the session
+    assert following.event("ready")["draft"] == {"etag": None}
+
+    typed = {"boxes": [{"id": "a", "text": "typed on the laptop"}]}
+    made = request(bed, "PUT", typed, laptop, If_None_Match="*")[2]
+
+    started = time.monotonic()
+    announced = following.event("draft")
+    assert time.monotonic() - started < 3
+    assert announced == {"session_id": OLD, "etag": made["etag"]}  # the etag, and no box
+    read = request(bed, "GET", None, studio)[2]
+    assert read["boxes"] == typed["boxes"] and read["etag"] == announced["etag"]
+    assert read["device"]["name"] == "laptop"
+
+    # The Studio's own save is announced with the etag its save returned, which is how it
+    # knows not to read its own draft back; a stream opened later states the etag at once.
+    edited = {"boxes": [{"id": "a", "text": "typed on the laptop, then the Studio"}]}
+    saved = request(bed, "PUT", edited, studio, If_Match=read["etag"])[2]
+    assert following.event("draft")["etag"] == saved["etag"]
+    assert stream().event("ready")["draft"] == {"etag": saved["etag"]}
+    # The etag rule stands: the laptop's save over the draft it read first is refused.
+    assert request(bed, "PUT", typed, laptop, If_Match=made["etag"])[0] == 412
+
+
+def test_a_prompt_sent_from_one_device_leaves_the_draft_the_other_reads(
+    bed: Bed, stream
+) -> None:
+    """KYO-798.c4: the sender saves the draft without the box, and the other device is told."""
+    laptop = issue("laptop", device_tokens.PERMISSION_SEND)
+    studio = issue("studio", device_tokens.PERMISSION_SEND)
+    both = {"boxes": [{"id": "sent", "text": "to send"}, {"id": "kept", "text": "to keep"}]}
+    made = request(bed, "PUT", both, laptop, If_None_Match="*")[2]
+    following = stream()
+    assert following.event("ready")["draft"] == {"etag": made["etag"]}
+
+    left = {"boxes": [{"id": "kept", "text": "to keep"}]}
+    after = request(bed, "PUT", left, laptop, If_Match=made["etag"])[2]
+
+    assert following.event("draft")["etag"] == after["etag"]
+    assert [box["id"] for box in request(bed, "GET", None, studio)[2]["boxes"]] == ["kept"]
+
+
+def project_changes(bed: Bed) -> http.client.HTTPResponse:
+    """The project's event stream, opened and read past its first lines."""
+    conn = http.client.HTTPConnection("127.0.0.1", bed.client.port, timeout=10)
+    conn.request("GET", f"{BASE}/events", headers=bed.client.reader)
+    response = conn.getresponse()
+    assert response.status == 200
+    while response.fp.readline().strip():
+        pass
+    return response
+
+
+def next_change(response: http.client.HTTPResponse) -> str:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        line = response.fp.readline().decode("utf-8").strip()
+        if line.startswith("data: "):
+            return json.loads(line.removeprefix("data: "))["kind"]
+    raise TimeoutError("no change event arrived")
+
+
+def test_a_project_draft_saved_from_one_device_is_announced_on_the_projects_stream(
+    bed: Bed, token: str
+) -> None:
+    """KYO-798.c1, with no session live: the stream says that it changed, and nothing of it."""
+    bed.server.poll_seconds = 0.05
+    following = project_changes(bed)
+    try:
+        etag = put(bed, token, PROJECT_DRAFT, ["between sessions, on the laptop"])
+        assert next_change(following) == "draft"
+        studio = issue("studio", device_tokens.PERMISSION_SEND)
+        read = request(bed, "GET", None, studio, path=PROJECT_DRAFT)[2]
+        assert read["etag"] == etag
+        assert [box["text"] for box in read["boxes"]] == ["between sessions, on the laptop"]
+
+        replacement = {"boxes": [{"text": "replaced"}]}
+        assert request(
+            bed, "PUT", replacement, studio, path=PROJECT_DRAFT, If_Match=etag
+        )[0] == 200
+        assert next_change(following) == "draft"
+    finally:
+        following.close()

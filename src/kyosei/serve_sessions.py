@@ -737,6 +737,16 @@ def _agenda_etag(environ: dict[str, str], session_id: str) -> str | None:
     return None if raw is None else serve_files.etag_of(raw)
 
 
+def _draft_etag(environ: dict[str, str], session_id: str) -> str | None:
+    """The etag of the session's saved composer draft (KYO-798); None when it has none.
+
+    The etag and no box, as for the task list: the draft is read with ``send``.
+    """
+    from . import serve_drafts
+
+    return serve_drafts.session_etag(environ, session_id)
+
+
 def _config_of(paths: ProjectPaths) -> Config:
     try:
         return load_config(paths.store_root)
@@ -793,6 +803,8 @@ class _Sampler:
         self._facts: dict | None = None
         #: KYO-770: the etag of the session's task list as last announced; None for no list.
         self._agenda: str | None = None
+        #: KYO-798: the etag of the session's composer draft as last announced.
+        self._draft: str | None = None
         self._next_follow = 0.0
         self._last_error: str | None = None
         #: Set by the hub when this reader is taken out of use; it then sends nothing more.
@@ -828,6 +840,7 @@ class _Sampler:
             self._reply = update.reply_in_progress
             self._facts = _facts_json(self._live.facts())
             self._agenda = _agenda_etag(self.project.environ, self.session_id)
+            self._draft = _draft_etag(self.project.environ, self.session_id)
             self._offset = self._live.transcript.offset
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
             self.beat = time.monotonic()
@@ -882,6 +895,7 @@ class _Sampler:
                 "facts": self._facts,
                 "held": self.hub.held(self.session_id),
                 "agenda": {"etag": self._agenda},
+                "draft": {"etag": self._draft},
             },
             event_id=self._position.cursor,
         )
@@ -1050,6 +1064,12 @@ class _Sampler:
             self._broadcast(
                 frame("agenda", {"session_id": self.session_id, "etag": now_agenda})
             )
+        # KYO-798: a draft saved from one device is announced to the others following the
+        # session, which then read it. A move the server makes between drafts is a save too.
+        now_draft = _draft_etag(self.project.environ, self.session_id)
+        if now_draft != self._draft:
+            self._draft = now_draft
+            self._broadcast(frame("draft", {"session_id": self.session_id, "etag": now_draft}))
 
 
 class SessionHub:
