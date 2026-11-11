@@ -7,8 +7,8 @@ every change is kept, and which rules the hooks enforce so nobody has to remembe
 ## Why sessions need help
 
 An agent session ends, and the next one starts with an empty context. The usual remedy is a
-handoff document written at the end of the day, which is written in a hurry, from memory,
-by the session least able to judge what mattered. Kyosei replaces it with three things: a
+handoff document written at the end of the day, from memory and under time pressure.
+Kyosei replaces it with three things: a
 brief derived from the store, notes written as the work happens, and a ledger of every
 change.
 
@@ -30,9 +30,10 @@ next, why it chose one approach over another. Those go in **shift notes**, writt
 `kyo note --shift` at the moment the thought occurs, not saved up for the end.
 
 The next session's brief prints the shift notes written since the previous brief, and the
-last note written before that session began, in full. That last note is the handoff. Notes
-written as you go are more honest than a summary written at the end, and a session that
-ends abruptly loses nothing.
+last note written before that session began, in full. That last note is the handoff. A note
+written during the work records a thought when it occurred, where a summary written at
+the end depends on what the session recalls, and the notes already written survive a
+session that ends abruptly.
 
 A decision waiting on you, or a reminder tied to a date or an event, is better as a
 `reminder` record. The brief lists each one with its age until it is settled. A defect

@@ -11,10 +11,10 @@ Terms used throughout:
 - **Operator**: the human. Writes ideas, makes the decisions below, approves what needs a
   person's eyes.
 - **Orchestrator**: the long-running agent session that owns the store. It files, dispatches,
-  verifies and closes records, and edits configuration when the operator asks. Before KYO-519
-  the CLI and the skill said *controller*; `kyo controller` is still accepted as an alias, and
-  since KYO-524 the packaged standing rules say `audience: orchestrator` (a project ledger that
-  still says `audience: controller` is read the same).
+  verifies and closes records, and edits configuration when the operator asks. `kyo controller`
+  is accepted as an alias, and the packaged standing rules say `audience: orchestrator`, with
+  a project ledger that says `audience: controller` read the same. History: *controller* was
+  the name the CLI and the skill used before KYO-519, and the standing rules before KYO-524.
 - **Worker**: a subagent the orchestrator dispatches into its own worktree with a frozen brief.
 
 Each decision lists the default, why it is the default, what changing it later costs, who
@@ -35,7 +35,7 @@ decides, and how a setup agent can find the answer before asking.
   records the identity automatically (KYO-559).
 - **Decides:** the operator, though there is rarely a reason to say no.
 - **Detect:** `git rev-parse HEAD`.
-- **Closed by KYO-507:** in a folder that is not a repository, `kyo init` runs `git init`
+- **What `kyo init` does** (KYO-507): in a folder that is not a repository, `kyo init` runs `git init`
   and commits only the files it writes (`--no-git-init` opts out). In a repository with no
   commit it commits nothing, and the identity is filled in automatically after the first
   commit (KYO-559).
@@ -46,8 +46,8 @@ decides, and how a setup agent can find the answer before asking.
 - **Why:** the guardrails are Claude Code hooks (SessionStart, Stop, SessionEnd,
   SubagentStop, PreToolUse, UserPromptSubmit). Another harness can run `kyo` commands, but nothing would
   enforce the rules.
-- **Decides:** the operator. The setup prompt should say plainly what is lost on another
-  harness rather than pretend it works the same.
+- **Decides:** the operator. The setup prompt states what is lost on another
+  harness.
 
 ### A3. Is there existing tracking to bring across?
 
@@ -55,13 +55,14 @@ decides, and how a setup agent can find the answer before asking.
   notes) and files records for the work that is still live. The rest stays where it is,
   linked from the first shift note.
 - **Why:** an imported backlog arrives without criteria or touches, which are what make a
-  record useful. Filing only the live work keeps the board honest from day one.
+  record useful. Filing only the live work keeps the board to records that describe work still to be
+  done.
 - **Decides:** the operator says what counts as live.
 - **Detect:** look for `TODO*`, `ROADMAP*`, `NOTES*`, `docs/`, and open issues if `gh` works.
 
 ---
 
-## B. At `kyo init` (cheap now, costly later)
+## B. At `kyo init` (decisions that cost more to change later)
 
 ### B1. Where does the store live?
 
@@ -79,8 +80,8 @@ decides, and how a setup agent can find the answer before asking.
   pushed stays published. `kyo redact` cannot reach a pushed commit.
 - **Decides:** the operator.
 - **Detect:** `git remote -v`. A public remote is a strong reason for the default.
-- **Since KYO-558:** bare `kyo init` in a folder with no store does not take the default
-  silently. It writes nothing, exits nonzero, and names the three routes: `kyo onboard`
+- **Bare `kyo init`** (KYO-558): in a folder with no store it does not take the default.
+  It writes nothing, exits nonzero, and names the three routes: `kyo onboard`
   (recommended), `kyo init --defaults` with the store path and prefix it would use, and
   `kyo init --in-repo`. It prints the same text with and without a terminal, because an
   agent runs `kyo` without one. The setup prompt passes `--defaults` or `--in-repo`
@@ -91,8 +92,8 @@ decides, and how a setup agent can find the answer before asking.
 ### B2. Should the store repository have a remote?
 
 - **Default:** none. `kyo init` creates it locally and commits the scaffold.
-- **Why it matters:** with no remote, the store exists on one disk only. A private remote is a
-  backup; any remote is a publication.
+- **Why it matters:** with no remote, the store exists on one disk only. A private remote
+  serves as a backup, and any remote holds a copy of the store's verbatim text on another host.
 - **Decides:** the operator.
 
 ### B3. What is the record id prefix?
@@ -124,7 +125,7 @@ decides, and how a setup agent can find the answer before asking.
 - **The alternative, the copies:** `kyo install-hooks --copies` writes the hooks into
   `.claude/settings.json`, and the skill and the CLAUDE.md section of C2 and C3 into the
   repository, where they are tracked. It suits cloud sessions and a Claude Code without
-  plugins, and it is the route every project used before the plugin existed. Each rerun brings the
+  plugins. Each rerun brings the
   copies up to date after an upgrade.
 - **What the hooks do** (the same under either route):
 
@@ -172,20 +173,20 @@ decides, and how a setup agent can find the answer before asking.
 
 - **Default:** with the plugin, nothing: the skill loads when the session-start brief names
   a Kyosei project, which the `SessionStart` hook adds to every session, as the packaged
-  skill's description says since KYO-593. `kyo harness install claude-code` removes the
+  skill's description says (KYO-593). `kyo harness install claude-code` removes the
   setup-incomplete section `kyo init` wrote (below) once it has enabled the plugin. With the copies, a short section in the project's
   CLAUDE.md (created if there is none): this project uses Kyosei, the orchestrator's guide
   is the `kyosei` skill, and workers never write under the store.
 - **Why the copies keep it:** it names the skill to a session where no session-start hook
   runs, such as a project that installed the skill and refused the hooks, and to a reader of
   the repository.
-- **Since KYO-508:** `kyo install-skill` writes a marked section and nothing outside its
+- **The marked section** (KYO-508): `kyo install-skill` writes a marked section and nothing outside its
   markers, and `kyo doctor` reports it missing or stale. There is no separate opt-out: the
   section comes with the skill, so the setup agent tells the operator rather than asking.
-- **Since KYO-558:** `kyo init` writes a setup-incomplete version of the same marked
+- **At `kyo init`** (KYO-558): `kyo init` writes a setup-incomplete version of the same marked
   section when CLAUDE.md has none: this project uses Kyosei, setup is incomplete, and the
   next step is `kyo onboard --check`. A later session is pointed at the missing setup even
-  if nothing else was installed. Since KYO-613 the section names both routes: on the
+  if nothing else was installed. The section names both routes (KYO-613): on the
   plugin, `kyo harness install claude-code` removes it once it has enabled the plugin, and
   the setup agent does not delete it by hand; on the copies, `kyo install-hooks --copies`
   or `kyo install-skill --copies` replaces it with the usual section,
@@ -238,9 +239,9 @@ decides, and how a setup agent can find the answer before asking.
   an approach, judging a product question, styling an interface, a measurement whose method
   is open) goes to the stronger model. Writing vaguer criteria is never the fix for a record
   that needs judgement.
-- **What that means as of 2026-10:** reasoning work to Opus, well-specified work to Sonnet,
-  which is fast, cheap and worth using. The largest model is not a sensible default for
-  workers. The setup agent checks the current model line-up rather than trusting these
+- **What that means as of 2026-10:** reasoning work to Opus, and well-specified work to
+  Sonnet, which is faster and costs less. The largest model is not recommended as the default
+  for workers. The setup agent checks the current model line-up rather than trusting these
   names.
 - **Where it lives:**
   - `worker_model` in `kyosei/config.yml` is the project default;
@@ -275,9 +276,9 @@ decides, and how a setup agent can find the answer before asking.
 ### D4. Fresh-worktree setup
 
 - **Default:** none. `worktree_setup` is empty.
-- **Why it matters most:** a new worktree has tracked files only, so no virtualenv and no
-  `node_modules`. Worse, it inherits the orchestrator's `VIRTUAL_ENV`, so a worker that skips
-  setup is silently testing the orchestrator's tree. Every brief prints these commands.
+- **Why it matters:** a new worktree has tracked files only, so no virtualenv and no
+  `node_modules`. It also inherits the orchestrator's `VIRTUAL_ENV`, so a worker that skips
+  setup tests the orchestrator's tree, and nothing reports it. Every brief prints these commands.
 - **Detect:** a Makefile target, `pyproject.toml`/`uv.lock`, `package.json` with a lockfile.
 - **Decides:** the setup agent proposes and the operator confirms.
 
@@ -412,7 +413,7 @@ decides, and how a setup agent can find the answer before asking.
 ### D9. Statuses and gates
 
 - **Default ladder:** `open`, `working`, `built`, `verified`, `done`, plus `wont-do`. `built`
-  exists because "written but not checked" is the most common state worth seeing.
+  exists so that "written but not checked" is a state the board shows.
 - **Gates** park a record on a condition: an event, a person running something, a person
   reviewing something, or a hold.
 - **Change:** rarely needed. The one common addition is below.
@@ -568,9 +569,9 @@ and runs no orchestrator; it only views and talks to them.
     `composer/`, the unsent text `kyo serve` keeps for a device;
   - `seal.key` and `transcript-archive/`, where D14 is yes;
   - `harness/claude-code`, the link the Claude Code plugin is loaded through (C1).
-- **PATH is the usual trap.** `~/.local/bin` is on PATH in a login shell. It is not on PATH
+- **PATH:** `~/.local/bin` is on PATH in a login shell. It is not on PATH
   in a non-interactive `ssh host kyo ...`, nor in anything launchd starts without help.
-  That is why:
+  For that reason:
   - remote commands run as `ssh host "zsh -lc 'kyo ...'"`;
   - orchestrator sessions start as `zsh -lc 'exec <orchestrator_command>'`;
   - the `kyo serve` login agent records the installing shell's PATH.
@@ -608,7 +609,7 @@ and runs no orchestrator; it only views and talks to them.
 
 ### E4. The desktop app (macOS)
 
-- **What it is:** one viewer of `kyo serve`, and dispensable; anyone can write another. It
+- **What it is:** one viewer of `kyo serve`, and optional; another viewer can be written against the same server. It
   ships no `kyo` and no server of its own, and says so when `kyo serve` is not answering.
 - **Locally:** it reads this machine's projects at `http://127.0.0.1:47370`. It adds a
   terminal pane per project and a claude tab listing that project's sessions.
@@ -617,8 +618,8 @@ and runs no orchestrator; it only views and talks to them.
   server; New Project… and Start orchestrator run their commands over SSH. A remote project
   has no terminal pane, because terminals are local.
 - **Record links (ask):** a `kyosei://` link opens the record in the app. It is clickable
-  only on macOS with the app installed, which registers the scheme. Elsewhere it is noise
-  around an id. So ask: if the operator reads the orchestrator through the app, links; if
+  only on macOS with the app installed, which registers the scheme. Elsewhere it is unclickable
+  text around an id. So ask: if the operator reads the orchestrator through the app, links; if
   not, plain ids. Record a "no" as `E4: declined` under `onboarding:` in
   `kyosei/config.yml`: `kyo brief` then stops printing the `kyosei://` citation rule and
   its worked example. With no entry, the brief keeps both.
@@ -693,8 +694,8 @@ once every `kyo` that reads it has been updated.
 
 ## G. Auditing an existing install
 
-The readback in F is a checklist. The same checklist, run against a project set up months
-ago, is an audit. So it is one command with two uses (KYO-514): `kyo onboard` prints the
+The readback in F is a checklist, and the same checklist run against a project set up
+earlier is an audit. One command therefore has two uses (KYO-514): `kyo onboard` prints the
 prompt that asks the questions for a new project, and `kyo onboard --check` reports, for an
 existing one:
 
@@ -712,4 +713,4 @@ git, and never opens the database, so the readback's `kyo doctor` line is the re
 last `kyo doctor` (or `kyo doctor --hook`) recorded beside the database: clean or the failing
 checks' names, with its age and the build that ran it. It reads as not run, naming `kyo
 doctor`, only when no result is recorded. `kyo onboard --check --all` runs it across the machine's
-`projects.json` and answers "which of my projects are missing what".
+`projects.json` and reports what each project is missing.

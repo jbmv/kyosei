@@ -5,11 +5,11 @@ and where the agents' work goes, and who is responsible for what.
 
 ## The problem it solves
 
-When you build software with coding agents, the agents do not remember. Each session
-starts cold. A plan agreed yesterday lives in a chat transcript nobody will reread. A task
-marked "done" may mean "written" or may mean "checked". Two agents working in parallel can
-edit the same file without either knowing. Over a few weeks the project's real state and
-everyone's picture of it drift apart.
+A coding agent carries no memory from one session to the next, so each session starts
+without the state of the project. A plan agreed in one session is recorded only in that
+session's transcript. A task marked "done" may mean "written" or may mean "checked". Two
+agents working in parallel can edit the same file without either knowing. Over time the
+project's actual state and its participants' understanding of it diverge.
 
 Kyosei is a store for that state. It keeps three things for a project:
 
@@ -73,7 +73,7 @@ are worse than none. `kyo ideas review` lists the ideas still waiting, oldest fi
 | Documentation | decides which documents count | merges doc changes, assembles numbered sections | proposes doc changes on its branch |
 | Deploys | decides who deploys | deploys only if the project says so | never |
 
-Most of the worker column is enforced, not hoped for. A hook refuses a worker that wrote to
+Most of the worker column is enforced by hooks. A hook refuses a worker that wrote to
 the store or stopped with uncommitted work, and another can refuse a whole-suite command
 inside a worker's worktree. [Sessions and hooks](03-sessions-and-hooks.md) has the list.
 The deploy row is the one Kyosei leaves to you: some projects have the operator deploy, some

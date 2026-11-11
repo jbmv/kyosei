@@ -99,8 +99,8 @@ history already pushed stays published, and `kyo redact` cannot reach a pushed c
 
 **A remote for the store?**
 ([B2](setup-decisions.md#b2-should-the-store-repository-have-a-remote)) None by
-default, so a split store lives on one disk. A private remote is a backup. Any remote is a
-publication.
+default, so a split store lives on one disk. A private remote serves as a backup, and any
+remote holds a copy of the store's verbatim text on another host.
 
 **The record id prefix.** ([B3](setup-decisions.md#b3-what-is-the-record-id-prefix))
 Derived from the folder name unless you choose one. Choose with care: ids end up in commit
@@ -126,10 +126,10 @@ is left without the plugin, because every hook would then run twice; the command
 prints the `claude` commands to run instead. [Install and upgrading](../reference/topics/install.md)
 has the detail.
 
-**The copies.** Before the plugin, `kyo install-hooks` and `kyo install-skill` copied the
-hooks and the skill into the project's `.claude/` directory, and they remain a supported mode
-for an operator without plugins or a cloud session that cannot load one. In a project that
-already has the copies, both commands work as before. In any other project they write nothing
+**The copies.** `kyo install-hooks` and `kyo install-skill` copy the hooks and the skill
+into the project's `.claude/` directory, a supported mode for an operator without plugins
+or a cloud session that cannot load one. In a project that already has the copies, both
+commands write without `--copies`. In any other project they write nothing
 unless given `--copies`, and name `kyo harness install claude-code` instead. To move a
 project from the copies to the plugin, run `kyo harness migrate` there: it enables the
 plugin, removes each copy that is still unedited along with the CLAUDE.md section, and names

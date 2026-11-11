@@ -152,29 +152,27 @@ directly — `bug`,
 `kyo discuss open` (KYO-658). Filing directly costs no structure: `kyo new` takes
 `--criteria-file` and `--touches-file` exactly as `kyo promote` does (KYO-228). Write to
 `ideas/` when a thought genuinely is not being filed this session, not as a required
-first step before every record. `decision` was the one kind still refused until
-KYO-521, and is filed directly only with `--evidence-file` (above). A kind a project
+first step before every record. `decision` is filed directly only with `--evidence-file` (above, KYO-521). A kind a project
 leaves without `intake` arrives via `kyo promote` or `kyo spawn`, which enforce the
 matching rules on their own edges (`idea` / a source kind in `accepts_from`). There is
 deliberately no `--force`: a project that wants a kind filed
 directly adds `intake` to that kind's `accepts_from`, which is one reviewable line in
 a versioned file rather than an invisible flag in a script.
 
-All three creation verbs now refuse a registry-flow violation the same way, with
+All three creation verbs refuse a registry-flow violation the same way, with
 exit 2 (KYO-68): `kyo new` when the kind does not accept `intake`, `kyo promote`
 when it does not accept `idea`, and `kyo spawn` when the source's kind is not in
 the target's `accepts_from`. The contract *names* stay distinct so a script can
-tell which edge was refused; only the exit code is shared, because "the creation
-verbs refused my kind" is one situation and used to be two codes.
+tell which edge was refused; only the exit code is shared, because a creation
+verb refusing a kind is one situation.
 
 `kyo spawn <source-id> --kind <target>` is the third and last of those edges: the
 one where `accepts_from` names **another kind**. It refuses (exit 2) unless the
 source record's kind is in the target's `accepts_from`, creates the target, and
 links it back to the source with `produced-by` — the same edge and direction
-`kyo split` writes. Before it, that source had no command at all, so every
-`bug -> task` / `proposal -> decision` edge in the registry was a transition
-`kyo map` would draw and `kyo doctor` would check the symmetry of while nothing
-could walk it (KYO-50). Three things it deliberately does not do: it does not copy
+`kyo split` writes. It is the command that walks the registry's kind-to-kind
+edges, such as `bug -> task` and `proposal -> decision`, which `kyo map` draws
+and `kyo doctor` checks for symmetry (KYO-50). Three things it deliberately does not do: it does not copy
 the source's text (the source stays live and the two would drift — the new record
 carries a provenance stub, and `--description-file` is where its own prose goes),
 it does not change the source's status (spawning is not a claim about the work, and
@@ -189,7 +187,7 @@ when structure is worth authoring (law 13).
 `kyo map [--json]` renders the registry as a graph — kinds as nodes, `intake`/`idea` as pseudo-sources,
 edges from `accepts_from`. `kyo list [--kind K] [--status S] [--json]` lists records
 and summarises the queue split by `policy.counted`. With no filter it lists every record,
-done and void included — that default is deliberate and stays; an agent that
+done and void included — that default is deliberate; an agent that
 wants the short listing asks for it with `kyo list --unsettled` (`--limit N` to cap it). `kyo doctor` validates the
 registry and that every record's kind is still defined in it.
 
@@ -204,7 +202,7 @@ so `kyo rebuild` reproduces it. It refuses a kind `kinds.yml` does not define, a
 the other archetype (a `work` record cannot become a `knowledge` one, or the reverse),
 a plan that still has members (detach them with `kyo edit <member> --no-plan` first),
 and a record carrying a `--since-note` re-kinded to a kind without `carried: true`. A
-kind already removed is not a dead end: the `kind_registry` problem names
+kind already removed can still be repaired: the `kind_registry` problem names
 `kyo edit <id> --kind <kind>` as its remedy (restoring the kind to `kinds.yml` is the
 other), and the edit still checks the archetype, read from the packaged default
 `kinds.yml` when the removed kind was a default one.
@@ -285,14 +283,14 @@ statuses:
     role: retired
 ```
 
-**The names are yours; the roles are not.** Rename `done` to `shipped` and
-`complete-requires-settled-criteria` still refuses an unqualified move into it, under
-the new name — because that contract was never a fact about the word `done`, only
-about the status where work is completed. The six roles are a closed set
-(`kyosei/contracts.py`, `STATUS_ROLES`); a project that could add a seventh could add a
-contract nothing enforces.
+**A project chooses the names, and the roles are fixed.** If `done` is renamed to `shipped`,
+`complete-requires-settled-criteria` still refuses an unqualified move into it under
+the new name, because the contract binds to the status where work is completed and
+not to the word `done`. The six roles are a closed set
+(`kyosei/contracts.py`, `STATUS_ROLES`), since a seventh role would have no contract
+enforcing it.
 
-What each role costs, stated so a rename is made with the contracts in view:
+What entering each role requires:
 
 | role | means | what entering it requires |
 | --- | --- | --- |
@@ -306,7 +304,7 @@ What each role costs, stated so a rename is made with the contracts in view:
 Exactly one status may carry `initial`, one `complete` and one `retired`: each is a
 status the tool has to be able to *name* rather than merely test for — where a record is
 filed, what `kyo wont-do` moves to, what "finished" means to the ready-work queue — and
-"which of your three completions did you mean" has no answer. The other three roles may
+a second status in the same role would make that name ambiguous. The other three roles may
 be carried by any number of statuses, including none. **The file's order is the ladder**,
 so there is no `position:` field to keep in step with it.
 
@@ -320,8 +318,8 @@ status>` by name when any member is not itself settled (its own status is `compl
 `retired`), naming the remedies — settle each member, or detach it with
 `kyo edit <MEMBER-ID> --no-plan` — and `--force` overrides it, recording that the plan was
 closed over open members. `plan`'s `requires_criteria: false` means the two criteria
-contracts above never fire for it, so this is the only safeguard standing between "printed
-as done" and "is done" for that kind.
+contracts above never fire for it, so this is the only contract that keeps a plan from
+being marked done while its members are open.
 
 Every record carries one more settling requirement, on both settling roles:
 `settled-requires-no-open-gates` (KYO-490) refuses `kyo move` into a `complete` or `retired`
@@ -352,9 +350,9 @@ for one.
 
 A gate's *type* is one of four (`awaiting:event`, `awaiting:human-run`,
 `awaiting:human-review`, `holding-for`). Its *payload* — `--do` — is free text, and free
-text is not searchable, so "everything waiting on a human to review a UI element" was
-not a question the store could be asked. `kyosei/gate-tags.yml` is that question's other
-half:
+text is not searchable, so the payload alone cannot answer a question such as
+"everything waiting on a human to review a UI element". `kyosei/gate-tags.yml` supplies
+the searchable part:
 
 ```yaml
 # kyosei/gate-tags.yml
@@ -374,7 +372,7 @@ kyo gate KYO-31 awaiting:event --do "the 2026-09 release reaches staging" --tag 
 kyo list --gate-tag ui-review
 ```
 
-**The tag is beside the payload, never instead of it.** `--do` is still required for the
+**A tag accompanies the payload and does not replace it.** `--do` is still required for the
 three gate types nobody could clear without one: a tag says a gate is waiting on a
 deploy, and only the payload says *which* deploy. `--tag` is repeatable, refused if the
 registry does not declare the tag (with the file's path and the tags it does hold), and
@@ -393,15 +391,15 @@ the only query it was tagged for.
 none) and `kyo redo <gate-id> --do "<corrected>"` (or `--do-file`) replaces an open
 gate's payload; each writes that one field and echoes the previous value beside the
 stored one. Neither is a clearing: the gate keeps its id, its type, the other field, and
-its `created_at`/`cleared_at` history. That is the point of having them, because the
+its `created_at`/`cleared_at` history. They exist because the
 `kyo ungate` + `kyo gate` round trip they replace writes a *clearing* into a git-canonical
 ledger for a condition that never cleared, mints a new id for one continuing obligation,
 and on a `holding-for` gate raises `gate-cleared-stale-criteria` against criteria nothing
 unblocked, a cost that adds up when classifications (KYO-130) or payloads (KYO-148) are
-corrected often. The two part company on a *cleared* gate: `kyo retag`
+corrected often. The two differ on a *cleared* gate: `kyo retag`
 allows it, since `kyo list --gate-tag` selects on open gates and no answer changes, while
-`kyo redo` refuses it — somebody was told to do that thing, did it, and recorded
-`cleared_why` against those words.
+`kyo redo` refuses it, because someone acted on those words and recorded
+`cleared_why` against them.
 
 **Clearing several gates is one act.** `kyo ungate G1 G2 ... --why TEXT` clears every
 named gate in one transaction and prints a line per gate; if any id is unknown or
@@ -411,10 +409,10 @@ gate carrying `T` and writes nothing; `--apply` clears them all in one transacti
 11, as `kyo flag collapse` has it). An undeclared `T` is refused naming
 `kyosei/gate-tags.yml`. Each clearing is a single `kyo ungate`'s — the same
 `cleared_why`, the same events, the same `gate-cleared-stale-criteria` flag on a
-`holding-for` gate — repeated. A bare gate id with no `--tag` is the command it always
-was.
+`holding-for` gate — repeated. With a bare gate id and no `--tag`, the command clears
+that one gate.
 
-**Merged is not live: the deploy gate.** A project whose merges reach users only at its
+**The deploy gate: merged work that is not yet live.** A project whose merges reach users only at its
 next deploy keeps that difference without a new stored field (KYO-479). Declare a
 `deploy` tag (the packaged `gate-tags.yml` carries it commented out), and when a record's
 work merges, gate it:
@@ -441,9 +439,9 @@ governs: src/kyosei/bases.py, src/kyosei/defaults/bases.yml
 
 A **Base** is a saved query with an arrangement: a source, filters, the columns a
 rendering shows, a sort, and an optional `group-by`. It exists because the board, the
-status view, a bubble overview and a typed-edge graph are not four features — they are
-four *renderings* of one saved question, and writing the question down once is what lets
-you re-bind how it is drawn instead of rewriting it.
+status view, a bubble overview and a typed-edge graph are
+four *renderings* of one saved question, and a question written down once can be
+drawn another way without being rewritten.
 
 ```yaml
 # kyosei/bases.yml
@@ -494,8 +492,8 @@ and `amended-by:` metadata.
 
 **Filtering a file source.** `path:` is a glob over the file's path. `contains:` is a
 phrase in the file's **body**, whitespace-normalised on both sides, so a phrase that
-hard-wrapped in the file still matches — this repo's prose is hard-wrapped deliberately,
-and a filter that fails to find a note you know exists teaches you not to trust it. Any
+hard-wrapped in the file still matches (this repository's prose is hard-wrapped, and a
+filter that missed such a phrase would not be reliable). Any
 other key is equality against a field, and a multi-valued field matches if *any* of its
 values does (`governs: src/kyosei/brief.py`, `promoted: KYO-30`). `properties.<key>` is
 equality against a frontmatter property, where the key is whatever the file states —
@@ -518,7 +516,7 @@ equality against a frontmatter property, where the key is whatever the file stat
     columns: [id, title, governs, staleness_says]
 ```
 
-**Querying the ideas pool never validates it.** The pool has zero required ceremony, so
+**Querying the ideas pool never validates it.** The pool requires no structure, so
 a file with no frontmatter is a row whose `properties` is `{}`, and a property no file
 declares is an empty column rather than an error. The one thing that cannot be settled
 when the file is read is therefore settled at the row that proves it: grouping by a
@@ -541,8 +539,7 @@ would make it valid — the same sentence a write gets. A `columns`, `sort` or `
 name that is not a field is refused naming the field set. Every problem in the file
 arrives in one message.
 
-**A records base's filters are exactly `kyo list`'s filters, because they are the same
-filters.** `kyo base run` is not a second query path: both surfaces call one engine
+**A records base's filters are `kyo list`'s filters.** `kyo base run` is not a second query path: both surfaces call one engine
 (`src/kyosei/query.py`), which owns the SQL, the standing-aware status filter, the
 open-gate pass and the counted/not-counted split. The filter set is a single dataclass
 that `kyo list`'s flags and a Base's `filters:` keys are both derived from, and a test
@@ -564,10 +561,10 @@ Every `--json` run states the db/export currency direction (`in-step`, `db-ahead
 instead of defaulting to clean.
 
 `kyo init` ships `bases.yml` declaring none, with the shape and four commented examples.
-The reason it is empty is sharper than for `scopes.yml`: a seeded base would have to name
+It is empty for a reason beyond `scopes.yml`'s: a seeded base would have to name
 a status or a kind out of this project's own registries, so a project that renamed its
-ladder would hold a `bases.yml` that fails to load — taking every base it had written
-itself down with it. A store with no `kyosei/bases.yml` at
+ladder would hold a `bases.yml` that fails to load, and the bases it had written
+itself would fail with it. A store with no `kyosei/bases.yml` at
 all reads as "this project has saved no views".
 
 Bases are **config, not store data**: no record field is added, no schema version moves,

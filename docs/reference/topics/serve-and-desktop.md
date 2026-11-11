@@ -209,9 +209,9 @@ checks stand in front of every route:
 **Other accounts on this machine can reach it.** A loopback port is open to every
 user logged in to the machine, not only to you. Any process under another account can
 read the records and governed documents of every project you serve and write every
-`ideas/` and scratchpad, and those writes run as you. On a single-user Mac that is nobody
-else. On a machine other people log in to, it is them too. Kyosei states this rather than
-engineering around it. The routes that need a device token are the exception: without one,
+`ideas/` and scratchpad, and those writes run as you. On a single-user Mac there is no
+other account. On a machine other people log in to, their accounts can do this. Kyosei
+documents this exposure and does not close it. The routes that need a device token are the exception: without one,
 another account reads no session turn, screen or image, sends nothing, files no note,
 starts no session and reads no source file (see "Which routes need a device token" below).
 The command route `cmd/sessions` is not one of those routes, and is described under that
@@ -1426,7 +1426,7 @@ goes to the server's own log as for every route.
 
 ### Reaching it from another machine: Tailscale Serve and SSH (KYO-441)
 
-The network is Tailscale, and it replaces a VPN. `kyo serve` stays on loopback.
+The network between the machines is a Tailscale tailnet. `kyo serve` stays on loopback.
 Tailscale Serve proxies the tailnet to it, with a certificate Tailscale provisions,
 so the other machine trusts it through its own trust store. Anything that changes the
 machine goes over SSH on the same tailnet: `kyo init`, `kyo projects add|remove`,
@@ -1463,11 +1463,12 @@ curl https://<devbox>.<tailnet>.ts.net/v1/version
 curl https://<devbox>.<tailnet>.ts.net/v1/projects
 ```
 
-**Never run `tailscale funnel` on this port. Funnel publishes it to the whole internet,
+**Never run `tailscale funnel` on this port. Funnel publishes it to the internet,
 and the routes that read records ask for no password.** Serve reaches your tailnet only.
 With Funnel, anyone on the internet could read every project's records and governed
-documents and write every `ideas/` and scratchpad; the routes that need a device token
-would still refuse a request without one.
+documents, list a project's sessions through `cmd/sessions`, and write every `ideas/`
+and scratchpad; the routes that need a device token would still refuse a request
+without one.
 
 **Restrict it to yourself with an access rule.** With Serve on, anyone the tailnet's
 policy lets reach `<devbox>`'s port 443 can read the records and governed documents of
@@ -1543,25 +1544,24 @@ Electron project, with its own dependency manifest and its own checks, under the
 `app-desktop` scope in Kyosei's own store. Its checks run from this
 directory: `npm --prefix apps/desktop run check` (lint, typecheck, and two suites —
 one that launches the app and asserts its window, one that drives the app's seams
-with no app at all). `make test` is the Python suite and knows nothing about that
-directory, deliberately. That directory's README carries the shell's design
+with no app at all). `make test` is the Python suite and does not cover that
+directory. That directory's README carries the shell's design
 authority and the reasons behind its tooling.
 
 The renderer is v3 (KYO-227, KYO-232): one window shell with a left nav rail, a
 collapsible sidebar whose content the rail selects, and one or two columns of
-tabs. There are no modes. Everything openable is a tab — the scratchpad, an idea, a
-record, a brief, a doc, the terminal, the claude session, the activity view — and
-pop-out is "move this tab to its own window". The layout (columns, widths, tabs,
+tabs. There are no modes: everything openable is a tab (the scratchpad, an idea, a
+record, a brief, a doc, the terminal, the claude session, the activity view), and
+popping one out moves that tab to its own window. The layout (columns, widths, tabs,
 sidebar) is remembered per display configuration, so each set of screens restores
-its own. It is worth knowing how the app reaches your project, because it is the
-same store this CLI writes to:
+its own. The app reads the same store this CLI writes to, as follows:
 
 - **You choose which project the app is looking at, from inside the app** (KYO-175).
   The project switcher at the foot of the nav rail opens a picker and the projects
   you have opened before; choosing one moves every tab, without an environment
   variable and without a restart. A directory with no project at or above it is refused where you
   choose it, naming what was looked for, rather than being adopted and then shown as
-  a broken store. `KYOSEI_PROJECT_ROOT` still wins if it is set — and while it is,
+  a broken store. `KYOSEI_PROJECT_ROOT` takes precedence if it is set — and while it is,
   the switcher says so and stays disabled rather than recording a choice it would
   then ignore. The project you picked is remembered between launches, in the app's
   own data directory and never in any project — together with the kyo serve it was
@@ -1625,17 +1625,17 @@ the answer is passed as `--read-transcripts`. Without the app it
   `--in-repo`), `kyo orchestrator start`. macOS needs Remote Login enabled on the machine the commands go to.
 - **To open a record a message names, click it in the claude tab** (KYO-263). What is
   clickable is a record id written as a **markdown link with a `kyosei://` target** —
-  `[KYO-261](kyosei://KYO/KYO-261)`, which is the form the `/kyosei` skill tells a
+  `[KYO-261](kyosei://KYO/KYO-261)`, which is the form the `/kyosei` skill tells an
   orchestrator to write. claude.ai renders that as an anchor and **strips the
-  non-http(s) `href`**, so what reaches you is link-styled text with no target: before
-  this, clicking it did nothing at all; now it opens the record here, in the same tab,
+  non-http(s) `href`**, so what reaches you is link-styled text with no target;
+  the app handles the click and opens the record here, in the same tab,
   column and window-on-its-project a clicked link anywhere else would. A **bare id, or
   a bare `kyosei://` URL, written as plain text is not clickable** — claude.ai leaves
   it as prose, so there is no element to click — while that same URL pasted into a
   browser's location bar still opens the app, since the scheme is registered. The tab's
   header says this where it is used. This is the one place a script of this app's runs
-  inside a page you are logged into, and its boundary is deliberate
-  rather than a habit: its own preload file, sandboxed and
+  inside a page you are logged into, and it is bounded:
+  its own preload file, sandboxed and
   context-isolated, exposing nothing to the page, mutating nothing in it, reading the
   clicked element's text and sending that one string to the app, which drops whatever
   does not resolve.
@@ -1703,12 +1703,12 @@ the answer is passed as `--read-transcripts`. Without the app it
   them, and the pack only ever names the profile. The API key is passed to
   `notarytool` by path. The pack never opens, copies or prints the file, so it stays
   out of the repository, `apps/desktop/release/` and the bundle. **With no Developer ID identity,
-  a pack is ad-hoc exactly as before** and says so in one line — it opens on the
+  a pack is ad-hoc** and says so in one line — it opens on the
   Mac that built it, and a copy moved elsewhere needs its quarantine removed by hand.
   The first signing pack on a machine may raise a keychain dialog asking whether
   `codesign` may use the key: answer **Always Allow**. The pack asks for it in its
   first second and refuses after two minutes unanswered, naming this, rather than
-  waiting inside the build for someone who is not there.
+  waiting indefinitely inside the build.
 - **The app reads every project through `kyo serve` and opens no store database**
   (KYO-459). The title bar's `project · branch · N records` and the status bar's
   schema version are `kyo`'s own `--json` answers, and every *write* goes through
@@ -1718,16 +1718,16 @@ the answer is passed as `--read-transcripts`. Without the app it
   close a record from the terminal — the app's own pane, or any other — and the
   Records, Notes or Ideas list showing beside it re-reads itself within a second or
   two, keeping your scroll position, your search, your sort, your filters and the
-  marks on rows you have open. It is the store's own change that wakes it, not a
-  timer: nothing is re-read while nobody writes, a list you are not looking at costs
-  nothing, and read-only `kyo` commands in that pane wake nothing at all.
+  marks on rows you have open. The store's own change triggers the re-read, and no
+  timer does: nothing is re-read while nothing is written, a list that is not shown
+  is not re-read, and read-only `kyo` commands in that pane trigger nothing.
 - **The status bar names which side of the `kyosei.db` / `kyosei/export/` seam
   moved**, in the four states this tool distinguishes: current, database ahead,
   export ahead, and cannot tell. The verdict is `kyo`'s own (`kyo list --json`'s
   `db_export_currency`), with its sentence and its remedy in the tooltip; the app
   compares nothing itself. If you have pulled a store repository and not yet run
-  `kyo rebuild`, that is where you find out — before you trust the record count
-  beside it.
+  `kyo rebuild`, the status bar says so, beside the record count that it
+  qualifies.
 - **The terminal tab is the window onto your project's orchestrator session**
   (KYO-293, KYO-474) — the one `kyo orchestrator start` runs claude in, on its own
   `tmux -L kyosei` server, so a permission prompt can be answered right there. On
@@ -1753,7 +1753,7 @@ the answer is passed as `--read-transcripts`. Without the app it
   that shell's `PATH` (KYO-450).
   That shell ends when the app quits, and the strip says so.
 
-  The two are **two ptys with two screens**, not one shell being switched. The tmux
+  The two are **two ptys with two screens**. The tmux
   client is a process of its own — the app spawns `tmux` itself rather than typing an
   attach command at a prompt — so a pill click attaches at once even while your bare
   shell is busy in a long command, and that command keeps running, with its own
@@ -1774,7 +1774,7 @@ the answer is passed as `--read-transcripts`. Without the app it
   older build than the kyo installed on disk (`/v1/version` says `stale`) keeps serving,
   and the status bar carries its `stale_detail` and `kyo serve --restart` (KYO-550).
 - **The app writes exactly two things of yours, and never your store** (KYO-114).
-  The compose tabs are a real editor, so they do write: files under your project's
+  The compose tabs are an editor, and they write two things: files under your project's
   `ideas/`, and a session scratchpad at `~/kyosei/<project>/scratchpad.md` — your
   own surface, deliberately outside `ideas/` and outside the store, so `kyo
   promote` and `kyo sweep` cannot see it by construction. (The switcher's memory of
@@ -1795,8 +1795,8 @@ the answer is passed as `--read-transcripts`. Without the app it
   you to tidy and then delete the markers. A tab with no unsaved typing follows the file
   instead: when kyo serve's events stream says the file changed (`scratchpad` is a kind
   of its own, since the file lives outside `ideas/`), the tab reloads it, keeping the
-  caret, and writes nothing back. Nothing is locked, so a sleeping laptop leaves nothing
-  behind.
+  caret, and writes nothing back. Nothing is locked, so a laptop that goes to sleep holds
+  no lock.
 - **The app never creates a record** (KYO-439). The scratchpad's "Promote to idea"
   writes an idea *file* under `ideas/`; turning an idea into a record — its kind,
   title, criteria and touches — is the orchestrator's act, run through `kyo promote`
@@ -1814,8 +1814,8 @@ older than the app, that is the case `kyo rebuild --force` fixes and the screen 
 so. If the store is **newer** — the ordinary case once you point one app at several
 projects, since each project's own `kyo` moves on its own schedule — the app asks you
 to bring that project's orchestrator session to upgrade and rebuild it, and offers you
-no button that would do it for you. That is not caution for its
-own sake: `kyo rebuild --force` rewrites `config.yml`'s `schema_version` too, so an
+no button that would do it for you. The reason is that
+`kyo rebuild --force` rewrites `config.yml`'s `schema_version` too, so an
 app that "fixed" a store older than itself would leave that project's own `kyo`
 refusing to open it. Either way the screen is re-checkable in place — when the
 migration has happened elsewhere, the same window opens the project.
