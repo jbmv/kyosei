@@ -2608,9 +2608,17 @@ def build_parser() -> KyoseiParser:
     p_report.add_argument("dispatch_id", metavar="DISPATCH_ID")
     p_report.add_argument(
         "--file",
-        required=True,
         metavar="FILE",
-        help="the report JSON, validated against the schema `kyo report-schema` prints",
+        help="the report JSON, validated against the schema `kyo report-schema` prints "
+        "(required unless --amend-with-branch)",
+    )
+    # KYO-745: the orchestrator's own commits on a finished worker's branch.
+    p_report.add_argument(
+        "--amend-with-branch",
+        action="store_true",
+        help="file a report that amends the dispatch's latest one: its verdicts carried, "
+        "and the commits on the branch it does not name added oldest first, each marked "
+        "[orchestrator] (KYO-745)",
     )
     # KYO-477: a worker's dry run. Same checks as the ingest, through the same
     # functions, and nothing written -- so it runs from a dispatch worktree, whose

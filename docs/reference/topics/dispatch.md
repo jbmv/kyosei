@@ -485,6 +485,17 @@ Nothing is reopened: `state` stays `reported`, `closed_at` stays whatever it
 was, and `kyo doctor`'s `report_amendment_chain` check keeps a dispatch's
 reports one chain ending at the current one.
 
+**An orchestrator's commits on a finished worker's branch** (KYO-745). When the
+orchestrator fixes the branch itself, `kyo accept` refuses it as moved past the
+report and names `kyo report <dispatch-id> --amend-with-branch`, which files the
+amending report without a JSON file: the latest report's body carried whole, and
+the branch's commits it does not name added to `commits[]`, oldest first, each
+subject prefixed `[orchestrator]` (the schema carries no per-commit author).
+`--check` runs the same checks and writes nothing. It refuses, naming the remedy,
+a dispatch with no ingested report (`report-amend-no-ingested-report`: file the
+worker's report with `--file` first) and a branch with no commit beyond the report
+(`report-amend-nothing-beyond`: `kyo accept` takes the report as it stands).
+
 `kyo dispatch close <id>` refuses (exit 2) to close a dispatch with no ingested
 report unless one of the two report-less states is named explicitly, rather than
 letting a dispatch that produced nothing look like anything finished. A

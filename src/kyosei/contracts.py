@@ -981,6 +981,12 @@ def amend_remedy(dispatch_id: str, current_report_id: str) -> str:
 #: is the silent overwrite ``dispatch-already-terminal`` exists to prevent.
 CONTRACT_REPORT_AMENDS_WRONG_REPORT = "report-amends-wrong-report"
 
+#: KYO-745. ``kyo report --amend-with-branch`` has nothing to amend: the dispatch has no
+#: ingested report (the worker's has to be filed with ``--file`` first), or its branch
+#: holds no commit the latest report fails to name.
+CONTRACT_REPORT_AMEND_NO_REPORT = "report-amend-no-ingested-report"
+CONTRACT_REPORT_AMEND_NOTHING_BEYOND = "report-amend-nothing-beyond"
+
 # ---------------------------------------------------------------- flags (M6, KYO-8)
 
 #: The flag classes `kyo sweep` produces (KYO-8.c1/c2/c3). ``docs/design/charter.md``'s

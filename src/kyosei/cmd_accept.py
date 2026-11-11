@@ -183,7 +183,9 @@ def _refuse_if_branch_moved(ctx: Context, dispatch, report_id: str, body: dict) 
             "moved after the report was written (a background task that kept "
             "committing, or a resumed worker), so the report does not describe what "
             "would be merged",
-            "nothing was applied. Have the worker file an amending report: add the "
+            "nothing was applied. If the orchestrator made the commits that moved it, "
+            f"`kyo report {dispatch['id']} --amend-with-branch` files the amending report; "
+            "otherwise have the worker file one: add the "
             f"missing commit(s), oldest first, end commits[] on {tip}, set "
             f"\"amends\": \"{report_id}\" and ingest it against this dispatch; then "
             "accept again",

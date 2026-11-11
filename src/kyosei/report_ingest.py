@@ -16,6 +16,8 @@ from .contracts import (
     BRANCH_REACH_OFF_BRANCH,
     BRANCH_REACH_REACHABLE,
     CONTRACT_DISPATCH_ALREADY_TERMINAL,
+    CONTRACT_REPORT_AMEND_NO_REPORT,
+    CONTRACT_REPORT_AMEND_NOTHING_BEYOND,
     CONTRACT_REPORT_AMENDS_WRONG_REPORT,
     CONTRACT_REPORT_COMMIT_OFF_BRANCH,
     CONTRACT_REPORT_ID_MISMATCH,
@@ -623,6 +625,71 @@ def verdict_counts_text(verdicts: list[dict]) -> str:
     return ", ".join(f"{n} {state}" for state, n in sorted(counts.items())) or "none"
 
 
+#: KYO-745: what marks a commit the orchestrator added to the branch after the report.
+ORCHESTRATOR_COMMIT_MARK = "[orchestrator] "
+
+
+def _amend_document_from_branch(ctx: Context, store, dispatch_id: str) -> dict:
+    """KYO-745: the latest report, amended with the commits its branch holds beyond it.
+
+    Carries the report's body whole (verdicts, touched files, docs verdicts) and adds, oldest
+    first, each commit on the dispatch's branch the report does not name, its subject marked
+    with :data:`ORCHESTRATOR_COMMIT_MARK` because the report schema has no per-commit author.
+    Reads only; the caller files the document as any amending report.
+    """
+    dispatch = store.dispatch(dispatch_id)
+    report_id = dispatch["report_id"]
+    if not report_id:
+        raise ContractViolation(
+            CONTRACT_REPORT_AMEND_NO_REPORT,
+            [
+                f"{dispatch_id} has no ingested report ({dispatch['state']}), so there is "
+                "nothing for --amend-with-branch to amend",
+                f"file the worker's report first: `kyo report {dispatch_id} --file "
+                ".kyosei-report.json`, then amend it",
+            ],
+        )
+    body = json.loads(store.report(report_id)["body_json"])
+    branch = dispatch["branch"]
+    advance = _branch_advance(
+        ctx.code_root, branch, body.get("worked_from_sha"), body.get("commits") or []
+    )
+    if advance["outcome"] == BRANCH_CHECK_CANNOT_TELL:
+        raise ContractViolation(
+            CONTRACT_REPORT_AMEND_NOTHING_BEYOND,
+            [
+                f"could not read branch {branch} against {report_id}: {advance['detail']}",
+                "run `kyo report` in the code repository that holds the branch, or file the "
+                f"amendment by hand with \"amends\": \"{report_id}\"",
+            ],
+        )
+    if not advance["unlisted"]:
+        raise ContractViolation(
+            CONTRACT_REPORT_AMEND_NOTHING_BEYOND,
+            [
+                f"branch {branch} holds no commit beyond those {report_id} names, so "
+                "there is nothing to amend",
+                f"`kyo accept {dispatch_id}` takes the report as it stands",
+            ],
+        )
+    from .git_queries import run_git
+
+    added = []
+    for sha in reversed(advance["unlisted"]):  # rev-list is newest first
+        shown = run_git(ctx.code_root, "log", "-1", "--format=%s", sha)
+        subject = shown.stdout.strip() if shown.returncode == 0 else ""
+        added.append({"sha": sha, "subject": ORCHESTRATOR_COMMIT_MARK + subject})
+    amended = dict(body)
+    amended["commits"] = [*(body.get("commits") or []), *added]
+    amended[REPORT_AMENDS_KEY] = report_id
+    problems = report_schema.validate_report(amended)
+    if problems:
+        raise KyoseiError(
+            f"the amended report does not conform to the schema: {'; '.join(problems)}"
+        )
+    return amended
+
+
 def cmd_report(ctx: Context, args: Namespace) -> Output:
     """``kyo report <dispatch-id> --file .kyosei-report.json`` — structured ingest.
 
@@ -668,7 +735,15 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
     """
     store = ctx.store()
     dispatch_id = args.dispatch_id
-    parsed = _load_report_document(args.file, dispatch_id)
+    if getattr(args, "amend_with_branch", False):
+        if args.file:
+            raise UsageError("pass --file or --amend-with-branch, not both")
+        parsed = _amend_document_from_branch(ctx, store, dispatch_id)
+        args.file = "<--amend-with-branch>"
+    elif not args.file:
+        raise UsageError("kyo report needs --file FILE, or --amend-with-branch")
+    else:
+        parsed = _load_report_document(args.file, dispatch_id)
 
     if getattr(args, "check", False):
         return _report_check_output(ctx, store, dispatch_id, parsed, args.file)
