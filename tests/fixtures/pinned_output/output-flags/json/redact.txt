@@ -69,7 +69,7 @@
     "notes": [],
     "plan": null,
     "reports": [],
-    "schema_version": 32,
+    "schema_version": 33,
     "scope": null,
     "since_note": null,
     "status": "working",

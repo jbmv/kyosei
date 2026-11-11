@@ -992,7 +992,9 @@ kyo check-build                            # has the `kyo` under this session ch
                                             # UserPromptSubmit form (KYO-398)
 kyo turns                                  # the turn index of a project that opted in to
                                             # reading transcripts: one line per prompt, no
-                                            # text; `--hook` is the form the hooks run (KYO-657)
+                                            # text; `--hook` is the form the hooks run (KYO-657);
+                                            # `--verify` checks the chain and credits' seals,
+                                            # `--seal-key` shows or chooses the key store (KYO-663)
 kyo agenda                                 # this session's task list, which the person also
                                             # writes from a device; `add --text "..."`,
                                             # `check <id>` and the rest change it as the

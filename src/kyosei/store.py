@@ -338,6 +338,7 @@ class Store:
         span_active_seconds: int | None = None,
         span_started_at: str | None = None,
         span_ended_at: str | None = None,
+        span_seal: str | None = None,
         created_at: str | None = None,
     ) -> str:
         """Store one credit and its subjects; return the credit's id.
@@ -354,6 +355,8 @@ class Store:
         ``words_form`` is how the matched words were sent (typed, mid-turn, choice,
         accepted-suggestion). The ``span_*`` arguments cite a discussion by id and by what
         was measured, and are all given or all omitted; no transcript text is stored.
+        ``span_seal`` (KYO-663) is the hash of the span's last line in the turn index,
+        kept only beside the span's ids and empty when that line was never sealed.
 
         ``outcome`` takes ``accepted``, ``refined``, ``overrode`` or ``unprompted`` and
         belongs to a ``decided`` credit. A ``refined`` credit must carry the refining
@@ -429,8 +432,8 @@ class Store:
             " recommended, recommended_by, outcome, alternatives_json, refining_session,"
             " refining_turn, words_form, span_session, span_first_turn, span_last_turn,"
             " span_person_turns, span_agent_turns, span_active_seconds, span_started_at,"
-            " span_ended_at, basis_id, author, created_at)"
-            " VALUES (" + ", ".join("?" * 30) + ")",
+            " span_ended_at, span_seal, basis_id, author, created_at)"
+            " VALUES (" + ", ".join("?" * 31) + ")",
             (
                 credit_id,
                 record_id,
@@ -459,6 +462,7 @@ class Store:
                 span_active_seconds,
                 span_started_at,
                 span_ended_at,
+                span_seal if span_session is not None else None,
                 basis_id,
                 author,
                 created_at or now(),
@@ -571,6 +575,16 @@ class Store:
                 " WHERE s.subject_id = ? AND c.superseded_by IS NULL"
                 " AND c.withdrawn_at IS NULL ORDER BY c.created_at",
                 (subject_id,),
+            )
+        )
+
+    def sealed_credits(self) -> list[sqlite3.Row]:
+        """KYO-663: the current credits whose span carries a seal, for `kyo turns --verify`."""
+        return list(
+            self.conn.execute(
+                "SELECT id, span_session, span_last_turn, span_seal FROM credits"
+                " WHERE span_seal IS NOT NULL AND superseded_by IS NULL"
+                " AND withdrawn_at IS NULL ORDER BY created_at, id"
             )
         )
 

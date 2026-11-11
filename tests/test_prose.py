@@ -89,6 +89,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--permission",  # a name from device_tokens.PERMISSIONS, not prose (KYO-699)
         "--discussion",  # a discussion record id (KYO-658)
         "--at-prompt",  # a prompt id or transcript record uuid from the turn index (KYO-658)
+        "--seal-key",  # one of three key-store names, or nothing (KYO-663)
         "--kind",
         "--status",
         "--level",

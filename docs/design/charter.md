@@ -520,7 +520,9 @@ governs: src/kyosei/schema.py
   It records the form of the matched words (typed, mid-turn, choice, accepted-suggestion), and,
   for a decision, the recommendation, its outcome (`accepted | refined | overrode | unprompted`;
   a refined credit also cites the refining turn) and an optional discussion span cited by id
-  with measured turn counts and active time. No transcript text is stored. A gate also carries
+  with measured turn counts and active time, and `span_seal` (schema_version 33, KYO-663), the
+  hash of the span's last line in the turn index, whose lines commit each message by a salted
+  per-line Merkle root and are hash-chained per session. No transcript text is stored. A gate also carries
   `cleared_as` (`answered | withdrawn`). Whether a credit is reconstructed is derived from
   timestamps, not stored. A credit that should not exist is withdrawn rather than deleted
   (schema_version 29, KYO-670): `withdrawn_at`, `withdrawn_by` and `withdrawn_why` record when,

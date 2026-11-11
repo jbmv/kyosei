@@ -137,7 +137,7 @@ decides, and how a setup agent can find the answer before asking.
   | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see E3). |
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
-  | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index and copies the transcript to the local archive. |
+  | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |
 
 - **Without them:** the commands still work, but every rule above becomes something the agent
   has to remember.
@@ -475,17 +475,30 @@ decides, and how a setup agent can find the answer before asking.
   `CLAUDE_CONFIG_DIR`), on this machine, when a credit is written or rechecked. Each time a
   session stops, the hooks read that session's transcript and subagent transcripts to keep
   the turn index and the archive below, and each prompt the session receives is read for
-  the marker of pasted content.
+  the marker of pasted content. Each prompt, and the agent's final reply when the session
+  stops, is also read once to compute the commitment described below.
 - **What is stored:** the check's outcome, the matched record's id and timestamp, the form
-  of the words, and for a cited discussion the counts of turns, the active seconds and the
-  first and last timestamps. No text, path or hash of a transcript. The words being credited
-  are stored whatever the answer, because the credit holds them. Beside the store and
-  gitignored, `kyosei/turns.jsonl` holds one line per prompt: session, prompt id, time,
-  whose it was and whether it carried pasted content, and no text.
+  of the words, and for a cited discussion the counts of turns, the active seconds, the
+  first and last timestamps, and `span_seal`, the hash of the discussion's last line in the
+  turn index. No text or path of a transcript, and no hash from which a message could be
+  found by guessing: the seal derives from the salted commitments below. The words being
+  credited are stored whatever the answer, because the credit holds them. Beside the store
+  and gitignored, `kyosei/turns.jsonl` holds one line per prompt and one per final reply of
+  the agent: session, prompt id, time, whose it was, whether it carried pasted content, a
+  commitment to the message (a salted hash and a line count) and the hash of the line
+  before it, and no text. The commitment lets you later show chosen lines of a message and
+  have a reader confirm they were in it; it reveals nothing without the seal key.
+- **The seal key:** 32 random bytes made on first use, in `$KYOSEI_HOME/seal.key` with mode
+  0600. It is the one secret to back up: without it no committed message can be shown to
+  match. `kyo turns --seal-key keychain` moves it to the macOS login keychain, and `kyo
+  turns --seal-key icloud-keychain` to a synchronizable keychain item that iCloud Keychain
+  copies to your other Apple devices. With that last choice the key leaves this machine,
+  end-to-end encrypted by iCloud Keychain; it is never chosen for you.
 - **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
   git repository, and which a credit is checked against when the original is absent.
-- **What never leaves the machine:** the transcripts, the archive and the prompt history.
+- **What never leaves the machine:** the transcripts, the archive, the turn index, the
+  prompt history, and the seal key unless you choose the iCloud Keychain option.
   Kyosei sends none of them anywhere and copies none of them into the store; a store remote
   carries only what is listed as stored.
 - **Where it lives:** `read_transcripts: true` or `read_transcripts: false` in

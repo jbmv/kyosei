@@ -4044,6 +4044,13 @@ UNREACHED: dict[str, str] = {
         "`kyo accept` it names run to exit 0, by "
         "test_a_branch_with_nothing_beyond_the_report_is_refused_and_accept_is_the_remedy"
     ),
+    "cmd_turns.py:_seal_key#1": (
+        "not provoked by this walk: "
+        "the named `kyo turns --seal-key icloud-keychain --key-leaves-this-machine` writes "
+        "to the account's iCloud Keychain when it succeeds; proved against the Security "
+        "framework seam by "
+        "test_icloud_keychain_is_refused_until_the_disclosure_is_acknowledged"
+    ),
     "cmd_discuss.py:_refuse_closed_source#0": (
         "not provoked by this walk: "
         "`kyo discuss open` files a fresh discussion and the spawn is repeated from it; "

@@ -183,7 +183,7 @@
                 "worked_from_sha": "<SHA>"
               }
             ],
-            "schema_version": 32,
+            "schema_version": 33,
             "scope": null,
             "since_note": null,
             "status": "open",
@@ -392,7 +392,7 @@
               "worked_from_sha": "<SHA>"
             }
           ],
-          "schema_version": 32,
+          "schema_version": 33,
           "scope": null,
           "since_note": null,
           "status": "open",

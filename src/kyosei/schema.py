@@ -343,7 +343,16 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: [32]); the empty list is what was true of it, since no discussion could be opened, and
 #: nothing is derived from a credit's span, which cites a discussion by transcript id and
 #: says nothing about when it was declared open. A real DDL change, so a real new hash.
-SCHEMA_VERSION = 32
+#: Bumped to 33 for KYO-663 (decision KYO-654, DC6): ``credits.span_seal``, the hash of the
+#: last line of a credit's span in the turn index, whose ``prev`` chain commits every line
+#: of the session before it (:mod:`kyosei.seal`). It is written when the credit is and
+#: never recomputed, so that a later change to a committed line disagrees with it
+#: (``kyo turns --verify``). A record document written at 32 or earlier carries no
+#: ``span_seal`` on its credits (:data:`CREDIT_FIELD_DEFAULTS` [33]); NULL is what was true
+#: of it, since no line was sealed, and a seal is never derived at load time: a hash
+#: computed now would claim a commitment made when the words were sent, which is the one
+#: thing it could not show. A real DDL change, so a real new hash.
+SCHEMA_VERSION = 33
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -848,6 +857,11 @@ CREATE TABLE doc_refs (
 -- agent's turn count, active seconds (gaps long enough to be breaks excluded) and the
 -- span's start and end timestamps. All NULL when no span is cited.
 --
+-- KYO-663: `span_seal` is the hash of the span's last line in the turn index
+-- (`kyosei/turns.jsonl`), as `kyosei.seal.line_hash` computes it. That line's `prev` chains
+-- every line of the session before it, so the one hash commits the span. NULL when no span
+-- is cited or the span's last turn was never sealed.
+--
 -- KYO-670: `withdrawn_at`, `withdrawn_by` and `withdrawn_why` record a credit retracted
 -- with no replacement (`kyo credit --withdraw`): when, by whom and why. The row and its
 -- quote stay; a credit is current only while `superseded_by` and `withdrawn_at` are NULL.
@@ -879,6 +893,7 @@ CREATE TABLE credits (
     span_active_seconds INTEGER,
     span_started_at   TEXT,
     span_ended_at     TEXT,
+    span_seal         TEXT,
     basis_id          TEXT REFERENCES credits(id),
     author            TEXT NOT NULL,
     created_at        TEXT NOT NULL,
@@ -1377,6 +1392,13 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "span_active_seconds": ("export.record_document", "store.Store.add_credit"),
         "span_started_at": ("export.record_document", "store.Store.add_credit"),
         "span_ended_at": ("export.record_document", "store.Store.add_credit"),
+        # KYO-663: echoed when the credit is written, and checked against the turn index.
+        "span_seal": (
+            "export.record_document",
+            "credits.lines",
+            "store.Store.sealed_credits",
+            "cmd_turns._verify",
+        ),
         "basis_id": ("export.record_document", "store.Store.add_credit"),
         "author": ("export.record_document",),
         "created_at": ("export.record_document",),
@@ -2330,6 +2352,10 @@ GATE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
 #: before withdrawal existed could not have been withdrawn, and NULL says exactly that.
 CREDIT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     29: {"withdrawn_at": None, "withdrawn_by": None, "withdrawn_why": None},
+    #: KYO-663: a credit exported before sealing existed has no seal, and NULL says so.
+    #: Never computed from the turn index at load time: a seal is worth what it is worth
+    #: because it was written when the credit was.
+    33: {"span_seal": None},
 }
 
 #: KYO-709: a field of a ``_person_notes.jsonl`` line, keyed by the line's own stamp. A
