@@ -25,8 +25,8 @@ above it. What may run at all is :data:`SERVED_COMMANDS`; every other command in
 ``tests/test_kyo_serve.py`` fails when a command is on neither.
 
 THE NETWORK STANCE. It binds a loopback address and nothing else — there is no
-override, because with no password and no TLS a LAN bind makes every device on the
-LAN a reader of every project. Loopback is not a boundary against a web page in the
+override, because with no TLS, and with the project routes open to any caller, a LAN bind
+makes every device on the LAN a reader of every project. Loopback is not a boundary against a web page in the
 same browser, so three mechanical checks stand in front of every route: the ``Host``
 must be a loopback name or one given with ``--allow-host`` (DNS rebinding), an
 ``Origin``, when sent, must be one given with ``--allow-origin`` (a cross-site
@@ -49,7 +49,8 @@ THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (G
 ``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events),
 ``sessions/{id}/screen``, ``sessions/{id}/changes``, ``sessions/{id}/images/{turn}/{index}``
 and ``sessions/{id}/subagents/{agent}``, all read-only and in a project that has opted in to
-reading transcripts. This module only routes them;
+reading transcripts. Each needs a valid device token of any permission (KYO-791); the project
+routes above do not. This module only routes them;
 :mod:`kyosei.serve_sessions` holds the rest.
 
 THE SEND ROUTES (KYO-699). ``sessions/{id}/send``, ``.../slash`` and ``.../interrupt`` (POST)
