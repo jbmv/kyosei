@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-814` (task) — kyo serve: search the served files by name and contents, and keep the files opened in the app per project
 - **2026-11-11** — `KYO-813` (bug) — The Mac app aborted at launch on both machines while the other stores were rebuilt to schema 34
 - **2026-11-11** — `KYO-812` (task) — Transcript search: a derived local index of prompts and replies, a command and a kyo serve route (E6)
 - **2026-11-11** — `KYO-809` (bug) — A held prompt taken back on another device loses its anchors and tags
