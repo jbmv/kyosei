@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-826` (task) — kyo serve: the transcript search by role with a longer excerpt, and the project's opened results
 - **2026-11-11** — `KYO-823` (task) — Mac app: anchor mode from a paragraph's + panel
 - **2026-11-11** — `KYO-820` (task) — Mac app: a path in a reminder is a link to Files
 - **2026-11-11** — `KYO-819` (task) — Files search: names before contents across roots, documents first, one row per file
