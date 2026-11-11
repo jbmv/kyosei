@@ -31,10 +31,11 @@ and only when that session already has a list, and none of them able to fail its
 - ``kyo check-build --hook``, the prompt hook, prints the unchecked items with who wrote each
   (:func:`prompt_lines`).
 - ``kyo sessions --hook`` at ``Stop`` announces the person's unchecked items to the person, and
-  says when dispatches are in flight and the list holds nothing of the orchestrator's
-  (:func:`stop_message`). It is printed as a hook's ``systemMessage``, which is shown and does
-  not continue the conversation: at ``Stop`` anything that reaches the agent makes it take
-  another turn, which is what an announcement must not do.
+  says when dispatches are in flight and the list holds nothing of the orchestrator's, once
+  per session and again only when the count has risen (:func:`stop_message`, KYO-775). It is
+  printed as a hook's ``systemMessage``, which is shown and does not continue the
+  conversation: at ``Stop`` anything that reaches the agent makes it take another turn,
+  which is what an announcement must not do.
 - ``kyo brief --session-start`` prints what the project's previous session left unchecked and
   carries the person's items into the new session's list, once (:func:`carry_lines`).
 """
@@ -693,11 +694,43 @@ def dispatches_in_flight(db_path: Path, session_id: str) -> int:
     return int(running) + int(reported)
 
 
+#: What follows ``$KYOSEI_HOME/composer/``: one file per session holding the count of
+#: dispatches in flight when the stop hook last had it in view (KYO-775). Session state, like
+#: the list, and never the store's.
+SAID = "agenda-said"
+
+
+def _said_count(environ: dict[str, str], session_id: str) -> int:
+    """The in-flight count last remembered for the session; 0 for none or an unreadable file."""
+    try:
+        from . import serve_files
+
+        raw = serve_files.composer_path(environ, SAID, session_id).read_bytes()
+        return max(0, int(json.loads(raw.decode("utf-8"))["in_flight"]))
+    except Exception:  # noqa: BLE001 - a hook never fails over this file
+        return 0
+
+
+def _remember_said(environ: dict[str, str], session_id: str, flying: int) -> None:
+    """Keep ``flying`` as the count the sentence has been said for, or has fallen to."""
+    with contextlib.suppress(Exception):
+        from . import serve_files
+
+        target = serve_files.composer_target(environ, SAID, session_id)
+        data = (json.dumps({"in_flight": flying}) + "\n").encode("utf-8")
+        with serve_files._WRITE_LOCK:
+            serve_files._write_atomically(
+                target, data, create=not target.exists(), private=True
+            )
+
+
 def stop_message(environ: dict[str, str], session_id: str | None, db_path: Path) -> str | None:
     """What the stop hook announces, or None when there is nothing to say.
 
     One sentence for the person's unchecked items, and one when dispatches are in flight
-    and the list holds no item of the orchestrator's. Neither blocks the stop.
+    and the list holds no item of the orchestrator's. Neither blocks the stop. The first is said
+    at every stop while an item is unchecked; the second once per session for a given count,
+    and again only when the count has risen since it was last said or fell (KYO-775).
     """
     if not session_id:
         return None
@@ -712,11 +745,14 @@ def stop_message(environ: dict[str, str], session_id: str | None, db_path: Path)
     items = document.get("items", []) if document else []
     if not any(item["author"] == ORCHESTRATOR for item in items):
         flying = dispatches_in_flight(db_path, session_id)
-        if flying:
+        said = _said_count(environ, session_id)
+        if flying > said:
             parts.append(
                 f"{flying} dispatch(es) are running or unaccepted and the session list holds "
                 "no item of the orchestrator's (kyo agenda add --text \"...\")"
             )
+        if flying != said:
+            _remember_said(environ, session_id, flying)
     return ". ".join(parts) if parts else None
 
 
