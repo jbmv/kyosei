@@ -274,8 +274,8 @@ def _require_permission(device: device_tokens.Device, permission: str) -> None:
         raise Refusal(
             403,
             f"the token of device {device.name} does not carry the {permission} permission; "
-            f"revoke it (`kyo devices revoke {device.name}`) and issue another with {issue_one}, "
-            "repeating --permission for each permission the device needs",
+            f"add it with `kyo devices grant {device.name} --permission {permission}`, which "
+            "keeps the token the device already holds",
             reason=f"no-{permission}-permission",
         )
 

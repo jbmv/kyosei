@@ -2285,8 +2285,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         )
 
     # KYO-330: `--from FILE` stands in for --title/--description-file/--criteria-file/
-    # --touches-file -- `kyo spawn` has no --plan, so a file's `plan:` is refused
-    # rather than silently unused.
+    # --touches-file; KYO-749: and for --plan, which `kyo new --from` also reads from `plan:`.
     from_file = getattr(args, "from_file", None)
     check_only = bool(getattr(args, "check", False))
     if check_only and not from_file:
@@ -2300,6 +2299,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
             args,
             [
                 ("title", "--title"),
+                ("plan", "--plan"),
                 ("scope", "--scope"),
                 ("description_file", "--description-file"),
                 ("criteria_file", "--criteria-file"),
@@ -2309,10 +2309,11 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         parsed = _parse_record_file(
             read_prose(from_file, what="--from"),
             source=from_file,
-            accepts_plan=False,
+            accepts_plan=True,
             accepts_description=True,
         )
         title = parsed.title
+        plan = parsed.plan
         criteria_texts = parsed.criteria_texts
         touch_lines = parsed.touch_lines
         scope_arg = parsed.scope
@@ -2321,6 +2322,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         if args.title is None:
             raise UsageError("--title is required (or pass --from FILE instead)")
         title = single_line(args.title, what="--title")
+        plan = args.plan
         criteria_texts = (
             read_lines(args.criteria_file, what="--criteria-file") if args.criteria_file else []
         )
@@ -2360,13 +2362,15 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     description = f"{head}\n\n---\nSpawned from: {source_id}\n"
 
     if check_only:
+        if plan is not None:
+            _require_plan(store, plan)
         return _from_check_output(
             command="spawn",
             kind=args.kind,
             invocation=f"kyo spawn {source_id} --kind {args.kind}",
             from_file=from_file,
             title=title,
-            plan=None,
+            plan=plan,
             scope=scope,
             scopes=scopes,
             description=description,
@@ -2386,6 +2390,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     warning_lines, warning_data = _duplicate_warning_output(duplicate_warnings)
 
     with store.transaction():
+        if plan is not None:
+            _require_plan(store, plan)
         before = {source_id: export.record_document(store, source_id)}
         record_id = store.new_record_id()
         seq = int(record_id.rsplit("-", 1)[1])
@@ -2393,8 +2399,19 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         store.conn.execute(
             "INSERT INTO records (id, seq, kind, title, status, plan_id, scope, description,"
             " wont_do_reason, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)",
-            (record_id, seq, args.kind, title, ladder.initial, scope, description, stamp, stamp),
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+            (
+                record_id,
+                seq,
+                args.kind,
+                title,
+                ladder.initial,
+                plan,
+                scope,
+                description,
+                stamp,
+                stamp,
+            ),
         )
         added_criteria = _add_criteria(store, record_id, criteria_texts)
         added_touches = _add_touches(store, record_id, touches)
@@ -2460,6 +2477,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
         *title_warning_lines,
         echo_value("scope", scope or "(none declared)"),
     ]
+    if plan:
+        lines.append(echo_value("plan", plan))
     lines += echo_block("description", description)
     lines.append(f"stored criteria: {len(added_criteria)}")
     lines += [f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added_criteria]

@@ -100,6 +100,7 @@ _FULL_CRITERION_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,15}-[1-9][0-9]*)\.c([1-9][0
 RULE_CRITERION_FLAG = "criterion-flag"
 RULE_GATE_PAYLOAD = "gate-payload"
 RULE_SOLE_UNOBSERVED = "sole-unobserved"
+RULE_ALL_UNOBSERVED = "all-unobserved"
 RULE_NO_TARGET = "no-target"
 
 
@@ -345,6 +346,25 @@ def _flag_targets(store, record_id: str, quote: _Quote, args: Namespace, by_id: 
     )
 
 
+def _refuse_ambiguous_criteria(record_id: str, quote: _Quote, unobserved: list, gate) -> None:
+    ids = [row["id"] for row in unobserved]
+    gate_flag = ["--gate", gate["id"]] if gate is not None else []
+    raise ContractViolation(
+        CONTRACT_CONFIRM_AMBIGUOUS_CRITERIA,
+        [
+            f"{record_id} has {len(ids)} unmet-unobserved criteria ("
+            + ", ".join(ids)
+            + "), and a bare confirm would settle a subset or all of them on words that "
+            "named none: one approval applied to observations nobody named is a rubber "
+            "stamp. Nothing was written. Name the criteria the words answer with "
+            "--criterion <ids>, or answer every one with --all-unobserved:",
+            *(f"  {_line(record_id, quote, '--criterion', cid, *gate_flag)}" for cid in ids),
+            f"  {_line(record_id, quote, *_criterion_flag(ids), *gate_flag)}",
+            f"  {_line(record_id, quote, '--all-unobserved', *gate_flag)}",
+        ],
+    )
+
+
 def _resolve(store, record_id: str, quote: _Quote, args: Namespace, scope: list) -> dict:
     """The targets, by the first rule that applies. Writes nothing."""
     criteria = list(store.criteria(record_id))
@@ -360,6 +380,23 @@ def _resolve(store, record_id: str, quote: _Quote, args: Namespace, scope: list)
             # cannot hold it: naming the criteria is the statement of what was looked at.
             resolved["named"] = [cid for cid in _named_ids(gate["detail"]) if cid in by_id]
         return resolved
+
+    unobserved = [row for row in criteria if row["state"] == "unmet-unobserved"]
+    if getattr(args, "all_unobserved", False) and unobserved:
+        # KYO-746.c2: every unobserved criterion, on the person's words, in one act.
+        resolved["rule"] = RULE_ALL_UNOBSERVED
+        resolved["targets"] = unobserved
+        if gate is not None:
+            resolved["named"] = [cid for cid in _named_ids(gate["detail"]) if cid in by_id]
+        return resolved
+
+    if len(unobserved) > 1 and not getattr(args, "all_unobserved", False):
+        # KYO-746.c1: a bare confirm on several unobserved criteria never settles a subset:
+        # the first one settled and cleared the gate. A gate whose payload names every one
+        # of them is the person's own statement of what the words answer, and passes.
+        covered = set(_named_ids(gate["detail"])) if gate is not None else set()
+        if not {row["id"] for row in unobserved} <= covered:
+            _refuse_ambiguous_criteria(record_id, quote, unobserved, gate)
 
     if gate is not None:
         named = _named_ids(gate["detail"])
@@ -389,29 +426,10 @@ def _resolve(store, record_id: str, quote: _Quote, args: Namespace, scope: list)
             ]
             return resolved
 
-    unobserved = [row for row in criteria if row["state"] == "unmet-unobserved"]
     if len(unobserved) == 1:
         resolved["rule"] = RULE_SOLE_UNOBSERVED
         resolved["targets"] = unobserved
         return resolved
-    if len(unobserved) > 1:
-        ids = [row["id"] for row in unobserved]
-        gate_flag = ["--gate", gate["id"]] if gate is not None else []
-        raise ContractViolation(
-            CONTRACT_CONFIRM_AMBIGUOUS_CRITERIA,
-            [
-                f"{record_id} has {len(ids)} unmet-unobserved criteria and "
-                + (
-                    f"{gate['id']} names none of them"
-                    if gate is not None
-                    else "no open human gate names any"
-                )
-                + ": one approval applied to observations nobody named is a rubber stamp. "
-                "Nothing was written. Name the criteria the words answer:",
-                *(f"  {_line(record_id, quote, '--criterion', cid, *gate_flag)}" for cid in ids),
-                f"  {_line(record_id, quote, *_criterion_flag(ids), *gate_flag)}",
-            ],
-        )
     resolved["rule"] = RULE_NO_TARGET
     resolved["targets"] = []
     if gate is None and not _holds_quote(store, record_id, quote):
@@ -496,6 +514,8 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
        the store: :func:`cmd_close_wave.refresh_after_completion` (KYO-577).
     """
     quote = _Quote(args)
+    if getattr(args, "all_unobserved", False) and args.criterion:
+        raise UsageError("pass --criterion or --all-unobserved, not both")
     store = ctx.store()
     record_id = args.record_id
     row = store.record(record_id)
@@ -592,6 +612,12 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         if gate is not None:
             named = resolved["named"]
             holding = [cid for cid in named if not _settled_now(store, cid)]
+            # KYO-746.c3: the gate stays while any criterion of the record is unobserved.
+            holding += [
+                row["id"]
+                for row in store.criteria(record_id)
+                if row["state"] == "unmet-unobserved" and row["id"] not in holding
+            ]
             refused = [step for step in steps if step.refused]
             if holding or refused:
                 gates_left.append(
@@ -695,6 +721,15 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             )
         )
     lines.append(_resolution_line(record_id, resolved, gate))
+    remaining = [
+        c["id"] for c in store.criteria(record_id) if c["state"] == "unmet-unobserved"
+    ]
+    if remaining:
+        # KYO-746.c3: what the words did not cover stays unobserved, and the gate with it.
+        lines.append(
+            f"still unobserved: {', '.join(remaining)} — "
+            f"`kyo confirm {record_id} --criterion <ids>` or `--all-unobserved` settles them"
+        )
     for cid in resolved["ignored"]:
         lines.append(f"ignored: {cid} in {gate['id']}'s payload is not {record_id}'s")
     for target in targets:
@@ -800,6 +835,8 @@ def _resolution_line(record_id: str, resolved: dict, gate) -> str:
             f"resolved: {gate_part} names {', '.join(resolved['named'])} -> {count} "
             "unsettled criterion/criteria to verify"
         )
+    if rule == RULE_ALL_UNOBSERVED:
+        return f"resolved: --all-unobserved -> {count} criterion/criteria; gate in scope: {gate_part}"
     if rule == RULE_SOLE_UNOBSERVED:
         return (
             f"resolved: {record_id}'s sole unmet-unobserved criterion; gate in scope: {gate_part}"

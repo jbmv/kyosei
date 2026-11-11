@@ -27,7 +27,10 @@ is the disposal (KYO-44). Each kind declares:
   `requires_discussion` (optional, either archetype, KYO-658, on the packaged `decision`)
   makes them refuse it (`decision-requires-discussion`) unless it is filed from its
   discussion: spawned from one, from a record one produced, or with `--discussion <id>`, or
-  with `--opened-late`, which opens one at the filing and marks it late for good. Both apply
+  with `--opened-late`, which opens one at the filing and marks it late for good. A spawn
+  closes the discussion it came from; `kyo spawn --keep-open` leaves it open for a discussion
+  that produces several records, and a spawn from a closed discussion is refused
+  (`spawn-from-closed-discussion`, KYO-749). Both apply
   only where `people:` declares someone. `raises_docs_obligations` (KYO-554, on
   the packaged `decision`) makes filing or editing a record raise a standing docs
   obligation on each ssot section it names by id and each of its doc-refs

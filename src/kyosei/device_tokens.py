@@ -239,21 +239,98 @@ def issue(
     return device, token
 
 
-def revoke(target: str, environ: dict[str, str] | None = None) -> tuple[Device, bool]:
-    """Revoke the device named or numbered ``target``; True when it was live until now."""
-    from . import clock
-
-    path = tokens_path(environ)
-    devices = read_devices(path)
+def _find(
+    target: str, devices: list[Device], path: Path, *, revoked_by_name: bool = False
+) -> Device:
     matches = [d for d in devices if d.name == target and d.revoked_at is None] or [
         d for d in devices if d.id == target
     ]
+    if not matches and revoked_by_name:
+        matches = [d for d in devices if d.name == target][-1:]
     if not matches:
         raise KyoseiError(
             f"no live device is named {target!r}, and no device has that id, in {path}; "
             "`kyo devices list` shows each device's name and id"
         )
     (chosen,) = matches
+    return chosen
+
+
+#: ``$KYOSEI_HOME``'s log of the permission changes `kyo devices grant` and `revoke
+#: --permission` make (KYO-747): one JSON object per change, never a token or a digest.
+CHANGE_LOG_FILE = "device-log.jsonl"
+
+
+def _log_change(
+    environ: dict[str, str] | None, action: str, device: Device, permissions: list[str]
+) -> None:
+    from . import clock
+
+    path = tokens_path(environ).with_name(CHANGE_LOG_FILE)
+    row = {
+        "at": clock.now(),
+        "action": action,
+        "device": device.id,
+        "name": device.name,
+        "permissions": permissions,
+        "now": list(device.permissions),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(descriptor, (json.dumps(row) + "\n").encode("utf-8"))
+    finally:
+        os.close(descriptor)
+
+
+def _refuse_revoked(device: Device, verb: str) -> None:
+    if device.revoked_at is not None:
+        raise KyoseiError(
+            f"device {device.name} (id {device.id}) was revoked at {device.revoked_at}, so its "
+            f"token cannot be {verb}; issue a new token with `kyo devices issue "
+            f"{device.name} --permission <p>` (repeat --permission for each it needs)"
+        )
+
+
+def change_permissions(
+    target: str, permissions: list[str], *, add: bool, environ: dict[str, str] | None = None
+) -> tuple[Device, list[str]]:
+    """Add (``grant``) or remove (``revoke --permission``) permissions on a live device's
+    token, which stays the same token. Returns the device and the permissions that changed;
+    each change is logged (:data:`CHANGE_LOG_FILE`) and a revoked device is refused."""
+    path = tokens_path(environ)
+    devices = read_devices(path)
+    chosen = _find(target, devices, path, revoked_by_name=True)
+    _refuse_revoked(chosen, "changed" if add else "narrowed")
+    wanted = sorted(set(permissions))
+    if add:
+        changed = [p for p in wanted if p not in chosen.permissions]
+        held = tuple(sorted({*chosen.permissions, *wanted}))
+    else:
+        missing = [p for p in wanted if p not in chosen.permissions]
+        if missing:
+            raise KyoseiError(
+                f"device {chosen.name} does not carry {', '.join(missing)}; it carries "
+                f"{', '.join(chosen.permissions) or 'none'} (`kyo devices list`)"
+            )
+        changed = wanted
+        held = tuple(p for p in chosen.permissions if p not in wanted)
+    done = Device(
+        chosen.id, chosen.name, chosen.digest, held, chosen.created_at, chosen.revoked_at
+    )
+    if changed:
+        _write_devices(path, [done if d.id == chosen.id else d for d in devices])
+        _log_change(environ, "grant" if add else "revoke-permission", done, changed)
+    return done, changed
+
+
+def revoke(target: str, environ: dict[str, str] | None = None) -> tuple[Device, bool]:
+    """Revoke the device named or numbered ``target``; True when it was live until now."""
+    from . import clock
+
+    path = tokens_path(environ)
+    devices = read_devices(path)
+    chosen = _find(target, devices, path)
     if chosen.revoked_at is not None:
         return chosen, False
     done = Device(
@@ -284,7 +361,8 @@ def _refuse_from_worktree(environ: dict[str, str], action: str) -> None:
 
 
 def cmd_devices(ctx: Context, args: Namespace) -> Output:
-    """``kyo devices list``, ``issue NAME [--permission P]…``, ``revoke NAME|ID``."""
+    """``kyo devices list``, ``issue NAME [--permission P]… [--token-only]``,
+    ``grant NAME|ID --permission P``, ``revoke NAME|ID [--permission P]``."""
     environ = ctx.environ
     action = args.action
     if action == "list":
@@ -317,6 +395,18 @@ def cmd_devices(ctx: Context, args: Namespace) -> Output:
     if action == "issue":
         _refuse_from_worktree(environ, action)
         device, token = issue(args.target, args.permission or [], environ)
+        if args.token_only:
+            return Output(
+                [token],
+                {
+                    "ok": True,
+                    "command": "devices",
+                    "action": "issue",
+                    "device": device.shown(),
+                    "token": token,
+                },
+                bare=True,
+            )
         return Output(
             [
                 f"issued a token to {device.name} (id {device.id}), permissions: "
@@ -324,6 +414,7 @@ def cmd_devices(ctx: Context, args: Namespace) -> Output:
                 f"  {token}",
                 "This is the only time the token is shown; only its digest is kept. The device "
                 "sends it as `Authorization: Bearer <token>`.",
+                "`kyo devices issue NAME --token-only` prints the token alone, for a pipe.",
             ],
             {
                 "ok": True,
@@ -333,9 +424,35 @@ def cmd_devices(ctx: Context, args: Namespace) -> Output:
                 "token": token,
             },
         )
-    if args.permission:
+    if args.token_only:
         raise KyoseiError(
-            "kyo devices revoke takes no --permission; run `kyo devices revoke <name>`"
+            f"--token-only goes with issue; `kyo devices {action}` prints no token"
+        )
+    if action == "grant" or (action == "revoke" and args.permission):
+        if not args.permission:
+            raise KyoseiError(
+                "kyo devices grant needs a permission; name one "
+                f"(`kyo devices grant {args.target} --permission {PERMISSIONS[0]}`)"
+            )
+        _refuse_from_worktree(environ, action)
+        adding = action == "grant"
+        device, changed = change_permissions(
+            args.target, args.permission, add=adding, environ=environ
+        )
+        word = "granted" if adding else "removed"
+        return Output(
+            [
+                f"{word} {', '.join(changed) or 'nothing new'} on {device.name} (id "
+                f"{device.id}); permissions now: {_permissions_word(device)}; the token is "
+                "unchanged",
+            ],
+            {
+                "ok": True,
+                "command": "devices",
+                "action": "grant" if adding else "revoke",
+                "changed": changed,
+                "device": device.shown(),
+            },
         )
     _refuse_from_worktree(environ, action)
     device, changed = revoke(args.target, environ)

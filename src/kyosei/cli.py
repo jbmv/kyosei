@@ -968,7 +968,7 @@ def build_parser() -> KyoseiParser:
         metavar="FILE",
         help="file the new record from one markdown file instead of --title/"
         "--description-file/--criteria-file/--touches-file: front matter for title/"
-        "scope/touches, a '## Criteria' section (one criterion per list item), "
+        "scope/plan/touches, a '## Criteria' section (one criterion per list item), "
         "everything else the description; refused together with any of those flags "
         "(KYO-330)",
     )
@@ -983,6 +983,17 @@ def build_parser() -> KyoseiParser:
     )
     credits.add_credit_flags(p_spawn, decision=True, span=True)
     cmd_discuss.add_filing_flags(p_spawn)  # KYO-658
+    p_spawn.add_argument(
+        "--plan",
+        metavar="ID",
+        help="plan record the new record belongs to, as `kyo new --plan` (KYO-749)",
+    )
+    p_spawn.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="spawning from a discussion closes it; with this the discussion stays open, "
+        "for a discussion that produces more than one record (KYO-749)",
+    )
     p_spawn.add_argument(
         "--check",
         action="store_true",
@@ -2271,28 +2282,38 @@ def build_parser() -> KyoseiParser:
     )
     p_devices.add_argument(
         "action",
-        choices=("list", "issue", "revoke"),
-        help="list every device, issue a token to a new device and print it once, or revoke "
-        "a device's token, which stops working on the next request",
+        choices=("list", "issue", "grant", "revoke"),
+        help="list every device, issue a token to a new device and print it once, grant a "
+        "live device's token a further permission without changing the token, or revoke a "
+        "device's token (with --permission, only that permission), which stops working on "
+        "the next request",
     )
     p_devices.add_argument(
         "target",
         nargs="?",
         metavar="NAME|ID",
-        help="for issue: the new device's name; for revoke: a live device's name, or an id "
-        "from `kyo devices list`",
+        help="for issue: the new device's name; for grant and revoke: a live device's name, "
+        "or an id from `kyo devices list`",
     )
     p_devices.add_argument(
         "--permission",
         action="append",
         default=[],
         choices=device_tokens.PERMISSIONS,
-        help="with issue: a permission the token carries (repeatable). `send` lets it use the "
+        help="with issue: a permission the token carries (repeatable); with grant: one to add "
+        "to a live token; with revoke: one to remove, leaving the token live (KYO-747). "
+        "`send` lets it use the "
         "send routes, `notes` the note routes, `start` the route that starts a "
         "project's orchestrator session (KYO-719), `terminal` the routes that draw a "
         "session's pane and type into it (KYO-721), and `files` the routes that read a "
         "project's files (KYO-735); a token issued without the one a route "
         "asks for is refused there",
+    )
+    p_devices.add_argument(
+        "--token-only",
+        action="store_true",
+        help="with issue: print the token and nothing else, with no trailing newline, so "
+        "`kyo devices issue NAME --token-only | pbcopy` copies the token alone (KYO-747)",
     )
 
     p_statusline = sub.add_parser(
@@ -2608,9 +2629,17 @@ def build_parser() -> KyoseiParser:
     p_report.add_argument("dispatch_id", metavar="DISPATCH_ID")
     p_report.add_argument(
         "--file",
-        required=True,
         metavar="FILE",
-        help="the report JSON, validated against the schema `kyo report-schema` prints",
+        help="the report JSON, validated against the schema `kyo report-schema` prints "
+        "(required unless --amend-with-branch)",
+    )
+    # KYO-745: the orchestrator's own commits on a finished worker's branch.
+    p_report.add_argument(
+        "--amend-with-branch",
+        action="store_true",
+        help="file a report that amends the dispatch's latest one: its verdicts carried, "
+        "and the commits on the branch it does not name added oldest first, each marked "
+        "[orchestrator] (KYO-745)",
     )
     # KYO-477: a worker's dry run. Same checks as the ingest, through the same
     # functions, and nothing written -- so it runs from a dispatch worktree, whose
@@ -2713,7 +2742,13 @@ def build_parser() -> KyoseiParser:
         metavar="CRITERION_ID",
         nargs="+",
         help="the criteria the words answer; overrides resolution from the gate's payload "
-        "or the record's sole unmet-unobserved criterion",
+        "or the record's sole unmet-unobserved criterion; required when the record holds "
+        "more than one unmet-unobserved criterion (or use --all-unobserved)",
+    )
+    p_confirm.add_argument(
+        "--all-unobserved",
+        action="store_true",
+        help="the words answer every unmet-unobserved criterion on the record (KYO-746)",
     )
     p_confirm.add_argument(
         "--gate",
@@ -4169,6 +4204,9 @@ def run(
 
     if args.json:
         print(render_json(output.data, compact))
+    elif output.bare:
+        sys.stdout.write("\n".join(output.lines))
+        sys.stdout.flush()
     elif output.lines:
         # KYO-362: a command that deliberately returns NO lines prints nothing, not a
         # blank one. `kyo doctor --hook` on a clean store is the first command in this

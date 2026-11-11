@@ -79,6 +79,8 @@ CONTRACT_DECISION_REQUIRES_DISCUSSION = "decision-requires-discussion"
 ROLE_OPENED = "opened"
 ROLE_NOTE = "note"
 ROLE_CLOSED = "closed"
+#: KYO-749.c2: a record spawned from a discussion that is already closed.
+CONTRACT_SPAWN_FROM_CLOSED_DISCUSSION = "spawn-from-closed-discussion"
 
 #: How many of the session's confirmed turns a refusal over ``--at-prompt`` lists.
 LISTED_TURNS = 5
@@ -425,6 +427,7 @@ class FilingDiscussion:
     opening: TurnStamp | None = None
     via_source: bool = False
     refs: list[dict] = field(default_factory=list)
+    keep_open: bool = False
 
     def write(self, ctx: Context, store: Store, record_id: str, title: str, stamp: str) -> dict:
         """Inside the filing's transaction: open the late discussion, link the record to
@@ -441,9 +444,11 @@ class FilingDiscussion:
         done["discussion_id"] = discussion_id
         if not self.via_source:
             done["link_id"] = _link(store, record_id, discussion_id, stamp)
-        done["closed_ref"] = close_on(
-            ctx, store, discussion_id, self.current, produced_id=record_id, created_at=stamp
-        )
+        done["kept_open"] = self.keep_open
+        if not self.keep_open:
+            done["closed_ref"] = close_on(
+                ctx, store, discussion_id, self.current, produced_id=record_id, created_at=stamp
+            )
         return done
 
     def record_ids(self) -> list[str]:
@@ -488,9 +493,50 @@ def filing_discussion(
     none and needs none. Refuses, writing nothing, a filing of a kind that sets
     ``requires_discussion`` with no discussion where the rule applies
     (``decision-requires-discussion``); and refuses the flags on a kind that does not."""
+    resolved = _filing_discussion(
+        ctx, store, kind_def, args, command=command, spawn_source=spawn_source
+    )
+    keep_open = bool(getattr(args, "keep_open", False))
+    if keep_open:
+        if resolved is None:
+            raise UsageError(
+                "--keep-open leaves a discussion open when a record is spawned from it, and "
+                "this filing names none: spawn from a discussion, or give --discussion <id>"
+            )
+        resolved.keep_open = True
+    return resolved
+
+
+def _refuse_closed_source(store: Store, spawn_source: str) -> None:
+    """KYO-749.c2: a record spawned from a discussion that is already closed."""
+    if not discussion_state(_refs(store, spawn_source))["open"]:
+        raise ContractViolation(
+            CONTRACT_SPAWN_FROM_CLOSED_DISCUSSION,
+            [
+                f"{spawn_source} is closed (an earlier spawn from it closed it, or it was "
+                "dropped), and a record filed from it now would claim a discussion that has "
+                "ended: nothing was written",
+                "a closed discussion is not reopened; open the next one with `kyo discuss "
+                "open`, or spawn the earlier records with `kyo spawn --keep-open` so the "
+                "discussion stays open for the later ones",
+            ],
+        )
+
+
+def _filing_discussion(
+    ctx: Context,
+    store: Store,
+    kind_def,
+    args: Namespace,
+    *,
+    command: str,
+    spawn_source: str | None = None,
+) -> FilingDiscussion | None:
     given = getattr(args, "discussion", None)
     late = bool(getattr(args, "opened_late", False))
     at = getattr(args, "at", None)
+    if spawn_source is not None and store.record(spawn_source)["kind"] == DISCUSSION_KIND:
+        _refuse_closed_source(store, spawn_source)
     if not kind_def.requires_discussion:
         given_flags = (("--discussion", given), ("--opened-late", late), ("--at-prompt", at))
         flags = [flag for flag, value in given_flags if value]
@@ -584,8 +630,13 @@ def filing_lines(store: Store, done: dict | None) -> list[str]:
         out += [f"  {line}" for line in turn_ref_lines([opened])]
     if done.get("link_id"):
         out.append(f"  link: {done['link_id']}  produced-by {discussion_id}")
-    if done.get("closed_ref"):
-        out.append(f"  closed: {done['closed_ref']} (spawning is not a status change)")
+    if done.get("kept_open"):
+        out.append(f"  left open: {discussion_id} (--keep-open)")
+    elif done.get("closed_ref"):
+        out.append(
+            f"  closed: {done['closed_ref']} — this filing closed {discussion_id}; "
+            "--keep-open leaves a discussion open for the next record"
+        )
     return out
 
 

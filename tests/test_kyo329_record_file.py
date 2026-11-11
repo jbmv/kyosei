@@ -465,9 +465,34 @@ def test_spawn_accepts_from_on_the_same_terms(kyo, project: Path, write_file) ->
     assert [t["path"] for t in record["touches"]] == ["widget.py"]
 
 
-def test_spawn_from_refuses_a_plan_key(kyo, project: Path, write_file) -> None:
+def test_spawn_takes_a_plan_from_the_file_and_from_the_flag(kyo, project: Path, write_file) -> None:
+    """KYO-749.c1: `plan:` in a `--from` file and `--plan` file the record onto the plan on
+    the terms `kyo new` does (`_require_plan`): an id that is not a plan is refused."""
     source_id = new_record(kyo, kind="bug", title="A bug", criteria=["repro"])
-    record_file = write_file("record.md", "---\ntitle: x\nplan: TST-1\n---\n")
-    result = kyo("spawn", source_id, "--kind", "evidence", "--from", record_file, "--check")
-    assert result.code == 1, result
-    assert "no --plan flag" in result.err
+    plan_id = new_record(kyo, kind="plan", title="A plan")
+    record_file = write_file(
+        "record.md",
+        f"---\ntitle: Spawned onto a plan\nplan: {plan_id}\ntouches:\n  - kyosei/config.yml\n"
+        "---\n\n## Criteria\n- c1\n",
+    )
+    checked = kyo("spawn", source_id, "--kind", "task", "--from", record_file, "--check")
+    assert checked.code == 0 and plan_id in checked.out, checked
+    result = kyo("spawn", source_id, "--kind", "task", "--from", record_file, "--json", "--full")
+    assert result.code == 0, result
+    assert result.json["record"]["plan"] == plan_id
+    flagged = kyo(
+        "spawn", source_id, "--kind", "task", "--title", "By flag", "--plan", plan_id,
+        "--criteria-file", write_file("c.txt", "c1\n"),
+        "--touches-file", write_file("t.txt", "kyosei/config.yml\n"), "--json",
+    )  # fmt: skip
+    assert flagged.code == 0, flagged
+    listed = kyo("list", "--plan", plan_id, "--json")
+    assert len(listed.json["records"]) == 2
+    bad = kyo(
+        "spawn", source_id, "--kind", "task", "--title", "Bad", "--plan", source_id,
+        "--criteria-file", write_file("c.txt", "c1\n"),
+        "--touches-file", write_file("t.txt", "kyosei/config.yml\n"),
+    )  # fmt: skip
+    assert bad.code != 0
+    both = kyo("spawn", source_id, "--kind", "task", "--from", record_file, "--plan", plan_id)
+    assert both.code != 0 and "--plan" in both.err

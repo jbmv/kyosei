@@ -765,8 +765,8 @@ kyo new task --from record.md              # the whole record from one file inst
                                            # description; see "One record, one file"
                                            # below (KYO-330). `kyo promote`/`kyo spawn`
                                            # take --from too, one shape for all three
-                                           # (KYO-340) -- `kyo spawn` alone has no plan:
-                                           # (no --plan flag to stand in for), and
+                                           # (KYO-340); `kyo spawn` reads plan: too
+                                           # (KYO-749), and
                                            # `kyo promote`'s body only displaces the
                                            # idea's own text when it actually differs
 kyo new task --from record.md --check      # validate record.md -- kind, scope, touches
@@ -1151,8 +1151,8 @@ the separate flags would have produced and handed to the same write path — so
 second way to state a record: passing `--from` together with any flag it replaces is
 refused by name. One file shape files by whichever route a kind demands (KYO-340):
 `kyo promote` has no `--plan` flag of its own, but its `--from` file's `plan:` sets
-one anyway, validated exactly as `kyo new --plan` validates one; `kyo spawn` has no
-`--plan` at all, so `plan:` in *its* `--from` file is refused. `kyo promote`'s own
+one anyway, validated exactly as `kyo new --plan` validates one; `kyo spawn` takes `--plan`
+and a `plan:` key on the same terms (KYO-749). `kyo promote`'s own
 description is always the idea being promoted — but a `--from` file's body now
 displaces it when the body actually differs from the idea's own text (whitespace
 aside); a body that merely echoes the idea back changes nothing, and the write-echo
@@ -1181,8 +1181,8 @@ in `--description-file`).
 ```
 
 * **Front matter** (`---` … `---`, standard YAML) carries `title:` (required — the
-  same one-line rule `--title` enforces), and the optional `scope:`, `plan:` (`kyo new`
-  and `kyo promote` — not `kyo spawn`, which has no `--plan`) and `touches:` (a YAML
+  same one-line rule `--title` enforces), and the optional `scope:`, `plan:` (`kyo new`,
+  `kyo promote` and `kyo spawn`) and `touches:` (a YAML
   list, one entry per line in exactly `--touches-file`'s
   grammar: `path`, `path#symbol`, `path#+` for additions to an existing file, `dir/`
   for a tree this work creates, `+path` for one file it creates). A value containing a

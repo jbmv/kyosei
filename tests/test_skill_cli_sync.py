@@ -1229,6 +1229,24 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "are rarely one line once written in the who/when/where shape, and the "
         "workflow teaches the file form for prose (law 5); `kyo reference` carries both"
     ),
+    ("report", "--amend-with-branch"): (
+        "KYO-745: named by `kyo accept`'s refusal for a branch that moved past its report, "
+        "which is where the orchestrator meets it; the skill tells the orchestrator to fix "
+        "a finished worker's branch itself, and whether it should name this flag is the "
+        "orchestrator's to decide, not this dispatch's"
+    ),
+    ("spawn", "--keep-open"): (
+        "KYO-749: for a discussion that produces more than one record; named by the "
+        "refusal for a spawn from a closed discussion, and taught in "
+        "docs/reference/topics/registries.md. Whether the skill should is the orchestrator's "
+        "to decide, not this dispatch's"
+    ),
+    ("confirm", "--all-unobserved"): (
+        "KYO-746: named by the refusal a bare confirm gets on a record with several "
+        "unobserved criteria, beside --criterion; the skill is the orchestrator's to "
+        "edit, and whether it should teach the flag is theirs to decide, not this "
+        "dispatch's"
+    ),
     ("new", "--since-note"): (
         "KYO-498: used once per already-old carried item when a project adopts the carry "
         "kind; docs/reference/topics/registries.md's kind-registry section teaches it, and "

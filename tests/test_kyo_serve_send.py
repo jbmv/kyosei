@@ -263,11 +263,13 @@ def test_a_token_without_send_permission_is_refused_and_the_remedy_clears_it(
     bare = issue("ipad")
     status, refused = post(bed, SEND, MESSAGE, bare)
     assert status == 403 and refused["reason"] == "no-send-permission"
-    assert "--permission send" in refused["error"] and "kyo devices revoke" in refused["error"]
+    assert "--permission send" in refused["error"]
+    assert "kyo devices grant ipad --permission send" in refused["error"]  # KYO-747.c3
     assert keys_sent(bed) == []
 
-    assert invoke(["devices", "revoke", "ipad"]).code == 0
-    assert post(bed, SEND, MESSAGE, issue("ipad", "send"))[0] == 200
+    # The remedy it names runs, and the token the device holds works as it was.
+    assert invoke(["devices", "grant", "ipad", "--permission", "send"]).code == 0
+    assert post(bed, SEND, MESSAGE, bare)[0] == 200
 
 
 def test_an_unreadable_token_file_refuses_every_token_and_replacing_it_clears_it(
@@ -306,11 +308,84 @@ def test_list_takes_no_argument_and_the_bare_form_clears_it(store_home: Path) ->
     assert invoke(["devices", "list"]).code == 0
 
 
-def test_revoke_takes_no_permission_and_the_bare_form_clears_it(store_home: Path) -> None:
+# ------------------------------------------------------------------------------ KYO-747
+
+
+def log_changes(store_home: Path) -> list[dict]:
+    path = store_home / device_tokens.CHANGE_LOG_FILE
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_token_only_prints_the_token_alone_with_no_trailing_newline(store_home: Path) -> None:
+    plain = invoke(["devices", "issue", "ipad", "--permission", "send"])
+    assert plain.code == 0
+    assert "--token-only" in plain.out.splitlines()[-1]
+    alone = invoke(["devices", "issue", "phone", "--token-only"])
+    assert alone.code == 0 and alone.out.startswith("kyo_")
+    assert "\n" not in alone.out and " " not in alone.out
+    token = alone.out
+    digest = device_tokens.token_digest(token)
+    devices = device_tokens.read_devices(device_tokens.tokens_path({"KYOSEI_HOME": str(store_home)}))
+    assert [d.name for d in devices if d.digest == digest] == ["phone"]
+    assert invoke(["devices", "revoke", "ipad", "--token-only"]).code != 0
+    assert invoke(["devices", "revoke", "ipad"]).code == 0, "dropping the flag clears it"
+
+
+def test_grant_adds_a_permission_to_a_live_token_without_changing_it_and_is_logged(
+    bed: Bed, store_home: Path
+) -> None:
+    enable(store_home)
+    token = issue("ipad", "send")
+    before = (store_home / device_tokens.TOKENS_FILE).read_text(encoding="utf-8")
+    done = invoke(["devices", "grant", "ipad", "--permission", "files", "--json"])
+    assert done.code == 0, done
+    document = json.loads(done.out)
+    assert document["changed"] == ["files"]
+    assert document["device"]["permissions"] == ["files", "send"]
+    after = json.loads((store_home / device_tokens.TOKENS_FILE).read_text(encoding="utf-8"))
+    assert after["devices"][0]["digest"] == json.loads(before)["devices"][0]["digest"]
+    assert post(bed, SEND, MESSAGE, token)[0] == 200, "the same token still works"
+    [row] = log_changes(store_home)
+    assert row["action"] == "grant" and row["permissions"] == ["files"] and row["name"] == "ipad"
+    assert token not in json.dumps(row)
+
+
+def test_revoke_with_a_permission_removes_it_and_leaves_the_token_live(
+    bed: Bed, store_home: Path
+) -> None:
+    enable(store_home)
+    token = issue("ipad", "send", "notes")
+    done = invoke(["devices", "revoke", "ipad", "--permission", "send", "--json"])
+    assert done.code == 0, done
+    assert json.loads(done.out)["device"]["permissions"] == ["notes"]
+    status, refused = post(bed, SEND, MESSAGE, token)
+    assert status == 403 and refused["reason"] == "no-send-permission"
+    missing = invoke(["devices", "revoke", "ipad", "--permission", "send"])
+    assert missing.code != 0 and "does not carry send" in missing.err
+    assert [r["action"] for r in log_changes(store_home)] == ["revoke-permission"]
+    assert invoke(["devices", "revoke", "ipad"]).code == 0, "bare revoke still revokes"
+
+
+def test_grant_and_permission_revoke_refuse_a_revoked_device_naming_issue(
+    store_home: Path,
+) -> None:
     issue("ipad", "send")
-    refused = invoke(["devices", "revoke", "ipad", "--permission", "send"])
-    assert refused.code != 0 and "kyo devices revoke" in refused.err
     assert invoke(["devices", "revoke", "ipad"]).code == 0
+    for args in (
+        ["devices", "grant", "ipad", "--permission", "files"],
+        ["devices", "revoke", "ipad", "--permission", "send"],
+    ):
+        refused = invoke(args)
+        assert refused.code != 0 and "kyo devices issue ipad --permission" in refused.err
+    assert invoke(["devices", "issue", "ipad", "--permission", "files"]).code == 0
+    assert invoke(["devices", "grant", "ipad", "--permission", "send"]).code == 0
+
+
+def test_grant_needs_a_permission_and_naming_one_clears_it(store_home: Path) -> None:
+    issue("ipad")
+    refused = invoke(["devices", "grant", "ipad"])
+    assert refused.code != 0 and "kyo devices grant ipad --permission" in refused.err
+    assert invoke(["devices", "grant", "ipad", "--permission", "send"]).code == 0
 
 
 def test_a_bad_device_name_is_refused_and_a_valid_one_clears_it(store_home: Path) -> None:
@@ -320,7 +395,7 @@ def test_a_bad_device_name_is_refused_and_a_valid_one_clears_it(store_home: Path
 
 
 def test_issue_and_revoke_need_a_device_and_naming_one_clears_it(store_home: Path) -> None:
-    for action in ("issue", "revoke"):
+    for action in ("issue", "revoke", "grant"):
         missing = invoke(["devices", action])
         assert missing.code != 0 and f"kyo devices {action}" in missing.err
     assert invoke(["devices", "issue", "my-ipad", "--permission", "send"]).code == 0

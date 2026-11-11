@@ -166,14 +166,15 @@ def test_rule_1_criterion_flag_overrides_the_gate_payload(kyo, tmp_path: Path) -
 
 def test_rule_2_the_gates_own_full_form_ids(kyo, tmp_path: Path) -> None:
     record = new_record(kyo, criteria=["a", "b"])
-    _unobserved(kyo, f"{record}.c1")
+    # KYO-746.c1: with two unobserved criteria a bare confirm refuses, so the gate's own
+    # ids decide only when exactly one criterion is unobserved.
     _unobserved(kyo, f"{record}.c2")
     gate = _gate(kyo, record, "awaiting:human-run", f"open the app; {record}.c2 is the banner")
     done = kyo("confirm", record, "--no-close", "--quote-file", _quote_file(tmp_path), "--json")
     assert done.code == 0, done
     assert done.json["rule"] == "gate-payload"
     assert _states(kyo, record)[f"{record}.c2"] == "met"
-    assert _states(kyo, record)[f"{record}.c1"] == "unmet-unobserved"
+    assert _states(kyo, record)[f"{record}.c1"] == "unmet-unbuilt"
     assert [g["gate_id"] for g in done.json["gates_cleared"]] == [gate]
 
 
@@ -547,3 +548,72 @@ def test_a_second_run_naming_the_criteria_skips_them_as_already_applied(
     assert second.code == 0 and second.json["complete"] is True, second
     assert second.json["skipped"][0]["reason"].startswith("already applied")
     assert _export(project) == before
+
+
+# ------------------------------------------------------------------------- KYO-746
+
+
+def test_a_gate_naming_one_of_several_unobserved_is_refused_and_clears_nothing(
+    kyo, project: Path, tmp_path: Path
+) -> None:
+    """KYO-746.c1: the incident: the payload named one criterion, the gate cleared, and the
+    other stayed unobserved. The refusal lists the criteria and both remedies."""
+    record = new_record(kyo, criteria=["a", "b"])
+    _unobserved(kyo, f"{record}.c1")
+    _unobserved(kyo, f"{record}.c2")
+    gate = _gate(kyo, record, "awaiting:human-run", f"look at {record}.c2")
+    text = _refused(
+        kyo, project, CONTRACT_CONFIRM_AMBIGUOUS_CRITERIA,
+        "confirm", record, "--quote-file", _quote_file(tmp_path),
+    )  # fmt: skip
+    assert f"{record}.c1" in text and f"{record}.c2" in text
+    assert "--criterion <ids>" in text and "--all-unobserved" in text
+    assert gate in _open_gates(kyo, record)
+    ran = _run_ready_line(kyo, text, index=-1)
+    assert ran.code == 0, ran
+    assert set(_states(kyo, record).values()) == {"met"}
+    assert gate not in _open_gates(kyo, record)
+
+
+def test_all_unobserved_verifies_every_unobserved_criterion_in_one_act(
+    kyo, tmp_path: Path
+) -> None:
+    record = new_record(kyo, criteria=["a", "b", "c"])
+    _unobserved(kyo, f"{record}.c1")
+    _unobserved(kyo, f"{record}.c2")
+    gate = _gate(kyo, record, "awaiting:human-run", f"look at {record}.c1")
+    done = kyo(
+        "confirm", record, "--all-unobserved", "--no-close",
+        "--quote-file", _quote_file(tmp_path), "--json",
+    )  # fmt: skip
+    assert done.code == 0, done
+    assert done.json["rule"] == "all-unobserved"
+    assert _states(kyo, record) == {
+        f"{record}.c1": "met", f"{record}.c2": "met", f"{record}.c3": "unmet-unbuilt",
+    }  # fmt: skip
+    assert [g["gate_id"] for g in done.json["gates_cleared"]] == [gate]
+
+
+def test_all_unobserved_with_criterion_is_a_usage_error(kyo, tmp_path: Path) -> None:
+    record = new_record(kyo, criteria=["a"])
+    done = kyo(
+        "confirm", record, "--all-unobserved", "--criterion", f"{record}.c1",
+        "--quote-file", _quote_file(tmp_path),
+    )  # fmt: skip
+    assert done.code != 0 and "not both" in done.err
+
+
+def test_criteria_left_unobserved_keep_the_gate_and_are_named(kyo, tmp_path: Path) -> None:
+    """KYO-746.c3: --criterion settled c1; the gate's payload named only c1, yet c2 is still
+    unobserved, so the gate stays and the output says which remain."""
+    record = new_record(kyo, criteria=["a", "b"])
+    _unobserved(kyo, f"{record}.c1")
+    _unobserved(kyo, f"{record}.c2")
+    gate = _gate(kyo, record, "awaiting:human-run", f"look at {record}.c1")
+    done = kyo(
+        "confirm", record, "--criterion", f"{record}.c1", "--no-close",
+        "--quote-file", _quote_file(tmp_path),
+    )  # fmt: skip
+    assert done.code == 0, done
+    assert gate in _open_gates(kyo, record)
+    assert f"still unobserved: {record}.c2" in done.out
