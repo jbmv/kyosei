@@ -28,6 +28,10 @@ import {
   meetDraft, sessionLinks, typedChoice,
 } from "./projects";
 import { SendGate } from "./sending";
+import {
+  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
+  refusalText,
+} from "./agenda";
 import { findSpans, fold, queryTerms, scrollBy, step, tally } from "./search";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
@@ -1684,6 +1688,44 @@ const kyo = {
     flushDraft();
   },
 
+  /**
+   * The followed session's task list (KYO-771), or that there is none to show, or why it
+   * cannot be read. A frame that answers a save says `saved`, and the field the save came
+   * from is then done with; any other frame is a change made elsewhere, and leaves what the
+   * person is typing where it is.
+   */
+  agenda(frame: AgendaFrame): void {
+    const session = (given: AgendaFrame | null) => (given?.state === "shown" ? given.session_id : null);
+    if (session(frame) !== session(agendaFrame)) {
+      agendaEditing = null;
+      agendaSaving = null;
+      agendaAdd.value = "";
+      agendaNote.hidden = true;
+    }
+    if (frame.state === "shown" && frame.saved) {
+      if (agendaSaving?.kind === "add") agendaAdd.value = "";
+      if (agendaSaving?.kind === "edit") agendaEditing = null;
+      agendaSaving = null;
+      agendaNote.hidden = true;
+    }
+    agendaFrame = frame;
+    const editing = agendaEditing;
+    if (editing && !agendaItemsNow().some((item) => item.id === editing.id && item.author === "person")) {
+      // The item being edited was removed elsewhere. The words typed for it are kept.
+      if (!agendaAdd.value) agendaAdd.value = editing.text;
+      agendaEditing = null;
+    }
+    drawAgenda();
+  },
+
+  /** A save of the list the server refused, or that never reached it. What was typed stays. */
+  agendaRefused(refusal: Refusal): void {
+    agendaSaving = null;
+    agendaNote.textContent = refusalText(refusal);
+    agendaNote.hidden = false;
+    drawAgenda();
+  },
+
   /** The server's answer to a pasted file: its id and path, or why it was refused. */
   attached(frame: { ref: string; id?: string; path?: string; error?: string }): void {
     const upload = uploads.get(frame.ref);
@@ -2924,7 +2966,8 @@ function remember(): void {
  */
 function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   hideMark();
-  boxes.replaceChildren();
+  // The session's list is the first thing in this column and is not a prompt.
+  for (const box of boxes.querySelectorAll(":scope > .box")) box.remove();
   for (const text of texts) addBox(text, kept.find((box) => box.text === text)?.marks);
   if (!texts.length) addBox();
   remember();
@@ -3093,6 +3136,138 @@ function showHeld(id: string | null): void {
     ? "Waiting for the turn to finish"
     : "Sending…";
 }
+
+// ------------------------------------------------------- the session's task list (KYO-771)
+
+const agendaPane = document.getElementById("agenda")!;
+const agendaWhy = document.getElementById("agenda-why")!;
+const agendaList = document.getElementById("agenda-items")!;
+const agendaAdd = document.getElementById("agenda-add") as HTMLInputElement;
+const agendaNote = document.getElementById("agenda-note")!;
+/** The list as the app last sent it. */
+let agendaFrame: AgendaFrame | null = null;
+/** The person's item whose text is open for editing, with the words typed so far. */
+let agendaEditing: { id: string; text: string } | null = null;
+/** The change whose save is out. Its answer clears the field the change was typed in. */
+let agendaSaving: Change | null = null;
+
+function agendaItemsNow(): AgendaItem[] {
+  return agendaFrame?.state === "shown" ? agendaFrame.items : [];
+}
+
+/** Saves the list with `change` made to it; false when there was nothing to save. */
+function saveAgenda(change: Change): boolean {
+  const items = listAfter(agendaItemsNow(), change);
+  if (items === null) return false;
+  agendaSaving = change;
+  agendaNote.hidden = true;
+  post("saveAgenda", { items });
+  return true;
+}
+
+function agendaRow(row: Row): HTMLElement {
+  const item = document.createElement("li");
+  item.className = `agenda-item${row.mine ? " mine" : ""}${row.checked ? " checked" : ""}`;
+  item.dataset.id = row.id;
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.checked = row.checked;
+  // The orchestrator's item shows its state and takes no press.
+  check.disabled = !row.mine;
+  check.setAttribute("aria-label", `${row.checked ? "Uncheck" : "Check"}: ${row.text}`);
+  check.addEventListener("change", () => {
+    saveAgenda({ kind: "check", id: row.id, checked: check.checked });
+  });
+  item.append(check);
+  if (row.mine && agendaEditing?.id === row.id) {
+    const field = document.createElement("input");
+    field.type = "text";
+    field.className = "agenda-edit";
+    field.maxLength = 500;
+    field.value = agendaEditing.text;
+    field.setAttribute("aria-label", "Edit this item");
+    const finish = (save: boolean) => {
+      const typed = agendaEditing;
+      if (!typed || typed.id !== row.id) return;
+      // An edit that changes nothing, or is given up, closes; one that is saved stays open
+      // with its words until the server has answered.
+      if (save && saveAgenda({ kind: "edit", id: row.id, text: typed.text })) return;
+      agendaEditing = null;
+      drawAgenda();
+    };
+    field.addEventListener("input", () => {
+      if (agendaEditing?.id === row.id) agendaEditing.text = field.value;
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    field.addEventListener("blur", () => {
+      // Leaving the field with the words unchanged closes it. Changed words stay in it.
+      if (agendaEditing?.id === row.id && agendaEditing.text === row.text && !agendaSaving) finish(false);
+    });
+    item.append(field);
+  } else {
+    const text = document.createElement("span");
+    text.className = "agenda-text";
+    text.textContent = row.text;
+    if (row.mine) {
+      text.title = "Edit";
+      text.addEventListener("click", () => {
+        agendaEditing = { id: row.id, text: row.text };
+        drawAgenda();
+        agendaList.querySelector<HTMLInputElement>(".agenda-edit")?.focus();
+      });
+    }
+    item.append(text);
+  }
+  const whose = document.createElement("span");
+  whose.className = "agenda-whose";
+  whose.textContent = row.whose;
+  item.append(whose);
+  if (row.mine) {
+    const remove = document.createElement("button");
+    remove.className = "agenda-remove";
+    remove.textContent = "×";
+    remove.title = "Remove";
+    remove.setAttribute("aria-label", `Remove: ${row.text}`);
+    remove.addEventListener("click", () => saveAgenda({ kind: "remove", id: row.id }));
+    item.append(remove);
+  }
+  return item;
+}
+
+function drawAgenda(): void {
+  const view = agendaView(agendaFrame);
+  agendaPane.hidden = !view.shown;
+  agendaWhy.hidden = view.why === null;
+  agendaWhy.textContent = view.why ?? "";
+  agendaAdd.hidden = !view.canAdd;
+  // A list redrawn under the caret keeps the caret: a change made elsewhere arrives while
+  // the person is typing.
+  const open = agendaList.querySelector<HTMLInputElement>(".agenda-edit");
+  const caret = open && document.activeElement === open
+    ? [open.selectionStart ?? open.value.length, open.selectionEnd ?? open.value.length] : null;
+  agendaList.replaceChildren(...view.rows.map(agendaRow));
+  const again = agendaList.querySelector<HTMLInputElement>(".agenda-edit");
+  if (caret && again) {
+    again.focus();
+    again.setSelectionRange(caret[0], caret[1]);
+  }
+}
+
+agendaAdd.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  // The words stay in the field until the server has taken them, and are sent once.
+  if (agendaSaving?.kind === "add") return;
+  saveAgenda({ kind: "add", text: agendaAdd.value });
+});
 
 /** Whether a held message has been asked back and the server has not answered. */
 let retracting = false;

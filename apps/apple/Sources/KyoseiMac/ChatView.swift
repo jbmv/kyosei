@@ -264,7 +264,8 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "agent")
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
-            "send", "retract", "interrupt", "saveDraft", "attach", "start", "sendNow", "copy",
+            "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
+            "sendNow", "copy",
             "terminal", "records", "files", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
@@ -346,6 +347,10 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "saveDraft", let body = message.body as? [String: Any] {
                 feed.saveDraft(body: body)
+                return
+            }
+            if message.name == "saveAgenda", let body = message.body as? [String: Any] {
+                feed.saveAgenda(body: body)
                 return
             }
             if message.name == "interrupt" {

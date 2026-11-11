@@ -424,9 +424,10 @@ public struct StreamWatch: Sendable {
     /// The frames the server's reader of the session sends. `held` is announced by the
     /// route that holds the message, and keeps arriving when the reader has stopped.
     /// `resumed` says a pass has succeeded after an `error` frame (KYO-728), which only a
-    /// reader that is reading can say.
+    /// reader that is reading can say. `agenda` is the reader's too (KYO-770): it looks for a
+    /// change to the session's task list on each pass, whoever saved it.
     public static let readerFrames: Set<String> = [
-        "transcript", "reply", "facts", "screen", "terminal", "resumed",
+        "transcript", "reply", "facts", "screen", "terminal", "resumed", "agenda",
     ]
     /// Fresh reads that must differ in a row before the stream is held to be stale.
     public static let differingReads = 2

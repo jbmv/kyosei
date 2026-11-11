@@ -149,7 +149,14 @@
         <button id="new-prompt" title="New prompt" aria-label="New prompt">+</button>
         <button id="interrupt" hidden>Interrupt</button>
       </div>
-      <div id="boxes"></div>
+      <div id="boxes">
+        <section id="agenda" hidden aria-label="Session list">
+          <div id="agenda-why" hidden></div>
+          <ul id="agenda-items"></ul>
+          <input id="agenda-add" type="text" maxlength="500" placeholder="Add a reminder" aria-label="Add an item to the session list" />
+          <div id="agenda-note" hidden></div>
+        </section>
+      </div>
       <div id="held" hidden>
         <span id="held-text"></span>
         <button id="held-send-now" hidden title="Send it now; the agent takes it at its next tool call">Send now</button>
