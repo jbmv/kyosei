@@ -431,6 +431,25 @@ def test_an_unknown_verdict_is_refused_with_the_vocabulary_named(
     assert "updated" in refused.err and "not-affected" in refused.err
 
 
+def test_settle_without_method_is_refused_and_the_named_remedy_clears_it(
+    kyo, git_project: Path
+) -> None:
+    """KYO-768: omitting --method crashed with an AttributeError; it is a refusal that
+    names --method, and running the line it names settles the obligation."""
+    record, _ = _project_with_a_governed_doc(kyo, git_project)
+    _, result = _dispatch_and_report(kyo, git_project, record)
+    obligation_id = result.json["docs_obligations"]["raised"][0]["id"]
+
+    refused = kyo("docs", "settle", obligation_id, "--verdict", "updated")
+    assert refused.code == 64, refused
+    assert "--method" in refused.err and "Traceback" not in refused.err
+
+    remedy = kyo(
+        "docs", "settle", obligation_id, "--verdict", "updated", "--method", "re-read it"
+    )
+    assert remedy.code == 0, remedy
+
+
 def test_a_settled_obligation_is_not_silently_re_settled(kyo, git_project: Path) -> None:
     """Law 9: a verdict is provenance, and overwriting one destroys the contest that is
     the valuable part. The refusal names the standing verdict and who recorded it."""

@@ -2892,6 +2892,12 @@ def _settling_a_docs_obligation_with_an_unknown_verdict(at: Path) -> Provocation
     )
 
 
+def _settling_a_docs_obligation_without_a_method(at: Path) -> Provocation:
+    """KYO-768: `--method` omitted; it reached `single_line(None)` and crashed."""
+    root, _, obligation = _project_with_an_open_docs_obligation(at)
+    return Provocation(root, ("docs", "settle", obligation, "--verdict", "updated"))
+
+
 def _showing_fields_without_json(at: Path) -> Provocation:
     """KYO-420.c3: `kyo show --fields` narrows the --json document, and in text mode
     it is refused rather than silently ignored."""
@@ -3603,6 +3609,11 @@ PROVOKED: dict[str, Expectation] = {
         # The failure is about the INVOCATION, not the state: re-running the malformed
         # command would go on failing however good the remedy is. What is asserted is
         # that the remedy runs from the state that printed it.
+        clears_by_rerun=False,
+        bindings={"<id>": "TST-1.o1", "<how>": "re-read"},
+    ),
+    "cmd_views.py:_cmd_docs_settle#3": Expectation(
+        _settling_a_docs_obligation_without_a_method,
         clears_by_rerun=False,
         bindings={"<id>": "TST-1.o1", "<how>": "re-read"},
     ),
@@ -5275,14 +5286,14 @@ RECORDED: dict[str, str] = {
         "it could not choose between the two flags either: which one applies is the "
         "fact only the controller has, since it is whether they ever spawned a worker"
     ),
-    "cmd_views.py:_cmd_docs_settle#3": (
+    "cmd_views.py:_cmd_docs_settle#4": (
         "re-invocation carrying prose: `kyo docs settle` again with --why, or one id at "
         "a time. The reason is the controller's account of what made these sections one "
         "editorial act (KYO-159.c4) — it is the evidence the review covered every member, "
         "and a placeholder supplied by this check would be exactly the rubber stamp the "
         "requirement exists to make expensive"
     ),
-    "cmd_views.py:_cmd_docs_settle#4": (
+    "cmd_views.py:_cmd_docs_settle#5": (
         "re-invocation naming a different set: the same command over only the members "
         "that are still open. Which of the named ids those are is in the message, but "
         "choosing to settle a smaller set is the caller's — and re-running as spelled "
