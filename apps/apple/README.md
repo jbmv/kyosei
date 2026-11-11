@@ -381,7 +381,8 @@ they are. The logic is in `web/src/files.ts`. All of this needs the device token
 - apps/apple/web/src/chat.ts#drawHistory
 - apps/apple/web/src/chat.ts#drawOpened
 - apps/apple/web/src/chat.ts#openMessage
-- apps/apple/web/src/chat.ts#revealPending
+- apps/apple/web/src/chat.ts#showReaderPlace
+- apps/apple/web/src/chat.ts#drawReader
 - apps/apple/web/src/chat.ts#historyFrames
 -->
 
