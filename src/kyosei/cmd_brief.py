@@ -1308,6 +1308,18 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
     ledgers.write_allocations(store)
 
     text = brief_text(data, compact=bool(args.compact))
+    # KYO-770: what the previous session left unchecked on its task list, printed once, and
+    # the person's items carried into this session's list. Session state under $KYOSEI_HOME,
+    # so it is read after the store's own work and cannot fail the brief.
+    data["agenda_left"] = []
+    if session_id is not None:
+        from . import cmd_agenda
+
+        data["agenda_left"] = cmd_agenda.carry_lines(
+            ctx.environ, session_id, cmd_agenda.previous_session(store.conn, session_id)
+        )
+        if data["agenda_left"]:
+            text = f"{text}\n\n" + "\n".join(data["agenda_left"])
     # KYO-559.c6: a session-start brief fills in a missing code-repository identity the
     # way `kyo doctor` does -- the same function, one line saying so, never an overwrite.
     data["code_repo_id_recorded"] = None

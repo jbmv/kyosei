@@ -14,8 +14,9 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
   commit does (KYO-693), and the repository's ``origin`` remote (KYO-700);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
-  objects, the reply in progress, changes to the screen and the terminal's text, and the
-  state of a held message (KYO-703), without its text;
+  objects, the reply in progress, changes to the screen and the terminal's text, the
+  state of a held message (KYO-703), without its text, and a change to the session's task
+  list (KYO-770), without its items;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
   and its text.
 
@@ -717,6 +718,18 @@ class ProjectSessions:
         }
 
 
+def _agenda_etag(environ: dict[str, str], session_id: str) -> str | None:
+    """The etag of the session's stored task list (KYO-770); None when it has none.
+
+    The etag and no item: this stream asks for no device token, and the list is read
+    behind one.
+    """
+    from . import cmd_agenda, serve_files
+
+    raw = cmd_agenda.read_raw(environ, session_id)
+    return None if raw is None else serve_files.etag_of(raw)
+
+
 def _config_of(paths: ProjectPaths) -> Config:
     try:
         return load_config(paths.store_root)
@@ -771,6 +784,8 @@ class _Sampler:
         self._terminal: dict | None = None
         self._reply: str | None = None
         self._facts: dict | None = None
+        #: KYO-770: the etag of the session's task list as last announced; None for no list.
+        self._agenda: str | None = None
         self._next_follow = 0.0
         self._last_error: str | None = None
         #: Set by the hub when this reader is taken out of use; it then sends nothing more.
@@ -805,6 +820,7 @@ class _Sampler:
             self._terminal = _terminal_json(update.terminal)
             self._reply = update.reply_in_progress
             self._facts = _facts_json(self._live.facts())
+            self._agenda = _agenda_etag(self.project.environ, self.session_id)
             self._offset = self._live.transcript.offset
             self._next_follow = time.monotonic() + PANELESS_FOLLOW_SECONDS
             self.beat = time.monotonic()
@@ -858,6 +874,7 @@ class _Sampler:
                 "reply_in_progress": self._reply,
                 "facts": self._facts,
                 "held": self.hub.held(self.session_id),
+                "agenda": {"etag": self._agenda},
             },
             event_id=self._position.cursor,
         )
@@ -1018,6 +1035,14 @@ class _Sampler:
         if reply != self._reply:
             self._reply = reply
             self._broadcast(frame("reply", {"session_id": self.session_id, "text": reply}))
+        # KYO-770: the list is saved by a device's PUT and by the orchestrator's `kyo agenda`,
+        # a process this server is not told about, so a change is looked for on each tick.
+        now_agenda = _agenda_etag(self.project.environ, self.session_id)
+        if now_agenda != self._agenda:
+            self._agenda = now_agenda
+            self._broadcast(
+                frame("agenda", {"session_id": self.session_id, "etag": now_agenda})
+            )
 
 
 class SessionHub:

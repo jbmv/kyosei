@@ -23,7 +23,7 @@ from . import brief as brief_module
 # `kyo next`'s and is read off that module here rather than re-derived. Safe at
 # module scope in this direction only — `cmd_next` imports nothing that reaches
 # back here.
-from . import cmd_next, commands, docs_recx, explanations, export
+from . import cmd_agenda, cmd_next, commands, docs_recx, explanations, export
 from . import config as config_module
 from . import procedures as procedures_module
 from .clock import now
@@ -1234,7 +1234,9 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
 
 def cmd_dispatch(ctx: Context, args: Namespace) -> Output:
     if args.target == "close":
-        return cmd_dispatch_close(ctx, args)
+        output = cmd_dispatch_close(ctx, args)
+        cmd_agenda.after_dispatch(ctx, output)  # KYO-770: the dispatch's item is checked
+        return output
     if args.dispatch_id:
         raise UsageError(
             f"unexpected extra argument {args.dispatch_id!r} after record id {args.target!r}; "
@@ -1246,6 +1248,9 @@ def cmd_dispatch(ctx: Context, args: Namespace) -> Output:
     # split project now reads an untracked `.kyosei` through the main checkout.)
     output = _cmd_dispatch_create(ctx, args)
     _ignore_a_nested_worktree_home(ctx, args, output)
+    # KYO-770: an item for this dispatch on the session's task list, when the session has
+    # one. After everything else, and unable to fail the dispatch that is now recorded.
+    cmd_agenda.after_dispatch(ctx, output)
     return output
 
 

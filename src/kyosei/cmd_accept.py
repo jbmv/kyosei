@@ -876,7 +876,7 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
             f"{dispatch_id}` lists them"
         )
 
-    return Output(
+    output = Output(
         lines,
         {
             "ok": True,
@@ -929,3 +929,9 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
             ),
         },
     )
+    # KYO-770: the session's task list, when the session has one: this dispatch's item is
+    # checked and the wave's close is listed. It cannot fail the acceptance.
+    from . import cmd_agenda
+
+    cmd_agenda.after_accept(ctx, args, output)
+    return output

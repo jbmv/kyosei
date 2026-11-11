@@ -858,6 +858,12 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
     the session's context, where the compact brief is the only thing that belongs,
     and ``Stop`` fires every turn. So a hook that worked says nothing; a hook that
     could not write says one line. Run by hand, it says everything.
+
+    ONE THING IS SAID AT ``Stop`` (KYO-770): the session's task list, when the person has
+    unchecked items on it or dispatches are in flight with nothing of the orchestrator's
+    listed. It is one JSON line carrying ``systemMessage``, which Claude Code shows to the
+    person without continuing the conversation, and it is printed only when the write above
+    said nothing, since a second line on stdout would stop it being read as JSON.
     """
     path = sessions_path(ctx.root)
     words = list(getattr(args, "words", None) or [])
@@ -987,4 +993,21 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
         lines.append(f"{SESSIONS_FILE}: {result['write_problem']}")
     if result["read_problem"] is not None:
         lines.append(f"{SESSIONS_FILE}: {result['read_problem']} (rewritten from this session)")
-    return Output(lines=lines, data={"ok": result["write_problem"] is None, **result})
+    announced = None
+    if event == "Stop" and not lines:
+        # KYO-770: the session's task list, announced and never a block. This hook's group
+        # prints nothing else at Stop, which the one JSON line needs: Claude Code shows a
+        # `systemMessage` to the person and stops as usual, where any text that reached the
+        # agent here would make it take another turn (see `cmd_agenda`).
+        from . import cmd_agenda
+        from .config import DB_NAME
+
+        announced = cmd_agenda.stop_message(
+            ctx.environ, session_id, Path(ctx.root) / KYOSEI_DIR / DB_NAME
+        )
+        if announced is not None:
+            lines.append(cmd_agenda.stop_hook_output(announced))
+    return Output(
+        lines=lines,
+        data={"ok": result["write_problem"] is None, **result, "agenda_announced": announced},
+    )

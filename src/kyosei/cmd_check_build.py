@@ -332,18 +332,25 @@ def cmd_check_build(ctx: Context, args: Namespace) -> Output:
     project, no opening brief, a brief from before builds were recorded, or a build
     that cannot name itself — and always exits 0. Run by hand it says which of those it
     found. It never opens the store for writing (:func:`opening_brief_build`).
+
+    KYO-770: the hook also prints the session's unchecked task-list items, with who wrote
+    each, after the build line if there is one, and nothing when the list has none
+    (:func:`kyosei.cmd_agenda.prompt_lines`). It is the one thing this hook prints on an
+    unchanged build, and it costs one small file read under ``$KYOSEI_HOME``.
     """
     from .buildinfo import build_identity
 
     hook = bool(getattr(args, "hook", False))
     data: dict = {"ok": True, "command": "check-build", "changed": False, "state": None}
+    agenda: list[str] = []
 
     def answer(state: str, line: str | None) -> Output:
         data["state"] = state
         data["line"] = line
+        data["agenda_lines"] = agenda
         if hook and state != "changed":
-            return Output([], data)
-        return Output([line] if line else [], data)
+            return Output(list(agenda), data)
+        return Output(([line] if line else []) + agenda, data)
 
     if ctx.layout is None or not ctx.layout.configured:
         return answer("no-project", "check-build: no Kyosei project here — nothing to compare")
@@ -362,6 +369,10 @@ def cmd_check_build(ctx: Context, args: Namespace) -> Output:
         candidate = payload.get("session_id")
         session_id = candidate if isinstance(candidate, str) and candidate else None
         data["session_id"] = session_id
+        if session_id is not None:
+            from . import cmd_agenda
+
+            agenda += cmd_agenda.prompt_lines(ctx.environ, session_id)
         if session_id is None:
             return answer(
                 "no-session",
