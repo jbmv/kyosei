@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-11** — `KYO-449` (task) — Desktop app: check the PATH kyo against KYO_ACCEPTS and show the four compatibility states
 - **2026-10-13** — `KYO-623` (task) — Prepare apps/desktop for publication as the maintainer's working viewer
 - **2026-10-12** — `KYO-587` (task) — kyo serve and the desktop app mark a recx search artifact as stranger-written before showing it
 - **2026-10-10** — `KYO-550` (bug) — The desktop app ignores kyo serve's stale flag, so a server left running an old build after a reinstall gives no sign in the window
