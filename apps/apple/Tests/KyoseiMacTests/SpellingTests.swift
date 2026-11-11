@@ -16,6 +16,7 @@ import WebKit
 struct SpellingTests {
     private static let underline = "WebContinuousSpellCheckingEnabled"
     private static let correction = "WebAutomaticSpellingCorrectionEnabled"
+    private static let capitals = "NSAutomaticCapitalizationEnabled"
 
     /// The test process stores neither key, as an app that has never had a choice made in its
     /// Spelling and Grammar menu stores neither.
@@ -32,6 +33,10 @@ struct SpellingTests {
         // the correction unless `objectForKey:` finds a value.
         #expect(defaults.bool(forKey: Self.underline))
         #expect(defaults.object(forKey: Self.correction) as? Bool == false)
+        // A value stored in any domain, the system-wide one included, is read before a
+        // registered one, so the capitals key is checked where the app registers it.
+        let registered = defaults.volatileDomain(forName: UserDefaults.registrationDomain)
+        #expect(registered[Self.capitals] as? Bool == false)
     }
 
     @Test func theValuesAreRegisteredAndNotStored() {
@@ -42,7 +47,7 @@ struct SpellingTests {
         // registration domain and not in the process's own.
         let registered = UserDefaults.standard.volatileDomain(
             forName: UserDefaults.registrationDomain)
-        for key in [Self.underline, Self.correction] {
+        for key in [Self.underline, Self.correction, Self.capitals] {
             #expect(registered[key] != nil)
             #expect(
                 CFPreferencesCopyValue(

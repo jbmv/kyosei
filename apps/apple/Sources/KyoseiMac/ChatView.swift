@@ -278,10 +278,17 @@ struct RunningAgentsLabel: View {
 /// rather than set because the Spelling and Grammar menu stores the person's choice under the
 /// same keys, and a stored value is read before a registered one. They are registered before
 /// the first web view exists because WebKit reads the keys once in the life of the process.
+///
+/// The capital at the start of a sentence still came back with the correction turned off
+/// whenever the underline was on (KYO-796.e3, the maintainer, 2026-11-11). It is taken to come
+/// from the system's own capitalisation setting, `NSAutomaticCapitalizationEnabled`, which the
+/// checker reads from the app's domain before the global one, so that key is registered off too.
+/// That this is the source is a hypothesis the maintainer's next look decides.
 final class ChatPage: WKWebView {
     static let spellingDefaults: [String: Any] = [
         "WebContinuousSpellCheckingEnabled": true,
         "WebAutomaticSpellingCorrectionEnabled": false,
+        "NSAutomaticCapitalizationEnabled": false,
     ]
 
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
