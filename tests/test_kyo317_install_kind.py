@@ -21,7 +21,7 @@ import pytest
 
 from kyosei import buildinfo
 
-from .conftest import invoke
+from .conftest import checkout_build_lock, invoke
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -309,11 +309,15 @@ def test_a_real_wheel_s_package_lives_under_site_packages_not_a_working_tree(
     # be older -- `pyproject.toml` requires >= 3.12.
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, cwd=REPO_ROOT)
     pip = venv / "bin" / "pip"
-    subprocess.run(
-        [str(pip), "install", "--quiet", "--no-deps", str(REPO_ROOT)],
-        check=True,
-        cwd=REPO_ROOT,
-    )
+    # A pip install of the checkout builds a wheel in the checkout's `build/` directory,
+    # as `uv build` does, so it waits its turn with the builds of test_kyo226 (KYO-609):
+    # two at once fail, which the suite met twice on 2026-11-11.
+    with checkout_build_lock(REPO_ROOT):
+        subprocess.run(
+            [str(pip), "install", "--quiet", "--no-deps", str(REPO_ROOT)],
+            check=True,
+            cwd=REPO_ROOT,
+        )
     found = list(venv.glob("lib/python3.*/site-packages/kyosei"))
     assert found, "the wheel did not install kyosei where a venv puts site-packages"
     package_dir = found[0]
