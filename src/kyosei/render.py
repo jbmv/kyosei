@@ -1349,7 +1349,7 @@ def flag_settle_text(data: dict) -> str:
     """
     mode = "APPLIED" if data["applied"] else "dry run — nothing written"
     out = [
-        f"flag resolve --settled ({mode}): {data['flags_closed']} staleness flag(s) "
+        f"flag resolve --settled ({mode}): {data['flags_closed']} flag(s) "
         f"across {data['records_affected']} record(s) already settled"
     ]
     out.append(
@@ -1359,7 +1359,7 @@ def flag_settle_text(data: dict) -> str:
         spread = ", ".join(f"{t}:{n}" for t, n in sorted(data["by_type"].items()))
         out.append(f"  by type: {spread}")
     if not data["plan"]:
-        out.append("  (nothing to settle — no open staleness flag sits under a settled record)")
+        out.append("  (nothing to settle — no open flag sits under a settled record)")
     for item in data["plan"]:
         spread = ", ".join(f"{t}:{n}" for t, n in sorted(item["by_type"].items()))
         out.append(f"  {item['record_id']} ({item['status']}): {spread}")
@@ -2275,6 +2275,12 @@ def brief_text(data: dict, *, compact: bool) -> str:
     for scope in sweep_module.TOUCH_CHANGED_SCOPES:
         count = sum(1 for f in data["unresolved_flags"] if f.get("touch_changed_scope") == scope)
         out.append(f"  {sweep_module.TOUCH_CHANGED_SCOPE_HEADINGS[scope]}: {count}")
+    # KYO-748.c2: the list above holds only flags on unsettled records.
+    if data.get("unresolved_flags_on_settled"):
+        out.append(
+            f"  {data['unresolved_flags_on_settled']} more on settled records, not listed: "
+            "`kyo flag list` lists every open flag"
+        )
     if compact:
         # KYO-326.c2: the SessionStart hook runs `kyo brief --compact --session-start`,
         # and nothing at session start acts on one flag rather than on the counts —

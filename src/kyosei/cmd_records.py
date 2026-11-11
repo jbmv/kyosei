@@ -70,7 +70,6 @@ from .contracts import (
     ROLE_VERIFIED,
     SETTLED_CRITERION_STATES,
     SETTLED_ROLES,
-    STALENESS_FLAG_TYPES,
     TOUCH_NEW_FILE_PREFIX,
     VERIFY_VERDICTS,
     VOID_CRITERION_STATES,
@@ -754,6 +753,12 @@ def _from_check_output(
     lines += [f"  | {line}" for line in description.split("\n")]
     lines.append(f"criteria: {len(criteria_texts)}")
     lines += [f"  - {text}" for text in criteria_texts]
+    # KYO-748.c3: the filing prints one count when several criteria warn; this is the
+    # detail it names.
+    for index, text in enumerate(criteria_texts, start=1):
+        warning = criterion_length_warning(text)
+        if warning is not None:
+            lines.append(f"  warning: criterion {index}: {warning}")
     lines.append(f"touches: {len(touches)}")
     lines += [
         f"  - {path}" + (f"#{symbol}" if symbol else "") for path, symbol in touches
@@ -3193,34 +3198,59 @@ def cmd_restate(ctx: Context, args: Namespace) -> Output:
     )
 
 
-def _close_settled_staleness_flags(
-    store: Store, record_id: str, status: str, actor: str
+def _close_settled_flags(
+    store: Store,
+    record_id: str,
+    status: str,
+    actor: str,
+    before: dict[str, dict | None],
 ) -> list[dict]:
-    """KYO-346.c1: the flags this record's own move settles, closed inside the
-    caller's transaction — the completion move, `kyo wont-do`, `kyo void`, whatever
-    status this record just entered. Only :data:`STALENESS_FLAG_TYPES`
-    (touch-changed, touch-missing, description-predates-claim); KYO-346.c2 leaves
-    `near-duplicate-criteria` and `gate-cleared-stale-criteria` open on purpose.
+    """KYO-346.c1, widened by KYO-748.c5: the flags this record's own move settles,
+    closed inside the caller's transaction — the completion move, `kyo wont-do`,
+    `kyo void`, whatever status this record just entered. Every open flag under it,
+    of any kind, and every open flag on ANOTHER record that names this one as its
+    pair (`near-duplicate-criteria`, `other_record_id`): a finding about two records'
+    criteria has nothing left to say once either of them is done.
 
-    Returns what it closed — the caller says how many in its own output (KYO-346.c1)
-    rather than this function printing anything, on the same seam every other
-    ``cmd_*`` helper here keeps (rendering is the command's job).
+    ``before`` gains the pre-closure document of each other record a flag was closed
+    on, so the event ledger records the change on both. Returns what it closed, each
+    with the ``record_id`` it sits on — the caller says how many in its own output
+    (KYO-346.c1) and regenerates every named record's export.
     """
-    open_staleness = [
-        row
+    open_flags = [
+        {"id": row["id"], "flag_type": row["flag_type"], "record_id": record_id}
         for row in store.flags(record_id)
-        if row["resolved_at"] is None and row["flag_type"] in STALENESS_FLAG_TYPES
+        if row["resolved_at"] is None
     ]
-    if not open_staleness:
+    open_flags += [
+        {"id": row["id"], "flag_type": row["flag_type"], "record_id": row["record_id"]}
+        for row in store.conn.execute(
+            "SELECT id, flag_type, record_id FROM flags WHERE other_record_id = ?"
+            " AND record_id != ? AND resolved_at IS NULL ORDER BY record_id, seq",
+            (record_id, record_id),
+        )
+    ]
+    if not open_flags:
         return []
+    for peer in sorted({f["record_id"] for f in open_flags} - {record_id}):
+        before.setdefault(peer, export.record_document(store, peer))
     why = settled_flag_why(record_id, status, actor)
     stamp = now()
-    for row in open_staleness:
+    for flag in open_flags:
         store.conn.execute(
             "UPDATE flags SET resolved_at = ?, resolved_by = ?, resolved_why = ? WHERE id = ?",
-            (stamp, actor, why, row["id"]),
+            (stamp, actor, why, flag["id"]),
         )
-    return [{"flag_id": row["id"], "flag_type": row["flag_type"]} for row in open_staleness]
+    return [
+        {"flag_id": f["id"], "flag_type": f["flag_type"], "record_id": f["record_id"]}
+        for f in open_flags
+    ]
+
+
+def _settled_export_ids(record_id: str, closed_flags: list[dict]) -> list[str]:
+    """The records a settling move rewrote: itself, then each other record a closed
+    flag sat on (KYO-748.c5)."""
+    return [record_id, *sorted({f["record_id"] for f in closed_flags} - {record_id})]
 
 
 def _closed_flags_line(closed_flags: list[dict]) -> str:
@@ -3540,12 +3570,12 @@ def _transition(
         ),
     )
     # KYO-346.c1: a record that just reached a completion or retired status
-    # (SETTLED_ROLES) has no open work left for a staleness flag to ask about — in
+    # (SETTLED_ROLES) has no open work left for any flag to ask about (KYO-748.c5) — in
     # the same transaction as the status write above, never a separate act a
     # controller has to remember to run.
     closed_flags: list[dict] = []
     if ladder.role(status) in SETTLED_ROLES:
-        closed_flags = _close_settled_staleness_flags(store, record_id, status, ctx.actor)
+        closed_flags = _close_settled_flags(store, record_id, status, ctx.actor, before)
     # KYO-497: the reason a carried record was completed with is the record of how the
     # item settled, and `records` stores a reason only for the retired role
     # (`wont_do_reason`). A record note holds it -- the object `kyo move --force` on a
@@ -3567,7 +3597,7 @@ def _transition(
         store,
         command=f"move {record_id} {status}",
         actor=ctx.actor,
-        record_ids=[record_id],
+        record_ids=_settled_export_ids(record_id, closed_flags),
         before=before,
     )
     return (
@@ -3698,7 +3728,9 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
             )
             doc = after_forced[args.id]
             events += note_events
-    commands._finish_mutation(store, [args.id], events)
+    commands._finish_mutation(
+        store, _settled_export_ids(args.id, closed_flags), events
+    )
     lines = [f"moved {args.id}", echo_value("status", f"{old_status} -> {args.status}")]
     if reason is not None:
         lines += echo_block("reason", reason)
@@ -3767,7 +3799,9 @@ def cmd_wont_do(ctx: Context, args: Namespace) -> Output:
             settled_by=f"kyo wont-do {args.id}",
             clearing=clearing,
         )
-    commands._finish_mutation(store, [args.id], events)
+    commands._finish_mutation(
+        store, _settled_export_ids(args.id, closed_flags), events
+    )
     lines = [
         f"retired {args.id} — its id is never reused",
         echo_value("status", f"{old_status} -> {retired}"),
@@ -3829,7 +3863,9 @@ def cmd_void(ctx: Context, args: Namespace) -> Output:
             force=bool(getattr(args, "force", False)),
             standing_settled=settled_standing,
         )
-    commands._finish_mutation(store, [args.id], events)
+    commands._finish_mutation(
+        store, _settled_export_ids(args.id, closed_flags), events
+    )
     kind_def = _load_registry(store).require(doc["kind"])
     lines = [
         f"voided {args.id} — its id is never reused",
@@ -3962,4 +3998,12 @@ def _criteria_warning_output(criteria: list[tuple[str, str]]) -> tuple[list[str]
             continue
         lines.append(f"  warning: {cid}: {warning}")
         data.append({"criterion_id": cid, "warning": warning})
+    if len(lines) > 1:
+        # KYO-748.c3: one warning per criterion is a wall at a filing of a dozen, and a
+        # wall is skimmed. A single warning prints as before; several print as a count,
+        # and `--from FILE --check` lists each (the `--json` data still carries them all).
+        lines = [
+            f"  warning: {len(lines)} criteria are long or hold a semicolon, and may each "
+            "bundle more than one claim; `kyo new --from FILE --check` lists them"
+        ]
     return lines, data

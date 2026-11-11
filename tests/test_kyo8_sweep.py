@@ -748,10 +748,8 @@ def test_the_completion_move_closes_only_the_three_staleness_flag_types(kyo, db)
 
     moved = kyo("move", record, "done", "--json")
     assert moved.code == 0, moved
-    assert moved.json["flags_closed"] == 3
-    assert {f["flag_id"] for f in moved.json["closed_flags"]} == {
-        ids[t] for t in _STALENESS_FLAG_TYPES
-    }
+    assert moved.json["flags_closed"] == 5
+    assert {f["flag_id"] for f in moved.json["closed_flags"]} == set(ids.values())
 
     flags = _flags_by_id(kyo, record)
     for flag_type in _STALENESS_FLAG_TYPES:
@@ -764,7 +762,7 @@ def test_the_completion_move_closes_only_the_three_staleness_flag_types(kyo, db)
         assert "KYO-346" in flag["resolved_why"]
     for flag_type in ("near-duplicate-criteria", "gate-cleared-stale-criteria"):
         flag = flags[ids[flag_type]]
-        assert flag["resolved_at"] is None, flag_type
+        assert flag["resolved_at"] is not None, flag_type
 
 
 def test_the_completion_move_prints_how_many_flags_it_closed(kyo, db) -> None:
@@ -777,7 +775,7 @@ def test_the_completion_move_prints_how_many_flags_it_closed(kyo, db) -> None:
 
     moved = kyo("move", record, "done")
     assert moved.code == 0, moved
-    assert "closed 3" in moved.out
+    assert "closed 5" in moved.out
 
 
 def test_wont_do_closes_open_staleness_flags(kyo, db) -> None:
@@ -787,13 +785,13 @@ def test_wont_do_closes_open_staleness_flags(kyo, db) -> None:
 
     moved = kyo("wont-do", record, "--why", "superseded", "--json")
     assert moved.code == 0, moved
-    assert moved.json["flags_closed"] == 3
+    assert moved.json["flags_closed"] == 5
 
     flags = _flags_by_id(kyo, record)
     for flag_type in _STALENESS_FLAG_TYPES:
         assert flags[ids[flag_type]]["resolved_at"] is not None, flag_type
     for flag_type in ("near-duplicate-criteria", "gate-cleared-stale-criteria"):
-        assert flags[ids[flag_type]]["resolved_at"] is None, flag_type
+        assert flags[ids[flag_type]]["resolved_at"] is not None, flag_type
 
 
 def test_void_closes_open_staleness_flags_on_a_knowledge_record(kyo, db, project: Path) -> None:
@@ -808,13 +806,13 @@ def test_void_closes_open_staleness_flags_on_a_knowledge_record(kyo, db, project
 
     voided = kyo("void", record, "--why", "filed in error", "--json")
     assert voided.code == 0, voided
-    assert voided.json["flags_closed"] == 3
+    assert voided.json["flags_closed"] == 5
 
     flags = _flags_by_id(kyo, record)
     for flag_type in _STALENESS_FLAG_TYPES:
         assert flags[ids[flag_type]]["resolved_at"] is not None, flag_type
     for flag_type in ("near-duplicate-criteria", "gate-cleared-stale-criteria"):
-        assert flags[ids[flag_type]]["resolved_at"] is None, flag_type
+        assert flags[ids[flag_type]]["resolved_at"] is not None, flag_type
 
 
 def test_a_non_settling_move_leaves_flags_open(kyo, db) -> None:
@@ -871,8 +869,8 @@ def test_flag_resolve_settled_is_a_dry_run_until_apply(kyo, db) -> None:
     assert dry.code == 0, dry
     assert dry.json["applied"] is False
     assert dry.json["records_affected"] == 1
-    assert dry.json["flags_closed"] == 3
-    assert dry.json["by_type"] == dict.fromkeys(_STALENESS_FLAG_TYPES, 1)
+    assert dry.json["flags_closed"] == 5
+    assert dry.json["by_type"] == dict.fromkeys(_ALL_FLAG_TYPES, 1)
     assert dry.json["plan"][0]["record_id"] == record
 
     flags = _flags_by_id(kyo, record)
@@ -903,25 +901,27 @@ def test_flag_resolve_settled_apply_closes_per_record_and_per_type(kyo, db) -> N
     assert applied.code == 0, applied
     assert applied.json["applied"] is True
     assert applied.json["records_affected"] == 2
-    assert applied.json["flags_closed"] == 6
-    assert applied.json["by_type"] == dict.fromkeys(_STALENESS_FLAG_TYPES, 2)
+    assert applied.json["flags_closed"] == 10
+    assert applied.json["by_type"] == dict.fromkeys(_ALL_FLAG_TYPES, 2)
 
     for record, ids in ((record_a, ids_a), (record_b, ids_b)):
         flags = _flags_by_id(kyo, record)
-        for flag_type in _STALENESS_FLAG_TYPES:
+        for flag_type in _ALL_FLAG_TYPES:
             flag = flags[ids[flag_type]]
             assert flag["resolved_at"] is not None, (record, flag_type)
             assert flag["resolved_by"] == "orchestrator"
             assert flag["resolved_why"] == "repairing accumulated debt"
         for flag_type in ("near-duplicate-criteria", "gate-cleared-stale-criteria"):
-            assert flags[ids[flag_type]]["resolved_at"] is None, (record, flag_type)
+            assert flags[ids[flag_type]]["resolved_at"] is not None, (record, flag_type)
 
     still_open_flags = _flags_by_id(kyo, still_open)
     for flag_id in ids_open.values():
         assert still_open_flags[flag_id]["resolved_at"] is None, "an open record is untouched"
 
     after = len(kyo("brief", "--json").json["unresolved_flags"])
-    assert after == before - 6
+    # The brief lists only flags on unsettled records (KYO-748.c2), so the repair of
+    # the settled records' flags leaves its list as it was.
+    assert after == before
 
     # Idempotent, exactly like `kyo flag collapse`: nothing left to repair.
     again = kyo(

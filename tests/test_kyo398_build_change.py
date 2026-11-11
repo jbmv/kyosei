@@ -480,3 +480,27 @@ def test_the_opening_brief_is_read_read_only(project, kyo, running) -> None:
     conn.commit()
     conn.close()
     assert cmd_check_build.opening_brief_build(db_file) is None
+
+
+def test_the_prompt_hook_names_each_new_build_once(kyo, running) -> None:
+    """KYO-748.c4: the notice is printed once for each build the tool changed to, and
+    not again on every later prompt until it changes again."""
+    running(*OLD)
+    assert kyo("brief", "--session-start", stdin=SESSION_A).code == 0
+
+    running(*NEW)
+    first = kyo("check-build", "--hook", stdin=PROMPT_A)
+    assert "build bbbbbbbb" in first.out
+    for _ in range(2):
+        again = kyo("check-build", "--hook", stdin=PROMPT_A)
+        assert (again.code, again.out) == (0, "")
+
+    # By hand it still answers, so asking is never met with silence.
+    assert "build bbbbbbbb" in kyo("check-build").out
+
+    # A further change is a new build, and is announced once in its turn.
+    third = ("c" * 40, "2026-09-26T02:34:00.000Z")
+    running(*third)
+    changed_again = kyo("check-build", "--hook", stdin=PROMPT_A)
+    assert "build cccccccc" in changed_again.out
+    assert kyo("check-build", "--hook", stdin=PROMPT_A).out == ""

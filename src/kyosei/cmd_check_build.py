@@ -7,7 +7,10 @@ per-prompt comparison of the build a session opened on with the one its hooks ru
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import sys
+import tempfile
 from argparse import Namespace
 from dataclasses import dataclass
 from pathlib import Path
@@ -276,6 +279,29 @@ def opening_brief_build(db_path: Path, session_id: str | None = None) -> dict | 
     return None if row is None else dict(row)
 
 
+def _announced_marker(db_file: Path, session_id: str) -> Path:
+    """Where the hook remembers which build it last announced to one session (KYO-748.c4).
+
+    A file in the system temp directory, named by the project's database path and the
+    session: a notice is state about a conversation, not about the project, and the store
+    is never opened for writing here (KYO-398). Losing the file only repeats a notice.
+    """
+    key = hashlib.sha256(f"{db_file}\0{session_id}".encode()).hexdigest()[:24]
+    return Path(tempfile.gettempdir()) / f"kyosei-check-build-{key}"
+
+
+def already_announced(db_file: Path, session_id: str, commit: str) -> bool:
+    try:
+        return _announced_marker(db_file, session_id).read_text(encoding="utf-8").strip() == commit
+    except OSError:
+        return False
+
+
+def remember_announced(db_file: Path, session_id: str, commit: str) -> None:
+    with contextlib.suppress(OSError):
+        _announced_marker(db_file, session_id).write_text(commit, encoding="utf-8")
+
+
 def build_check_line(opening: dict, identity) -> str:
     """The one line a prompt gets when the build under the session changed."""
     from .buildinfo import SHORT_SHA
@@ -375,4 +401,13 @@ def cmd_check_build(ctx: Context, args: Namespace) -> Output:
             f"brief {opening['id']}",
         )
     data["changed"] = True
+    # KYO-748.c4: the per-prompt hook says it once for each build the session has seen
+    # the tool change to, not on every prompt until the session ends. Run by hand it
+    # always answers.
+    if hook and session_id is not None and identity.commit:
+        db_file = ctx.root / KYOSEI_DIR / DB_NAME
+        if already_announced(db_file, session_id, identity.commit):
+            data["announced_before"] = True
+            return answer("changed-announced", None)
+        remember_announced(db_file, session_id, identity.commit)
     return answer("changed", build_check_line(opening, identity))

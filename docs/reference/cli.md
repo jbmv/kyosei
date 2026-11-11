@@ -696,7 +696,7 @@ Usage: `kyo flag [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 
 ### Positional arguments
 
-- `{list,resolve,collapse}` — **required**. list: every open flag, one line each (--all includes resolved ones). resolve: acknowledge and clear one flag, or with --settled, every open staleness flag under a record already at a completion or retired status (KYO-346; dry run without --apply). collapse: merge each record's duplicate touch-changed flags into its earliest one and close the rest as superseded (KYO-69; dry run without --apply)
+- `{list,resolve,collapse}` — **required**. list: every open flag, one line each (--all includes resolved ones). resolve: acknowledge and clear one flag, or with --settled, every open flag under a record already at a completion or retired status (KYO-346, KYO-748; dry run without --apply). collapse: merge each record's duplicate touch-changed flags into its earliest one and close the rest as superseded (KYO-69; dry run without --apply)
 - `[FLAG_ID]` — optional.
 - `[FLAG_ID ...]` — optional. resolve only: further flags to resolve in the same act, with the one --why; an unknown or already-resolved id refuses the whole call before anything is written
 
@@ -704,7 +704,7 @@ Usage: `kyo flag [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 
 - `--apply` — optional. collapse/resolve --settled only: actually write it (default is a dry run)
 - `--all` — optional. list only: include flags that have already been resolved
-- `--settled` — optional. resolve only: every open staleness flag under a record already at a completion or retired status, as one act (KYO-346; dry run without --apply, requires --why)
+- `--settled` — optional. resolve only: every open flag, of any kind, under a record already at a completion or retired status, as one act (KYO-346, KYO-748; dry run without --apply, requires --why)
 - `--why TEXT` — optional. one-line reason for resolving it (required with --settled)
 - `--why-file FILE` — optional. read the reason from a file, or '-' for stdin
 

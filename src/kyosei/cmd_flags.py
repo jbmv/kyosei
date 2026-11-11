@@ -12,7 +12,6 @@ from .contracts import (
     CONTRACT_FLAG_ALREADY_RESOLVED,
     FLAG_TYPE_TOUCH_CHANGED,
     SETTLED_ROLES,
-    STALENESS_FLAG_TYPES,
 )
 from .errors import ContractViolation, UsageError
 from .render import echo_block, flag_collapse_text, flag_line, flag_settle_text
@@ -151,9 +150,11 @@ def cmd_flag_collapse(ctx: Context, args: Namespace) -> Output:
 
 
 def _settled_plan(store: Store) -> list[dict]:
-    """KYO-346.c3: every open staleness flag (:data:`contracts.STALENESS_FLAG_TYPES`)
-    sitting under a record already at a completion or retired status
-    (:data:`contracts.SETTLED_ROLES`) — the debt `kyo flag resolve --settled` repairs,
+    """KYO-346.c3, widened by KYO-748.c5: every open flag of any kind sitting under a
+    record already at a completion or retired status (:data:`contracts.SETTLED_ROLES`),
+    and every open flag whose *other* record (a `near-duplicate-criteria` pair names
+    one) has settled, since a finding about a pair has nothing left to say once either
+    half is done — the debt `kyo flag resolve --settled` repairs,
     for a store that accumulated these before a record's own move learned to close
     its own (KYO-346.c1). Grouped per record and per type: "printing the count per
     record and per type" is what lets an operator spot-check the plan against
@@ -167,15 +168,20 @@ def _settled_plan(store: Store) -> list[dict]:
     by_record: dict[str, dict] = {}
     rows = store.conn.execute(
         "SELECT flags.id AS flag_id, flags.record_id AS record_id, "
-        "flags.flag_type AS flag_type, records.status AS status "
+        "flags.flag_type AS flag_type, records.status AS status, "
+        "other.status AS other_status "
         "FROM flags JOIN records ON records.id = flags.record_id "
+        "LEFT JOIN records AS other ON other.id = flags.other_record_id "
         "WHERE flags.resolved_at IS NULL "
         "ORDER BY flags.record_id, flags.seq"
     ).fetchall()
     for row in rows:
-        if row["flag_type"] not in STALENESS_FLAG_TYPES:
-            continue
-        if ladder.role(row["status"]) not in SETTLED_ROLES:
+        owner_settled = ladder.role(row["status"]) in SETTLED_ROLES
+        other_settled = (
+            row["other_status"] is not None
+            and ladder.role(row["other_status"]) in SETTLED_ROLES
+        )
+        if not (owner_settled or other_settled):
             continue
         entry = by_record.setdefault(
             row["record_id"],
@@ -192,8 +198,8 @@ def _settled_plan(store: Store) -> list[dict]:
 
 
 def cmd_flag_settle(ctx: Context, args: Namespace) -> Output:
-    """``kyo flag resolve --settled --why <reason>`` (KYO-346.c3) — closes every open
-    staleness flag under a record already at a completion or retired status
+    """``kyo flag resolve --settled --why <reason>`` (KYO-346.c3, KYO-748.c5) — closes every open
+    flag, of any kind, under a record already at a completion or retired status
     (docs/design/review.md#kyo-346).
 
     One act across the whole store, on `kyo flag collapse`'s own terms: a plan
@@ -352,7 +358,7 @@ def cmd_flag(ctx: Context, args: Namespace) -> Output:
         if args.flag_id is not None:
             raise UsageError(
                 "`kyo flag resolve --settled` takes no flag id — it resolves every open "
-                "staleness flag under a record already at a completion or retired status "
+                "flag under a record already at a completion or retired status "
                 "at once; run it without a flag id"
             )
         return cmd_flag_settle(ctx, args)

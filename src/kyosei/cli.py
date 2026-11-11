@@ -2839,8 +2839,8 @@ def build_parser() -> KyoseiParser:
         help=(
             "list: every open flag, one line each (--all includes resolved ones). "
             "resolve: acknowledge and clear one flag, or with --settled, every open "
-            "staleness flag under a record already at a completion or retired status "
-            "(KYO-346; dry run without --apply). "
+            "flag under a record already at a completion or retired status "
+            "(KYO-346, KYO-748; dry run without --apply). "
             "collapse: merge each record's duplicate touch-changed flags into its "
             "earliest one and close the rest as superseded (KYO-69; dry run without "
             "--apply)"
@@ -2880,8 +2880,8 @@ def build_parser() -> KyoseiParser:
     p_flag.add_argument(
         "--settled",
         action="store_true",
-        help="resolve only: every open staleness flag under a record already at a "
-        "completion or retired status, as one act (KYO-346; dry run without --apply, "
+        help="resolve only: every open flag, of any kind, under a record already at a "
+        "completion or retired status, as one act (KYO-346, KYO-748; dry run without --apply, "
         "requires --why)",
     )
     _add_reason_flags(p_flag, "for resolving it (required with --settled)")
