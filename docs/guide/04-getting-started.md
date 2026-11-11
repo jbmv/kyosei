@@ -108,7 +108,7 @@ messages and code comments for the life of the project, and the prefix cannot ch
 records cite it.
 
 **The trunk branch.** ([B4](setup-decisions.md#b4-which-branch-is-trunk)) Kyosei
-asks git: `origin/HEAD`, then `init.defaultBranch`, then `main`. Set `trunk:` in
+asks git: `origin/HEAD`, then `init.defaultBranch`, then `main`, then `master`. Set `trunk:` in
 `kyosei/config.yml` only if the project merges somewhere else, such as `develop`.
 
 ## Wiring it into Claude Code

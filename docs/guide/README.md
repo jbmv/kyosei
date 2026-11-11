@@ -40,7 +40,8 @@ decision there has an id such as **D1**, and the pages above link to it by that 
 Before KYO-519 the CLI, the skill and the standing rules called the orchestrator the
 **controller**, and some places still do: `kyo controller` is kept as an alias of
 `kyo orchestrator`, the config key `controller_only_commands` and the standing rules'
-`audience: controller` are read alongside their new spellings, and stored history keeps the
+`audience: controller` are read alongside their new spellings
+(`orchestrator_only_commands`, `audience: orchestrator`), and stored history keeps the
 old word. It is the same thing. Since KYO-524 the packaged standing rules say
 `audience: orchestrator` under `## Orchestrator-audience rules`; a project's own ledger
 keeps whichever spelling it has until it adopts the new wording, and both are read the same.

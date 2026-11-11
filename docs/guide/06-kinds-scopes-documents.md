@@ -45,7 +45,9 @@ process:
   produced nothing.
 
 `kyo spawn` follows those edges and refuses any other. A decision filed directly instead has
-your words behind it: `kyo new decision` refuses without `--evidence-file`.
+your words behind it: `kyo new decision` refuses without `--evidence-file`. Where
+`people:` declares you it also carries a credit, your words and what was recommended,
+given with `--quote-file` and `--decision-file`.
 
 **Changing them.** Adding a kind, or changing what one accepts, is easy. Removing a kind
 that records still use is not refused, but those records stop counting and `kyo doctor`
