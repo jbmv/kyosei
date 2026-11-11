@@ -53,9 +53,10 @@ TARGET_SHAPES: tuple[str, ...] = (SHAPE_PATH, SHAPE_PATH_SYMBOL, SHAPE_SYMBOL)
 #: "any short dotted suffix" — reads ``global_queue.brain.step`` as a file named
 #: ``.step`` and reads ``OrderSnapshot.subtotal_cents`` as one named ``.subtotal_cents``,
 #: and those are the two commonest shapes in the corpus this was measured against. Ground
-#: truth overrides it in both directions: a slash-free target that *does* exist as a
-#: file under some base is a path whatever its suffix (``Makefile``, ``Dockerfile``),
-#: which is what keeps this list from having to be complete.
+#: truth overrides it in one direction: a slash-free target that *does* exist as a file
+#: under some base, under exactly that name, is a path whatever its suffix (``Makefile``,
+#: ``Dockerfile``; :func:`_named_file`, KYO-828), which is what keeps this list from
+#: having to be complete. A leading ``./`` says the same thing by spelling alone.
 FILE_SUFFIXES: frozenset[str] = frozenset(
     {
         ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".sh", ".sql",
@@ -150,9 +151,10 @@ def target_shape(path: str, symbol: str | None) -> str:
 
     Spelling alone, with no filesystem — so the answer is the same for a project being
     parsed and one being unit-tested, and so :func:`resolve_target` can report *what it
-    tried to resolve* even when nothing resolved. :func:`resolve_target` may still
-    promote a :data:`SHAPE_SYMBOL` to :data:`SHAPE_PATH` when ground truth says the
-    string is a real file; it never demotes in the other direction.
+    tried to resolve* even when nothing resolved. :func:`resolve_target` promotes a
+    :data:`SHAPE_SYMBOL` to :data:`SHAPE_PATH` when a base holds a file under exactly
+    that name (:func:`_named_file`, KYO-828); it never demotes in the other direction.
+    ``./Makefile`` carries a ``/`` and is a path here already, with no file consulted.
 
     A symbol half settles it. Otherwise a ``/`` makes it a path, a known file suffix
     (:data:`FILE_SUFFIXES`) makes it a path, and anything else — an undotted identifier
@@ -330,6 +332,31 @@ def _first_existing(root: Path, bases: Sequence[str], relative: str) -> str | No
     return None
 
 
+def _named_file(root: Path, bases: Sequence[str], name: str) -> str | None:
+    """The file a slash-free, suffixless target names, if a base holds one (KYO-828).
+
+    ``Makefile`` and ``LICENSE`` are spelled like a bare symbol, and read as one they
+    govern every code file that contains the word. A base holding a file under that
+    name settles the question the spelling cannot: the target is that file.
+
+    The name must match an entry of the base's directory listing exactly, case included.
+    ``Path.is_file`` alone answers by the filesystem's rule, and on a case-insensitive
+    volume it would call the symbol ``license`` the file ``LICENSE`` on one machine and
+    not on another.
+    """
+    for base in bases:
+        directory = _under_root(root, base)
+        if directory is None:
+            continue
+        try:
+            listed = name in os.listdir(directory)
+        except OSError:
+            continue
+        if listed and (directory / name).is_file():
+            return (directory / name).relative_to(root).as_posix()
+    return None
+
+
 def _tried(bases: Sequence[str]) -> str:
     """The base list, named, for a failure message (c3).
 
@@ -461,8 +488,10 @@ def resolve_target(
       (:func:`carries_symbol`), which begins with the same coarse wrap-tolerant phrase
       check ``cmd_records._validate_touches`` uses for a record's ``touches``, so the
       two cannot drift apart on anything that resolved before this record.
-    * :data:`SHAPE_SYMBOL` — a dotted ``module.sub.symbol`` resolves as the module's
-      file under the bases *plus* that symbol, exactly as if it had been written
+    * :data:`SHAPE_SYMBOL` — first, a base holding a file under exactly the written
+      name makes the target that file, a :data:`SHAPE_PATH` (:func:`_named_file`,
+      KYO-828: ``Makefile``, ``LICENSE``). Otherwise a dotted ``module.sub.symbol``
+      resolves as the module's file under the bases *plus* that symbol, as if written
       ``module/sub.py#symbol``; anything else resolves when every one of its tokens
       (:func:`symbol_tokens`) is a whole-word match in at least one searchable file
       under the bases, and the target then governs every file it was found in.
@@ -490,6 +519,9 @@ def resolve_target(
     shape = target_shape(path_part, symbol_part)
 
     if shape == SHAPE_SYMBOL:
+        named = _named_file(root, bases, path_part) if path_part else None
+        if named is not None:
+            return GovernsTarget(raw, SHAPE_PATH, path_part, None, paths=(named,))
         return _resolve_symbol(root, raw, path_part, bases, index)
 
     if not path_part:
