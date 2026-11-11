@@ -219,7 +219,7 @@ def test_the_doctor_first_stop_hook_is_reported_as_superseded(kyo, project: Path
     packaged command — and the ordering is the whole defect, so the report can only
     come from the exact-string supersession path."""
     doctor_first = "kyo doctor && kyo sweep && kyo html"
-    _replace_installed(kyo, project, ("Stop", "SessionEnd"), doctor_first)
+    _replace_installed(kyo, project, "Stop", doctor_first)
 
     # No packaged COMMAND is missing here — this settings file runs every one of them,
     # and the ordering is the whole defect (KYO-362 added a flag to the last of them,
@@ -277,7 +277,7 @@ def test_a_stop_chain_that_still_runs_the_retired_kyo_html_is_reported(
     """
     retired = "kyo sweep && kyo html && kyo doctor"
     assert retired in SUPERSEDED_HOOK_COMMANDS
-    _replace_installed(kyo, project, ("Stop", "SessionEnd"), retired)
+    _replace_installed(kyo, project, "Stop", retired)
 
     # The premise: every packaged command is already here, because this line is a
     # superset of them. Compared by command word since KYO-362 (this module's

@@ -125,7 +125,7 @@ def _fragment_commands_by_event() -> dict[str, Counter]:
     `kyo` argument strings it runs behind its inline guard."""
     found: dict[str, Counter] = {}
     for event, name in HOOK_INSTALL_TARGETS:
-        for group in _load_hook_fragment(name):
+        for group in _load_hook_fragment(name, event=event):
             for hook in group["hooks"]:
                 action = hook["command"].removeprefix(PATH_GUARD_PREFIX)
                 assert action != hook["command"], f"{name}: no PATH guard"

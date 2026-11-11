@@ -46,7 +46,9 @@ def test_install_hooks_writes_settings_json_from_scratch(kyo, project: Path) -> 
     # rather than a substring of it — a `kyo doctor` sequenced ahead of a remedy
     # short-circuits the remedy its own message names.
     assert STOP_RECIPE in json.dumps(hooks["Stop"])
-    assert STOP_RECIPE in json.dumps(hooks["SessionEnd"])
+    # KYO-774: the chain runs at Stop alone; SessionEnd keeps the turn index and the session record.
+    assert STOP_RECIPE not in json.dumps(hooks["SessionEnd"])
+    assert TURNS_RECIPE in json.dumps(hooks["SessionEnd"])
     subagent_stop = json.dumps(hooks["SubagentStop"])
     # KYO-17: was a raw `git status --porcelain`; now the CLI command that
     # excludes exactly what `check-branch` forbids, so the two halves agree.
@@ -285,6 +287,10 @@ def test_install_hooks_rewrites_the_doctor_first_stop_hook(kyo, project: Path) -
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     for event in ("Stop", "SessionEnd"):
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
+        if event == "SessionEnd":
+            # KYO-774: the superseded chain is removed, not carried to today's, there.
+            assert commands == [guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], commands
+            continue
         # KYO-186 put a second packaged fragment on this event. What is asserted is
         # that the superseded line was REPLACED rather than kept alongside its
         # replacement -- not that the event runs one command, which stopped being
@@ -327,6 +333,9 @@ def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html
     for event in ("Stop", "SessionEnd"):
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
         assert retired not in commands, f"{event}: {commands}"
+        if event == "SessionEnd":  # KYO-774: removed there, not replaced
+            assert commands == [guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)], commands
+            continue
         assert commands.count(guarded(STOP_RECIPE)) == 1, f"{event}: {commands}"
         expected = [guarded(STOP_RECIPE), guarded(TURNS_RECIPE), guarded(SESSIONS_RECIPE)]
         assert commands == expected, f"{event}: {commands}"
@@ -348,6 +357,8 @@ def _packaged_sessionend_timeouts() -> dict[str, int]:
         fragment = json.loads((source / "hooks" / name).read_text(encoding="utf-8"))
         (groups,) = fragment.values()
         for group in groups:
+            if "SessionEnd" not in group.get("events", ["SessionEnd"]):
+                continue  # KYO-774: a Stop-only group
             for hook in group["hooks"]:
                 if "timeout" in hook:
                     timeouts[hook["command"]] = hook["timeout"]
@@ -362,7 +373,6 @@ def test_every_packaged_sessionend_hook_carries_a_timeout() -> None:
     `timeout` is exactly that defect, shipped again."""
     timeouts = _packaged_sessionend_timeouts()
     assert timeouts == {
-        guarded(STOP_RECIPE): 20,
         guarded(TURNS_RECIPE): 20,
         guarded(SESSIONS_RECIPE): 5,
     }
@@ -401,7 +411,7 @@ def test_install_hooks_sets_the_timeout_on_an_existing_sessionend_entry_in_place
             {
                 "hooks": {
                     "SessionEnd": [
-                        {"hooks": [{"type": "command", "command": guarded(STOP_RECIPE)}]},
+                        {"hooks": [{"type": "command", "command": guarded(TURNS_RECIPE)}]},
                         {"hooks": [{"type": "command", "command": guarded(SESSIONS_RECIPE)}]},
                     ]
                 }
@@ -417,11 +427,11 @@ def test_install_hooks_sets_the_timeout_on_an_existing_sessionend_entry_in_place
     session_end = settings["hooks"]["SessionEnd"]
     hooks = [h for g in session_end for h in g["hooks"]]
     # One entry per command, not two -- the fix must not duplicate.
-    assert [h["command"] for h in hooks].count(guarded(STOP_RECIPE)) == 1
+    assert [h["command"] for h in hooks].count(guarded(TURNS_RECIPE)) == 1
     assert [h["command"] for h in hooks].count(guarded(SESSIONS_RECIPE)) == 1
     by_command = {h["command"]: h["timeout"] for h in hooks}
     assert by_command == _packaged_sessionend_timeouts()
-    assert any("raised" in c and STOP_RECIPE in c for c in result.json["changes"]), result.json[
+    assert any("raised" in c and TURNS_RECIPE in c for c in result.json["changes"]), result.json[
         "changes"
     ]
 
@@ -436,7 +446,7 @@ def test_install_hooks_print_previews_the_sessionend_timeout_fix(kyo, project: P
             {
             "hooks": {
                 "SessionEnd": [
-                    {"hooks": [{"type": "command", "command": guarded(STOP_RECIPE)}]}
+                    {"hooks": [{"type": "command", "command": guarded(TURNS_RECIPE)}]}
                 ]
             }
         }
@@ -452,8 +462,8 @@ def test_install_hooks_print_previews_the_sessionend_timeout_fix(kyo, project: P
 
     session_end = result.json["settings"]["hooks"]["SessionEnd"]
     hooks = [h for g in session_end for h in g["hooks"]]
-    stop_hook = next(h for h in hooks if h["command"] == guarded(STOP_RECIPE))
-    assert stop_hook["timeout"] == _packaged_sessionend_timeouts()[guarded(STOP_RECIPE)]
+    turns_hook = next(h for h in hooks if h["command"] == guarded(TURNS_RECIPE))
+    assert turns_hook["timeout"] == _packaged_sessionend_timeouts()[guarded(TURNS_RECIPE)]
 
 
 def test_install_hooks_leaves_a_hand_set_sessionend_timeout_at_or_above_packaged_alone(
@@ -480,7 +490,6 @@ def test_install_hooks_leaves_a_hand_set_sessionend_timeout_at_or_above_packaged
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     hooks = [h for g in settings["hooks"]["SessionEnd"] for h in g["hooks"]]
     assert {h["command"]: h["timeout"] for h in hooks} == {
-        guarded(STOP_RECIPE): 30,
         guarded(TURNS_RECIPE): 30,
         guarded(SESSIONS_RECIPE): 30,
     }
@@ -561,6 +570,8 @@ def test_an_existing_project_picks_up_the_guard_by_re_running_install_hooks(
         ran_before = {
             hook["command"] for group in before["hooks"][event] for hook in group["hooks"]
         }
+        if event == "SessionEnd":  # KYO-774: the sweep and doctor chain left this event
+            ran_before = {c for c in ran_before if hook_action(c) != STOP_RECIPE}
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
         assert all(c.startswith(PATH_GUARD_PREFIX) for c in commands), f"{event}: {commands}"
         # One entry per check, not two: the bare line was REPLACED, not joined.
@@ -1110,3 +1121,105 @@ def test_install_hooks_print_still_renders_settings_json_but_after_the_header(
     ]
     assert json_line_indexes and change_line_indexes
     assert max(json_line_indexes) < min(change_line_indexes), lines
+
+
+# ------------------------------------------- KYO-774: the chain runs at Stop, not SessionEnd
+
+
+def _packaged_events_by_action() -> dict[str, set[str]]:
+    """Each packaged hook action mapped to the events it is installed under, read
+    straight off the fragments through the loader's own event filter."""
+    found: dict[str, set[str]] = {}
+    for event, name in HOOK_INSTALL_TARGETS:
+        for group in install_hooks._load_hook_fragment(name, event=event):
+            for hook in group["hooks"]:
+                found.setdefault(hook_action(hook["command"]), set()).add(event)
+    return found
+
+
+def test_the_chain_is_packaged_under_stop_and_the_turn_and_session_hooks_keep_sessionend() -> None:
+    """KYO-774.c1, install route and plugin route read side by side."""
+    from kyosei.harness import plugin_hooks_document
+
+    events = _packaged_events_by_action()
+    assert events[STOP_RECIPE] == {"Stop"}
+    assert {"Stop", "SessionEnd"} <= events[TURNS_RECIPE]
+    assert {"SessionStart", "Stop", "SessionEnd"} == events[SESSIONS_RECIPE]
+
+    hooks = plugin_hooks_document()["hooks"]
+    for event, expected in (("Stop", True), ("SessionEnd", False)):
+        text = json.dumps(hooks[event])
+        assert ("sweep --hook" in text) is expected, event
+    timeouts = {
+        h["command"].split()[-2]: h.get("timeout")
+        for g in hooks["SessionEnd"]
+        for h in g["hooks"]
+    }
+    assert timeouts == {"turns": 20, "sessions": 5}, timeouts
+
+
+def test_a_fresh_install_carries_the_event_filter_key_nowhere(kyo, project: Path) -> None:
+    assert kyo("install-hooks", "--copies").code == 0
+    settings = json.loads(_settings_path(project).read_text(encoding="utf-8"))
+    assert "events" not in json.dumps(settings["hooks"])
+    assert not any(
+        "events" in group for groups in settings["hooks"].values() for group in groups
+    )
+
+
+def test_install_hooks_removes_the_chain_from_sessionend_and_keeps_the_persons_own(
+    kyo, project: Path
+) -> None:
+    """KYO-774.c2. A settings file as earlier builds wrote it: the chain under both events,
+    beside a SessionEnd hook of the person's own and the chain extended by a step of theirs."""
+    settings_path = _settings_path(project)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    own = "echo my own session-end hook"
+    extended = guarded(STOP_RECIPE) + " && echo mine"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [{"hooks": [{"type": "command", "command": guarded(STOP_RECIPE)}]}],
+                    "SessionEnd": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": guarded(STOP_RECIPE), "timeout": 20},
+                                {"type": "command", "command": own},
+                            ]
+                        },
+                        {"hooks": [{"type": "command", "command": extended}]},
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = kyo("install-hooks", "--copies", "--json")
+    assert result.code == 0, result
+    assert any(
+        c.startswith("SessionEnd: removed") and STOP_RECIPE in c for c in result.json["changes"]
+    ), result.json["changes"]
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    commands = [h["command"] for g in settings["hooks"]["SessionEnd"] for h in g["hooks"]]
+    assert guarded(STOP_RECIPE) not in commands
+    assert own in commands
+    assert extended in commands, "a chain the person extended is theirs"
+    stop_commands = [h["command"] for g in settings["hooks"]["Stop"] for h in g["hooks"]]
+    assert stop_commands.count(guarded(STOP_RECIPE)) == 1
+
+    again = kyo("install-hooks", "--copies", "--json")
+    assert again.json["changes"] == [], "a second run has nothing left to remove"
+
+
+def test_doctor_does_not_report_a_stop_only_chain_as_missing_or_outdated(
+    kyo, project: Path
+) -> None:
+    """KYO-774.c3: the install this build makes is the one its doctor accepts."""
+    assert kyo("install-hooks", "--copies").code == 0
+    settings = json.loads(_settings_path(project).read_text(encoding="utf-8"))
+    assert STOP_RECIPE not in json.dumps(settings["hooks"]["SessionEnd"])
+    assert install_hooks.hook_drift(project) == []
+    assert install_hooks.hook_drift_by_tier(project) == ([], [])

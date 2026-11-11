@@ -25,11 +25,11 @@ from .scaffold import (
 
 #: (settings.json event key, packaged hook-fragment filename under
 #: ``defaults/hooks/``). ``stop.json`` installs under both ``Stop`` and
-#: ``SessionEnd`` — templates/hooks/README.md's own instruction ("If your harness
-#: fires SessionEnd separately from Stop, install this same block under
-#: SessionEnd too") — since one packaged fragment describes one hook *action*,
+#: ``SessionEnd`` — since one packaged fragment describes one hook *action*,
 #: not one event name; which event(s) fire it is `kyo install-hooks`'s call, not
-#: the fragment's.
+#: the fragment's. A group that carries an ``events`` list is installed under those
+#: events only (:func:`_load_hook_fragment`): the sweep and doctor chain names ``Stop``
+#: alone (KYO-774).
 #:
 #: ``sessions.json`` installs under ``SessionStart``, ``Stop`` and ``SessionEnd``, and `kyo
 #: sessions --hook` tells them apart by the payload's own ``hook_event_name`` rather than by
@@ -50,7 +50,9 @@ HOOK_INSTALL_TARGETS: tuple[tuple[str, str], ...] = (
 CLAUDE_SETTINGS_REL = Path(".claude") / "settings.json"
 
 
-def _load_hook_fragment(name: str, hooks_dir: Path | None = None) -> list[dict]:
+def _load_hook_fragment(
+    name: str, hooks_dir: Path | None = None, event: str | None = None
+) -> list[dict]:
     """Read one packaged hook fragment (``defaults/hooks/<name>``) and return its
     list of hook-groups — the value under the fragment's own single top-level
     event key, whichever event that happens to name (see
@@ -62,7 +64,23 @@ def _load_hook_fragment(name: str, hooks_dir: Path | None = None) -> list[dict]:
     passes that directory, and every comparison built on top reads it instead of the
     running build's. ``None`` — every consumer, and every call that means "what does
     this build install" — is the packaged copy, exactly as before.
+
+    A group may carry ``events``, the list of events it installs under (KYO-774). With
+    ``event`` given, a group naming other events is left out; the key is never returned,
+    since it is the fragment's own and Claude Code's group shape has no such field.
+    ``event=None`` returns every group, as the fragment-versus-source comparison needs.
     """
+    groups = _read_hook_fragment(name, hooks_dir)
+    kept = []
+    for group in groups:
+        events = group.get("events")
+        if event is not None and isinstance(events, list) and event not in events:
+            continue
+        kept.append({k: v for k, v in group.items() if k != "events"})
+    return kept
+
+
+def _read_hook_fragment(name: str, hooks_dir: Path | None) -> list[dict]:
     if hooks_dir is not None:
         path = hooks_dir / name
         if not path.is_file():
@@ -386,6 +404,37 @@ def _drop_superseded_hooks(hooks_section: dict) -> tuple[list[str], dict[str, li
     return changes, edited
 
 
+def _drop_sessionend_chain(hooks_section: dict) -> list[str]:
+    """KYO-774: remove the sweep and doctor chain from ``SessionEnd``, where builds before
+    this one installed it. Claude Code cancels it there on exit ("Hook cancelled") and the
+    same chain has already run at ``Stop``. Only a hook whose action is exactly
+    :data:`STOP_HOOK_COMMAND` goes (the PATH guard aside); a ``SessionEnd`` hook of the
+    person's own, or the chain extended by a step of theirs, is left alone, on
+    :func:`_drop_superseded_hooks`'s rule. A group left empty is dropped with it."""
+    groups = hooks_section.get(SESSIONEND_EVENT)
+    if not isinstance(groups, list):
+        return []
+    changes: list[str] = []
+    for group in list(groups):
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            continue
+        kept = [
+            h
+            for h in group["hooks"]
+            if not (isinstance(h, dict) and hook_action(h.get("command")) == STOP_HOOK_COMMAND)
+        ]
+        if len(kept) == len(group["hooks"]):
+            continue
+        changes.append(
+            f"{SESSIONEND_EVENT}: removed {STOP_HOOK_COMMAND!r}, which now runs at Stop only "
+            "(Claude Code cancels it at SessionEnd)"
+        )
+        group["hooks"] = kept
+        if not kept:
+            groups.remove(group)
+    return changes
+
+
 def _hook_commands(group: dict) -> set[tuple[object, object]]:
     return {(h.get("type"), h.get("command")) for h in group.get("hooks", [])}
 
@@ -443,7 +492,7 @@ def packaged_elements(event: str, hooks_dir: Path | None = None) -> set[str]:
     for target_event, source_name in HOOK_INSTALL_TARGETS:
         if target_event != event:
             continue
-        for group in _load_hook_fragment(source_name, hooks_dir):
+        for group in _load_hook_fragment(source_name, hooks_dir, target_event):
             for hook in group.get("hooks", []):
                 found |= command_elements(hook.get("command"))
     return found
@@ -471,7 +520,7 @@ def _sessionend_timeout_specs(hooks_dir: Path | None = None) -> list[tuple[set[s
     for target_event, source_name in HOOK_INSTALL_TARGETS:
         if target_event != SESSIONEND_EVENT:
             continue
-        for group in _load_hook_fragment(source_name, hooks_dir):
+        for group in _load_hook_fragment(source_name, hooks_dir, target_event):
             for hook in group.get("hooks", []):
                 timeout = hook.get("timeout")
                 if not isinstance(timeout, int):
@@ -716,9 +765,10 @@ def merge_hooks(existing_settings: dict) -> tuple[dict, list[str]]:
     settings = copy.deepcopy(existing_settings)
     hooks_section = settings.setdefault("hooks", {})
     changes, edited = _drop_superseded_hooks(hooks_section)
+    changes.extend(_drop_sessionend_chain(hooks_section))
     for event, source_name in HOOK_INSTALL_TARGETS:
         target_groups = hooks_section.setdefault(event, [])
-        for group in _load_hook_fragment(source_name):
+        for group in _load_hook_fragment(source_name, event=event):
             clean_hooks = _strip_comment_fields(group.get("hooks", []))
             if event != SESSIONEND_EVENT:
                 # KYO-269: the packaged fragment's `timeout` is sized for the

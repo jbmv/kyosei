@@ -50,15 +50,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/kyo-hook\" sweep --hook && sh \"${CLAUDE_PLUGIN_ROOT}/hooks/kyo-hook\" doctor --hook",
-            "timeout": 20
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/kyo-hook\" turns --hook",
             "timeout": 20
           }
