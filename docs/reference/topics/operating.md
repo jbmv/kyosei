@@ -758,6 +758,16 @@ as it is, and the token is ignored.
 
 governs: src/kyosei/cli.py
 
+The block lists alternatives side by side as well as steps, so a line is not always one
+that works where it stands. A comment that opens with a tag in square brackets says so:
+`[alternative]` is one of several forms, which an earlier line may have left refused;
+`[illustration]` uses an id or a value of yours that exists nowhere here; `[refused]` is
+refused on purpose, where the tag names a kind of project only there (`where nobody is
+declared` or `where someone is declared` refers to `people:` in `kyosei/config.yml`). A
+word in square brackets inside a command is optional, a trailing `...` repeats what
+precedes it, and a part in angle brackets is for you to fill in.
+`tests/test_walkthroughs.py` types every other line into a temporary project.
+
 ```sh
 kyo onboard                                # guided setup: prints the steps for an agent
                                             # (bare `kyo init` in a new project writes
@@ -777,7 +787,8 @@ kyo projects list                          # the projects this machine serves (k
 kyo harness install claude-code            # link and register the plugin inside this
                                             # build with Claude Code; in a project, also
                                             # enable it there at local scope (KYO-594)
-kyo harness migrate                        # in a project on the copies: enable the plugin,
+kyo harness migrate                        # [refused] without `claude` on the PATH.
+                                            # In a project on the copies: enable the plugin,
                                             # then remove the unedited copied hooks, skill
                                             # and CLAUDE.md section; names what it leaves,
                                             # commits nothing (KYO-595)
@@ -800,7 +811,8 @@ kyo discuss open --title "Which store"     # a discussion, stamped at the person
                                            # from the turn index; a decision spawned from
                                            # it closes it (KYO-658)
 kyo new decision --title "Use SQLite" \
-            --evidence-file words.md      # a decision made in conversation, the operator's
+            --evidence-file words.md      # [refused where someone is declared]
+                                           # a decision made in conversation, the operator's
                                            # words stored as evidence in the same act;
                                            # refused without it (KYO-521). This form files
                                            # it where `people:` in kyosei/config.yml
@@ -808,7 +820,8 @@ kyo new decision --title "Use SQLite" \
                                            # declares someone
 kyo new decision --title "Use SQLite" --evidence-file words.md \
             --quote-file words.md --decision-file decision.md \
-            --discussion KYO-3            # the form for a project that declares someone,
+            --discussion KYO-3            # [refused where nobody is declared]
+                                           # the form for a project that declares someone,
                                            # refused where nobody is declared: the decision
                                            # carries a credit (the person's words, and in
                                            # decision.md what was recommended and the
@@ -818,7 +831,8 @@ kyo new decision --title "Use SQLite" --evidence-file words.md \
                                            # and --source-other WHERE says where the words
                                            # were said outside a Claude Code session
                                            # (KYO-644, KYO-658)
-kyo discuss skip --why "a question about a log line"   # the Stop check asked about a turn
+kyo discuss skip --why "a question about a log line"   # [refused] where no turn index is kept.
+                                           # The Stop check asked about a turn
                                            # that is not a discussion; the reason is kept
                                            # on the turn's index line (KYO-662)
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
@@ -831,9 +845,11 @@ kyo move KYO-1 working                     # contracts are checked here
 kyo gate KYO-1 awaiting:human-run --do "run the staging migration, then reload the dashboard" \
                                   --tag ui-review   # tags from kyosei/gate-tags.yml;
                                                     # --do stays the exact thing to run
-kyo ungate KYO-1.g1 --why "ran it; output attached"   # clears it where `people:`
+kyo ungate KYO-1.g1 --why "ran it; output attached"   # [refused where someone is declared]
+                                           # clears it where `people:`
                                            # declares nobody
-kyo ungate KYO-1.g1 --quote-file q.txt     # where `people:` declares someone, a gate that
+kyo ungate KYO-1.g1 --quote-file q.txt     # [refused where nobody is declared]
+                                           # where `people:` declares someone, a gate that
                                            # waits on a person is cleared with that person's
                                            # words, stored as a credit (with --source-other
                                            # WHERE outside a Claude Code session);
@@ -868,10 +884,11 @@ kyo redact KYO-1.e1 --why "carried a consumer id"   # evidence (kyo attach), a c
                                            # still quoting the text
 kyo redact KYO-1.description --why-file why.md   # or KYO-1.title, KYO-1.c2: the record's own
                                            # field, every version up to now (KYO-426)
-kyo move KYO-1 done
+kyo move KYO-1 done                        # [alternative] refused while a criterion is unmet
 kyo list --kind bug --status working       # filtered, with a counted/not-counted summary
 kyo list --gate-tag ui-review              # everything held by an open gate tagged this
-kyo list --plan KYO-20                     # a plan's members: the relation is stored on the
+kyo list --plan KYO-20                     # [illustration] KYO-20: a plan of yours;
+                                           # a plan's members: the relation is stored on the
                                            # member, so this is the only way to walk it back
 kyo list --status open --status working    # --status repeats: records in either status
 kyo list --unsettled                       # only records not yet settled: no status whose role
@@ -916,13 +933,15 @@ kyo promote ideas/widget.md --kind chore \
                                            # removes the file (KYO-106, reversed by
                                            # KYO-228); --keep leaves a stub in its place instead
 kyo promote ideas/widget.md --kind task \
-            --section "The heading" ...     # promote ONE section of a multi-idea file: that
+            --section "The heading" \
+            --criteria-file criteria.txt \
+            --touches-file touches.txt ...     # promote ONE section of a multi-idea file: that
                                            # section's prose becomes the record and the section
                                            # -- heading included -- is removed; the rest of the
                                            # file survives untouched (KYO-107, KYO-228); --keep
                                            # leaves an inline stub instead of removing it
 kyo spawn KYO-1 --kind decision \
-          --title "We adopt the new cache"  # the kind-to-kind edge: refused unless KYO-1's kind
+          --title "We adopt the new cache"  # [refused] from a bug: the kind-to-kind edge, refused unless KYO-1's kind
                                            # is in decision's accepts_from; the new record is
                                            # produced-by-linked back to KYO-1 and KYO-1's own
                                            # status is left exactly where it was
@@ -973,7 +992,7 @@ kyo dispatch KYO-1 --worktree ../wt-kyo-1   # override that: recorded (relative 
                                            # `git worktree add` worktree of this repository
                                            # (KYO-402); --branch must pass
                                            # `git check-ref-format --branch`
-kyo dispatch KYO-1 --model some-model      # which model the worker runs on; recorded and stated
+kyo dispatch KYO-1 --model some-model      # [alternative] which model the worker runs on; recorded and stated
                                            # in the brief, never enforced (KYO-61). Defaults to
                                            # the kind's policy.worker_model, then config.yml's
 kyo dispatch KYO-1 --force                 # override a touch or worktree collision; recorded
@@ -998,7 +1017,7 @@ kyo worktrees --expand-stops               # the stop-audit census the default f
 kyo report KYO-1.d1 --file .kyosei-report.json   # ingest a structured worker report
                                            # (schema-validated); .kyosei-report.json is the
                                            # path every brief names, and it is gitignored
-kyo report KYO-1.d1 --file .kyosei-report.json --check   # the same checks, nothing
+kyo report KYO-1.d1 --file .kyosei-report.json --check   # [alternative] before the ingest above; the same checks, nothing
                                            # written: a worker's dry run (KYO-477)
 kyo touch-drift KYO-1.d1                   # files the branch changed that no covered record
                                            # declared, with the exact --touches-file correction;
@@ -1016,13 +1035,13 @@ kyo accept KYO-1.d1 --reviewed --close     # ...and then move each covered recor
                                            # which records it left and which contract refused each
 kyo dispatch close KYO-1.d1                # refuses (exit 2) with no ingested report
 kyo dispatch close KYO-1.d1 --terminated-no-report \
-                             --why "worker crashed"   # the loud, distinct terminal state (law 8):
+                             --why "worker crashed"   # [alternative] to the line below. The loud, distinct terminal state (law 8):
                                            # a worker was spawned and the work stopped
 kyo dispatch close KYO-1.d1 --withdrawn \
-                             --why "wrong model frozen"  # never handed to a worker at all
+                             --why "wrong model frozen"  # [alternative] to the line above. Never handed to a worker at all
                                            # (KYO-345) -- terminal and quiet: no brief lists it,
                                            # `kyo show KYO-1` keeps it under its own word
-kyo dispatch KYO-1 --terminated-no-report --why "..."   # refused (exit 64): these flags are
+kyo dispatch KYO-1 --terminated-no-report --why "..."   # [refused] (exit 64): these flags are
                                            # only for `dispatch close`, and the message names
                                            # KYO-1's own running dispatch, if it has one
                                            # (KYO-133)
@@ -1031,7 +1050,7 @@ kyo split KYO-1 --to-successor KYO-1.c3 KYO-1.c4   # unmet criteria move to a ne
 kyo sweep                                  # flags touch-changed / touch-missing / near-dup
                                             # criteria; never edits (KYO-8.c1/c2/c3)
 kyo flag resolve KYO-1.f1 --why "checked; expected"   # acknowledge a sweep flag
-kyo flag resolve KYO-1.f1 KYO-2.f3 --why "..."   # several flags, one act (KYO-528)
+kyo flag resolve KYO-1.f1 KYO-2.f3 --why "..."   # [illustration] two of your flags: several flags, one act (KYO-528)
 kyo flag collapse                          # dry run: merge each record's duplicate
 kyo flag collapse --apply                   # touch-changed flags into its earliest one
                                             # and close the rest as superseded (KYO-69.c3)
@@ -1056,7 +1075,7 @@ kyo agenda                                 # this session's task list, which the
                                             # writes from a device; `add --text "..."`,
                                             # `check <id>` and the rest change it as the
                                             # orchestrator (KYO-770)
-kyo show KYO-S19                           # read one shift note back by id, any time
+kyo show KYO-S19                           # [illustration] an id of your own: read one shift note back by id, any time
 kyo note --shift --file thought.md         # append to the continuously-written shift log
 kyo where                                  # where is this project, and can THIS build open its
                                             # store -- layout, store root, code root, branch,
@@ -1160,7 +1179,7 @@ kyo changelog                              # what Kyosei changed since the build
                                             # packaged with the wheel
 kyo changelog --since 2026-09-08           # ...since a date, or since any commit this checkout
 kyo changelog --all                        # ...or the whole history
-kyo install-skill                          # write the packaged /kyosei workflow AND the
+kyo install-skill                          # [refused] unless on the copies. Write the packaged /kyosei workflow AND the
                                            # reference beside it into .claude/skills/
                                            # (install-hooks does this too; KYO-328), and
                                            # keeps one marked section in CLAUDE.md saying
@@ -1203,7 +1222,7 @@ kyo rules add --title "<imperative title>" \
 kyo export --refresh                       # rewrite every drifted export document from the db,
                                             # and re-append ledger rows the db holds and the
                                             # export lacks (KYO-404)
-kyo rebuild                                # reconstruct kyosei.db from kyosei/export/ alone;
+kyo rebuild                                # [refused] while kyosei.db exists. Reconstruct kyosei.db from kyosei/export/ alone;
                                             # refused over an existing kyosei.db without
                                             # --force
 kyo install-hooks [--print] [--copies]     # merge Claude Code hook templates into
