@@ -222,10 +222,14 @@ and `--json` were never affected either way.
 
 Under that line `kyo dispatch` prints the brief's length by section, in characters and
 in the order the brief is written (KYO-773): the header, the record summary, the
-criteria, the covered records, the touches, the claims, the write scope, the standing
-rules, the stance, the task and the report instructions. The numbers sum to the total
-on the line above, so a brief that grew shows which section grew. `--json` carries the
-same list as `brief_sections`.
+criteria, the covered records (`also covers`), the touches, the claims, the write scope,
+the standing rules, the stance, the task and the report instructions (`report`). Three
+sections are listed only when the brief has them: `also covers` when the dispatch covers
+other records, and, between the touches and the claims, `ledger hand-off` when the
+touches include the packaged procedures ledger and `numbered documents` when the project
+declares a numbered, append-only document. The numbers sum to the total on the line
+above, so a brief that grew shows which section grew. `--json` carries the same list as
+`brief_sections`.
 
 **What a worker leaves outside its worktree is named at its stop** (KYO-535). Once the
 dispatch row exists, `kyo dispatch` writes a baseline into the code repository's git
@@ -392,6 +396,14 @@ line** `kyo accept` prints says how many and names `kyo docs settle
 and `--close`, left short over open docs obligations, names the unmatched
 verdicts on those same documents beside the refusal (KYO-393).
 
+`--except <criterion-id>...` applies every verdict the report carries except those of
+the criteria named (KYO-343). It is passed to `kyo verify --from-report` as the
+complement, through that command's own `--only`. The excepted verdicts stay unapplied
+and readable in the report, and `--close` leaves a record that holds one of them
+unmoved and names it as the reason. An id the report carries no verdict for is refused
+with `accept-except-names-an-absent-criterion` and nothing is applied, because a
+mistyped exception would otherwise apply every verdict.
+
 Two things it will not do on its own. It **refuses while the report carries
 `premise_false[]` or `disagreements[]` entries**, printing every field of every
 one of them, until `--reviewed` says you have read them — reading a worker's
@@ -485,6 +497,23 @@ runs once the report is ingested), `confirm-criterion-not-confirmable` (another
 record's, void or missing), `confirm-gate-not-confirmable` (missing, another
 record's, already cleared, or not a human gate) and
 `confirm-gate-names-a-missing-criterion` (correct the payload with `kyo redo`).
+
+**In a project that declares people, a confirmation is credited** (KYO-644). Where
+`people:` in `kyosei/config.yml` names someone, `kyo confirm` resolves one credit for
+the whole act before anything is written, and the credit names every verification the
+act records and the gate it clears. `--person KEY` names the person and defaults to the
+only one declared. `--session ID` names the Claude Code session the words were said in
+and defaults to `$CLAUDE_CODE_SESSION_ID`; in a project that has opted in to reading
+transcripts the quote is checked against that session's transcript, and `--turn UUID`
+names the transcript record when the words occur in several turns. `--source-other
+WHERE` is one line saying where the words were said when that was not a Claude Code
+session, and it cannot be combined with `--session`. A confirmation with no resolvable
+credit is refused with `human-observed-requires-credit`, which prints the same `kyo
+confirm` line with `--person KEY --source-other <where>` added. The transcript check
+refuses with `credit-quote-not-found` or `credit-quote-ambiguous`, and an undeclared
+`--person` with `credit-person-undeclared`. A project that declares nobody records the
+confirmation with no credit. Credits are described under "The kind registry" in
+[registries.md](registries.md).
 
 **The words are stored verbatim in evidence, and not in the gate's clearing
 reason.** The quote is read once, its length and sha256 echoed on the first
@@ -754,7 +783,7 @@ says; that row is still what the next sweep diffs from and what `kyo brief` read
 
 When it cannot resolve its own base, `kyo sweep` **flags nothing for that class and
 says so** — in its output, in `--json`, in `kyo brief`'s "staleness coverage"
-section, and durably on the row. It does not refuse (that would discard the two
+section, and durably on the row. It does not refuse (that would discard the three
 flag classes which never needed a base, and record nothing at all, in a command
 run from a session-stop hook) and it does not fall back to a full scan (that
 asserts every declared touch changed, which the tool does not know, and routine
@@ -764,7 +793,7 @@ could not read stays unread rather than being counted as clean. Any surface
 rendering staleness therefore has three states to paint, not two — `stale`, `not
 stale`, and `could not tell`.
 
-**A fourth flag class, not raised by sweep.** `kyo ungate` flags the record when a
+**A fifth flag class, not raised by sweep.** `kyo ungate` flags the record when a
 `holding-for` gate clears on a record carrying criteria older than the clearing
 (`gate-cleared-stale-criteria`). A gate's meaning is "this record is waiting on
 something that will change what it should be", so clearing one always implies
@@ -774,11 +803,13 @@ resolution, with no text analysis in it, and only still-unmet criteria are named
 types clear when something *happened* or someone *looked*, and a flag that fires on
 every clearing becomes the routine false positive nobody reads.
 
-`kyo flag resolve <flag-id> [--why]` is this build's own acknowledge/resolve
+`kyo flag resolve <flag-id>... [--why]` is this build's own acknowledge/resolve
 design for a flag: it records who resolved it and when, and never re-runs or
-silently clears the condition that produced it. An already-resolved flag
-refuses a second resolve (exit 2); sweeping again after a resolve, with the
-condition still true, creates a *new* flag rather than reopening the old one.
+silently clears the condition that produced it. Several ids are one act under one
+`--why`, and an unknown or already-resolved id among them refuses the whole call. An
+already-resolved flag refuses a second resolve (exit 2); sweeping again after a
+resolve, with the condition still true, creates a *new* flag rather than reopening the
+old one.
 
 `touch-changed` is the one flag class that *supersedes* rather than accumulates
 (KYO-69). Sweep runs on every session-stop hook, and before this it filed a new
@@ -794,19 +825,19 @@ names the survivor, so the surviving flag says everything all of them said. It i
 dry run without `--apply`, and idempotent: after one apply the plan is empty.
 
 **A flag outlives the record it was raised under only until that record settles**
-(KYO-346). Moving a record to its kind's completion status, `kyo wont-do`, and
-`kyo void` each close, in the same transaction as the move, that record's own open
-`touch-changed`, `touch-missing` and `description-predates-claim` flags — a
-completed or retired record has no open work left for one of those to ask about —
-recording a `resolved_why` that names the move and the actor. `kyo accept --close`
-inherits this for free: it walks a record to completion through `kyo move`.
-`near-duplicate-criteria` and `gate-cleared-stale-criteria` are left open
-regardless of the record's status: the first is a fact about the criteria's text
-and the second a judgement about an unobserved criterion after a gate cleared, and
-neither is answered by the record having moved. `kyo flag resolve --settled --why
-<reason> [--apply]` is the one-act repair for a store that accumulated the first
-three under already-settled records before this existed — dry run by default, on
-`kyo flag collapse`'s own terms, printing the count closed per record and per type.
+(KYO-346, KYO-748). Moving a record to its kind's completion status, `kyo wont-do`, and
+`kyo void` each close, in the same transaction as the move, every open flag under that
+record, of any class — a completed or retired record has no open work left for a flag
+to ask about — recording a `resolved_why` that names the move and the actor. The move
+also closes every open `near-duplicate-criteria` flag on another record that names this
+one as its pair, since a finding about two records' criteria has nothing left to say
+once either is settled. `kyo accept --close` inherits this: it walks a record to
+completion through `kyo move`. `kyo flag resolve --settled --why <reason> [--apply]` is
+the one-act repair for a store that accumulated flags under already-settled records, or
+paired with one, before the move closed them — dry run by default, on `kyo flag
+collapse`'s own terms, printing the count closed per record and per type. `kyo brief`
+lists the open flags on unsettled records only and states how many more sit on settled
+records, which `kyo flag list` prints.
 
 `kyo brief` splits the unresolved `touch-changed` flags by whether the record has
 any dispatch history, and prints both counts even at zero. Firing for a record that
@@ -904,11 +935,18 @@ since the previous brief, and every event since the previous brief. The last
 two are bounded by a `brief_runs` row's own recorded cursor (`last_event_seq`,
 `last_shift_note_seq`) — a design constraint, not an implementation
 convenience: "what changed since I last looked" must never be a git diff.
-Last, only when something differs, a block naming each packaged asset (the
-`/kyosei` skill, the hooks, the procedures ledger, rule-wise) whose copy in
-this project has fallen behind this build's, with the remedy command beside
-each — the same drift comparisons `kyo doctor` uses, read here at session
-start rather than only at the Stop hook (KYO-213).
+Only when something differs, the brief also carries a block, printed above the
+events, naming each packaged asset whose copy in this project has fallen behind this
+build's — the same drift comparisons `kyo doctor` uses, read here at session start
+rather than only at the Stop hook (KYO-213). The procedures ledger is compared rule by
+rule in every project. The `/kyosei` skill and the hooks are compared only where the
+project holds copies of them (`kyo install-hooks --copies`); a project on the Claude
+Code plugin holds none, so both comparisons are skipped there (KYO-608). Each finding
+names its remedy command where it has one (`kyo install-skill`, `kyo install-hooks` or
+`kyo install-procedures`); a rule the project reworded has none. In the repository
+Kyosei is built from, the block instead says when the installed build is older than the
+checkout, and names no install command, since each would write the older packaged text
+over the newer source (KYO-309).
 
 The **reminders** section (KYO-497; headed `carried` until KYO-521) sits directly after
 gated work. It lists every record of a kind whose policy carries `carried: true` (the
@@ -928,8 +966,9 @@ closing note no longer needs to carry it. The `--json` keys keep the policy's wo
 
 `--compact` is the form the packaged `SessionStart` hook injects, and it is
 shorter in two ways (KYO-419). Every count-section with nothing in it (scope
-unknown, finished but not moved, built awaiting verification, unobserved waiting
-on a person, reminders, running dispatches, terminated-no-report) is named on one shared
+unknown, blocked, finished but not moved, built awaiting verification, unobserved
+waiting on a person, reminders, standing docs obligations, running dispatches,
+terminated-no-report) is named on one shared
 `empty (0 each):` line rather than given a heading and a "(none)" of its own, so
 "checked, and empty" is still on the page. The per-section
 explanatory parentheticals are dropped, the unobserved section's remedy sentence
