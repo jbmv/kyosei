@@ -990,6 +990,10 @@ kyo check-build                            # has the `kyo` under this session ch
 kyo turns                                  # the turn index of a project that opted in to
                                             # reading transcripts: one line per prompt, no
                                             # text; `--hook` is the form the hooks run (KYO-657)
+kyo agenda                                 # this session's task list, which the person also
+                                            # writes from a device; `add --text "..."`,
+                                            # `check <id>` and the rest change it as the
+                                            # orchestrator (KYO-770)
 kyo show KYO-S19                           # read one shift note back by id, any time
 kyo note --shift --file thought.md         # append to the continuously-written shift log
 kyo where                                  # where is this project, and can THIS build open its

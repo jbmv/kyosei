@@ -131,7 +131,7 @@ decides, and how a setup agent can find the answer before asking.
   | When | Hook runs | Why |
   |---|---|---|
   | Session start | `kyo brief` | Anchors the session: deltas, ready work, gates, the last shift note. |
-  | Every prompt | `kyo check-build --hook` | One line when the installed `kyo` changed mid-session. |
+  | Every prompt | `kyo check-build --hook` | One line when the installed `kyo` changed mid-session, and the unchecked items of the session's task list. |
   | Every prompt | `kyo turns --hook` | Silent; indexes the prompt where D14 is yes. |
   | Before a `git push` | `kyo check-push` | Refuses a push that would publish an in-repo store until acknowledged. |
   | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see E3). |

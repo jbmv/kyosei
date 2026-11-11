@@ -588,6 +588,9 @@ kyo verify <criterion-id> --verdict met --method human-observed --evidence-file 
 kyo attach <id> --file dump.har --supports <claim-id>
 kyo sessions [--hook] [--json]    # session hooks record this project's Claude Code sessions,
                                   #   and where each is on claude.ai, into gitignored local state
+kyo agenda [add|edit|check|uncheck|remove|move]   # the session's task list, written by the
+                                  #   person from a device and by the orchestrator here; session
+                                  #   state under $KYOSEI_HOME, not the store's (KYO-770)
 kyo dispatch <id>                 # checks premises (shows claims + levels), checks touch-disjointness
                                     # vs running dispatches, generates brief, freezes it
 kyo report <dispatch-id> --file .kyosei-report.json   # structured ingest; absence of report =
@@ -662,6 +665,12 @@ replaces both halves with mechanisms:
   like everything else; the next brief opens with the previous shift log, dated.
 - **Closeout is a hook, not a ritual.** `SessionEnd`/`Stop` hooks run `kyo doctor` + `kyo
   sweep` + report-completeness checks. Nothing about ending a shift is remembered.
+- **A session's task list is carried by the brief, and is not a record** (KYO-770). The list
+  holds the orchestrator's plan for its coming turns and the person's reminders for the
+  session. It is session state kept beside the composer's draft, written by both, and nothing
+  is written when a session ends: the next session's brief prints what was left unchecked and
+  adds the person's items to the new session's list, once. A wait of days remains a
+  `reminder` record, which every brief lists with its age.
 - **Worktree cleanup refuses to destroy work.** `kyo dispatch close` fails loudly if the
   worktree holds uncommitted changes or the dispatch has no ingested report — the check the old
   "Ending a shift" checklist performed from memory, with `--force` silently discarding. KYO-207
@@ -920,7 +929,13 @@ and integrates via:
     KYO-335 one installed `kyo` serves every project on a machine (the uv tool since KYO-443
     and KYO-450), so an upgrade (`uv tool upgrade kyosei`, or a reinstall from source)
     changes the tool under running sessions; the session-start brief names a change between
-    sessions, and this names one within a session.
+    sessions, and this names one within a session. The same hook prints the unchecked items
+    of the session's task list (KYO-770), which is how an orchestrator reads its plan and
+    the person's reminders on every turn. At `Stop`, `kyo sessions --hook` shows the person
+    their own unchecked items as a hook `systemMessage`: at that event any text that
+    reaches the agent makes it take another turn, so an announcement that must not hold
+    the session open is addressed to the person and the agent reads the items on the next
+    prompt.
   - Every packaged hook exits 0 with no output where no Kyosei project resolves, because a
     plugin's hooks fire in every session (KYO-591): `kyo`'s own project resolution decides when
     it is on PATH, and the missing-`kyo` guard's marker walk decides when it is not. A blocking
