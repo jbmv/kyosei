@@ -627,6 +627,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-732` (task) — Mac app: a top bar of views, and the Records view
 - **2026-11-11** — `KYO-727` (bug) — Mac app composer: an empty prompt vanishes, an anchor lands on a new line, and the view jumps while typing
 - **2026-11-11** — `KYO-726` (task) — Mac app: status bar, subagent rows and composer buttons restyled
+- **2026-11-11** — `KYO-725` (bug) — Mac app: the chat stopped updating and a sent prompt stayed on Sending
 - **2026-11-11** — `KYO-723` (task) — Mac app: a code block in a reply wraps and has a copy button
 - **2026-11-11** — `KYO-722` (task) — Mac app: Send now on a held prompt, delivered at the session's next tool call
 - **2026-11-11** — `KYO-721` (task) — Mac app: a real terminal on the session's pane, served by kyo serve
