@@ -658,6 +658,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-759` (task) — Mac app Records: one flat list, newest first, with the kind beside the id
 - **2026-11-11** — `KYO-757` (task) — A report's false premises and disagreements have ids and can be anchored to
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
+- **2026-11-11** — `KYO-754` (task) — Mac app: Command-F searches the open record and the open file
 - **2026-11-11** — `KYO-753` (task) — Mac app: the terminal covers the whole chat pane
 - **2026-11-11** — `KYO-752` (task) — Mac app: an empty chat says the session is active and waiting
 - **2026-11-11** — `KYO-751` (bug) — Mac app: the side panel's disclosure mark turns about the wrong point
