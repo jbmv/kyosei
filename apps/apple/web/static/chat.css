@@ -764,7 +764,7 @@ body.terminal-open #terminal { display: flex; }
 .mark-anchor-mode .icon { width: 14px; height: 14px; }
 .mark-divider { flex-basis: 100%; height: 0; border-top: 1px solid var(--soft-line); }
 body.anchor-mode, body.anchor-mode * { cursor: var(--anchor-cursor) !important; }
-.anchor-dim { opacity: 0.4; transition: opacity 0.1s; }
+body.anchor-mode.anchor-off, body.anchor-mode.anchor-off * { cursor: var(--anchor-cursor-off) !important; }
 .anchor-lit { border-radius: 4px; background: color-mix(in srgb, var(--pastel-blue) 20%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--pastel-blue) 45%, transparent); }
 ::highlight(anchor-preview) { background-color: color-mix(in srgb, var(--pastel-blue) 38%, transparent); }
 .mark-thumb { width: 28px; height: 28px; margin-right: 5px; border-radius: 4px; object-fit: cover; vertical-align: middle; }

@@ -10,7 +10,7 @@ let page: Page | null = null;
 before(async () => { page = await openPage(); });
 after(async () => { await page?.close(); });
 
-const FIRST = "First sentence of the reply. Second sentence of it.";
+const FIRST = "First sentence of the reply. Second sentence of it.\n\nA second paragraph here.";
 const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /** A session whose chat has a reply and a tool call, a box typed in, and its + panel open. */
@@ -71,11 +71,12 @@ const press = (opened: Page, point: { x: number; y: number }) => opened.run(`(()
 })()`);
 
 const state = (opened: Page) => opened.run<{
-  mode: boolean; preview: string[]; dimmed: number; anchors: string[]; menu: boolean;
+  mode: boolean; preview: string[]; grey: boolean; dimmed: number; anchors: string[]; menu: boolean;
 }>(`(() => ({
   mode: document.body.classList.contains("anchor-mode"),
   preview: [...(CSS.highlights.get("anchor-preview") ?? [])].map((range) => range.toString()),
-  dimmed: document.querySelectorAll(".anchor-dim").length,
+  grey: document.body.classList.contains("anchor-off"),
+  dimmed: [...document.querySelectorAll("*")].filter((e) => getComputedStyle(e).opacity !== "1").length,
   anchors: [...document.querySelectorAll("#boxes .mark.held")].flatMap((mark) => mark.title.split("\\n")),
   menu: !!document.getElementById("anchor-menu")?.isConnected,
 }))()`);
@@ -104,7 +105,7 @@ test("the + panel's Anchor starts the mode; a hover shows the sentence and a pre
   assert.deepEqual(after.anchors, ["anchor: Second sentence of it."]);
 });
 
-test("a hover on what cannot be anchored dims it, and a press there does nothing", async (t) => {
+test("over what cannot be anchored the pointer greys, nothing dims, and a press does nothing", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
   await opened.run(`document.querySelector(".mark-panel .mark-anchor-mode").click()`);
@@ -115,8 +116,18 @@ test("a hover on what cannot be anchored dims it, and a press there does nothing
   await move(opened, point);
   await wait(50);
   const hovered = await state(opened);
-  assert.equal(hovered.dimmed, 1);
+  assert.equal(hovered.grey, true, "the pointer is grey");
   assert.deepEqual(hovered.preview, []);
+  // The space between a reply's two paragraphs is not a place either (it lit the whole reply).
+  const gap = await opened.run<{ x: number; y: number }>(`(() => {
+    const [one, two] = document.querySelectorAll("#chat .reply [data-source-line]");
+    const a = one.getBoundingClientRect(), b = two.getBoundingClientRect();
+    return { x: a.left + 5, y: (a.bottom + b.top) / 2 };
+  })()`);
+  await move(opened, gap);
+  await wait(50);
+  const between = await state(opened);
+  assert.deepEqual([between.grey, between.preview], [true, []]);
   await press(opened, point);
   const after = await state(opened);
   assert.deepEqual([after.mode, after.anchors], [true, []], "the mode stays on and nothing is anchored");
@@ -148,4 +159,43 @@ test("Escape ends the mode without anchoring", async (t) => {
   await opened.run(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
   const after = await state(opened);
   assert.deepEqual([after.mode, after.anchors], [false, []]);
+});
+
+const RECORD = {
+  id: "KYO-9", kind: "task", title: "A record to anchor", status: "open",
+  description: "What the record is about.",
+  criteria: [{ id: "KYO-9.c1", text: "A criterion of it", state: "unmet-unbuilt" }],
+};
+
+test("in Records a press on the record's metadata anchors the whole record", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  // The record is opened first, then the box's + panel and the mode.
+  await opened.run(`(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    window.kyo.records({ project: "p" });
+    const row = document.createElement("div");
+    row.dataset.open = "KYO-9";
+    document.body.append(row);
+    row.click();
+    row.remove();
+    window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
+    // The box's + panel and the mode, with the record open.
+    const area = document.querySelector("#boxes textarea").getBoundingClientRect();
+    document.querySelector("#boxes .box-body").dispatchEvent(new MouseEvent("mousemove",
+      { bubbles: true, clientX: area.left + 10, clientY: area.top + 8 }));
+    document.querySelector("#boxes .mark.ghost").click();
+    document.querySelector(".mark-panel .mark-anchor-mode").click();
+  })()`);
+  const point = await opened.run<{ x: number; y: number } | null>(`(() => {
+    const meta = [...document.querySelectorAll("#record *")].find((e) =>
+      !e.closest("[data-record-ref]") && e.children.length === 0 && e.textContent.trim()
+      && e.getBoundingClientRect().height > 0);
+    if (!meta) return null;
+    const box = meta.getBoundingClientRect();
+    return { x: box.left + 2, y: box.top + box.height / 2 };
+  })()`);
+  assert.ok(point, "the record's page has metadata outside its parts");
+  await press(opened, point!);
+  assert.deepEqual((await state(opened)).anchors, ["anchor: KYO-9 A record to anchor"]);
 });

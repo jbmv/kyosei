@@ -2553,33 +2553,38 @@ document.addEventListener("keydown", (event) => {
 // chat, an open record or an open file anchors it to that paragraph, as a right-click would.
 
 let anchorMode: { area: HTMLTextAreaElement; id: number } | null = null;
-let anchorDimmed: Element | null = null;
 let anchorLit: Element | null = null;
 /** Set by a press made in the mode, whose click must not also act on what it fell on. */
 let anchorSwallow = false;
 let anchorHoverFrame = 0;
 
-/** The pointer in the mode: the anchor icon, outlined so it shows on light and dark alike. */
-function anchorCursor(): string {
-  const strokes = (colour: string, width: number) =>
-    `<g fill='none' stroke='${colour}' stroke-width='${width}' stroke-linecap='round' stroke-linejoin='round'>${ICONS.anchor}</g>`;
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>`
-    + `${strokes("black", 4)}${strokes("white", 1.8)}</svg>`;
-  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") 12 12, crosshair`;
+/**
+ * The pointer in the mode: a solid anchor, ringed in white so it shows on light and dark
+ * alike, and grey over a place a press would not anchor (the maintainer, 2026-11-11).
+ */
+function anchorCursor(colour: string): string {
+  const shape = (paint: string, width: number) =>
+    `<g fill='none' stroke='${paint}' stroke-width='${width}' stroke-linecap='round' stroke-linejoin='round'>`
+    + `<circle cx='12' cy='5' r='2.2'/><path d='M12 7.2V21M7.5 11h9M4.5 13.5a7.5 7.5 0 0 0 15 0'/></g>`
+    + `<g fill='${paint}'><path d='M2.6 12.2l2-2.4 2 2.4z'/><path d='M17.4 12.2l2-2.4 2 2.4z'/></g>`;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='-1 -1 26 26'>`
+    + `${shape("white", 5.4)}${shape(colour, 2.8)}</svg>`;
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") 13 13, crosshair`;
 }
 
 function startAnchorMode(area: HTMLTextAreaElement, id: number): void {
   hideMark();
   anchorMode = { area, id };
-  document.body.style.setProperty("--anchor-cursor", anchorCursor());
+  document.body.style.setProperty("--anchor-cursor", anchorCursor("#1d1d1f"));
+  document.body.style.setProperty("--anchor-cursor-off", anchorCursor("#a3a3a3"));
   document.body.classList.add("anchor-mode");
 }
 
 function clearAnchorHover(): void {
   showRanges("anchor-preview", []);
   anchorLit?.classList.remove("anchor-lit");
-  anchorDimmed?.classList.remove("anchor-dim");
-  anchorLit = anchorDimmed = null;
+  anchorLit = null;
+  document.body.classList.remove("anchor-off");
 }
 
 function endAnchorMode(): void {
@@ -2602,6 +2607,9 @@ function anchorPlaceAt(
     const key = holder.dataset.key;
     const session = menu?.current;
     if (!key || !sources.has(key) || !session) return null;
+    // Between a reply's blocks a right-click takes the whole reply; a press in the mode
+    // takes words, so that space is not a place to anchor.
+    if (!own && key.startsWith("r:") && !target.closest("[data-source-line]")) return null;
     const span = spanAt(holder, key, target as HTMLElement, point, own);
     if (!span) return null;
     const item: AnchorItem = { kind: "anchor", key, session, ...span };
@@ -2609,9 +2617,17 @@ function anchorPlaceAt(
     return { item, range, element: range ? null : holder };
   }
   if (recordArticle.contains(target)) {
-    const element = target.closest<HTMLElement>("[data-record-ref]");
+    // A press outside the record's parts, on its metadata or summary, takes the whole record.
+    const part = target.closest<HTMLElement>("[data-record-ref]");
+    const head = recordArticle.querySelector<HTMLElement>(".record-head[data-record-ref]");
+    const element = part ?? head;
     const id = element?.dataset.recordRef;
     if (!element || !id) return null;
+    if (!part) {
+      const title = recordArticle.querySelector("h1")?.textContent ?? "";
+      const words = title.trim() ? `${id} ${firstWords(title, ANCHOR_WORDS)}` : id;
+      return { item: { kind: "record", id, words }, range: null, element: recordArticle };
+    }
     const text = element.classList.contains("record-head")
       ? recordArticle.querySelector("h1")?.textContent ?? ""
       : element.querySelector(".rec-text")?.textContent ?? "";
@@ -2633,12 +2649,6 @@ function anchorPlaceAt(
   return null;
 }
 
-/** The part of the page a hover that cannot anchor dims: its row or block, never the page. */
-function dimmedPart(target: Element): Element | null {
-  const part = target.closest("#chat > *, button, a, li, .rec-row, .mention-row, .tree-row, .chip, .box, p, div");
-  return part && part !== document.body && part !== document.documentElement ? part : null;
-}
-
 document.addEventListener("mousemove", (event) => {
   if (!anchorMode || !(event.target instanceof Element)) return;
   const target = event.target;
@@ -2653,8 +2663,7 @@ document.addEventListener("mousemove", (event) => {
       anchorLit = found.element;
       anchorLit.classList.add("anchor-lit");
     } else if (!found) {
-      anchorDimmed = dimmedPart(target);
-      anchorDimmed?.classList.add("anchor-dim");
+      document.body.classList.add("anchor-off");
     }
   });
 }, { passive: true });
