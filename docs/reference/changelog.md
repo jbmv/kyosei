@@ -630,6 +630,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-780` (bug) — The composer's undo does not take back an anchor, and a removed anchor stays highlighted in the chat
 - **2026-11-11** — `KYO-773` (task) — A dispatch's brief says each thing once: touches by path, and its length by section
 - **2026-11-11** — `KYO-772` (bug) — Mac app: the search bar cannot be closed by a press and crowds the header
 - **2026-11-11** — `KYO-770` (task) — A session's task list, kept by kyo serve and edited by the person and the orchestrator
