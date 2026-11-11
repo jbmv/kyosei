@@ -1,5 +1,7 @@
 # Setup decisions
 
+governs: src/kyosei/defaults/onboard.md
+
 This is the one list both onboarding documents are built from: the human guide explains
 each decision, and the agent setup prompt asks it. The prompt ships inside the wheel
 (`kyo onboard` prints it), and `tests/test_kyo_onboard.py` fails when a decision id below is
@@ -193,6 +195,8 @@ decides, and how a setup agent can find the answer before asking.
   and `kyo doctor` does not report it as drift while no skill is installed.
 
 ### C4. Worker agent types
+
+governs: src/kyosei/cmd_install_agents.py, src/kyosei/defaults/agents/worker.md, src/kyosei/defaults/agents/designer.md
 
 - **Default:** none. Workers run as the harness's general-purpose subagent, and the
   orchestrator passes the model at spawn time.
@@ -476,6 +480,8 @@ decides, and how a setup agent can find the answer before asking.
   ends the notice.
 
 ### D14. May Kyosei read this project's transcripts?
+
+governs: src/kyosei/seal.py
 
 The answer allows three things: checking that words credited to the person are theirs,
 counting the turns of a discussion a credit cites, and sealing each message as it is sent,

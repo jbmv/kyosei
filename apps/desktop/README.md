@@ -464,6 +464,14 @@ policy the suite currently declares) are checked, so pointing the suite back at
 
 ## The shell (KYO-232)
 
+<!-- governs:
+- apps/desktop/src/renderer/shell/shell.ts
+- apps/desktop/src/renderer/shell/rail.ts
+- apps/desktop/src/renderer/shell/sidebar.ts
+- apps/desktop/src/renderer/shell/columns.ts
+- apps/desktop/src/renderer/shell/home.ts
+-->
+
 Three regions and nothing else: the **rail**, the **sidebar**, and the **columns**.
 
 **The rail** is nine things in a narrow column — scratchpad, ideas, records, briefs,
@@ -709,6 +717,12 @@ asserts against, and it is the machine-readable form of "these regions persist".
 
 ## The tab registry, discovered by directory (KYO-232.c5)
 
+<!-- governs:
+- apps/desktop/src/renderer/tabs/kind.ts
+- apps/desktop/src/renderer/tabs/registry.ts
+- apps/desktop/build.mjs
+-->
+
 `src/renderer/tabs/<kind>/index.ts` exports one `TabKind`, and that is the whole
 registration mechanism: `build.mjs` enumerates the directories into
 `src/renderer/tabs/registry.generated.ts` (gitignored, because it is output), and
@@ -801,6 +815,11 @@ single named place, and the reason each is single is a law rather than taste.
 
 ### 1. One resolver, two sources — `src/main/kyo.ts`
 
+<!-- governs:
+- apps/desktop/src/main/kyo.ts
+- apps/desktop/src/main/shellenv.ts
+-->
+
 Every `kyo` this app runs goes through `resolveKyo()`. It knows exactly two
 sources and prefers them in a stated order:
 
@@ -844,6 +863,12 @@ Two rules live at that seam because that is the only place they can be enforced:
 
 ### 2. Every read and write goes through `kyo serve` — `src/main/kyoserve.ts` (KYO-459)
 
+<!-- governs:
+- apps/desktop/src/main/kyoserve.ts
+- apps/desktop/src/main/store.ts
+- apps/desktop/src/shared/served.ts
+-->
+
 The app is a client of `kyo serve` for every project it shows, this machine's included
 (KYO-452). `kyoserve.ts` is the one transport: a server
 is an address (`127.0.0.1:47370` for this machine, or `KYOSEI_SERVE_URL`; another
@@ -886,6 +911,10 @@ and a kyo it does not read is a status-bar chip that opens the same states.
 
 ### 3. Currency in the status bar
 
+<!-- governs:
+- apps/desktop/src/main/facts.ts
+-->
+
 The read path inherits the db-vs-export gap (KYO-74), so the status bar renders the
 direction, and can show all four states:
 
@@ -910,6 +939,11 @@ Bases and has no `kyosei/bases.yml`, so a `kyo base run --json` poll would need 
 config file written into a store this app must not write to.
 
 ### 4. The terminal is a real shell — `src/main/terminal.ts`
+
+<!-- governs:
+- apps/desktop/src/main/terminal.ts
+- apps/desktop/src/renderer/tabs/terminal/index.ts
+-->
 
 Ptys (`@lydell/node-pty`) with their working directory at the project root, drawn by
 xterm.js, on the login shell's environment (KYO-229). Typing `kyo` there reaches the
@@ -1042,6 +1076,10 @@ its environment would be writing into somebody else's; `seams.spec.ts` fails on 
 
 ### A dev box's session, over the person's own SSH (KYO-474.c3)
 
+<!-- governs:
+- apps/desktop/src/main/ssh.ts
+-->
+
 A window on a dev box's project has no tmux to attach with here: the session is on the
 other machine. Its client pty runs `ssh -t <host> zsh -lc 'kyo controller attach
 <prefix>'`, built by `ssh.ts`'s one argv builder (`orchestratorAttachArgv`, with `-t` and
@@ -1058,6 +1096,11 @@ whose SSH host ssh could not be handed. `tests/remote-terminal.spec.ts` drives a
 it against an ssh stand-in.
 
 ### The attach is a pty, not a typed command (KYO-293.c2)
+
+<!-- governs:
+- apps/desktop/src/main/tmuxctl.ts
+- apps/desktop/src/main/tmuxenv.ts
+-->
 
 KYO-115 ran a POSIX script in the pane's own shell (`sessionScript`) which `exec`'d
 the client, so a detach left an empty pty with no shell to return to. KYO-283 stopped
@@ -1146,6 +1189,10 @@ from the Finder inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, measured, and `tm
 is at `/opt/homebrew/bin/tmux`. The pane is a private shell there and says so.
 
 ### The app asks the login shell for its environment, once (KYO-229)
+
+<!-- governs:
+- apps/desktop/src/main/shellenv.ts
+-->
 
 And then it stopped being the right behaviour. A Finder-launched app that says "I
 cannot see your tmux" is a true sentence and a useless one: a Finder launch showed it
@@ -1369,6 +1416,10 @@ is replaced by a single ask.
 
 ## The claude.ai pane (KYO-186)
 
+<!-- governs:
+- apps/desktop/src/renderer/tabs/claude/index.ts
+-->
+
 A pane beside the terminal — not instead of it — showing claude.ai, opened on **this
 project's own Remote Control session** when the store names one. The footer's
 `claude` button shows and hides it; it starts closed, unlike the terminal, because
@@ -1408,6 +1459,10 @@ an anchor with no href" below and decided in KYO-321. Anything that would open a
 window goes to the real browser instead.
 
 ### Which session, and why the store rather than a scan
+
+<!-- governs:
+- apps/desktop/src/main/sessions.ts
+-->
 
 **The session writes its own Remote Control information into the store, from a
 session hook.** `kyo sessions --hook` runs on `SessionStart`, `Stop` and
@@ -1523,6 +1578,13 @@ this project's, and no check here signs in.
 
 ## Commands on a machine: the orchestrator row and New project (KYO-460)
 
+<!-- governs:
+- apps/desktop/src/main/controller.ts
+- apps/desktop/src/main/ssh.ts
+- apps/desktop/src/shared/controller-trust.ts
+- apps/desktop/src/renderer/shell/new-project-dialog.ts
+-->
+
 The app changes a machine only by running ordinary CLI commands there, locally or over
 the person's own SSH (KYO-452). `src/main/ssh.ts` is the one place those commands are
 built and run; `controller.ts` and `main.ts`'s New project handlers call it.
@@ -1570,6 +1632,11 @@ socket nothing listens on, so no suite app reaches ssh or the machine's real
 `tmux -L kyosei` server.
 
 ## The v3 read model (KYO-231)
+
+<!-- governs:
+- apps/desktop/src/main/records.ts
+- apps/desktop/src/main/activity.ts
+-->
 
 Everything the v3 tabs render, produced in the main process so that **no tab derives
 anything**. Four queries and a push, all reads, none of which can mutate a store.
@@ -1673,6 +1740,12 @@ verdict counts, the unaudited stop count, and the derived classes.
 
 ## `kyosei://<project>/<id>` — deep links (KYO-230)
 
+<!-- governs:
+- apps/desktop/src/main/links.ts
+- apps/desktop/src/renderer/links/index.ts
+- apps/desktop/src/renderer/tabs/views/ids.ts
+-->
+
 A link in the orchestrator's message that opens the record and highlights the gate,
 claim, criterion, note, evidence, flag or dispatch it names. Three surfaces, one URL,
 and none of them knows how to read an id:
@@ -1755,6 +1828,10 @@ asserts the view never left the page it was on, because handing a `kyosei://` li
 route it straight back — and is not this.
 
 ### In claude.ai the link is an anchor with no href, so the gesture is a click (KYO-263)
+
+<!-- governs:
+- apps/desktop/src/main/claude-preload.ts
+-->
 
 **A `kyosei://` link written into a claude.ai message did nothing when you clicked it,
 and that was the site's doing, not this app's.** Its message renderer keeps the link's
@@ -2131,6 +2208,10 @@ mode adds no second route to a record.
 
 ### `ideas.py`, ported once, and not trusted
 
+<!-- governs:
+- apps/desktop/src/shared/ideafile.ts
+-->
+
 `shared/ideafile.ts` is the second rule in this app implemented twice, after
 `grouping.ts`, and it is there for a forced reason: the Base engine answers
 beautifully for files **on disk**, and nothing answers for the buffer the human is
@@ -2170,34 +2251,105 @@ saved / NOT saved` is true. A failed write is never silent and never reads as sa
 
 ## Layout
 
+<!-- governs:
+- apps/desktop/src/main/preload.ts
+- apps/desktop/src/main/remote.ts
+- apps/desktop/src/main/projects.ts
+- apps/desktop/src/main/service.ts
+- apps/desktop/src/main/docs.ts
+- apps/desktop/src/main/ideas.ts
+- apps/desktop/src/main/procfacts.ts
+- apps/desktop/src/main/tabdrag.ts
+- apps/desktop/src/renderer/index.html
+- apps/desktop/src/renderer/shell.css
+- apps/desktop/src/renderer/renderer.ts
+- apps/desktop/src/renderer/dom.ts
+- apps/desktop/src/renderer/icons.ts
+- apps/desktop/src/renderer/overlays.ts
+- apps/desktop/src/renderer/links/styles.ts
+- apps/desktop/src/renderer/shell/activity-format.ts
+- apps/desktop/src/renderer/shell/remote-dialog.ts
+- apps/desktop/src/renderer/tabs/home/index.ts
+- apps/desktop/src/renderer/tabs/compose/index.ts
+- apps/desktop/src/renderer/tabs/compose/editor.ts
+- apps/desktop/src/renderer/tabs/compose/complete.ts
+- apps/desktop/src/renderer/tabs/compose/idea-dialog.ts
+- apps/desktop/src/renderer/tabs/compose/styles.ts
+- apps/desktop/src/renderer/tabs/record/index.ts
+- apps/desktop/src/renderer/tabs/record/page.ts
+- apps/desktop/src/renderer/tabs/record/styles.ts
+- apps/desktop/src/renderer/tabs/views/index.ts
+- apps/desktop/src/renderer/tabs/views/styles.ts
+- apps/desktop/src/renderer/tabs/docs/markdown.ts
+- apps/desktop/src/renderer/tabs/docs/mermaid.ts
+- apps/desktop/src/renderer/tabs/docs/styles.ts
+- apps/desktop/src/shared/merge3.ts
+-->
+
 ```
 src/shared/protocol.ts        the main<->renderer contract (windows, facts, terminal, the read model, layouts)
 src/shared/ideafile.ts        `kyosei.ideas`'s frontmatter and section readers, ported and checked
+src/shared/merge3.ts          a line-based three-way merge, for a save kyo serve refused as stale (KYO-575)
+src/shared/served.ts          where a project is served from, in words
+src/shared/controller-trust.ts  what the claude tab says while a session waits on the workspace-trust prompt (KYO-567)
 src/main/main.ts              window lifecycle, the window registry, the IPC wiring, layout memory
 src/main/preload.ts           the whole renderer capability surface (contextIsolation on)
 src/main/claude-preload.ts    the claude view's own preload: one click listener, nothing exposed (KYO-321)
 src/main/kyo.ts               THE resolver: two sources, one invocation, quoting, argv guard
 src/main/kyoserve.ts          THE transport: a client of kyo serve, a project as (server, name) (KYO-459)
 src/main/store.ts             the store layout's file names, and nothing that opens them
+src/main/service.ts           the store-facing seam: one implementation for every project (KYO-368, KYO-459)
+src/main/projects.ts          this machine's project registry, as the app sees it
 src/main/facts.ts             locating the store and the currency verdict
 src/main/records.ts           every store read, and the allowlist that keeps them reads
+src/main/docs.ts              every read the document views make, and no write
 src/main/ideas.ts             the scratchpad and `ideas/`, read and written through kyo serve's file routes
 src/main/activity.ts          the activity rows, renamed from `kyo activity --json`
 src/main/links.ts             the `kyosei://` grammar, the resolver, and `followLink`
+src/main/sessions.ts          which claude.ai page the Remote Control pane opens on
+src/main/controller.ts        the orchestrator row: whether the session is running, and Start (KYO-460)
+src/main/ssh.ts               running CLI commands on a machine: this one, or another over SSH (KYO-460)
+src/main/procfacts.ts         what a process is called, and what the machine is called
+src/main/tabdrag.ts           which window's tab strip is under a screen point
 src/main/shellenv.ts          the login shell's environment, captured once it worked, and the log of every ask (KYO-229, KYO-266)
 src/main/remote.ts            the other machines' kyo serves this app connected to, remembered by address
 src/main/terminal.ts          the pty, the tmux session, and removing an earlier build's `kyo` links (KYO-450)
 src/main/tmuxenv.ts           its pty-free half: the pane's environment, which tmux, the socket funnel (KYO-388)
+src/main/tmuxctl.ts           the one place a tmux command is run and its answer read (KYO-283)
+src/renderer/index.html       the one document both window kinds load
 src/renderer/renderer.ts      the entry: a shell window, or one tab moved into a window
+src/renderer/dom.ts           DOM helpers
+src/renderer/icons.ts         the icon set, as path data
+src/renderer/overlays.ts      what is drawn over the page: a context menu, a prompt
+src/renderer/links/index.ts   the link renderer every text surface uses (KYO-233.c3)
+src/renderer/links/styles.ts  the link renderer's CSS
 src/renderer/shell/shell.ts   the shell -- layout memory, badges, pop-out, deep links, menu commands
 src/renderer/shell/rail.ts    the nav rail, and the tab kinds that contribute to it
 src/renderer/shell/sidebar.ts the four lists, and the rows every handler shares
 src/renderer/shell/columns.ts columns of tabs: the model, the dragging, the menu, the drop outside
 src/renderer/shell/home.ts    the home page: what a new tab or an empty column offers
+src/renderer/shell/activity-format.ts     the Activity list's arithmetic and links (KYO-251)
+src/renderer/shell/new-project-dialog.ts  New project: a machine, a folder, then `kyo init` (KYO-460)
+src/renderer/shell/remote-dialog.ts       Connect to a dev box: an address, then a project
 src/renderer/tabs/kind.ts     THE TAB INTERFACE -- read this to write a tab
 src/renderer/tabs/registry.ts what the build discovered, checked against its directories
 src/renderer/tabs/<kind>/     one directory per tab kind; the build enumerates them
+src/renderer/tabs/home/index.ts           the home tab
+src/renderer/tabs/claude/index.ts         the claude tab: the rectangle and caption of the Remote Control view
+src/renderer/tabs/terminal/index.ts       the terminal tab: xterm.js bound to the main process's pty
+src/renderer/tabs/compose/index.ts        the compose tab: the scratchpad and idea files, editable, with autosave
+src/renderer/tabs/compose/editor.ts       the CodeMirror editor, its ribbon and its completion popup
+src/renderer/tabs/compose/complete.ts     `[[`, `#` and `[[<id>.` completion from the registries
+src/renderer/tabs/compose/idea-dialog.ts  the promote-to-idea dialog (KYO-252)
+src/renderer/tabs/record/index.ts         the record tab
+src/renderer/tabs/record/page.ts          the record page: every child object as a section
+src/renderer/tabs/views/index.ts          the views tab: records, awaiting-human, the brief, one document
+src/renderer/tabs/views/ids.ts            ids in free text, made into links
+src/renderer/tabs/docs/markdown.ts        a document rendered read-only
+src/renderer/tabs/docs/mermaid.ts         mermaid diagrams, read-only
+src/renderer/tabs/<kind>/styles.ts        that tab's own CSS
 src/renderer/shell.css        the v3 stylesheet
+build.mjs                     the build and, with `--pack`, the application bundle
 tests/fixture.ts              throwaway stores, built by the real CLI, in spacey paths
 tests/shell.spec.ts           launches the real app and drives the v3 shell
 tests/seams.spec.ts      drives the seams directly, with no app
@@ -2231,12 +2383,14 @@ src/renderer/ideas/tools.ts       the scratchpad tool and `ideas/` as a file tre
 src/renderer/ideas/mode.ts        the three panes, the open document, the saving
 ```
 
-`src/shared/grouping.ts` and `src/shared/ideafile.ts` sit beside the protocol for the
-same reason: both processes need them. Grouping, because the
-folder tree groups in main where the rows are read, and the bubble rendering groups
-the Base result the renderer already holds.
+The files under `src/shared/` sit beside the protocol for the same reason: both
+processes need them.
 
 ## Packaging (KYO-176)
+
+<!-- governs:
+- apps/desktop/build.mjs
+-->
 
 ```
 npm --prefix apps/desktop run pack     # → apps/desktop/release/Kyosei-darwin-arm64/Kyosei.app

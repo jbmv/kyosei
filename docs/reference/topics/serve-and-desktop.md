@@ -4,6 +4,8 @@
 
 ### Starting an orchestrator from another machine: `kyo orchestrator` (KYO-458)
 
+governs: src/kyosei/cmd_controller.py, src/kyosei/home_settings.py
+
 `kyo orchestrator start <project>` starts a detached tmux session, named after the
 project's prefix, that runs the machine's orchestrator command in the project's
 directory, and returns at once. `kyo orchestrator list` shows each registered
@@ -99,6 +101,8 @@ which ends its server and every orchestrator session in it, and removes the file
   KYO`. Errors come back as the SSH command's stderr.
 
 ### Serving a store: `kyo serve` (KYO-448)
+
+governs: src/kyosei/serve.py, src/kyosei/serve_events.py, src/kyosei/serve_files.py, src/kyosei/serve_install.py, src/kyosei/cmd_projects.py
 
 `kyo serve` serves every project this machine knows to any viewer, over plain HTTP
 on loopback. The projects are the ones `kyo projects list` shows
@@ -219,6 +223,8 @@ table.
 
 ### Reading sessions: the session routes (KYO-689)
 
+governs: src/kyosei/serve_send.py#require_reader
+
 Beside the store and file routes, `kyo serve` serves a project's Claude Code sessions,
 read-only. These routes answer only in a project that has opted in with
 `read_transcripts: true` in `kyosei/config.yml`; until then each refuses (403) and names
@@ -247,6 +253,8 @@ A browser's `EventSource` cannot send the header, so a client reads the stream w
 request it can set headers on.
 
 #### Which routes need a device token
+
+governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/cmd_statusline.py, src/kyosei/harness/claude_code_transcript.py, src/kyosei/harness/claude_code_pane.py
 
 | Routes | Token |
 |---|---|
@@ -544,6 +552,8 @@ directory is `~/.claude`; a `CLAUDE_CONFIG_DIR` set only in a shell does not rea
 
 ### Searching what was said: the search route (KYO-812)
 
+governs: src/kyosei/transcript_search.py
+
 `GET /v1/projects/<name>/search?q=<phrase>` searches the text of the person's prompts and of
 the assistant's replies across the project's sessions. It reads what the session routes
 read, so it asks for the same things: a device token of any permission, checked first, and
@@ -635,6 +645,8 @@ characters an excerpt keeps on each side of the first match, 80 when it is absen
 
 ### The results opened in the app: the history routes (KYO-826)
 
+governs: src/kyosei/serve.py#_history, src/kyosei/serve_sessions.py#record_history
+
 `history/recent` keeps, per project and on the server, the search results a client reports
 having opened, so that devices share one list as they share the recently opened files. It
 needs a device token of any permission, checked first, and a project that has opted in with
@@ -654,6 +666,8 @@ The list is one JSON file per project under `$KYOSEI_HOME/composer/recent-histor
 the recently opened files, outside every repository and readable by this account alone.
 
 ### Sending input: the send routes (KYO-699)
+
+governs: src/kyosei/serve_send.py, src/kyosei/device_tokens.py
 
 `kyo serve` can type into a session's terminal, which drives an agent that can run commands.
 It is off until you turn it on, and each request needs a token issued to one device.
@@ -741,6 +755,8 @@ and reason. It never holds a segment's text. If the log cannot be written, or wo
 a git repository, the send is refused before any key is sent.
 
 ### Saved drafts and held messages (KYO-703)
+
+governs: src/kyosei/serve_drafts.py, src/kyosei/serve_held.py
 
 The composer's unsent text is kept by the server, so that it survives closing the app and
 moving between devices. Both kinds live under `$KYOSEI_HOME/composer/`, in files private to
@@ -888,6 +904,8 @@ held. On a session's event stream, the `ready` event carries `held` and a `held`
 
 ### A session's task list (KYO-770)
 
+governs: src/kyosei/serve_agenda.py, src/kyosei/cmd_agenda.py
+
 A session has one ordered list of items that the person and the orchestrator both write. The
 person keeps reminders on it, and the orchestrator keeps its plan for the coming turns. The
 person writes from a device, through the route below; the orchestrator writes with
@@ -990,6 +1008,8 @@ can fail its own command over the list.
 
 ### Attachments (KYO-715)
 
+governs: src/kyosei/serve_attachments.py
+
 A client on another machine attaches a file, such as an image pasted into a paragraph of a
 prompt. The session runs on the server's machine, so the file is saved there and the agent is
 given its path (see "Sending a prompt" below). The routes are under
@@ -1024,6 +1044,8 @@ one declared, with `declared` and `found`), `attachment-empty` (400), `attachmen
 token. A refused file is not saved.
 
 ### Notes: the note routes (KYO-706)
+
+governs: src/kyosei/serve_notes.py, src/kyosei/cmd_notes.py, src/kyosei/report_entries.py
 
 A note is the person's text on the places it addresses, as `kyo notes` records it
 (`kyo reference notes`). Clients file, find, tag and send notes through these routes, each
@@ -1308,6 +1330,8 @@ served file that is not text is refused with 415 and `not-text`.
 
 ### Starting an orchestrator session: the start route (KYO-719)
 
+governs: src/kyosei/serve_orchestrator.py
+
 `kyo serve` starts a project's orchestrator session on request, so that a device with no SSH
 path to the machine can start one (decision KYO-718). This is the one process `kyo serve`
 starts.
@@ -1358,6 +1382,8 @@ its time, project, device, and its outcome (`started`, `refused`, `failed`) with
 reason. A start that cannot be recorded is not made.
 
 ### A terminal on a session's pane: the terminal routes (KYO-721)
+
+governs: src/kyosei/serve_terminal.py
 
 `kyo serve` streams a session's pane to a client as the pane's program draws it, and types
 what the client sends into it. A terminal emulator in the client draws the stream, so the
@@ -1429,6 +1455,8 @@ never logged, since it may be a password; a refused input or resize is logged, w
 action `terminal-input` or `terminal-resize`.
 
 ### Reading a project's files: the file routes (KYO-735)
+
+governs: src/kyosei/serve_tree.py
 
 A plan, a proposal or a source file that an agent names in a reply is a file on the machine
 that runs the session, and a client on another device cannot open it. `kyo serve` therefore

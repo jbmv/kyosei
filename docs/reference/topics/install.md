@@ -4,6 +4,8 @@ Installing `kyo`, checking which copy is running, and moving a project to a newe
 
 ## Install
 
+governs: src/kyosei/cmd_harness.py, src/kyosei/cmd_harness_migrate.py, src/kyosei/cmd_onboard.py, src/kyosei/harness/__init__.py, src/kyosei/harness/__main__.py, src/kyosei/harness/claude-code/plugin/.claude-plugin/plugin.json, src/kyosei/harness/claude-code/.claude-plugin/marketplace.json
+
 **One `kyo` per machine, installed as a uv tool, and `kyo version` says which kind a
 running copy is (KYO-317).** Every hook in every project, every
 Terminal.app session, the desktop app and the app's terminal panes run that one
@@ -154,6 +156,8 @@ make lint    # ruff
 
 ## Upgrading
 
+governs: src/kyosei/install_hooks.py, src/kyosei/install_skill.py, src/kyosei/install_procedures.py, src/kyosei/cmd_check_build.py, src/kyosei/changelog.py, src/kyosei/buildinfo.py
+
 The section above says how to reinstall. This one says **when it is worth doing,
 and what you get**. Without it, a project can report a defect that its installed build
 already fixes, because nothing says which build is running (KYO-226).
@@ -290,6 +294,8 @@ consumer across a `schema_version` bump" just above: re-snapshot, `kyo rebuild
 --force`, `kyo export --refresh`, `kyo doctor`.
 
 ### Upgrading from schema 25 to 26
+
+governs: build_backend/kyosei_build.py
 
 This subsection is what a project's orchestrator has to **do** differently after moving to a
 build at schema 26 from one at schema 25, in the order it will meet it. `kyo changelog`

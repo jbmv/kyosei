@@ -302,6 +302,8 @@ sends carries a private term or home path in its message or author name (KYO-669
 
 ### The whole suite is the orchestrator's: `orchestrator_only_commands` (KYO-298)
 
+governs: src/kyosei/cmd_check_command.py
+
 **This is opt-in, through one config key, and a project that declares nothing is
 unaffected.** Nothing below applies until the project names the commands.
 
@@ -565,6 +567,8 @@ a merge script.
 
 ### Prior-art search (KYO-585, KYO-586)
 
+governs: src/kyosei/prior_art.py
+
 **Off until the project chooses, and available only with the extra.** The search uses
 recx-cli, installed with `uv tool install 'kyosei[recx]'`. A project records its choice
 with `kyo prior-art-setting on` or `kyo prior-art-setting off`; both write `state` under
@@ -748,7 +752,7 @@ as it is, and the token is ignored.
 
 ## Quick start
 
-governs: src/kyosei/cli.py
+governs: src/kyosei/cli.py, src/kyosei/explanations.py, src/kyosei/prose.py
 
 The block lists alternatives side by side as well as steps, so a line is not always one
 that works where it stands. A comment that opens with a tag in square brackets says so:
@@ -1225,6 +1229,8 @@ kyo install-hooks [--print] [--copies]     # merge Claude Code hook templates in
 shape flags `--full`, `--pretty` and `--compact-json`.
 
 ### One record, one file: `--from` (KYO-330)
+
+governs: src/kyosei/cmd_records.py#_refuse_from_combo, src/kyosei/cmd_records.py#_from_check_output
 
 Filing a record with the separate flags means a scratch file per multi-line field —
 `--description-file`, `--criteria-file`, `--touches-file` — plus the one-line flags

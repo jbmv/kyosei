@@ -4,7 +4,7 @@ Layer 3: `governs:` sections, `kyo docs check`, documentation obligations and th
 
 ## Layer 3: the docs-SOT skeleton validator
 
-governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_obligations.py, src/kyosei/docs_parse.py, src/kyosei/docs_regions.py, src/kyosei/docs_staleness.py, src/kyosei/docs_suggest.py, src/kyosei/docs_targets.py
+governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_obligations.py, src/kyosei/docs_parse.py, src/kyosei/docs_regions.py, src/kyosei/docs_staleness.py, src/kyosei/docs_suggest.py, src/kyosei/docs_targets.py, src/kyosei/docs_coverage.py, src/kyosei/docs_history.py, src/kyosei/docs_index.py, src/kyosei/docs_ssot.py, src/kyosei/defaults/documents.yml
 
 A project's documents state what is *currently true* about it, and its history
 belongs in commit messages and decision records. `kyo docs

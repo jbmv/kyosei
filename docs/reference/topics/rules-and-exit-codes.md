@@ -4,7 +4,7 @@ The rules that have machinery behind them, and what each exit code means.
 
 ## Rules with machinery behind them
 
-governs: src/kyosei/doctor.py, src/kyosei/doctor_consumers.py, src/kyosei/doctor_dispatch.py, src/kyosei/doctor_exports.py, src/kyosei/doctor_install.py, src/kyosei/doctor_records.py, src/kyosei/doctor_registry.py, src/kyosei/contracts.py
+governs: src/kyosei/doctor.py, src/kyosei/doctor_consumers.py, src/kyosei/doctor_dispatch.py, src/kyosei/doctor_exports.py, src/kyosei/doctor_install.py, src/kyosei/doctor_records.py, src/kyosei/doctor_registry.py, src/kyosei/contracts.py, src/kyosei/cmd_check_branch.py, src/kyosei/cmd_check_clean.py, src/kyosei/cmd_guard.py, src/kyosei/cmd_store.py
 
 | Rule | Mechanism |
 | --- | --- |

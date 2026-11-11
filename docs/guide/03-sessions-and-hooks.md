@@ -62,6 +62,8 @@ project.
 
 ## Standing rules
 
+governs: src/kyosei/procedures.py, src/kyosei/defaults/procedures.md
+
 `kyosei/procedures.md` is the project's rule book, grouped by audience: workers, the
 orchestrator, and the operator. Every dispatch brief quotes the worker rules. Each rule
 states how it is enforced: by a mechanism (a command or hook that refuses), partly, or not
@@ -73,6 +75,8 @@ asking the orchestrator, and `kyo install-procedures` adds new default rules aft
 upgrade without overwriting yours.
 
 ## The hooks
+
+governs: src/kyosei/defaults/hooks/session-start.json, src/kyosei/defaults/hooks/prompt-submit.json, src/kyosei/defaults/hooks/pre-tool-use.json, src/kyosei/defaults/hooks/subagent-stop.json, src/kyosei/defaults/hooks/stop.json, src/kyosei/defaults/hooks/sessions.json
 
 Kyosei's Claude Code plugin carries these hooks, and on the copies `kyo install-hooks` adds
 them to the project's `.claude/settings.json` instead

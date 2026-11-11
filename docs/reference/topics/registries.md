@@ -4,7 +4,7 @@ The kind, scope, status and gate-tag registries, and the saved views in `kyosei/
 
 ## The kind registry
 
-governs: src/kyosei/kinds.py, src/kyosei/defaults/kinds.yml
+governs: src/kyosei/kinds.py, src/kyosei/defaults/kinds.yml, src/kyosei/cmd_records.py, src/kyosei/cmd_discuss.py
 
 Every record has a **kind**, defined in `kyosei/kinds.yml` — bug, task, chore,
 investigation, experiment, proposal, plan, reminder (archetype `work`: has criteria, a status
@@ -341,7 +341,7 @@ a rename that stranded records is a decision for whoever made it.
 
 ## The gate-tag registry
 
-governs: src/kyosei/registry.py, src/kyosei/defaults/gate-tags.yml
+governs: src/kyosei/registry.py, src/kyosei/defaults/gate-tags.yml, src/kyosei/cmd_links.py
 
 A **gate** holds a record until something outside the store clears it, and it is
 orthogonal to status: a record can be `working` *and* blocked, which is a state a
