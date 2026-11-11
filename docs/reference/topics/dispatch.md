@@ -294,7 +294,7 @@ transcripts of one measured wave — 172,733 and 325,752 tokens, each straight
 after a full-suite run — and none in the three workers that ran test files only.
 Both fields are additive: every field these surfaces carried before means the
 same thing beside them. They are the measurement behind
-["The whole suite is the orchestrator's"](operating.md#the-whole-suite-is-the-orchestrators-controller_only_commands-kyo-298),
+["The whole suite is the orchestrator's"](operating.md#the-whole-suite-is-the-orchestrators-orchestrator_only_commands-kyo-298),
 and the reason that policy can be re-checked per dispatch rather than believed.
 
 Each row of `kyo worktrees --json` also carries **when that dispatch finished

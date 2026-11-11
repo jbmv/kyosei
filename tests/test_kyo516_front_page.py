@@ -40,7 +40,7 @@ MOVED_HEADINGS = (
     # KYO-621 retitled this one without its build date.
     "### Upgrading from schema 25 to 26",
     "## Operating a Kyosei project",
-    "### The whole suite is the orchestrator's: `controller_only_commands` (KYO-298)",
+    "### The whole suite is the orchestrator's: `orchestrator_only_commands` (KYO-298)",
     "### Doc fragments: a document that grows by numbered section (KYO-299)",
     "### What an in-repo store costs the repository (KYO-268)",
     "### The desktop app reads every project through kyo serve (KYO-459)",

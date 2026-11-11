@@ -308,7 +308,7 @@ first push" in [store.md](store.md). The hooks wire it into `PreToolUse` for age
 `pre-push` hook that warns a human without blocking. Both refuse a push when a commit it
 sends carries a private term or home path in its message or author name (KYO-669).
 
-### The whole suite is the orchestrator's: `controller_only_commands` (KYO-298)
+### The whole suite is the orchestrator's: `orchestrator_only_commands` (KYO-298)
 
 **Opt-in, in one config key, and a project that declares nothing is unaffected.**
 Nothing below fires until you name the commands yourself.
