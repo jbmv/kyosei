@@ -928,6 +928,12 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .rec-id, .ref-id { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: nowrap; user-select: text; -webkit-user-select: text; cursor: text; }
 
 .rec-row { padding: 6px 10px; border-radius: 7px; font-size: 14px; line-height: 1.35; cursor: default; }
+/* A row outside the window is not laid out or painted until it is scrolled to (KYO-833): a
+   filter turned off puts every record back in both lists, and laying all of them out was
+   most of what the press cost. The size stated is the row's content while it is not drawn:
+   one line of the title on the landing page, the head and two lines of it in the side bar. */
+#records-list .rec-row { content-visibility: auto; contain-intrinsic-size: auto 54px; }
+#records-groups .rec-row { content-visibility: auto; contain-intrinsic-size: auto 18.9px; }
 .rec-row:hover { background: var(--panel); }
 .rec-row.current { background: var(--line); }
 .rec-row.closed .rec-title { color: var(--muted); }

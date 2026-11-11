@@ -4427,6 +4427,7 @@ const recordsLanding = document.getElementById("records-landing")!;
 const recordArticle = document.getElementById("record")!;
 const recordsList = document.getElementById("records-list")!;
 const recordsHistoryList = document.getElementById("records-history")!;
+const recordsGroups = document.getElementById("records-groups")!;
 
 let recordRows: RecordRow[] = [];
 let readyRecords = new Set<string>();
@@ -4552,11 +4553,42 @@ function emptyRow(text: string): HTMLElement {
   return row;
 }
 
-/** Replaces a list's rows and leaves it scrolled where it was. */
+/**
+ * Replaces a list's rows and leaves it scrolled where it was. A list that already holds
+ * exactly these rows is left alone, so a draw that changes nothing costs no layout (KYO-833).
+ */
 function fill(holder: HTMLElement, rows: HTMLElement[]): void {
+  const held = holder.children;
+  if (held.length === rows.length && rows.every((row, index) => held[index] === row)) return;
   const place = holder.scrollTop;
   holder.replaceChildren(...rows);
   holder.scrollTop = place;
+}
+
+/**
+ * The rows drawn for the list the server last sent, kept between draws (KYO-833). A filter
+ * or a search changes which records are shown and nothing a row says, so each record's row
+ * is made once for each of the two lists and put back as it is. A new list from the server
+ * is new row objects, which are drawn anew.
+ */
+const keptRows = { side: new WeakMap<RecordRow, HTMLElement>(), landing: new WeakMap<RecordRow, HTMLElement>() };
+
+function keptRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
+  let item = keptRows[place].get(row);
+  if (!item) {
+    item = recordRow(row, place);
+    keptRows[place].set(row, item);
+  }
+  item.classList.toggle("current", row.id === openRecordId);
+  return item;
+}
+
+/** The list newest first, sorted once for each list the server sends. */
+let sortedRows: { from: RecordRow[]; rows: RecordRow[] } | null = null;
+
+function rowsNewestFirst(): RecordRow[] {
+  if (sortedRows?.from !== recordRows) sortedRows = { from: recordRows, rows: newestFirst(recordRows) };
+  return sortedRows.rows;
 }
 
 /**
@@ -4607,9 +4639,9 @@ function drawRecordLists(): void {
     if (field.value !== narrowing.search) field.value = narrowing.search;
   });
   drawKindControls();
-  const shown = narrow(newestFirst(recordRows), narrowing, readyRecords, awaitingRecords);
+  const shown = narrow(rowsNewestFirst(), narrowing, readyRecords, awaitingRecords);
   const nothing = !listsRead ? "Reading the records." : "No record matches.";
-  fill(recordsList, shown.length ? shown.map((row) => recordRow(row, "side")) : [emptyRow(nothing)]);
+  fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
   fill(
     recordsHistoryList,
     viewedRecords.length
@@ -4617,8 +4649,7 @@ function drawRecordLists(): void {
       : [emptyRow("No record has been viewed.")]);
 
   // The landing page lists the same rows in the same order, without groups (KYO-759).
-  document.getElementById("records-groups")!.replaceChildren(
-    ...(shown.length ? shown.map((row) => recordRow(row, "landing")) : [emptyRow(nothing)]));
+  fill(recordsGroups, shown.length ? shown.map((row) => keptRow(row, "landing")) : [emptyRow(nothing)]);
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";
