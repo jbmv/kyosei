@@ -515,3 +515,5 @@ def test_keep_open_with_no_discussion_is_refused(kyo, indexed: Path, tmp_path: P
         "--touches-file", _file(tmp_path, "t.txt", ""),
     )  # fmt: skip
     assert refused.code != 0 and "--keep-open" in refused.err
+    discussion = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    assert _spawn_task(kyo, discussion, tmp_path, "T", "--keep-open").code == 0

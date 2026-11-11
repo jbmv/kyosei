@@ -328,6 +328,7 @@ def test_token_only_prints_the_token_alone_with_no_trailing_newline(store_home: 
     devices = device_tokens.read_devices(device_tokens.tokens_path({"KYOSEI_HOME": str(store_home)}))
     assert [d.name for d in devices if d.digest == digest] == ["phone"]
     assert invoke(["devices", "revoke", "ipad", "--token-only"]).code != 0
+    assert invoke(["devices", "revoke", "ipad"]).code == 0, "dropping the flag clears it"
 
 
 def test_grant_adds_a_permission_to_a_live_token_without_changing_it_and_is_logged(

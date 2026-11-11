@@ -3889,7 +3889,7 @@ UNREACHED: dict[str, str] = {
         "test_kyo735_sessions_takes_nothing_but_scratch_and_a_directory"
     ),
     # KYO-658: `decision-requires-discussion`; each named remedy is run by the test cited.
-    "cmd_discuss.py:filing_discussion#5": (
+    "cmd_discuss.py:_filing_discussion#5": (
         "the same command with --opened-late, or with --discussion naming the discussion "
         "`kyo discuss open` filed, or `kyo spawn <discussion-id> --kind decision`; proved by "
         "test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one"
@@ -4123,7 +4123,7 @@ UNREACHED: dict[str, str] = {
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_a_second_live_device_of_one_name_is_refused_and_revoking_clears_it"
     ),
-    "device_tokens.py:revoke#0": (
+    "device_tokens.py:_find#0": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
@@ -4145,7 +4145,25 @@ UNREACHED: dict[str, str] = {
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
         "not build. Provoked, and its remedy run to exit 0, by "
-        "tests/test_kyo_serve_send.py::test_revoke_takes_no_permission_and_the_bare_form_clears_it"
+        "tests/test_kyo_serve_send.py::test_token_only_prints_the_token_alone_with_no_trailing_newline"
+    ),
+    "device_tokens.py:cmd_devices#3": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_grant_needs_a_permission_and_naming_one_clears_it"
+    ),
+    "device_tokens.py:_refuse_revoked#0": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_grant_and_permission_revoke_refuse_a_revoked_device_naming_issue"
+    ),
+    "device_tokens.py:change_permissions#0": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_revoke_with_a_permission_removes_it_and_leaves_the_token_live"
     ),
     # KYO-714: `kyo statusline`'s refusals, each proved in tests/test_kyo_statusline.py.
     "cmd_statusline.py:_manage#0": (
@@ -4424,7 +4442,31 @@ UNREACHED: dict[str, str] = {
 #: the message and the entry moved into :data:`PROVOKED`, which is the transition this
 #: table exists to force. The mechanism is kept for the next finding, and
 #: ``test_a_finding_is_wired_to_a_provoker`` is what stops it rotting while unused.
-FINDINGS: dict[str, str] = {}
+FINDINGS: dict[str, str] = {    # KYO-745 and KYO-749: remedies that run `kyo` lines, listed with the cited proofs.
+    "report_ingest.py:_amend_document_from_branch#0": (
+        "needs a dispatch with no ingested report and a worker's report file to file first; "
+        "proved by test_a_dispatch_with_no_ingested_report_is_refused_and_the_filing_is_the_remedy"
+    ),
+    "report_ingest.py:_amend_document_from_branch#1": (
+        "needs a branch this clone cannot read, and the remedy is to run in the repository "
+        "that holds it or to hand-write the amendment, which this check cannot author"
+    ),
+    "report_ingest.py:_amend_document_from_branch#2": (
+        "needs a dispatch whose branch holds nothing beyond its report; proved, and the "
+        "`kyo accept` it names run to exit 0, by "
+        "test_a_branch_with_nothing_beyond_the_report_is_refused_and_accept_is_the_remedy"
+    ),
+    "cmd_discuss.py:_refuse_closed_source#0": (
+        "`kyo discuss open` files a fresh discussion and the spawn is repeated from it; "
+        "proved by test_a_record_spawned_from_a_closed_discussion_is_refused_naming_discuss_open"
+    ),
+    "cmd_accept.py:_refuse_if_branch_moved#0": (
+        "a hand-written amending report: the worker (or the orchestrator) adds the missing "
+        "commit(s) to commits[], sets amends, and files it; this check "
+        "cannot author a report's contents. Proved by tests/test_kyo_accept_tip_and_summary.py"
+        "::test_an_amending_report_ending_on_the_tip_clears_the_refusal"
+    ),
+}
 
 
 #: KYO-84.c2, the half of the surface this check can only RECORD. Each of these names a
@@ -4484,11 +4526,11 @@ RECORDED: dict[str, str] = {
         "copying the packaged `discussion:` entry into kyosei/kinds.yml, a hand edit; proved "
         "by test_a_registry_without_the_discussion_kind_is_cleared_by_copying_the_entry"
     ),
-    "cmd_discuss.py:filing_discussion#0": (
+    "cmd_discuss.py:_filing_discussion#0": (
         "a re-invocation without the discussion flags; proved by "
         "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
     ),
-    "cmd_discuss.py:filing_discussion#1": (
+    "cmd_discuss.py:_filing_discussion#1": (
         "a re-invocation giving --discussion or --opened-late, not both; proved by "
         "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
     ),
@@ -5412,11 +5454,16 @@ RECORDED: dict[str, str] = {
     # is not something this check can write, so it is out of reach here; the clearing is
     # proved in tests/test_kyo_accept_tip_and_summary.py::
     # test_an_amending_report_ending_on_the_tip_clears_the_refusal.
-    "cmd_accept.py:_refuse_if_branch_moved#0": (
-        "a hand-written amending report: the worker (or the orchestrator) adds the missing "
-        "commit(s) to commits[], sets amends, and files it; this check "
-        "cannot author a report's contents. Proved by tests/test_kyo_accept_tip_and_summary.py"
-        "::test_an_amending_report_ending_on_the_tip_clears_the_refusal"
+    # KYO-745: `kyo report --amend-with-branch`'s refusals, each remedy run by the test cited
+    # (tests/test_kyo745_amend_with_branch.py).
+    "report_ingest.py:cmd_report#0": (
+        "a re-invocation naming --file or --amend-with-branch; proved by "
+        "test_file_and_amend_with_branch_are_exclusive"
+    ),
+    # KYO-749.c2: the refusal for a record spawned from a closed discussion.
+    "cmd_discuss.py:filing_discussion#0": (
+        "a re-invocation spawning from a discussion, or naming one with --discussion; proved by "
+        "test_keep_open_with_no_discussion_is_refused"
     ),
     "cmd_accept.py:_refuse_until_reviewed#0": (
         "a re-invocation whose argument is the controller's own statement: read the "
