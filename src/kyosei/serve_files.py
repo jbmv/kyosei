@@ -14,8 +14,8 @@ WHAT IS WRITABLE. Exactly two things per project:
 
 And for this machine rather than a project: the send log, and the composer's unsent text
 (KYO-703), ``$KYOSEI_HOME/composer/{drafts,held}/<session id>.json`` (and, KYO-709,
-``unfiled/<message id>.json``), private to this account and refused if it would lie inside a
-git repository. KYO-715 adds the files a prompt attaches,
+``unfiled/<message id>.json``; KYO-763, ``project-drafts/<project>.json``), private to this
+account and refused if it would lie inside a git repository. KYO-715 adds the files a prompt attaches,
 ``$KYOSEI_HOME/composer/attachments/<project>/<session id>/<sha256>.<extension>``, written
 once by :func:`write_attachment` under a name it checks itself and never replaced.
 
@@ -634,6 +634,8 @@ def open_private_log(path: Path) -> int:
 #: What follows ``$KYOSEI_HOME/composer/``: one directory per kind of unsent text.
 DRAFTS = "drafts"
 HELD = "held"
+#: KYO-763: a project's draft, kept between its sessions, named by the project.
+PROJECT_DRAFTS = "project-drafts"
 #: KYO-709: a delivered message whose notes could not be filed yet, named by the message's id.
 UNFILED = "unfiled"
 
@@ -685,6 +687,18 @@ def composer_target(environ: dict[str, str], kind: str, session_id: str) -> Path
     path = composer_path(environ, kind, session_id)
     composer_directory(environ, kind)
     return path
+
+
+def project_draft_path(environ: dict[str, str], project: str, *, create: bool = False) -> Path:
+    """The one file holding ``project``'s draft (KYO-763); ``create`` makes its directory.
+
+    ``project`` is a name the server's registry holds, which the caller has resolved. A name
+    that could not be one file's name is refused all the same, as an attachment's is.
+    """
+    _check_segment(project, "project name")
+    if create:
+        composer_directory(environ, PROJECT_DRAFTS)
+    return composer_kind_directory(environ, PROJECT_DRAFTS) / f"{project}.json"
 
 
 def _composer_refusal(directory: Path, why: str) -> Refusal:
@@ -741,7 +755,7 @@ def _check_segment(value: str, what: str) -> None:
     ):
         raise Refusal(
             400,
-            f"{value!r} cannot name a directory of attachments: a {what} that names one is "
+            f"{value!r} cannot name a directory or file of unsent text: a {what} that names one is "
             "not empty, holds no slash or NUL, and does not begin with a dot",
             reason="bad-request",
         )

@@ -59,7 +59,8 @@ permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is t
 ``kyosei.serve*`` module that can reach the session layer's sending half.
 
 THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
-composer boxes (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
+composer boxes, and ``draft`` (GET, PUT, KYO-763) the project's own, kept between its
+sessions (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
 message held until the turn ends (:mod:`kyosei.serve_held`), and ``sessions/{id}/held-now`` (POST,
 KYO-722) delivers it at once, during a turn. Both need a device token.
 ``sessions/{id}/attachments`` (POST) and ``sessions/{id}/attachments/{attachment}`` (GET,
@@ -330,6 +331,10 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     # KYO-709: one composer prompt with its marks in place (serve_notes).
     "send-prompt": ("POST",),
 }
+
+#: KYO-763: ``draft``, the project's own draft, kept between its sessions.
+PROJECT_DRAFT_ROUTE = "draft"
+PROJECT_DRAFT_METHODS = ("GET", "PUT")
 
 #: KYO-715: ``sessions/{id}/attachments`` (POST) and ``.../attachments/{id}`` (GET).
 SESSION_ATTACHMENTS_ROUTE = "attachments"
@@ -810,6 +815,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             allowed = ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE:
             allowed = ("GET",)
+        elif len(rest) == 3 and rest[0] == "projects" and rest[2] == PROJECT_DRAFT_ROUTE:
+            allowed = PROJECT_DRAFT_METHODS
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == NOTES_ROUTE:
             if len(rest) == 3:
                 allowed = ("GET", "POST")
@@ -884,6 +891,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._orchestrator_start(rest[1], split.query)
         if rest[2] == PROJECT_FILES_ROUTE:
             return self._project_files(rest[1], rest[3:], split.query)
+        if rest[2] == PROJECT_DRAFT_ROUTE:
+            return self._session_composer(method, rest[1], None, "draft", split.query)
         if rest[2] == NOTES_ROUTE:
             return self._note_route(method, rest[1], rest[3:], split.query)
         if rest[2] == TAGS_ROUTE or (len(rest) == 5 and rest[4] == SESSION_MARKS_ROUTE):
@@ -1081,9 +1090,12 @@ class ServeHandler(BaseHTTPRequestHandler):
         return 200, _json_bytes(document)
 
     def _session_composer(
-        self, method: str, name: str, session_id: str, route: str, query: str
+        self, method: str, name: str, session_id: str | None, route: str, query: str
     ) -> tuple:
-        """The draft and held routes, each carrying a device token, so no query string."""
+        """The draft and held routes, each carrying a device token, so no query string.
+
+        ``session_id`` is None for the one route that is not a session's: the project's draft.
+        """
         from . import serve_drafts
 
         if query:
@@ -1107,6 +1119,7 @@ class ServeHandler(BaseHTTPRequestHandler):
         if route == "draft":
             status, document = serve_drafts.perform(
                 self.server.environ,
+                name,
                 root_of,
                 session_id,
                 method,
