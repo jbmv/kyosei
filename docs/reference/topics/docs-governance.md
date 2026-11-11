@@ -296,7 +296,7 @@ raises a **standing** docs obligation when a record of it is written:
   on the record settles its open standing obligations `not-affected`, method `void`,
   carrying the void's reason and author.
 
-Ids as code pointers, parameter owners, a history-language lint and freshness are later
+Ids as code pointers, parameter owners and freshness are later
 slices of KYO-551 and are not built.
 
 **What a `#symbol` actually narrows, and on which files (KYO-153, KYO-351,

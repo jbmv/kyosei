@@ -89,8 +89,13 @@ verifies, moves, and maintains everything else. The human *views* the board; age
     coverage does not yet.
 11. **Dry-run by default, explicit `--apply`,** for anything that mutates data outside the store.
     (A dry run revealed a 20× blast radius on a wrong premise.)
-12. **The viewer writes prose, never state.** The structured store is read-only from every viewer,
-    forever. The ideas layer is writable from anywhere. (A web UI drag corrupted 18 unrelated
+12. **The viewer writes prose, never state.** No viewer changes a record: status, criteria,
+    verdicts, gates and links are written by the CLI alone. The ideas layer is writable from
+    anywhere. A person's notes are their own prose, and they are the one thing a viewer files in
+    the structured store: decision KYO-681 (D2) placed notes in the store, so `kyo serve`'s note
+    routes file a note, change its tags and record that it was sent, each through the function
+    `kyo notes` calls and behind a device token holding the `notes` permission. Every other
+    served command runs on a store opened read-only. (A web UI drag corrupted 18 unrelated
     cards' ordinals.)
 13. **Structure appears at promotion, not at intake.** Ideas need zero ceremony; promotion is the
     explicit act that authors criteria, touches, and scope — the moment human/orchestrator judgment
@@ -128,6 +133,12 @@ verifies, moves, and maintains everything else. The human *views* the board; age
   docs/                   # Layer 3: single-source-of-truth docs (current state only; git = history)
     PRD.md, PSD.md        # per scope level (project / app / component), per the design sketch
 ```
+
+The tree shows the in-repo layout (`kyo init --in-repo`). Under the split layout, which is the
+default, `ideas/` and `kyosei/` are in a store repository of their own at `~/kyosei/<project>/`,
+and the code repository holds a `.kyosei` link file and the project's `docs/`. `kyo init` creates
+the store and not `docs/`; what it writes is listed under "What `kyo init` creates" in
+docs/reference/topics/store.md.
 
 ### Layer 1 — Ideas (mutable, human-owned)
 
@@ -297,7 +308,7 @@ worker's own diff, which is the only thing `kyo check-branch` judges.
 governs: src/kyosei/kinds.py, src/kyosei/defaults/kinds.yml
 
 There is **one record type**. Everything else — bug, chore, feature task, investigation,
-experiment, decision, proposal, plan, evidence — is a **kind**, defined in `kyosei/kinds.yml`.
+experiment, decision, proposal, plan, evidence, reminder, discussion — is a **kind**, defined in `kyosei/kinds.yml`.
 A kind declares its flows (the arrows), its policy (the rules for records in that circle), and
 its archetype. Users add, drop, and modify kinds per project; the registry is validated on load;
 the viewer renders it as a circles-and-arrows kind map — the hand drawing becomes a generated,
@@ -570,11 +581,14 @@ from the git hook's mode of `kyo check-push` only; 64 usage — argparse's own 2
 overridden so 2 means exactly one thing), prose via stdin/file (one-line fields per law 5).
 
 ```
-kyo init                          # scaffold dirs, db, default kinds.yml, hooks templates
-kyo new <kind> --title ... [--from <idea|record>] [--evidence-file f]   # evidence stored in the
+kyo init --defaults               # scaffold dirs, db and the default registries; a bare `kyo init`
+                                  #   writes nothing and names `kyo onboard`. Installs no hooks:
+                                  #   `kyo harness install claude-code` does (KYO-558, KYO-594)
+kyo new <kind> --title ... [--evidence-file f]   # evidence stored in the
                                   #   same act; required where policy.requires_evidence_links (KYO-521)
+kyo spawn <id> --kind <k>         # a record of another kind from an existing one (KYO-50)
 kyo show <id> [--json]
-kyo edit <id> --notes-file f.md   # or stdin; echoes stored result; supersede-marks prior notes
+kyo edit <id> --note-file f.md    # or stdin; echoes stored result; supersede-marks prior notes
 kyo promote <idea-file> --kind <k>   # validates flows + touches against repo; authors criteria
 kyo move <id> <status>            # enforces transition contracts AT the transition, names unmet items
 kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload the dashboard"
@@ -587,7 +601,7 @@ kyo dossier <id>                  # one decision as a Markdown page for a reader
 kyo discuss check --hook          # at Stop: asks the agent to open one, or `kyo discuss skip --why`,
                                   #   when a turn put a choice to the person and none is open (KYO-662)
 kyo wont-do <id> --why            # terminal; ID retired forever
-kyo split <id> --criteria c3,c7   # met criteria close with evidence; rest leave with history; back-pointers both ways
+kyo split <id> --to-successor <criterion-id>...   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles
 kyo claim <id> --level derived --method "raw SQL: ..." --file claim.md
 kyo verify <criterion-id> --verdict met --method human-observed --evidence-file paste.txt
@@ -629,13 +643,19 @@ kind's `write_scope` as an explicit capability statement, base SHA — plus the 
 earned its keep: **"flag conflicts, do not resolve them; contradicting this brief must be cheaper
 than complying with it."** The orchestrator writes only the genuinely task-specific part.
 
-**Sweep** (flags, never auto-edits): git diff since last sweep × all `touches` → possibly-stale
-records; records in `open` whose declared artifacts already exist in the repo → moved-but-inverse
-flag; records in shipping states whose commits are absent from main → moved-but-not-merged flag;
-claims older than N days with level `asserted` → re-verify prompts; `governs:`-bearing doc
-sections whose symbols changed → doc-stale flags; near-duplicate criterion text across records →
-same-question flags. Run `kyo sweep` on record *creation* too, against the existing corpus —
-creation is when overlap is cheapest to catch.
+**Sweep** (flags, never auto-edits). Four flag classes are built: git diff since last sweep × all
+`touches` → possibly-stale records (`touch-changed`); a declared touch that no longer exists in
+the repository (`touch-missing`); near-duplicate criterion text across records
+(`near-duplicate-criteria`); and a record's description older than a claim on the same record
+(`description-predates-claim`, KYO-137). The near-duplicate check also runs on record
+*creation*, against the existing corpus — creation is when overlap is cheapest to catch.
+
+Four more were specified here and are not built, because no record carried an acceptance
+criterion for them (KYO-8): records in `open` whose declared artifacts already exist in the repo
+→ moved-but-inverse flag; records in shipping states whose commits are absent from main →
+moved-but-not-merged flag; claims older than N days with level `asserted` → re-verify prompts;
+`governs:`-bearing doc sections whose symbols changed → doc-stale flags. The last question is
+answered outside sweep, by Layer 3's docs obligations and `kyo docs check`.
 
 ---
 
@@ -915,16 +935,23 @@ and integrates via:
   Since KYO-593 the skill ships as part of a Claude Code plugin inside the package
   (`src/kyosei/harness/claude-code/`), whose `hooks/hooks.json` is generated from the same hook fragments listed below;
   `kyo install-skill` copies the same two skill files. Registering the plugin is KYO-594.
-- **Hooks** (installed by `kyo init` as templates into consumer projects):
-  - `SessionStart` → `kyo brief --compact` injected (the token-efficient briefing; no re-derivation)
+- **Hooks** (carried by the Claude Code plugin, which `kyo harness install claude-code` enables
+  in a project, or written into the project's `.claude/settings.json` by `kyo install-hooks
+  --copies`; `kyo init` installs none):
+  - `SessionStart` → `kyo brief --compact` injected (the token-efficient briefing; no
+    re-derivation), and `kyo sessions --hook`, which records the session in the project's
+    gitignored `sessions.json`; the same command runs at `Stop` and `SessionEnd`.
   - `PreToolUse` on Bash → two checks that stop a command before it runs, each silent unless it
     fires: `kyo check-push --pre-tool-use` stops a `git push` that would publish an in-repo store
     (KYO-60), and `kyo check-command --pre-tool-use` refuses a command the project declared
     orchestrator-only when it would run inside a running dispatch's worktree (KYO-298). The
     `git commit`-on-`kyo doctor` gate this line described until 2026-09-18 never shipped: the
     packaged PreToolUse fragment was first added by KYO-60 and has never carried one.
-  - `SubagentStop` → report-artifact presence check (and note: a stop hook is NOT the durability
-    mechanism — law 8 — it is a second net). KYO-206 gives that artifact one named path,
+  - `SubagentStop` → `kyo check-clean --subagent-stop` and `kyo check-branch --subagent-stop`,
+    which block a worker's stop while its worktree holds uncommitted work or its branch carries
+    a write to the store (and note: a stop hook is NOT the durability mechanism — law 8 — it is
+    a second net). Neither looks for the report: a dispatch that ends without one is recorded
+    as `terminated-no-report` and listed by every brief. KYO-206 gives the report one named path,
     `.kyosei-report.json`, which `kyo init`/`kyo install-hooks` gitignore and the stop's own
     uncommitted-work check excludes — so "commit before you stop" stops meaning "commit your
     report". These guards run *after* the worker's hand-back reaches the orchestrator, and the
@@ -951,6 +978,9 @@ and integrates via:
     discussion or records with `kyo discuss skip --why` that it is not one. It is not a
     block, it is silent when `stop_hook_active` is set and so asks once per turn, and it is
     in its own group so a failing sweep or doctor does not skip it.
+  - `Stop`, `SessionEnd` and `UserPromptSubmit` → `kyo turns --hook`, which appends to the turn
+    index in a project that opted in to reading transcripts and does nothing elsewhere
+    (KYO-657).
   - Every packaged hook exits 0 with no output where no Kyosei project resolves, because a
     plugin's hooks fire in every session (KYO-591): `kyo`'s own project resolution decides when
     it is on PATH, and the missing-`kyo` guard's marker walk decides when it is not. A blocking
@@ -958,6 +988,9 @@ and integrates via:
     the finding without blocking again (KYO-592).
 - **CLAUDE.md in consumer projects** carries awareness ("this project uses Kyosei; the skill is
   /kyosei"), not rules — rules live in hooks and transition contracts, because prose mandates decay.
+  The section is written on the copies, by `kyo install-skill`. On the plugin the session-start
+  brief names the project instead, and `kyo harness install claude-code` removes the
+  setup-incomplete section `kyo init` wrote (KYO-613).
 
 ---
 
@@ -1067,19 +1100,22 @@ Deferred to v2+: local live server; full docs validator rule set; external event
 ("wake when the cycle reaches done" — design the gate schema so a watcher can clear gates later);
 Electron app (native shell, point-at-a-project-directory, ideas editor pane — the state-read-only
 rule is permanent regardless of shell); optional Obsidian-vault mirror export of the structured
-store; criterion-as-query auto-evaluation.
+store; criterion-as-query auto-evaluation. Two of these have since been built: the local server
+is `kyo serve` (KYO-448) and the Electron app is `apps/desktop/`. What either may write is law 12.
 
 ## Tech choices
 
-- **Python 3.12+**, stdlib-first: `sqlite3` (no ORM), `argparse`, `json`; `pyyaml` and a markdown
-  renderer as the only notable deps. Rationale: broad tooling support, cross-platform, no runtime
-  services.
-- **pytest** as the floor from milestone 1; **ruff** for lint. `kyo doctor` is part of CI.
-- Viewer: server-side-rendered static HTML + vendored JS (graph lib only). No CDN, no network
-  at runtime.
+- **Python 3.12+**, stdlib-first: `sqlite3` (no ORM), `argparse`, `json`; `pyyaml` is the one
+  required dependency, and `recx-cli` an optional one for prior-art search. Rationale: broad
+  tooling support, cross-platform, no runtime services.
+- **pytest** as the floor from milestone 1; **ruff** for lint. CI runs both; `kyo doctor` is
+  exercised by the suite and is not a CI step of its own.
+- Viewer: specified as server-side-rendered static HTML + vendored JS (graph lib only), with no
+  CDN and no network at runtime. That viewer was retired with milestone 7 (KYO-215); the
+  desktop app reads the store through `kyo serve`.
 - The tool lives in this repo and installs as a CLI (`pipx` / `uv tool install`) with two console
   entry points — `kyosei` and the blessed short alias `kyo` (identical); each consumer
-  project gets `ideas/`, `kyosei/`, `docs/` via `kyo init`.
+  project gets `ideas/` and `kyosei/` via `kyo init`, and keeps its own `docs/`.
 
 ## References
 
