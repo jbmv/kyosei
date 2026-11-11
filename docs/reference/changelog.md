@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-797` (proposal) — Documents govern the code they describe, and Kyosei says when they do not
 - **2026-11-11** — `KYO-795` (task) — The kyo serve documents describe the server as built: writes, tokens and session access
 - **2026-11-11** — `KYO-794` (task) — The README, llms.txt and AGENTS.md name the Mac app, and the app's README describes what it adds
 - **2026-11-11** — `KYO-793` (task) — The charter and the dispatch, governance, store and registry references match the CLI
