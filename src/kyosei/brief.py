@@ -537,6 +537,24 @@ def _symbol_with_line(symbol: str, line: int | None) -> str:
     return TOUCH_SYMBOL_LINE_FORMAT.format(symbol=symbol, line=line)
 
 
+def _declared_by(primary_id: str, record_ids: Sequence[str]) -> str:
+    """The first cell of a touches row: every record that declares the path (KYO-773.c1).
+
+    The primary record first under its own label, then the ``--also-covers`` records
+    under one label between them, so a path six records declare reads
+    ``A (this dispatch's own record); B, C (--also-covers)`` rather than the label
+    five times. Either way the cell ends with one of the two labels, which is what
+    :func:`touch_paths_named_in` recognises a touches row by.
+    """
+    parts = []
+    if primary_id in record_ids:
+        parts.append(f"{primary_id} ({TOUCH_SOURCE_PRIMARY})")
+    covered = [record_id for record_id in record_ids if record_id != primary_id]
+    if covered:
+        parts.append(f"{', '.join(covered)} ({TOUCH_SOURCE_COVERED})")
+    return "; ".join(parts)
+
+
 def _touches_block(
     *,
     primary_id: str,
@@ -572,69 +590,87 @@ def _touches_block(
     """
     lines_of = symbol_lines or {}
     order = [primary_id, *covered_ids]
-    labels = {primary_id: TOUCH_SOURCE_PRIMARY}
-    labels.update(dict.fromkeys(covered_ids, TOUCH_SOURCE_COVERED))
     symbols = _symbols_by_touch(documents)
 
-    rows: list[str] = []
+    # KYO-773.c1: one row per PATH, with every record that declares it in the first
+    # cell. The table used to carry one row per record and path, so a file six covered
+    # records all declared was six rows saying one thing about the worker's boundary
+    # (6,548 characters of a 32,735-character brief, measured on KYO-751.d1). The
+    # boundary is the path column; which record put a path there is attribution, and
+    # attribution fits in a cell.
+    declarers: dict[str, list[str]] = {}
     undeclared: list[str] = []
-    directories = False
-    new_files = False
-    additive = False
-    located = False
     for record_id in order:
         paths = sorted(claimed_paths.get(record_id, set()))
         if not paths:
             undeclared.append(record_id)
-            continue
         for path in paths:
-            # KYO-209: a directory touch is scope this work creates or owns, and the
-            # symbol column says so rather than "(whole file)" about something that is
-            # not a file and may not exist yet. A worker that reads such a row as a
-            # missing file goes looking for the file — which is the failure the record
-            # was filed for, moved one step later.
-            if is_directory_touch(path):
-                directories = True
-                named = TOUCH_DIRECTORY_SYMBOL
-            elif is_new_file_touch(path):
-                # KYO-225. Same reasoning as the directory row one branch up, one scale
-                # smaller: a worker who reads this as an ordinary file touch goes
-                # looking for a file that is not there and reports the Touches table as
-                # wrong. The row has to say the file is the work's OUTPUT.
-                new_files = True
-                named = TOUCH_NEW_FILE_SYMBOL
-            else:
-                # KYO-300.c3: the additive claim is a symbol whose name is not the
-                # point — a bare `+` in this column reads as a typo. The column says
-                # what the row MEANS, exactly as the two branches above do for the
-                # directory and new-file forms, and the note under the table says the
-                # rest.
-                claimed = symbols.get((record_id, path), [])
-                if any(sweep.is_additive_symbol(symbol) for symbol in claimed):
-                    additive = True
-                placed = {
-                    symbol: lines_of.get(path, {}).get(symbol)
-                    for symbol in claimed
-                    if not sweep.is_additive_symbol(symbol)
-                }
-                located = located or any(placed.values())
-                named = (
-                    ", ".join(
-                        TOUCH_ADDITIVE_SYMBOL
-                        if sweep.is_additive_symbol(symbol)
-                        else _symbol_with_line(symbol, placed.get(symbol))
-                        for symbol in claimed
-                    )
-                    or "(whole file)"
+            declarers.setdefault(path, []).append(record_id)
+
+    rows: list[str] = []
+    directories = False
+    new_files = False
+    additive = False
+    located = False
+    for path, record_ids in declarers.items():
+        # KYO-209: a directory touch is scope this work creates or owns, and the
+        # symbol column says so rather than "(whole file)" about something that is
+        # not a file and may not exist yet. A worker that reads such a row as a
+        # missing file goes looking for the file — which is the failure the record
+        # was filed for, moved one step later.
+        if is_directory_touch(path):
+            directories = True
+            named = TOUCH_DIRECTORY_SYMBOL
+        elif is_new_file_touch(path):
+            # KYO-225. Same reasoning as the directory row one branch up, one scale
+            # smaller: a worker who reads this as an ordinary file touch goes
+            # looking for a file that is not there and reports the Touches table as
+            # wrong. The row has to say the file is the work's OUTPUT.
+            new_files = True
+            named = TOUCH_NEW_FILE_SYMBOL
+        else:
+            # Each symbol once, in the order the records first name it. A record that
+            # declares the path with no symbol claims the whole file, and the cell says
+            # so first: the claim is file-level either way (`commands._touch_files`),
+            # and the symbols another record names are detail hung off it.
+            claimed: list[str] = []
+            whole_file = False
+            for record_id in record_ids:
+                of_record = symbols.get((record_id, path), [])
+                whole_file = whole_file or not of_record
+                claimed += [symbol for symbol in of_record if symbol not in claimed]
+            # KYO-300.c3: the additive claim is a symbol whose name is not the
+            # point — a bare `+` in this column reads as a typo. The column says
+            # what the row MEANS, exactly as the two branches above do for the
+            # directory and new-file forms, and the note under the table says the
+            # rest.
+            if any(sweep.is_additive_symbol(symbol) for symbol in claimed):
+                additive = True
+            placed = {
+                symbol: lines_of.get(path, {}).get(symbol)
+                for symbol in claimed
+                if not sweep.is_additive_symbol(symbol)
+            }
+            located = located or any(placed.values())
+            cells = ["(whole file)"] if whole_file else []
+            for symbol in claimed:
+                cell = (
+                    TOUCH_ADDITIVE_SYMBOL
+                    if sweep.is_additive_symbol(symbol)
+                    else _symbol_with_line(symbol, placed.get(symbol))
                 )
-            rows.append(f"| {record_id} ({labels[record_id]}) | {path} | {named} |")
+                if cell not in cells:
+                    cells.append(cell)
+            named = ", ".join(cells)
+        rows.append(f"| {_declared_by(primary_id, record_ids)} | {path} | {named} |")
 
     lines: list[str] = []
     if len(order) > 1:
         lines += [
             f"This dispatch covers {len(order)} records ({', '.join(order)}), so the table "
-            "below is the union of what all of them declare. Every path in it is inside "
-            "your write scope, whichever record put it there.",
+            "below is the union of what all of them declare, one row for each path with "
+            "the records that declare it. Every path in it is inside your write scope, "
+            "whichever record put it there.",
             "",
         ]
     if rows:
@@ -782,15 +818,23 @@ def _test_history_block(history: Mapping | None) -> list[str]:
         "",
         TEST_HISTORY_LABEL,
         "",
-        "| your declared file | test file also changed | how often |",
+        "| your declared file | dispatches that reported it | test files they also "
+        "changed (in how many of those dispatches) |",
         "|---|---|---|",
     ]
+    # KYO-773.c3: one row per DECLARED file, as :func:`_cooccurrence_block` has one per
+    # dragged file (KYO-347). The table used to carry one row per declared file and
+    # test, so each declared path and its dispatch count were printed up to five
+    # times: 74 rows and 7,265 characters in KYO-770.d1's brief for 17 declared files.
     for finding in findings:
-        for test in list(finding["tests"])[:_TEST_HISTORY_PER_PATH]:
-            lines.append(
-                f"| {finding['declared']} | {test['path']} | {test['hits']} of "
-                f"{finding['support']} dispatches |"
-            )
+        tests = list(finding["tests"])[:_TEST_HISTORY_PER_PATH]
+        if not tests:
+            continue
+        lines.append(
+            f"| {finding['declared']} | {finding['support']} | "
+            + ", ".join(f"{test['path']} ({test['hits']})" for test in tests)
+            + " |"
+        )
     return lines
 
 
@@ -822,6 +866,10 @@ def _provenance_block(
             "diff. How stale each one is:"
         )
         lines.append("")
+        # KYO-773.c3: one line per FINDING, naming every dispatch it holds for. The
+        # commonest finding is the same sentence for every running dispatch, and a
+        # wave of five used to print it five times.
+        by_finding: dict[str, list[str]] = {}
         for entry in rows:
             # Branches on the two FACTS, never on `staleness`'s label: this module
             # imports neither `cmd_dispatch` nor `commands` (it is a pure renderer,
@@ -846,10 +894,11 @@ def _provenance_block(
                     "never checked against work — neither it nor any earlier dispatch "
                     "on that claim has reported"
                 )
-            lines.append(
-                f"- `{entry['dispatch_id']}` (dispatching {entry['record_id']}), "
-                f"{len(entry['declared_files'])} declared path(s): {how}."
+            by_finding.setdefault(how, []).append(
+                f"`{entry['dispatch_id']}` (dispatching {entry['record_id']}, "
+                f"{len(entry['declared_files'])} declared path(s))"
             )
+        lines += [f"- {', '.join(named)}: {how}." for how, named in by_finding.items()]
     symbol_narrowed = [n for n in narrowed if not n.get("running_directories")]
     if symbol_narrowed:
         lines += [
@@ -910,8 +959,11 @@ def _provenance_block(
 #: own briefs carry the OLD rule text while a build made from that commit ships the new
 #: one, so the worker is asked for the replacement text in its report rather than left
 #: to assume somebody will re-derive it.
+_LEDGER_HANDOFF_HEADING = (
+    "## The packaged ledger is yours; the store copy is an orchestrator hand-off"
+)
 _LEDGER_HANDOFF_BLOCK = (
-    "## The packaged ledger is yours; the store copy is an orchestrator hand-off\n"
+    f"{_LEDGER_HANDOFF_HEADING}\n"
     "\n"
     f"Your touches include `{PACKAGED_LEDGER_SOURCE_PATH}` — the standing-rules ledger "
     "this build **packages**. Editing it is in your scope. The copy that actually "
@@ -985,7 +1037,7 @@ def _doc_fragments_block(
     if not rows:
         return []
     lines = [
-        "## Documents that grow by numbered section — write a fragment, never the document",
+        _HEADING_OF["numbered documents"],
         "",
         "This project declares the document(s) below as **numbered and append-only**. "
         "Their section numbers are cited across the repository and their indexes are "
@@ -1228,7 +1280,7 @@ def _covers_block(covered_records: list[dict]) -> str:
     if not covered_records:
         return ""
     parts = [
-        "## Also formally covers",
+        _HEADING_OF["also covers"],
         "",
         "This dispatch's report may carry `criteria_verdicts` for the primary "
         "record above **and** every record below (KYO-12 fix: a dispatch either "
@@ -1321,6 +1373,73 @@ def _recx_trailer_block(recx_manifest: bool) -> list[str]:
         "the trailer only after reading the module entry against the code.",
         "",
     ]
+
+
+#: KYO-773.c2: the brief's sections, in the order :func:`generate_brief` writes them,
+#: each as the name `kyo dispatch` prints its length under and the heading that opens
+#: it. The text before the first heading is the header (:data:`BRIEF_HEADER_SECTION`).
+#: :func:`generate_brief` writes its headings from this table and
+#: :func:`brief_section_lengths` splits on the same table, so a heading cannot be
+#: renamed in the writer alone.
+BRIEF_HEADER_SECTION = "header"
+BRIEF_SECTION_HEADINGS: tuple[tuple[str, str], ...] = (
+    ("record summary", "## Record summary"),
+    ("criteria", "## Criteria"),
+    ("also covers", "## Also formally covers"),
+    ("touches", "## Touches"),
+    ("ledger hand-off", _LEDGER_HANDOFF_HEADING),
+    (
+        "numbered documents",
+        "## Documents that grow by numbered section — write a fragment, never the document",
+    ),
+    ("claims", "## Cited claims and evidence"),
+    ("write scope", "## Write scope — your capability boundary, stated mechanically"),
+    ("standing rules", "## Standing rules (worker-audience)"),
+    ("stance", "## Standing stance"),
+    ("task", "## Task"),
+    ("report", "## Report"),
+)
+_HEADING_OF = dict(BRIEF_SECTION_HEADINGS)
+
+
+def brief_section_lengths(brief_text: str) -> list[tuple[str, int]]:
+    """``[(section, characters), ...]`` for a brief, in order; the lengths sum to the
+    brief's own length (KYO-773.c2).
+
+    Read back out of the text rather than counted while it is written, so the same
+    function measures a brief frozen by an earlier build. A section runs from its
+    heading to the next one this table knows, taken in the writer's order, so a
+    ``## `` line inside the record's description or the task prose opens nothing unless
+    it is exactly a later generated heading. The report is the last section and
+    follows the one block of prose the generator did not write, so it is taken at its
+    last occurrence: everything after the generated ``## Report`` heading is generated,
+    and none of it is that heading again.
+    """
+    lines = brief_text.splitlines(keepends=True)
+    stripped = [line.rstrip("\n") for line in lines]
+
+    def last(heading: str) -> int | None:
+        found = [i for i, line in enumerate(stripped) if line == heading]
+        return found[-1] if found else None
+
+    report_at = last(_HEADING_OF["report"])
+    front_end = len(lines) if report_at is None else report_at
+
+    starts: list[tuple[str, int]] = [(BRIEF_HEADER_SECTION, 0)]
+    pending = [pair for pair in BRIEF_SECTION_HEADINGS if pair[0] != "report"]
+    for i, line in enumerate(stripped[:front_end]):
+        for position, (name, heading) in enumerate(pending):
+            if line == heading:
+                starts.append((name, i))
+                pending = pending[position + 1 :]
+                break
+    if report_at is not None:
+        starts.append(("report", report_at))
+
+    lengths: list[tuple[str, int]] = []
+    for (name, start), (_, end) in zip(starts, [*starts[1:], ("", len(lines))], strict=True):
+        lengths.append((name, sum(len(line) for line in lines[start:end])))
+    return lengths
 
 
 def generate_brief(
@@ -1533,18 +1652,18 @@ def generate_brief(
         # matched.
         *([_guard_tests_bullet(guard_commands)] if guard_commands else []),
         "",
-        "## Record summary",
+        _HEADING_OF["record summary"],
         "",
         record["description"] or "(no description)",
         "",
         f"**Status**: {record['status']}{gate_line}",
         f"**Plan membership**: {record['plan'] or '(none)'}",
         "",
-        "## Criteria",
+        _HEADING_OF["criteria"],
         "",
         _criteria_table(record["criteria"]),
         _covers_block(covered_list),
-        "## Touches",
+        _HEADING_OF["touches"],
         "",
         touches_block,
         # KYO-151.c1, placed here because it is *about* a path in the table above and
@@ -1555,29 +1674,29 @@ def generate_brief(
         # here: both are about a path in the table above whose ordinary editing rules do
         # not apply to it.
         *_doc_fragments_block(dispatch_id, numbered_documents),
-        "## Cited claims and evidence",
+        _HEADING_OF["claims"],
         "",
         _claims_table(record["claims"]),
-        "## Write scope — your capability boundary, stated mechanically",
+        _HEADING_OF["write scope"],
         "",
         f"**`write_scope: {kind.policy.get('write_scope', 'none')}`**",
         "",
         WRITE_SCOPE_STATEMENTS.get(kind.policy.get("write_scope", "none"), ""),
         "",
-        "## Standing rules (worker-audience)",
+        _HEADING_OF["standing rules"],
         "",
         _worker_rules_block(worker_rules),
-        "## Standing stance",
+        _HEADING_OF["stance"],
         "",
         STANDING_STANCE,
         "",
         "---",
         "",
-        "## Task",
+        _HEADING_OF["task"],
         "",
         controller_task_prose or "(no task-specific instructions given at dispatch time)",
         "",
-        "## Report",
+        _HEADING_OF["report"],
         "",
         # KYO-149: this sentence used to send the worker to
         # `templates/report.schema.json` — a source-tree path `pyproject.toml` has
@@ -1656,6 +1775,8 @@ def generate_brief(
 
 
 __all__ = [
+    "BRIEF_HEADER_SECTION",
+    "BRIEF_SECTION_HEADINGS",
     "SHARED_RESOURCES_LINE",
     "STANDING_STANCE",
     "TEST_HISTORY_LABEL",
@@ -1665,6 +1786,7 @@ __all__ = [
     "WORKER_RULES_FULL_TEXT_NOTE",
     "WORKER_RULE_FULL_TEXT_COMMAND",
     "WRITE_SCOPE_STATEMENTS",
+    "brief_section_lengths",
     "enforced_by_summary",
     "generate_brief",
     "touch_paths_named_in",

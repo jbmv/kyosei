@@ -288,7 +288,8 @@ def test_the_tests_past_dispatches_changed_are_listed_as_history(
     brief = _brief_of(kyo, fresh, _worktree(tmp_path, "wf"))
 
     assert "### Where the tests for these files have been" in brief
-    assert "| src/widget.py | tests/test_widget.py | 2 of 2 dispatches |" in brief
+    # KYO-773: one row per declared file, its dispatch count once.
+    assert "| src/widget.py | 2 | tests/test_widget.py (2) |" in brief
     assert brief_module.TEST_HISTORY_LABEL in brief
     # The label is the mechanism, not decoration: it must deny coverage in words.
     assert "not a claim that any of them exercises your change" in brief

@@ -12,6 +12,7 @@ stored worker model: (not declared — nothing declared one — not kyosei/confi
   TST-2 (status working, not settled) through link TST-L1
 disjointness: computed from DECLARED touches. No other dispatch was running, so nothing was compared and nothing could have collided — this dispatch is unconstrained by the check rather than cleared by it.
 stored brief (15806 chars, sha256:<DIGEST>) — read it with `kyo show TST-1.d1` (or --print-brief)
+  by section (chars): header 5195 · record summary 83 · criteria 194 · touches 544 · claims 54 · write scope 232 · standing rules 4651 · stance 538 · task 65 · report 4250
 explained in `kyo reference dispatch`
 
 --err--

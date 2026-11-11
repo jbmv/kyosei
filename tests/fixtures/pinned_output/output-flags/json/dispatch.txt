@@ -11,6 +11,48 @@
     }
   ],
   "branch": "kyo-137",
+  "brief_sections": [
+    {
+      "chars": 5195,
+      "section": "header"
+    },
+    {
+      "chars": 83,
+      "section": "record summary"
+    },
+    {
+      "chars": 194,
+      "section": "criteria"
+    },
+    {
+      "chars": 544,
+      "section": "touches"
+    },
+    {
+      "chars": 54,
+      "section": "claims"
+    },
+    {
+      "chars": 232,
+      "section": "write scope"
+    },
+    {
+      "chars": 4651,
+      "section": "standing rules"
+    },
+    {
+      "chars": 538,
+      "section": "stance"
+    },
+    {
+      "chars": 65,
+      "section": "task"
+    },
+    {
+      "chars": 4250,
+      "section": "report"
+    }
+  ],
   "broad_claim_warnings": [],
   "collisions_overridden": [],
   "command": "dispatch",
