@@ -131,10 +131,13 @@ Ask these together, in one message.
   machine, end-to-end encrypted by iCloud Keychain, and it is never chosen for you.
   **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
-  is checked against when the original is absent. **What never leaves this
-  machine:** the transcripts, the archive, the turn index, the prompt history, and the
-  seal key unless you choose the iCloud Keychain option. Kyosei sends none of them
-  anywhere and copies none of them into the store; a store remote carries only what is
+  is checked against when the original is absent; and, once a search of what was said is
+  run (`kyo transcripts search`), an index holding the text of your prompts and the agent's
+  replies, in `$KYOSEI_HOME/transcript-search/<project>/`, beside the archive. **What never
+  leaves this machine:** the transcripts, the archive, the search index, the turn index, the
+  prompt history, and the seal key unless you choose the iCloud Keychain option. Kyosei
+  sends none of them anywhere and copies none of them into the store; a store remote
+  carries only what is
   listed as stored. **Read either way:** the Remote Control session id in a session's
   transcript, and the token totals of dispatched workers; neither reads your words." This
   question has no default: propose no answer, and do not record it as declined or deferred

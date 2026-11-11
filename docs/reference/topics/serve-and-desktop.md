@@ -609,12 +609,15 @@ stands where the text is cut. `matches` counts the matches in the whole message.
 `more` is true, `cursor` names the place the next page starts after; it stays valid when
 new messages arrive, since it names a message and not a count.
 
-**The index.** The search reads a local index, `kyosei/.transcript-search/index.db` beside
-the database. Its directory holds a `.gitignore` that ignores everything in it, and nothing
-of it is written to `kyosei/export/`. Every search first compares each session's transcript
-with what the index recorded and reads again only the sessions that changed, which `index`
-reports as `read`; `removed` counts sessions whose transcript no longer exists anywhere,
-and `problems` names transcripts that could not be read. The index is derived:
+**The index.** The search reads a local index,
+`$KYOSEI_HOME/transcript-search/<project>/index.db`, a sibling of the transcript archive.
+It holds the text of the prompts and replies, so it is kept as the archive is: in a
+directory of mode 0700, outside every git repository (a search is refused, naming
+`$KYOSEI_HOME`, when that directory lies inside one), and outside the store, whose
+directory and `kyosei/export/` hold none of it. Every search first compares each session's
+transcript with what the index recorded and reads again only the sessions that changed,
+which `index` reports as `read`; `removed` counts indexed sessions that have no transcript
+left to read, and `problems` names transcripts that could not be read. The index is derived:
 `kyo transcripts rebuild` deletes it and writes it again from the transcripts and the
 archive, and deleting the directory by hand loses nothing. The server's request log records
 this route without its query string, so the phrase searched for is not logged.

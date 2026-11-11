@@ -288,8 +288,8 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # writes are gitignored local state beside `kyosei.db`, and no record or event.
     "turns": (cmd_turns.cmd_turns, PROJECT_OPTIONAL),
     # KYO-812: the search of what was said in a project's sessions. Not in
-    # MUTATING_COMMANDS: the index it keeps is derived local state beside `kyosei.db`,
-    # ignored by git and rebuilt from the transcripts, and no record or event.
+    # MUTATING_COMMANDS: the index it keeps is derived local state under $KYOSEI_HOME,
+    # outside the store and rebuilt from the transcripts, and no record or event.
     "transcripts": (transcript_search.cmd_transcripts, PROJECT_REQUIRED),
     "install-hooks": (commands.cmd_install_hooks, PROJECT_REQUIRED),
     "install-skill": (commands.cmd_install_skill, PROJECT_REQUIRED),
@@ -2145,7 +2145,7 @@ def build_parser() -> KyoseiParser:
         help="search: list the prompts and replies holding the phrase, newest first, from "
         "live transcripts and archived ones; tool calls, tool results, thinking and "
         "subagents are not searched. rebuild: delete the local index "
-        "(kyosei/.transcript-search/, ignored by git) and write it again from the "
+        "($KYOSEI_HOME/transcript-search/<project>/) and write it again from the "
         "transcripts; a search brings the index up to date itself, so this is for an index "
         "that is suspected wrong",
     )

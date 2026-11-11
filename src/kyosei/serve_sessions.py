@@ -35,7 +35,7 @@ READ ONLY, AND NEVER THE SENDING HALF. These routes change no session. Only
 fails if another ``kyosei.serve*`` module reaches them). Two things these routes can cause
 to be written: the layer's own log of an uncatalogued screen under
 ``$KYOSEI_HOME/pane-unrecognised``, outside any repository, and the search's derived index
-beside the database, in a directory git ignores (:mod:`kyosei.transcript_search`).
+under ``$KYOSEI_HOME/transcript-search``, beside the archive (:mod:`kyosei.transcript_search`).
 
 A DEVICE TOKEN (KYO-791). Every route here is refused with 401 unless the request carries
 the token of a device this machine issued one to and has not revoked

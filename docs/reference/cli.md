@@ -1714,7 +1714,7 @@ Usage: `kyo transcripts [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--
 
 ### Positional arguments
 
-- `{search,rebuild}` — **required**. search: list the prompts and replies holding the phrase, newest first, from live transcripts and archived ones; tool calls, tool results, thinking and subagents are not searched. rebuild: delete the local index (kyosei/.transcript-search/, ignored by git) and write it again from the transcripts; a search brings the index up to date itself, so this is for an index that is suspected wrong
+- `{search,rebuild}` — **required**. search: list the prompts and replies holding the phrase, newest first, from live transcripts and archived ones; tool calls, tool results, thinking and subagents are not searched. rebuild: delete the local index ($KYOSEI_HOME/transcript-search/<project>/) and write it again from the transcripts; a search brings the index up to date itself, so this is for an index that is suspected wrong
 - `[PHRASE ...]` — optional. for search: the words to find, matched as one phrase as find in a browser matches them: case is ignored, a space matches any white space, and no character is an operator
 
 ### Options

@@ -14,13 +14,17 @@ the most recent sessions, so the other two are what reach the older ones. Each s
 transcript is found as the session layer finds it: the original while Claude Code keeps it,
 and the archive's copy afterwards.
 
-THE INDEX IS DERIVED. It is one SQLite file, ``kyosei/.transcript-search/index.db``, beside
-the database. The directory is created with mode 0700 and holds its own ``.gitignore``
-ignoring everything in it, as ``kyosei/.doctor-cache`` does, so a store written before this
-existed needs no new ignore line before the file appears. It is a file of its own rather
-than tables in ``kyosei.db`` because that database is rebuilt from ``kyosei/export/``, which
-is committed: nothing here is exported, tracked or logged. Deleting the directory loses
-nothing; ``kyo transcripts rebuild`` writes it again from the transcripts.
+THE INDEX IS DERIVED. It is one SQLite file,
+``$KYOSEI_HOME/transcript-search/<project>/index.db``, a sibling of the transcript archive
+and named as the archive's directory is. It holds the text of the transcripts, so it is
+kept where they are kept: outside every git repository (:func:`index_location_problem`
+refuses a location inside one, as the archive's check does), in a directory of mode 0700
+and a file of mode 0600. It is not beside ``kyosei.db``, because no file in a store's
+directory holds a transcript's words, and under the in-repo layout that directory is in the
+code repository. It is a file of its own rather than tables in ``kyosei.db`` because that
+database is rebuilt from ``kyosei/export/``, which is committed: nothing here is exported,
+tracked or logged. Deleting the directory loses nothing; ``kyo transcripts rebuild`` writes
+it again from the transcripts.
 
 KEPT UP TO DATE ON READ. Every search first compares each session's transcript (its path,
 size and modification time) with what the index recorded, and reads again only the sessions
@@ -59,19 +63,24 @@ from . import cmd_turns
 from .cmd_sessions import expand_home, read_sessions, sessions_path
 from .commands import Context, Output
 from .config import (
-    KYOSEI_DIR,
     READ_TRANSCRIPTS_KEY,
     Config,
     load_config,
     project_home_name,
+    store_home,
     transcripts_opted_in,
 )
 from .errors import KyoseiError, UsageError
 from .harness import claude_code_transcript as transcript
-from .transcript_archive import archive_dir, archived_session_ids
+from .transcript_archive import (
+    archive_dir,
+    archived_session_ids,
+    enclosing_git_repository,
+    project_archive_name,
+)
 
-#: The directory beside the database that holds the index and its own ``.gitignore``.
-INDEX_DIRNAME = ".transcript-search"
+#: The directory directly under ``$KYOSEI_HOME`` holding one index directory per project.
+INDEX_DIRNAME = "transcript-search"
 INDEX_NAME = "index.db"
 
 #: The index's layout, kept in ``PRAGMA user_version``; an index of another is rebuilt.
@@ -93,8 +102,6 @@ NOT_OPTED_IN = (
     "this project has not opted in to reading transcripts, so its sessions are neither "
     f"indexed nor searched; to opt in, set `{READ_TRANSCRIPTS_KEY}: true` in kyosei/config.yml"
 )
-
-_IGNORE = "# kyo transcripts' local index (KYO-812); never committed\n*\n"
 
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
@@ -181,13 +188,26 @@ def excerpt(text: str, spans: list[tuple[int, int]]) -> list[dict]:
 # ---------------------------------------------------------------------- the sessions
 
 
-def index_dir(store_root: Path | str) -> Path:
-    return Path(store_root) / KYOSEI_DIR / INDEX_DIRNAME
+def index_dir(config: Config, environ: Mapping[str, str] | None = None) -> Path:
+    """This project's index directory. Nothing here creates it."""
+    env = None if environ is None else dict(environ)
+    return store_home(env) / INDEX_DIRNAME / project_archive_name(config)
 
 
-def index_path(store_root: Path | str) -> Path:
-    """Where the index is. Nothing here creates it."""
-    return index_dir(store_root) / INDEX_NAME
+def index_path(config: Config, environ: Mapping[str, str] | None = None) -> Path:
+    return index_dir(config, environ) / INDEX_NAME
+
+
+def index_location_problem(directory: Path) -> str | None:
+    """Why ``directory`` must not hold the index, or None when no git repository encloses it."""
+    repository = enclosing_git_repository(directory)
+    if repository is None:
+        return None
+    return (
+        f"the transcript search index {directory} is inside the git repository at "
+        f"{repository}, where the text of a transcript could be committed; point $KYOSEI_HOME "
+        "at a directory outside every git repository"
+    )
 
 
 def project_session_ids(
@@ -259,15 +279,17 @@ def _create(conn: sqlite3.Connection) -> None:
         raise
 
 
-def _connect(store_root: Path | str) -> sqlite3.Connection:
-    """Open the index, creating it empty when it is absent, damaged or of another layout."""
-    directory = index_dir(store_root)
+def _connect(directory: Path) -> sqlite3.Connection:
+    """Open the index, creating it empty when it is absent, damaged or of another layout.
+
+    Refuses a directory inside a git repository before anything is written.
+    """
+    problem = index_location_problem(directory)
+    if problem is not None:
+        raise KyoseiError(problem)
     path = directory / INDEX_NAME
     for attempt in (0, 1):
-        directory.mkdir(mode=0o700, exist_ok=True)
-        ignore = directory / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text(_IGNORE, encoding="utf-8")
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if not path.exists():
             os.close(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600))
         conn = sqlite3.connect(path, timeout=30.0)
@@ -386,10 +408,10 @@ def rebuild(
 ) -> Sync:
     """Delete the index and write it again from the transcripts and the archive."""
     _require_opt_in(config)
-    directory = index_dir(store_root)
+    directory = index_dir(config, environ)
     if directory.exists():
         shutil.rmtree(directory)
-    conn = _connect(store_root)
+    conn = _connect(directory)
     try:
         return _sync(conn, config, store_root, environ)
     finally:
@@ -472,7 +494,7 @@ def search(
         )
     after = _cursor_key(cursor)
     pattern = phrase_pattern(parts)
-    conn = _connect(store_root)
+    conn = _connect(index_dir(config, environ))
     try:
         synced = _sync(conn, config, store_root, environ)
         results: list[dict] = []
@@ -538,8 +560,9 @@ def cmd_transcripts(ctx: Context, args: Namespace) -> Output:
             )
         done = rebuild(config, ctx.root, ctx.environ)
         lines = [
-            f"transcripts: index rebuilt at {index_path(ctx.root)} from {len(done.read)} of "
-            f"{done.sessions} session(s); the others have no transcript left to read"
+            f"transcripts: index rebuilt at {index_path(config, ctx.environ)} from "
+            f"{len(done.read)} of {done.sessions} session(s); the others have no transcript "
+            "left to read"
         ]
         lines += [f"  could not be read: {problem}" for problem in done.problems]
         return Output(

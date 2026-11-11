@@ -19,7 +19,7 @@ from kyosei import cmd_sessions, cmd_turns, transcript_search
 from kyosei.config import load_config
 from kyosei.transcript_archive import archive_dir, archive_session
 
-from .conftest import git_init, invoke, new_record, opt_in_transcripts
+from .conftest import invoke, new_record, opt_in_transcripts
 
 LIVE = "11111111-1111-4111-8111-111111111111"
 INDEXED = "22222222-2222-4222-8222-222222222222"
@@ -112,6 +112,10 @@ class World:
     @property
     def config(self):
         return load_config(self.project)
+
+    @property
+    def index_dir(self) -> Path:
+        return transcript_search.index_dir(self.config)
 
     def search(self, query: str, **kwargs) -> dict:
         return transcript_search.search(self.config, self.project, "proj", query, **kwargs)
@@ -323,41 +327,55 @@ def test_rebuild_takes_no_argument_and_the_bare_form_clears_it(world: World) -> 
         refused = run(world, "rebuild", *extra)
         assert refused.code != 0, refused
         assert "run `kyo transcripts rebuild`" in refused.err
-    assert not transcript_search.index_dir(world.project).exists()
+    assert not world.index_dir.exists()
     assert run(world, "rebuild").code == 0  # the remedy, as it is written
 
 
 # -------------------------------------------------------------------- c2: derived, local
 
 
-def test_the_index_is_beside_the_database_and_git_ignores_it(world: World) -> None:
-    git_init(world.project)
+def test_the_index_is_local_private_and_outside_the_store(world: World, store_home: Path) -> None:
     world.search("heron")
-    index = transcript_search.index_path(world.project)
-    assert index.is_file() and index.parent.parent == world.project / "kyosei"
-    assert (world.project / "kyosei" / "kyosei.db").is_file()
+    index = world.index_dir / transcript_search.INDEX_NAME
+    assert index.is_file()
+    # A sibling of the transcript archive under $KYOSEI_HOME, named as the archive is.
+    assert world.index_dir == store_home / "transcript-search" / "proj"
+    assert archive_dir(world.config) == store_home / "transcript-archive" / "proj"
+    assert world.project not in index.parents
     assert index.stat().st_mode & 0o777 == 0o600
-    assert index.parent.stat().st_mode & 0o777 == 0o700
-    status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
-        cwd=world.project,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert transcript_search.INDEX_DIRNAME not in status, status
+    assert world.index_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_an_index_inside_a_git_repository_is_refused_and_moving_the_home_clears_it(
+    world: World, tmp_path: Path, monkeypatch
+) -> None:
+    inside = tmp_path / "a-repository" / "home"
+    inside.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path / "a-repository")], check=True)
+    monkeypatch.setenv("KYOSEI_HOME", str(inside))
+    for action in (["search", "heron"], ["rebuild"]):
+        refused = run(world, *action)
+        assert refused.code != 0, refused
+        assert "where the text of a transcript could be committed" in refused.err
+        assert "point $KYOSEI_HOME at a directory outside every git repository" in refused.err
+    assert not (inside / "transcript-search").exists()  # nothing was written there
+
+    outside = tmp_path / "outside-home"
+    monkeypatch.setenv("KYOSEI_HOME", str(outside))  # the remedy, as it is written
+    assert run(world, "search", "heron").code == 0
+    assert (outside / "transcript-search" / "proj" / transcript_search.INDEX_NAME).is_file()
 
 
 def test_deleting_the_index_and_rebuilding_gives_the_same_results(world: World) -> None:
     queries = ("heron", "the wren", "robin", REPLY_WORDS, "s;", RESULT_WORDS)
     before = {query: world.search(query)["results"] for query in queries}
     assert before["heron"]
-    shutil.rmtree(transcript_search.index_dir(world.project))
+    shutil.rmtree(world.index_dir)
 
     result = invoke(["--root", str(world.project), "transcripts", "rebuild", "--json"])
     assert result.code == 0, result
     assert json.loads(result.out)["index"]["read"] == 3
-    assert transcript_search.index_path(world.project).is_file()
+    assert (world.index_dir / transcript_search.INDEX_NAME).is_file()
     assert {query: world.search(query)["results"] for query in queries} == before
 
 
@@ -393,7 +411,7 @@ def test_a_session_whose_transcript_is_gone_everywhere_leaves_the_index(world: W
 
 def test_an_index_of_another_layout_or_a_damaged_one_is_written_again(world: World) -> None:
     expected = world.found("heron")
-    index = transcript_search.index_path(world.project)
+    index = world.index_dir / transcript_search.INDEX_NAME
     index.write_bytes(b"this is not a database, and it is long enough to be read as one" * 40)
     assert world.found("heron") == expected
 
@@ -408,7 +426,7 @@ def test_an_index_of_another_layout_or_a_damaged_one_is_written_again(world: Wor
 def test_without_the_trigram_tokenizer_the_answers_are_the_same(world: World, monkeypatch) -> None:
     queries = ("heron", "the wren", "allow wat", "s;", "robin wren")
     with_fts = {query: world.found(query) for query in queries}
-    shutil.rmtree(transcript_search.index_dir(world.project))
+    shutil.rmtree(world.index_dir)
     monkeypatch.setattr(
         transcript_search,
         "_FTS_TABLE",
@@ -421,21 +439,22 @@ def test_without_the_trigram_tokenizer_the_answers_are_the_same(world: World, mo
 # ---------------------------------------------------------- the text stays out of the store
 
 
-def test_the_export_and_every_tracked_file_hold_none_of_a_replys_text(world: World, kyo) -> None:
+def test_the_export_and_every_file_of_the_project_hold_none_of_a_replys_text(
+    world: World, kyo
+) -> None:
     new_record(kyo, title="a record written beside the index")
     world.search("heron")
     assert invoke(["--root", str(world.project), "export", "--refresh"]).code == 0
-    git_init(world.project)
-    subprocess.run(["git", "add", "-A"], cwd=world.project, check=True)
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=world.project, capture_output=True, text=True, check=True
-    ).stdout.split("\0")
-    assert any(name.startswith("kyosei/export/") for name in tracked)
     needle = REPLY_WORDS.encode("utf-8")
-    for name in filter(None, tracked):
-        assert needle not in (world.project / name).read_bytes(), name
-    # Non-vacuous: the index does hold it, so the walk above would have found a leak.
-    held = b"".join(p.read_bytes() for p in transcript_search.index_dir(world.project).iterdir())
+    # Every file under the project, tracked or ignored, the database and the export included.
+    files = [path for path in world.project.rglob("*") if path.is_file()]
+    names = {str(path.relative_to(world.project)) for path in files}
+    assert "kyosei/kyosei.db" in names
+    assert any(name.startswith("kyosei/export/") and name.endswith(".json") for name in names)
+    for path in files:
+        assert needle not in path.read_bytes(), path
+    # Non-vacuous: the index does hold it, so the walk above would have found a copy.
+    held = b"".join(path.read_bytes() for path in world.index_dir.iterdir())
     assert needle in held
 
 
@@ -457,7 +476,8 @@ def test_a_project_not_opted_in_is_refused_and_the_remedy_clears_it(
         assert refused.code != 0, action
         assert "has not opted in to reading transcripts" in refused.err
         assert "set `read_transcripts: true` in kyosei/config.yml" in refused.err
-    assert not transcript_search.index_dir(project).exists()  # nothing was read or written
+    index = transcript_search.index_dir(load_config(project))
+    assert not index.exists()  # nothing was read or written
 
     opt_in_transcripts(project)  # the remedy, as it is written
     cleared = invoke(["--root", str(project), "transcripts", "search", "heron", "--json"])
