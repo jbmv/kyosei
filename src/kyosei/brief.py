@@ -455,6 +455,48 @@ def _worktree_tooling_bullet(worktree: str, setup_commands: Sequence[str]) -> st
     )
 
 
+def _guard_tests_bullet(guard_commands: Sequence) -> str:
+    """KYO-744. The guard tests this dispatch's touches call for, as commands to run.
+
+    A worker runs the tests that cover its change and leaves the suite to its
+    orchestrator (KYO-297). A guard test covers no change in particular: it asserts
+    something about a whole surface, such as that every command is classified, and
+    fails when a change elsewhere breaks that. A worker choosing tests for its own
+    change does not find it, and the suite finds it after the merge. The project
+    declares which touched paths call for which tests (``guard_tests`` in
+    ``kyosei/config.yml``), and ``config.matched_guard_tests`` selects the rules this
+    dispatch's claim matches.
+
+    Each entry of ``guard_commands`` is a ``config.GuardCommand``. Kyosei prints the
+    commands and runs none of them, as with ``worktree_setup``. Empty renders as the
+    empty string, and the caller then adds no bullet at all: a project that declares no
+    guard test, or a dispatch whose touches match none, gets the brief it got before.
+    """
+    if not guard_commands:
+        return ""
+    lines: list[str] = []
+    for guard in guard_commands:
+        lines.append(f"        {guard.command}")
+        touches = ", ".join(dict.fromkeys(touch for touch, _glob in guard.reasons))
+        lines.append(f"{_SETUP_NOTE_INDENT}called for by your touch of {touches}")
+        lines.extend(f"{_SETUP_NOTE_INDENT}{note}" for note in guard.notes)
+    listed = "\n".join(lines)
+    return (
+        "- **Guard tests**: this project declares tests that guard paths your touches "
+        "match (`guard_tests` in `kyosei/config.yml`). A guard test fails on a change "
+        "made elsewhere in those paths and covers no one change, so the tests you choose "
+        "for your own change will not include it. Run these in your worktree, after the "
+        "setup above and before you report:\n\n"
+        f"{listed}\n\n"
+        "  Each takes its test files from the project's declaration, and Kyosei ran none "
+        "of them. They were matched against the touches declared for this dispatch when "
+        "this brief was frozen, so a file you change outside those touches was not "
+        "considered. A failure here is yours to fix before you report, or to report if "
+        "you cannot. A test file named here that does not exist is a defect in the "
+        "declaration and belongs in `premise_false[]`."
+    )
+
+
 def _symbols_by_touch(documents: Sequence[dict]) -> dict[tuple[str, str], list[str]]:
     """``(record_id, path) -> [symbol, ...]`` for the symbol column.
 
@@ -1322,6 +1364,11 @@ def generate_brief(
     #: second reader of the same file is a second source of truth (law 3). Empty
     #: is a rendered state, not a skipped one (KYO-143.c4).
     worktree_setup: Sequence[str] = (),
+    #: KYO-744: ``config.matched_guard_tests`` -- the guard-test commands this
+    #: dispatch's touches call for, each a ``config.GuardCommand``. Matched by the
+    #: caller against the same claim the Touches section renders, and passed in for
+    #: the law-3 reason above. Empty renders as nothing at all.
+    guard_commands: Sequence = (),
     #: KYO-147.c1: ``touch_drift.declaration_provenance`` rows — how stale each
     #: other running dispatch's DECLARED touches are. Passed in for the same law-3
     #: reason as everything above it, and with one extra: it is derived from the
@@ -1482,6 +1529,9 @@ def generate_brief(
         # about the work. Placed last in the header because it is what the worker
         # acts on first.
         _worktree_tooling_bullet(worktree, list(worktree_setup)),
+        # KYO-744: directly under the setup it depends on, and absent when nothing
+        # matched.
+        *([_guard_tests_bullet(guard_commands)] if guard_commands else []),
         "",
         "## Record summary",
         "",

@@ -2112,6 +2112,13 @@ CONFIG_CONSUMERS: dict[str, tuple[str, ...]] = {
     # KYO-656: read only through this one predicate, so that everything which reads a
     # person's transcript asks the same question.
     "read_transcripts": ("config.transcripts_opted_in",),
+    # KYO-744. The project's guard tests, by the touched paths that call for them: each
+    # rule is globs over touched paths, the test files to run and the command they are
+    # appended to. `kyo dispatch` states in the brief the rules a dispatch's touches
+    # match, and `kyo doctor` names a declared test file that does not exist. Parsed by
+    # each reader through `config.read_guard_tests`, on `close_wave`'s terms: a malformed
+    # value refuses `kyo dispatch`, is named by `kyo doctor`, and never blinds a hook.
+    "guard_tests": ("cmd_dispatch._cmd_dispatch_create", "doctor_install.check_guard_tests"),
 }
 
 #: Config keys a project may legitimately not carry (KYO-60).
@@ -2194,6 +2201,9 @@ OPTIONAL_CONFIG_KEYS: frozenset[str] = frozenset(
         # KYO-656: absent in every project that has not answered setup decision D14, and
         # absence reads as not opted in (KYO-654, DC12).
         "read_transcripts",
+        # KYO-744: absent in every project that has declared no guard test, and then a
+        # brief says nothing about them.
+        "guard_tests",
     }
 )
 

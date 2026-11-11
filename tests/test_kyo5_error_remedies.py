@@ -4633,6 +4633,16 @@ RECORDED: dict[str, str] = {
         "a hand edit of kyosei/config.yml, tested by "
         "test_the_people_key_is_declared_read_and_refused_when_malformed"
     ),
+    # KYO-744: the one `guard_tests` refusal. Its remedy is a hand edit of
+    # kyosei/config.yml (delete the key, or write the shape the message prints), which no
+    # `kyo` command performs. Proved for every malformed shape by
+    # tests/test_kyo744_guard_tests.py::
+    # test_a_malformed_declaration_is_refused_and_each_named_remedy_clears_it, which
+    # writes the printed shape back, then deletes the key, and dispatches.
+    "config.py:parse_guard_tests#0": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_a_malformed_declaration_is_refused_and_each_named_remedy_clears_it"
+    ),
     # KYO-642: `Store.add_credit`'s refusals, whose remedy is a different argument to the
     # Python writer (no `kyo` command calls it until KYO-644). Proved by
     # tests/test_schema_compat.py::test_a_refined_credit_without_its_refining_turn_is_refused

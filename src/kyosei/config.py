@@ -48,12 +48,15 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 from .contracts import STORE_LINK_NAME as _contracts_store_link_name
+from .contracts import is_directory_touch as _contracts_is_directory_touch
+from .contracts import touch_target as _contracts_touch_target
 from .errors import KyoseiError
 from .registry import load_yaml_refusing_duplicates
 from .schema import CONFIG_CONSUMERS, OPTIONAL_CONFIG_KEYS, SCHEMA_VERSION
@@ -1858,6 +1861,290 @@ def transcripts_opted_in(config: Config) -> bool:
     return config.read_transcripts is True
 
 
+# ---------------------------------------------------------------- KYO-744: guard tests
+
+#: The config key under which a project declares its guard tests.
+GUARD_TESTS_KEY = "guard_tests"
+
+#: The keys one ``guard_tests`` rule may carry. ``note`` is optional.
+GUARD_RULE_KEYS = ("touches", "tests", "run", "note")
+
+#: What separates a test file from a selector inside it, as in
+#: ``tests/test_cli.py::test_every_command_is_classified``. The file is what
+#: `kyo doctor` checks exists; the whole entry is what the brief's command names.
+GUARD_TEST_SELECTOR = "::"
+
+
+@dataclass(frozen=True)
+class GuardRule:
+    """One ``guard_tests`` rule: the touched paths that call for some tests (KYO-744).
+
+    A guard test is one that fails on a change made elsewhere: a test that every command
+    is classified, that no flag breaks a naming rule, that a ledger accounts for every
+    error message. A worker runs the tests that cover its change (KYO-297), and a guard
+    covers no change in particular, so it is found only by the suite after the merge.
+    The project knows which of its paths a guard watches, so it declares that here.
+    """
+
+    #: Globs over repository-relative paths; the rule applies when any touch of the
+    #: dispatch matches any of them (:func:`guard_glob_matches`).
+    touches: tuple[str, ...]
+    #: The test files to run, each optionally with a ``::`` selector.
+    tests: tuple[str, ...]
+    #: The command the test files are appended to, e.g. ``.venv/bin/python -m pytest``.
+    #: Declared because only the project knows its test runner.
+    run: str
+    #: The project's one-line note about the rule, or ``""``.
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class GuardCommand:
+    """One command a brief states: a runner and every matched test file it is given."""
+
+    run: str
+    tests: tuple[str, ...]
+    #: ``(touch as declared, glob it matched)`` pairs, in the order they were found.
+    reasons: tuple[tuple[str, str], ...]
+    notes: tuple[str, ...] = ()
+
+    @property
+    def command(self) -> str:
+        """The line a worker runs: the runner followed by the test files, quoted."""
+        return " ".join([self.run, *(shlex.quote(test) for test in self.tests)])
+
+
+def guard_test_file(entry: str) -> str:
+    """The file a ``tests`` entry names, with any ``::`` selector removed."""
+    return entry.split(GUARD_TEST_SELECTOR, 1)[0]
+
+
+class _GuardTestsProblem(ValueError):
+    """What is wrong with a ``guard_tests`` value, carried to the one refusal below."""
+
+
+def _guard_string_list(value: object) -> list[str] | None:
+    """A string, or a non-empty list of them, as a list; ``None`` for anything else."""
+    items = [value] if isinstance(value, str) else value
+    if not isinstance(items, list) or not items:
+        return None
+    if not all(isinstance(item, str) and item.strip() for item in items):
+        return None
+    return [item.strip() for item in items]
+
+
+def _guard_path_problem(key: str, text: str) -> str | None:
+    """Why ``text`` cannot be a ``touches`` glob or a ``tests`` entry, or ``None``."""
+    if "\n" in text:
+        return "contains a newline"
+    if text.startswith("/") or text.startswith("~"):
+        return "is not relative to the repository root"
+    if ".." in text.split("/"):
+        return "climbs out of the repository with `..`"
+    if key == "touches" and "#" in text:
+        # A touch's `#symbol` is not matched: a guard watches the file, and a glob that
+        # named a symbol would silently never apply.
+        return "names a `#symbol`, and a guard glob matches paths only"
+    if key == "touches" and text.startswith("+"):
+        return "starts with `+`, which marks a touch and is not part of a path"
+    if key == "tests" and not guard_test_file(text):
+        return "names no file before its `::` selector"
+    return None
+
+
+def _parse_guard_rule(entry: object) -> GuardRule:
+    """One rule, or :class:`_GuardTestsProblem` saying what is wrong with it."""
+    if not isinstance(entry, dict):
+        raise _GuardTestsProblem(f"must be a mapping; found {type(entry).__name__}")
+    unknown = sorted(str(key) for key in set(entry) - set(GUARD_RULE_KEYS))
+    if unknown:
+        raise _GuardTestsProblem(
+            f"carries {', '.join(unknown)}, which nothing reads (the keys are "
+            f"{', '.join(GUARD_RULE_KEYS)})"
+        )
+    lists: dict[str, list[str]] = {}
+    for key in ("touches", "tests"):
+        items = _guard_string_list(entry.get(key))
+        if items is None:
+            raise _GuardTestsProblem(
+                f"needs '{key}' as a non-empty string or a non-empty list of them; "
+                f"found {entry.get(key)!r}"
+            )
+        for item in items:
+            problem = _guard_path_problem(key, item)
+            if problem is not None:
+                raise _GuardTestsProblem(f"has the {key} entry {item!r}, which {problem}")
+        lists[key] = items
+    run = entry.get("run")
+    if not isinstance(run, str) or not run.strip() or "\n" in run:
+        raise _GuardTestsProblem(
+            f"needs 'run' as the one-line command its test files are appended to; found {run!r}"
+        )
+    note = entry.get("note")
+    if note is not None and (not isinstance(note, str) or not note.strip() or "\n" in note):
+        raise _GuardTestsProblem(f"has a 'note' that is not one line of text; found {note!r}")
+    return GuardRule(
+        touches=tuple(dict.fromkeys(lists["touches"])),
+        tests=tuple(dict.fromkeys(lists["tests"])),
+        run=" ".join(run.split()),
+        note=note.strip() if note is not None else "",
+    )
+
+
+def parse_guard_tests(value: object, path: Path) -> tuple[GuardRule, ...]:
+    """KYO-744: ``guard_tests:`` into its rules, in the file's order.
+
+    Absent and an empty list both mean that no guard test is declared, as with
+    ``orchestrator_only_commands``: the consequence of either is that a brief says
+    nothing about guard tests. Every other shape that is not a list of rules is
+    refused, because a rule that parsed to nothing would leave the brief silent about
+    a guard the project believes it declared.
+
+    Parsed by its readers through :func:`read_guard_tests` and not by
+    :func:`load_config`, on ``close_wave``'s terms: a malformed value refuses
+    `kyo dispatch` and is named by `kyo doctor`, and never blinds a hook.
+    """
+    if value is None:
+        return ()
+    where = ""
+    try:
+        if not isinstance(value, list):
+            raise _GuardTestsProblem(
+                f"must be a list of rules, or absent; found {type(value).__name__}"
+            )
+        rules = []
+        for index, entry in enumerate(value):
+            where = f" rule {index + 1}"
+            rules.append(_parse_guard_rule(entry))
+    except _GuardTestsProblem as problem:
+        # One refusal for every malformed shape, so the remedy is stated once.
+        raise KyoseiError(
+            f"{path} key '{GUARD_TESTS_KEY}'{where} {problem} — hand edit {path}: delete "
+            "the key to declare no guard tests, or write each rule as\n"
+            f"  {GUARD_TESTS_KEY}:\n"
+            "    - touches: [src/app/cli.py, 'src/app/serve*.py']\n"
+            "      tests: [tests/test_command_classification.py]\n"
+            "      run: .venv/bin/python -m pytest"
+        ) from None
+    return tuple(rules)
+
+
+def read_guard_tests(root: Path) -> tuple[GuardRule, ...]:
+    """``guard_tests`` from this project's ``kyosei/config.yml``, validated."""
+    return parse_guard_tests(read_raw_config(root).get(GUARD_TESTS_KEY), config_path_for(root))
+
+
+def _guard_segment_regex(segment: str) -> str:
+    """One glob path segment as a regular expression that never crosses a ``/``."""
+    out: list[str] = []
+    index = 0
+    while index < len(segment):
+        char = segment[index]
+        if char == "*":
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        elif char == "[" and "]" in segment[index + 2 :]:
+            end = segment.index("]", index + 2)
+            body = segment[index + 1 : end]
+            negated = body.startswith("!")
+            members = re.escape(body[negated:]).replace(r"\-", "-")
+            out.append("[" + ("^" if negated else "") + members + "]")
+            index = end
+        else:
+            out.append(re.escape(char))
+        index += 1
+    return "".join(out)
+
+
+def _guard_glob_segments(glob: str) -> list[str]:
+    """A glob's segments, with a trailing ``/`` read as ``/**`` (the whole tree)."""
+    segments = glob.split("/")
+    if segments[-1] == "":
+        segments[-1] = "**"
+    return segments
+
+
+def guard_glob_matches(glob: str, touch: str) -> bool:
+    """Does a stored touch path fall under ``glob`` (KYO-744)?
+
+    The dialect is :meth:`pathlib.Path.glob`'s, as ``documents.yml``'s ``globs`` use it:
+    ``*`` and ``?`` stop at a ``/``, ``**`` as a whole segment crosses directories, and
+    the glob is matched against the whole repository-relative path. A glob ending in
+    ``/`` names everything beneath that directory.
+
+    The three touch forms are read as what each claims:
+
+    * a file touch matches as its path. Its ``#symbol`` is not consulted, and the
+      caller passes the path alone: a guard watches the file, and a change to one
+      symbol in it can fail the guard as easily as a change to another.
+    * a new-file touch (``+path``) matches as the path it will create, so a glob such
+      as ``src/app/cmd_*.py`` applies to a command module that does not exist yet.
+    * a directory touch (``dir/``) claims its whole tree, including files not yet
+      created, so it matches any glob that could match a path beneath it. This errs
+      toward naming a guard, which costs a worker seconds, over omitting one.
+    """
+    path = _contracts_touch_target(touch)
+    segments = _guard_glob_segments(glob)
+    if not _contracts_is_directory_touch(path):
+        pattern = ""
+        for index, segment in enumerate(segments):
+            last = index == len(segments) - 1
+            if segment == "**":
+                pattern += ".*" if last else "(?:[^/]+/)*"
+            else:
+                pattern += _guard_segment_regex(segment) + ("" if last else "/")
+        return re.fullmatch(pattern, path) is not None
+    directory = path.rstrip("/").split("/")
+    for index, part in enumerate(directory):
+        if index >= len(segments):
+            return False  # the glob names a path above this directory
+        if segments[index] == "**":
+            return True
+        if re.fullmatch(_guard_segment_regex(segments[index]), part) is None:
+            return False
+    # Every directory segment matched; the glob reaches beneath it only if it goes on.
+    return len(segments) > len(directory)
+
+
+def matched_guard_tests(
+    rules: Sequence[GuardRule], touches: Iterable[str]
+) -> tuple[GuardCommand, ...]:
+    """The commands a dispatch's touches call for, one per distinct ``run`` (KYO-744).
+
+    ``touches`` is the dispatch's whole claim as stored paths: the primary record's
+    touches and those of every record it covers with ``--also-covers``, since the one
+    branch carries the changes of all of them. Rules that share a ``run`` are merged
+    into one command, so a test runner starts once, and a test file named by two
+    matching rules is given once. No match yields ``()``.
+    """
+    ordered = sorted(set(touches))
+    merged: dict[str, dict[str, dict]] = {}
+    for rule in rules:
+        reasons = [
+            (touch, glob)
+            for touch in ordered
+            for glob in rule.touches
+            if guard_glob_matches(glob, touch)
+        ]
+        if not reasons:
+            continue
+        slot = merged.setdefault(rule.run, {"tests": {}, "reasons": {}, "notes": {}})
+        slot["tests"].update(dict.fromkeys(rule.tests))
+        slot["reasons"].update(dict.fromkeys(reasons))
+        if rule.note:
+            slot["notes"][rule.note] = None
+    return tuple(
+        GuardCommand(
+            run=run,
+            tests=tuple(slot["tests"]),
+            reasons=tuple(slot["reasons"]),
+            notes=tuple(slot["notes"]),
+        )
+        for run, slot in merged.items()
+    )
+
+
 # ---------------------------------------------------------------- KYO-560: onboarding
 
 #: The config key that records the setup decisions an operator declined or deferred.
@@ -2033,6 +2320,22 @@ CONFIG_KEY_EXAMPLES: dict[str, str] = {
         "#   D4:\n"
         "#     status: deferred\n"
         "#     reason: no code yet, so no install or test command"
+    ),
+    "guard_tests": (
+        "# KYO-744. Uncomment and edit to declare this project's guard tests: tests that\n"
+        "# fail on a change made elsewhere, such as one asserting that every command is\n"
+        "# classified. A rule names globs of touched paths (`*` stops at a `/`, `**`\n"
+        "# crosses directories, a trailing `/` is the whole tree), the test files to\n"
+        "# run, and the command they are appended to. `kyo dispatch` states in the brief\n"
+        "# the rules a dispatch's touches match, as commands the worker runs before it\n"
+        "# reports; `kyo doctor` names a declared test file that does not exist. A kyo\n"
+        "# older than this key refuses it, so declare it only once every kyo that reads\n"
+        "# this store has it.\n"
+        "#\n"
+        "# guard_tests:\n"
+        "#   - touches: [src/app/cli.py, 'src/app/serve*.py']\n"
+        "#     tests: [tests/test_command_classification.py]\n"
+        "#     run: .venv/bin/python -m pytest"
     ),
     "controller_only_commands": (
         "# KYO-298. Uncomment and edit to declare which commands are THE WHOLE SUITE\n"

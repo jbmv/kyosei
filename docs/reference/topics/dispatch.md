@@ -181,6 +181,30 @@ repository's HEAD. `--no-create-worktree` records and prints instead.
 unwritable file refuses with no dispatch created; a write that still fails after
 the dispatch is recorded says which dispatch exists and not to re-run.
 
+A project declares its guard tests in `guard_tests` in `kyosei/config.yml` (KYO-744): the
+tests that fail on a change made elsewhere, which a worker choosing tests for its own
+change does not find.
+
+```yaml
+guard_tests:
+  - touches: [src/app/cli.py, 'src/app/serve*.py']   # globs of touched paths
+    tests: [tests/test_command_classification.py]    # files, each optionally with ::selector
+    run: .venv/bin/python -m pytest                  # the command the files are appended to
+    note: a few seconds                              # optional, one line
+```
+
+`kyo dispatch` matches each rule against the dispatch's whole claim, which is the record's
+touches and those of every record named with `--also-covers`, and the brief states the
+matching rules under the worktree setup as commands the worker runs before it reports.
+Rules that share a `run` become one command. A dispatch whose touches match no rule gets a
+brief that does not mention guard tests. In a glob `*` and `?` stop at a `/`, `**` crosses
+directories, and a trailing `/` names the whole tree. A touch written `path#symbol`
+matches as its file, a new-file touch `+path` matches as the path it creates, and a
+directory touch `dir/` matches every glob that reaches a path beneath it. A malformed
+declaration refuses `kyo dispatch` and no other command, and `kyo doctor`'s `guard_tests`
+check names it, along with any declared test file that does not exist in the code
+repository. The commands are printed, never run.
+
 `kyo dispatch` itself no longer prints the whole frozen brief to the terminal by
 default (KYO-326): it prints everything else it always did — warnings, the
 drag-in summary, the disjointness lines, the worktree line — and, in

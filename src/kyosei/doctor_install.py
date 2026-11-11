@@ -23,6 +23,7 @@ from . import (
 )
 from . import config as config_module
 from .config import CONFIG_NAME, transcripts_opted_in
+from .errors import KyoseiError
 from .harness.claude_code_transcript import config_dir
 from .schema import SCHEMA_VERSION
 from .store import Store
@@ -1000,6 +1001,39 @@ def check_orchestrator_only_setup(store: Store) -> list[str]:
                 "in the meantime, which is a refusal aimed at a worker for doing what "
                 "this file told it to"
             )
+    return findings
+
+
+def check_guard_tests(store: Store) -> list[str]:
+    """KYO-744: ``guard_tests`` parses, and every test file it declares exists.
+
+    A brief states a matched rule's test files as a command for the worker to run. A
+    file that was renamed or deleted since the rule was written makes that command fail
+    in the worker's worktree, where the worker can only report it; here it is named to
+    whoever can edit the declaration. A PROBLEM: the remedy is a hand edit available now.
+
+    The file is looked for in the code repository this invocation runs in, with any
+    ``::`` selector removed. Whether a selector names a real test is not checked, since
+    that would mean running the project's test runner.
+    """
+    root = store.config.root
+    path = config_module.config_path_for(root)
+    try:
+        rules = config_module.read_guard_tests(root)
+    except KyoseiError as exc:
+        return [str(exc)]
+    code_root = store.config.repo_root
+    findings = []
+    for index, rule in enumerate(rules, start=1):
+        for test in rule.tests:
+            file = config_module.guard_test_file(test)
+            if not (code_root / file).is_file():
+                findings.append(
+                    f"{path} key '{config_module.GUARD_TESTS_KEY}' rule {index} names the "
+                    f"test file {file!r}, which does not exist in {code_root}, so a brief "
+                    f"that states this rule tells a worker to run a command that fails -- "
+                    f"hand edit {path}: correct the path, or remove the entry"
+                )
     return findings
 
 
