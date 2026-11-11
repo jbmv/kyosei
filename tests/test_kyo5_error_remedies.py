@@ -1583,6 +1583,53 @@ class _SourceIndex:
     def message_text(self, expr: ast.expr, module: str) -> str:
         return " ".join(self._text(expr, module, 0, frozenset()))
 
+    def _function_named(
+        self, module: str, func: ast.expr
+    ) -> tuple[str, ast.FunctionDef] | None:
+        """The module-level function a call's ``func`` names, with the module that
+        defines it: a bare name, one imported from a sibling, or ``alias.name`` where
+        ``alias`` is a sibling module. A method (``self.refuse(...)``) is not resolved,
+        for the reason :meth:`_resolve` gives: only module-level names are followed."""
+        if isinstance(func, ast.Name):
+            name, where = func.id, module
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            alias = self.module_aliases.get(module, {}).get(func.value.id)
+            if alias is None:
+                return None
+            name, where = func.attr, alias
+        else:
+            return None
+        for _ in range(self.MAX_DEPTH):
+            if name in self.funcs.get(where, {}):
+                return where, self.funcs[where][name]
+            target = self.imported.get(where, {}).get(name)
+            if target is None:
+                return None
+            where, name = target
+        return None
+
+    def returns_error(self, module: str, func: ast.expr, depth: int = 0) -> bool:
+        """KYO-764: whether ``func`` names a module-level helper that builds and returns
+        a deliberate error, so ``raise helper(...)`` is a raise site of one.
+
+        A helper counts when any of its ``return`` statements is a call of a class in
+        :data:`ERROR_CLASS_NAMES`, or a call of another helper that does (bounded by
+        :attr:`MAX_DEPTH`, like the message resolution). The refused shape of KYO-187,
+        ``raise variable``, stays refused and is not followed here.
+        """
+        found = self._function_named(module, func)
+        if found is None or depth > self.MAX_DEPTH:
+            return False
+        where, fn = found
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Return) and isinstance(node.value, ast.Call)):
+                continue
+            called = node.value.func
+            name = called.id if isinstance(called, ast.Name) else getattr(called, "attr", None)
+            if name in ERROR_CLASS_NAMES or self.returns_error(where, called, depth + 1):
+                return True
+        return False
+
     def _text(
         self, expr: ast.expr | None, module: str, depth: int, seen: frozenset
     ) -> list[str]:
@@ -1693,7 +1740,9 @@ def sites_in(directory: Path) -> tuple[ErrorSite, ...]:
         for node in raises:
             called = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
             name = called.id if isinstance(called, ast.Name) else getattr(called, "attr", None)
-            if name not in ERROR_CLASS_NAMES:
+            if name not in ERROR_CLASS_NAMES and not (
+                isinstance(node.exc, ast.Call) and index.returns_error(module, called)
+            ):
                 continue
             function = owners.get(node.lineno, "(module level)")
             ordinal = seen_in_function.get(function, 0)
@@ -3191,11 +3240,11 @@ PROVOKED: dict[str, Expectation] = {
             "kyosei/export/ and has no source for this file"
         },
     ),
-    "git_queries.py:_git_rev_parse_head#1": Expectation(
+    "git_queries.py:_git_rev_parse_head#2": Expectation(
         _not_a_git_repository,
         descriptive={"kyo dispatch": "names the command being refused; the remedy is `git init`"},
     ),
-    "git_queries.py:_git_current_branch#2": Expectation(
+    "git_queries.py:_git_current_branch#3": Expectation(
         _detached_head,
         descriptive={
             "kyo check-branch": "names the command being refused, with the flag it needs; no "
@@ -3874,6 +3923,62 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-764: refusals the walk found once it followed `raise helper(...)`.
+    "cmd_views.py:_show#0": (
+        "not provoked by this walk: the error is built inside `_refuse_shape`, so the "
+        "construction frame this check identifies a site by is the helper's and never the "
+        "raise's. The `kyo show` in the message is the command being refused, named to say "
+        "which ids it accepts. Provoked by "
+        "tests/test_kyo8_sweep.py::test_show_refuses_an_unshowable_shape_as_a_shape"
+    ),
+    "device_tokens.py:_device#0": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_device_entry_is_refused_and_issuing_afresh_clears_it"
+    ),
+    "device_tokens.py:_device#1": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_device_entry_is_refused_and_issuing_afresh_clears_it"
+    ),
+    "device_tokens.py:read_devices#0": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_an_unreadable_token_file_refuses_every_token_and_replacing_it_clears_it"
+    ),
+    "device_tokens.py:read_devices#1": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_an_unreadable_token_file_refuses_every_token_and_replacing_it_clears_it"
+    ),
+    "device_tokens.py:read_devices#2": (
+        "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
+        "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
+        "not build. Provoked, and its remedy run to exit 0, by "
+        "tests/test_kyo_serve_send.py::test_an_unreadable_token_file_refuses_every_token_and_replacing_it_clears_it"
+    ),
+    "serve_install.py:install#0": (
+        "not provoked by this walk: it needs a platform with neither launchd nor systemd, "
+        "and the remedy, `kyo serve`, runs the server in the foreground and never returns. "
+        "The refusal is provoked by "
+        "tests/test_kyo764_helper_sites.py::test_another_platform_is_refused_for_every_service_action"
+    ),
+    "serve_install.py:uninstall#0": (
+        "not provoked by this walk: it needs a platform with neither launchd nor systemd, "
+        "and the remedy, `kyo serve`, runs the server in the foreground and never returns. "
+        "The refusal is provoked by "
+        "tests/test_kyo764_helper_sites.py::test_another_platform_is_refused_for_every_service_action"
+    ),
+    "serve_install.py:restart#0": (
+        "not provoked by this walk: it needs a platform with neither launchd nor systemd, "
+        "and the remedy, `kyo serve`, runs the server in the foreground and never returns. "
+        "The refusal is provoked by "
+        "tests/test_kyo764_helper_sites.py::test_another_platform_is_refused_for_every_service_action"
+    ),
     # KYO-745 and KYO-749: each refusal is provoked, and its remedy run, by the test cited.
     "report_ingest.py:_amend_document_from_branch#1": (
         "not provoked by this walk: needs a branch this clone cannot read, and the remedy is to "
@@ -4097,35 +4202,35 @@ UNREACHED: dict[str, str] = {
         "s remedy run to exit 0, by tests/test_kyo_serve_install.py::test_start_refuses_w"
         "hen_another_kyo_serve_answers_naming_its_pid_and_build"
     ),
-    "serve_install.py:install#0": (
+    "serve_install.py:install#1": (
         "not provoked by this walk: every `kyo serve --install/--uninstall/--restart` s"
         "ite runs launchctl or systemctl, and the port check needs a live listener; this "
         "walk has neither, and the real service managers are the user's. Provoked, and it"
         "s remedy run to exit 0, by tests/test_kyo_serve_install.py::test_a_failed_bootst"
         "rap_names_the_desktop_terminal_and_rerunning_clears_it"
     ),
-    "serve_install.py:install#1": (
+    "serve_install.py:install#2": (
         "not provoked by this walk: every `kyo serve --install/--uninstall/--restart` s"
         "ite runs launchctl or systemctl, and the port check needs a live listener; this "
         "walk has neither, and the real service managers are the user's. Provoked, and it"
         "s remedy run to exit 0, by tests/test_kyo_serve_install.py::test_a_failed_system"
         "d_enable_names_the_user_instance_and_rerunning_clears_it"
     ),
-    "serve_install.py:uninstall#0": (
+    "serve_install.py:uninstall#1": (
         "not provoked by this walk: every `kyo serve --install/--uninstall/--restart` s"
         "ite runs launchctl or systemctl, and the port check needs a live listener; this "
         "walk has neither, and the real service managers are the user's. Provoked, and it"
         "s remedy run to exit 0, by tests/test_kyo_serve_install.py::test_a_failed_bootou"
         "t_leaves_the_plist_and_rerunning_uninstall_clears_it"
     ),
-    "serve_install.py:restart#0": (
+    "serve_install.py:restart#1": (
         "not provoked by this walk: every `kyo serve --install/--uninstall/--restart` s"
         "ite runs launchctl or systemctl, and the port check needs a live listener; this "
         "walk has neither, and the real service managers are the user's. Provoked, and it"
         "s remedy run to exit 0, by tests/test_kyo_serve_install.py::test_restart_kicksta"
         "rts_the_agent_and_refuses_naming_install_when_none_is_loaded"
     ),
-    "serve_install.py:restart#1": (
+    "serve_install.py:restart#2": (
         "not provoked by this walk: every `kyo serve --install/--uninstall/--restart` s"
         "ite runs launchctl or systemctl, and the port check needs a live listener; this "
         "walk has neither, and the real service managers are the user's. Provoked, and it"
@@ -4499,6 +4604,58 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-764: refusals the walk found once it followed `raise helper(...)`; the remedy of each
+    # is a hand edit or removal of a file, run by the test the reason names.
+    "cmd_projects.py:read_entries#0": (
+        "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
+        "moving it aside; proved by "
+        "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    "cmd_projects.py:read_entries#1": (
+        "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
+        "moving it aside; proved by "
+        "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    "cmd_projects.py:read_entries#2": (
+        "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
+        "moving it aside; proved by "
+        "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    "cmd_projects.py:read_entries#3": (
+        "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
+        "moving it aside; proved by "
+        "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    "cmd_projects.py:read_entries#4": (
+        "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
+        "moving it aside; proved by "
+        "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    "home_settings.py:load#0": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
+        " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
+    ),
+    "home_settings.py:load#1": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
+        " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
+    ),
+    "home_settings.py:load#2": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
+        " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
+    ),
+    "home_settings.py:load#3": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
+        " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
+    ),
+    "home_settings.py:load#6": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
+        " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
+    ),
     # KYO-737.d1: an anchor to a span of a served file, refused when the prompt is held. Each
     # remedy is a client's next request or a git command, run by the test the reason names.
     "serve_notes.py:_file_anchor#5": (
@@ -5551,10 +5708,10 @@ NOT_A_REMEDY: dict[str, str] = {
         "`git status --porcelain` is the command kyo ran to answer the question, quoted "
         "because it failed"
     ),
-    "git_queries.py:_git_rev_parse_head#2": (
+    "git_queries.py:_git_rev_parse_head#3": (
         "`git rev-parse HEAD` is the command kyo ran, quoted because it returned nothing"
     ),
-    "git_queries.py:_git_current_branch#1": (
+    "git_queries.py:_git_current_branch#2": (
         "`git rev-parse --abbrev-ref HEAD` is the command kyo ran, quoted with its "
         "stderr as the evidence that this is not a git repository"
     ),
@@ -5693,6 +5850,56 @@ def test_a_newly_added_raise_of_a_variable_is_caught(tmp_path: Path) -> None:
     # unclassified — if the walk could see it at all, which it cannot.
     keys = [site.key for site in sites_in(copy)]
     assert not [key for key in keys if "_a_refusal_added_later" in key]
+
+
+def test_a_raise_through_a_helper_that_returns_the_error_is_a_site(tmp_path: Path) -> None:
+    """KYO-764.c1: ``raise helper(...)``, where the helper builds and returns the error,
+    is a raise site of that error, and added unclassified it fails the ledger.
+
+    The walk matched the class name on the raise node, so a helper that returned the
+    error hid its raise from the surface: a worker's first draft of KYO-744 raised a
+    remedy-naming error through one and every ledger test passed with the site off the
+    tables. The edit is made to a real copy of the tree and the answer re-derived from
+    disk, as the KYO-187 test above does.
+    """
+    copy = _copy_of_the_source_tree(tmp_path)
+    _insert_lines_above(
+        copy / "cmd_store.py",
+        "def cmd_doctor(",
+        [
+            "def _refusal_built_apart(why: str) -> KyoseiError:",
+            '    return KyoseiError(f"something broke ({why}); run `kyo rebuild --force`")',
+            "",
+            "",
+            "def _a_refusal_added_through_a_helper() -> None:",
+            '    raise _refusal_built_apart("a reason")',
+            "",
+            "",
+        ],
+    )
+    added = [s for s in sites_in(copy) if "_a_refusal_added_through_a_helper" in s.key]
+    assert len(added) == 1, added
+    assert added[0].remedies == ("kyo rebuild --force",)
+    unclassified = {s.key for s in sites_in(copy) if s.names_a_remedy} - _classified()
+    assert unclassified == {added[0].key}
+
+    # Nothing is invented: a helper that returns something else is not a site, and
+    # neither is a raise of a name, which KYO-187 refuses instead of following.
+    _insert_lines_above(
+        copy / "cmd_store.py",
+        "def cmd_doctor(",
+        [
+            "def _text_built_apart() -> str:",
+            '    return "run `kyo rebuild --force`"',
+            "",
+            "",
+            "def _a_raise_of_something_else() -> None:",
+            "    raise _text_built_apart()",
+            "",
+            "",
+        ],
+    )
+    assert not [s for s in sites_in(copy) if "_a_raise_of_something_else" in s.key]
 
 
 def test_the_refusal_reads_the_raise_shape_and_not_a_name(tmp_path: Path) -> None:
@@ -5879,7 +6086,9 @@ def _messages() -> dict[str, str]:
         for node in raises:
             called = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
             name = called.id if isinstance(called, ast.Name) else getattr(called, "attr", None)
-            if name not in ERROR_CLASS_NAMES:
+            if name not in ERROR_CLASS_NAMES and not (
+                isinstance(node.exc, ast.Call) and index.returns_error(module, called)
+            ):
                 continue
             function = owners.get(node.lineno, "(module level)")
             ordinal = seen.get(function, 0)

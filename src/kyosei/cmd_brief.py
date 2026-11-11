@@ -508,6 +508,23 @@ def _staleness_coverage(store: Store) -> dict:
     }
 
 
+def _flags_on_settled_records(store: Store) -> set[str]:
+    """Ids of the open flags that sit on a settled record, or name a settled record as
+    the other half of their pair (KYO-748.c2): findings about work that is finished or
+    retired, which the brief counts and leaves to `kyo flag list`."""
+    ladder = _load_status_ladder(store)
+    settled = {
+        row["id"]
+        for row in store.conn.execute("SELECT id, status FROM records")
+        if ladder.is_settled(row["status"])
+    }
+    return {
+        row["id"]
+        for row in store.unresolved_flags()
+        if row["record_id"] in settled or row["other_record_id"] in settled
+    }
+
+
 def _ranked_unresolved_flags(store: Store) -> list[dict]:
     """The brief's flag list, each ``touch-changed`` entry carrying the scope it belongs
     to, ordered worked-record staleness first (KYO-69.c2).
@@ -526,7 +543,10 @@ def _ranked_unresolved_flags(store: Store) -> list[dict]:
     """
     worked = _records_with_dispatch_history(store)
     flags = []
+    on_settled = _flags_on_settled_records(store)
     for row in store.unresolved_flags():
+        if row["id"] in on_settled:
+            continue
         flag = dict(row)
         flag["touch_changed_scope"] = (
             sweep_module.touch_changed_scope(has_dispatch_history=flag["record_id"] in worked)
@@ -1149,6 +1169,9 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         # way to tell "answered" from "there was never anything here".
         "terminated_no_report_answered_count": terminated_no_report_answered,
         "unresolved_flags": _ranked_unresolved_flags(store),
+        # KYO-748.c2: the open flags the list above leaves out because their record is
+        # settled; counted so the text can say how many and where to read them.
+        "unresolved_flags_on_settled": len(_flags_on_settled_records(store)),
         # KYO-63: the flag list above is the surface that reads as "nothing is stale",
         # and it reads that way just as convincingly when the staleness check never ran.
         "staleness": _staleness_coverage(store),

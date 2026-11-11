@@ -277,6 +277,11 @@ third action because it is still a resolve — of every staleness flag a settled
 own move should already have closed — not a new way for a flag to leave the unresolved
 set.
 
+KYO-748 widened both to every flag of any kind, and to a `near-duplicate-criteria` flag
+whose other record settles: a finding about a pair of records' criteria has nothing left
+to say once either of them is done. A flag of that kind is raised only between criteria
+of records that are both unsettled, so this closes the last way one outlives its pair.
+
 ## KYO-349
 
 The ungated-unobserved remedy line used to quote the criterion's stored reason

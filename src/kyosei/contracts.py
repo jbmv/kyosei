@@ -1043,28 +1043,6 @@ FLAG_TYPES: tuple[str, ...] = (
     FLAG_TYPE_GATE_CLEARED_STALE_CRITERIA,
 )
 
-#: KYO-346.c1/c2. A record at a completion or retired status (:data:`SETTLED_ROLES`,
-#: below) has no open work left for one of these three to ask a question about — a
-#: worked-on record's declared files not changing again is what files do once nobody
-#: is touching them, and a description not outrunning its own claims is likewise a
-#: fact about work that has stopped. So the move that settles a record — the
-#: completion move, `kyo wont-do`, `kyo void` — closes these automatically (KYO-346.c1)
-#: and `kyo flag resolve --settled` is the repair for a store that accumulated them
-#: before that existed (KYO-346.c3).
-#:
-#: Deliberately narrower than :data:`SWEEP_FLAG_TYPES`: `near-duplicate-criteria` is a
-#: fact about the CRITERIA'S TEXT, unrelated to whether the record itself moved, and
-#: `gate-cleared-stale-criteria` asks whether an unobserved criterion still makes sense
-#: after a gate cleared — a judgement a record reaching its own completion or
-#: retirement does not make for itself. KYO-346.c2 leaves both open on purpose; a test
-#: says so.
-STALENESS_FLAG_TYPES: tuple[str, ...] = (
-    FLAG_TYPE_TOUCH_CHANGED,
-    FLAG_TYPE_TOUCH_MISSING,
-    FLAG_TYPE_DESCRIPTION_PREDATES_CLAIM,
-)
-
-
 #: KYO-346.c1: the reason text an automatic settlement closure records, so a reader of
 #: a single flag (`kyo show`) is told this was not a human judging the finding —
 #: paired with :data:`SETTLED_WHY_PREFIX` below exactly as `sweep.superseded_why` is
@@ -1076,8 +1054,8 @@ SETTLED_WHY_PREFIX = "settled automatically: "
 def settled_flag_why(record_id: str, status: str, actor: str) -> str:
     return (
         f"{SETTLED_WHY_PREFIX}{record_id} moved to {status!r} by {actor} — a record "
-        "at a completion or retired status has no open work left for a staleness "
-        "flag to ask about (KYO-346)."
+        "at a completion or retired status has no open work left for a "
+        "flag to ask about (KYO-346, KYO-748)."
     )
 
 
