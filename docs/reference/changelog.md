@@ -626,6 +626,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-738` (task) — Mac app Files: home, back and forward as icons
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
+- **2026-11-11** — `KYO-733` (task) — An anchor line quotes enough of the reply for the agent to find the place
 - **2026-11-11** — `KYO-732` (task) — Mac app: a top bar of views, and the Records view
 - **2026-11-11** — `KYO-727` (bug) — Mac app composer: an empty prompt vanishes, an anchor lands on a new line, and the view jumps while typing
 - **2026-11-11** — `KYO-726` (task) — Mac app: status bar, subagent rows and composer buttons restyled
