@@ -28,6 +28,11 @@ tag change    ``KYO-T7``           ``person_note_tag_change``
 The ``c``/``n``/``g`` numbers are *allocation counters*, not positions: voiding
 criterion ``c2`` leaves ``c3`` named ``c3`` forever, so a citation written into a
 commit message stays true.
+
+One shape is not in the table because nothing allocates it: an entry of a stored report,
+``KYO-12.r1.p2`` (KYO-757). It is read from the report's body by its place, which is fixed
+because a report's body is written once; :mod:`kyosei.report_entries` holds the shape and
+the reasoning.
 """
 
 from __future__ import annotations

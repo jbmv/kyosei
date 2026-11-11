@@ -766,6 +766,7 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 | A prompt | `on my prompt <uuid> "<words>..."` |
 | Of another session | either of those, with `in session <id>` before the words |
 | A record, or a criterion, gate, dispatch, note or claim of one | `on record KYO-717.c4 "<words>..."` |
+| A false premise, disagreement, corrected number or verdict of a report | `on record KYO-740.r1.p1 "<words>..."` |
 | Lines of a served file | `on file <path> lines 333-345 "<words>..."`, or `line 333` for one line |
 | A document or file filed with a commit | `on document <path> at <commit> lines 3-9 "<words>..."` |
 | Another note | `on note <id>` |
@@ -777,6 +778,18 @@ words of its own and its line is the id alone. `kyo show` reads a record's id an
 a criterion, gate, note or claim is printed by `kyo show` of the record its id begins with. An
 id the store does not hold is refused when the message is held, naming the command that lists
 the ids.
+
+**An entry of a report (KYO-757).** A false premise, a disagreement, a corrected number and a
+verdict of a stored report are anchored to as a record's elements are, by the ids
+`KYO-740.r1.p1`, `KYO-740.r1.x1`, `KYO-740.r1.n1` and `KYO-740.r1.v1`: the report's id, a letter
+for the array of its body, and the entry's place in that array counted from 1. The ids are read
+from the stored body and are not stored themselves. A report's body is written once, so a place
+does not move; an amending report is a second report whose entries have ids of their own, and
+the superseded report's ids go on naming its entries. The line quotes a premise's or a number's
+claim, a disagreement's topic, and a verdict's evidence, or its reason or notes when it gave no
+evidence. `kyo show <entry id>` prints the entry with its report's standing, `kyo show <report
+id>` lists the ids a report holds, and each report in `kyo show <record> --json` carries them
+under `entry_ids`, by array. Docs verdicts and commits have no such id.
 
 A file's line carries the path relative to its root, the lines counted from 1 in the file's
 source, and the words at them. A span is written `lines 12-14` and a single line `line 3`;
