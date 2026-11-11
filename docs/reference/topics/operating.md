@@ -247,7 +247,7 @@ touches nothing is exactly what lets you see the situation.
 (`read_transcripts: true` in `kyosei/config.yml`). `transcript_retention` is a notice,
 printed when Claude Code's `cleanupPeriodDays` is unset (Claude Code then deletes
 transcripts after 30 days) or under 365: a credit cannot be checked against a
-transcript that has been deleted, unless the archive holds a copy. Setting the key to
+transcript older than that period, unless the archive holds a copy. Setting the key to
 365 or more in Claude Code's `settings.json` clears it (KYO-657).
 `transcript_archive_location` is a problem, reported when the transcript archive,
 `$KYOSEI_HOME/transcript-archive/`, lies inside a git repository, where a transcript
