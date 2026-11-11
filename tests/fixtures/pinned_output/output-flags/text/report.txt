@@ -18,7 +18,7 @@ docs obligations: 1 raised across 1 document(s) — each needs a verdict before 
   docs/architecture.md — 1 section(s)
       TST-1.o1  [How the CLI is wired]
           docs/architecture.md [How the CLI is wired] governs src/app.py, and this dispatch changed src/app.py
-      this document governs whole files (src/app.py) — `governs: <path>#<symbol>` narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets only
+      this document governs whole files (src/app.py) — `governs: <path>#<symbol>` narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css` targets only
       kyo docs settle TST-1.o1 --verdict updated|not-affected --method '<how you decided>'
   changed paths: read from the union of `git diff <SHA>..kyo-137` (the two-dot diff from TST-1.d1's recorded base sha) and the report's touched_files[] — 1 named by both; 6 only by the git diff (missing from touched_files[]: kyosei/bases.yml, kyosei/export/TST-1.json, kyosei/export/TST-2.json, kyosei/export/TST-3.json, kyosei/export/_allocations.json and 1 more) — because kyo-137 is already merged into main, so the three-dot diff `git diff main...kyo-137` compares kyo-137 against itself and examines nothing — an empty answer there is the absence of a finding, not a clean one
 touch drift: none — all 1 file(s) the report's touched_files[] names are claimed by TST-1

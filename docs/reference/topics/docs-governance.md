@@ -335,7 +335,7 @@ A `path#symbol` target raises its section only when the diff
 touches that symbol's own lines — but only where the region can be located,
 which is a closed list of file types the instrument can read. Narrowed by
 `#symbol` on these suffixes and no others: `.py`, `.md`, `.ts`, `.tsx`, `.js`,
-`.mjs`, `.json`, `.yml`, `.yaml`, `.css`. On every other file type the `#symbol` is accepted, resolves, and
+`.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css`. On every other file type the `#symbol` is accepted, resolves, and
 raises exactly as the bare path would: the narrowing is silently absent, not
 broken. So `kyo docs check` says so, once per such target — a notice, never a
 failure, and the exit code is unchanged — and the `governs: <path>#<symbol>`
@@ -371,6 +371,30 @@ readable suffix still finds no region — the name is only imported or called
 there — `kyo docs check` lists it beside the unreadable-suffix notices as
 "accepted, but no region found", so a project narrowing many targets learns
 which ones took without replaying old merges.
+
+A call at the start of a line (`showHit();`) is read as a declaration of its
+name, which adds a one-statement region and so widens what raises. Where the
+call is the last statement of a callback, the line that closes the callback may
+carry the rest of the enclosing call (`}, SEARCH_DEBOUNCE_MS);`). That line is
+indented less than the call and is left out of its region, as a line of closing
+punctuation alone is; kept, it gave the region a closing brace with no opening
+one, and the brace count then discarded every region of the name, the function's
+own included (KYO-832).
+
+**Swift (KYO-832).** A `.swift` file is read by the same finder with Swift's
+reading of a declaration: a line that opens, behind its attributes and
+modifiers, with `func`, `var`, `let`, `class`, `struct`, `enum`, `protocol`,
+`actor`, `extension`, `typealias`, `associatedtype` or `macro` and the name; an
+enum `case` that names it; or `init`, `deinit` or `subscript` when that is the
+symbol written. A call, an argument label (`title: text,`) and a name bound in
+a condition or a pattern (`if let name`, `case .failed(let name)`) declare
+nothing, and a binding that begins its own line (`let name = ...`) does, which
+widens. The region runs from the declaration, with the comment block and the
+attribute lines directly above it, through its closing brace, and an opening
+brace on a line of its own continues the declaration. A region that holds an odd
+number of `"""` delimiters is discarded, since the text of a multi-line string
+may sit at any indentation, and the symbol then raises on any change to the
+file. Overloads of one name each give a region.
 
 **The data formats (KYO-363).** A symbol narrows these as well, so a section governing
 `package.json#scripts` is not raised by a dependency bump. What a symbol means is different
@@ -554,8 +578,17 @@ tree, writes nothing and opens no store, and prints the ungoverned code files by
 directory; the files reached only by a `<document>#<anchor>` comment under `src/`, which
 raise for the region around the comment and are therefore listed apart and not counted as
 governed; the targets that resolve to more than 20 files, which are reported and not
-refused; the sections that govern nothing, by document; and the steps to a map. `--json`
-carries the same.
+refused; the files governed by `#symbol` targets only; the sections that govern nothing,
+by document; and the steps to a map. `--json` carries the same.
+
+A file is governed by `#symbol` targets only when at least one target narrows it to a
+symbol's region and no target governs it whole (KYO-832). A change to such a file outside
+the named symbols, a new function included, raises no obligation, although the file
+counts as governed. A target governs a file whole when it names no symbol, when the
+file's suffix has no region reader, or when no region is found for the symbol in the file
+as it stands, since each of those raises on any change. The list is `symbol_only` in
+`--json`, each entry a `path` and its `symbols`. It is a report: the doctor's finding and
+the level do not read it.
 
 What counts as code is the project's declaration where it has one. `docs_coverage:` in
 `kyosei/config.yml` takes `level` (`off`, `notice` or `problem`), `code` (a list of globs

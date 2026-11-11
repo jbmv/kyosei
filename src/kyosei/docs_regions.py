@@ -5,7 +5,7 @@ changed it.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +46,14 @@ from .prose import contains_phrase
 #: below are the ones KYO-352's tests cover. Adding another is one entry and its tests.
 BRACE_REGION_SUFFIXES: tuple[str, ...] = (".ts", ".tsx", ".js", ".mjs")
 
+#: Swift, read by :func:`_declaration_regions` with its own notion of a declaration
+#: (KYO-832). The finder is the brace languages' one, by indentation, and what differs is
+#: which line declares a name: :func:`_declares_swift` asks for a declaring keyword, since
+#: the brace languages' "a name at the start of a line" reads an argument label
+#: (`title: text,`) as a declaration. Measured against this repository's own Swift sources
+#: under `apps/apple/` when it was added.
+SWIFT_REGION_SUFFIXES: tuple[str, ...] = (".swift",)
+
 #: The two spellings of YAML :func:`_yaml_regions` reads (KYO-363). Both, because which
 #: one a project writes is a coin flip and a target that narrows in `config.yml` and not
 #: in `config.yaml` would be the kind of difference nobody can see in the declaration.
@@ -53,7 +61,7 @@ YAML_REGION_SUFFIXES: tuple[str, ...] = (".yml", ".yaml")
 
 #: Suffixes :func:`symbol_regions` can locate a region in. A file type absent here is
 #: "cannot tell" by construction, not by a failed lookup — a project whose documents
-#: govern Go or Swift keeps the file-level behaviour it had before KYO-153 rather
+#: govern Go or Kotlin keeps the file-level behaviour it had before KYO-153 rather
 #: than getting a silently weaker check.
 #:
 #: Read as a question through :func:`narrows_by_symbol` by everything that *advises* a
@@ -63,6 +71,7 @@ REGION_SUFFIXES: tuple[str, ...] = (
     ".py",
     ".md",
     *BRACE_REGION_SUFFIXES,
+    *SWIFT_REGION_SUFFIXES,
     ".json",
     *YAML_REGION_SUFFIXES,
     ".css",
@@ -274,8 +283,93 @@ def _declares(line: str, name: str) -> bool:
     return False
 
 
-def _declaration_regions(text: str, symbol: str) -> tuple[tuple[int, int], ...]:
+#: The keywords that declare a named thing in Swift. `case` is not here: an enum case
+#: may be one of several on a line and has its own pattern in :func:`_declares_swift`.
+_SWIFT_KEYWORDS = (
+    "func|var|let|class|struct|enum|protocol|actor|extension|typealias|associatedtype|macro"
+)
+
+#: The three members Swift declares without a name of their own. A dot before one is a
+#: call (`super.init(`, `Self.init(`), so the pattern refuses it.
+_SWIFT_UNNAMED = ("init", "deinit", "subscript")
+
+#: An attribute on its own line above a Swift declaration (`@MainActor`, `@ViewBuilder`,
+#: `@available(macOS 14, *)`), which belongs to the declaration as a comment block does.
+_SWIFT_LEAD_RE = re.compile(r"^\s*(//|/\*|\*|#|(@\w+(\([^)]*\))?\s*)+$)")
+
+#: Swift's continuation lines: closing punctuation as in the brace languages, and an
+#: opening brace on its own line, so that a body written under its signature is not cut
+#: off from it.
+_SWIFT_CONTINUES_RE = re.compile(r"^\s*[)\]}{]")
+
+
+#: What may stand in front of a Swift declaration's keyword: attributes (`@MainActor`,
+#: `@available(macOS 14, *)`) and modifiers (`private`, `static`, `private(set)`,
+#: `nonisolated`). Any lowercase word is taken as a modifier, so that a modifier Swift adds
+#: later does not hide a declaration, except the words that begin a statement: `if let
+#: name`, `guard let name`, `case .failed(let name)` and `for var name` bind a name inside
+#: a condition or a pattern and declare no member. A binding that begins its own line
+#: (`let name = ...`) still counts, which widens.
+_SWIFT_PREFIX = (
+    r"^\s*(?:(?:@\w+(?:\([^)]*\))?"
+    r"|(?!(?:if|guard|case|while|for|catch|else|return|switch|in|try|await|throw|defer|do|"
+    r"repeat)\b)[a-z]+(?:\([a-z]+\))?)\s+)*"
+)
+
+
+def _declares_swift(line: str, name: str) -> bool:
+    """Does ``line`` declare ``name`` in Swift? (KYO-832)
+
+    A line that opens, behind its attributes and modifiers, with a declaring keyword
+    and the name (`func send(`, `private var feed`, `struct Row`, `extension
+    SessionFeed`); an enum case naming it (`case idle, sending`); or one of `init`,
+    `deinit` and `subscript` when that is the name asked for. A comment line declares
+    nothing, and neither does a call (`send()`), an argument label (`name: value`) or
+    a name bound in a condition or a pattern, since each would add a region that is
+    not the member's.
+    """
+    escaped = re.escape(name)
+    if name in _SWIFT_UNNAMED:
+        return re.search(rf"{_SWIFT_PREFIX}{escaped}\b[?!]?\s*(?:[(<{{]|$)", line) is not None
+    if re.search(rf"{_SWIFT_PREFIX}(?:{_SWIFT_KEYWORDS})\s+(?:[\w.]+\.)?{escaped}\b", line):
+        return True
+    return re.search(rf"^\s*(?:indirect\s+)?case\s+(?:.*,\s*)?{escaped}\b", line) is not None
+
+
+def _swift_regions(text: str, symbol: str) -> tuple[tuple[int, int], ...]:
+    """Line spans of ``symbol``'s declarations in a Swift file (KYO-832).
+
+    :func:`_declaration_regions` with Swift's reading of a declaration, of the lines
+    that lead one and of the lines that continue one. One veto is added to the brace
+    count: a region holding an odd number of `\"\"\"` delimiters ends inside a multi-line
+    string, whose text may sit at any indentation, so the indentation that ended the
+    region there says nothing about the declaration.
+    """
+    regions = _declaration_regions(
+        text, symbol, declares=_declares_swift, lead=_SWIFT_LEAD_RE,
+        continues=_SWIFT_CONTINUES_RE,
+    )
+    lines = text.splitlines()
+    for start, end in regions:
+        if "\n".join(lines[start - 1 : end]).count('\"\"\"') % 2:
+            return ()
+    return regions
+
+
+def _declaration_regions(
+    text: str,
+    symbol: str,
+    *,
+    declares: Callable[[str, str], bool] = _declares,
+    lead: re.Pattern[str] = _COMMENT_LINE_RE,
+    continues: re.Pattern[str] | None = None,
+) -> tuple[tuple[int, int], ...]:
     """Line spans of ``symbol``'s declarations in a brace language (KYO-352).
+
+    ``declares``, ``lead`` and ``continues`` are what a language reads differently: which
+    line declares the name, which lines directly above it belong to it, and which lines
+    carry it on. Their defaults are TypeScript's and JavaScript's; Swift passes its own
+    (:func:`_swift_regions`).
 
     Region by next declaration rather than by brace matching
     (docs/design/docs.md#kyo-352), and the reason is which way each fails. Brace matching
@@ -311,23 +405,32 @@ def _declaration_regions(text: str, symbol: str) -> tuple[tuple[int, int], ...]:
         # A substring test first: `_declares` requires the declared name to BE `name`,
         # so a line without it cannot match, and a bare-symbol target asks this of
         # every file it resolved to (KYO-397).
-        if name not in line or not _declares(line, name):
+        if name not in line or not declares(line, name):
             continue
         start = index
-        while start > 0 and _COMMENT_LINE_RE.match(lines[start - 1]):
+        while start > 0 and lead.match(lines[start - 1]):
             start -= 1
-        end = _declaration_end(lines, index)
+        end = _declaration_end(lines, index, continues or _CONTINUES_RE)
         # KYO-358: the LAST member of a class has no sibling to end its block, so the
         # block runs on through the class's own closing brace and the veto below threw
         # the whole symbol away. A closing line shallower than the declaration closes
         # something that encloses it, never the declaration itself, so it is not part of
         # the region; the veto still judges what is left.
+        #
+        # KYO-832: "closing line" is a line that BEGINS with closing punctuation, not
+        # one that is nothing else. A call counts as a declaration (see `_declares`),
+        # and a call that is the last statement of a callback is followed by the line
+        # that closes the callback and carries the rest of the enclosing call:
+        # `}, SEARCH_DEBOUNCE_MS);`. That line is shallower than the call and so not
+        # part of it, but it was kept for not being punctuation only, the one-statement
+        # region then held a `}` with no `{`, and the veto below threw away every region
+        # of the name, the function's own included.
         indent = sweep._indent_width(line)
         inner = end
         while inner > index + 1 and (
             not lines[inner - 1].strip()
             or (
-                sweep._CLOSER_RE.match(lines[inner - 1])
+                (continues or _CONTINUES_RE).match(lines[inner - 1])
                 and sweep._indent_width(lines[inner - 1]) < indent
             )
         ):
@@ -356,7 +459,9 @@ def _declaration_regions(text: str, symbol: str) -> tuple[tuple[int, int], ...]:
 _CONTINUES_RE = re.compile(r"^\s*[)\]}]")
 
 
-def _declaration_end(lines: Sequence[str], index: int) -> int:
+def _declaration_end(
+    lines: Sequence[str], index: int, continues: re.Pattern[str] = _CONTINUES_RE
+) -> int:
     """Where the declaration on 0-based ``index`` ends, as a 1-based inclusive line.
 
     :func:`kyosei.sweep.region_end`, minus the half of it that is for prose (KYO-360).
@@ -378,7 +483,7 @@ def _declaration_end(lines: Sequence[str], index: int) -> int:
     indent = sweep._indent_width(lines[index])
     for j in range(index + 1, limit):
         line = lines[j]
-        if not line.strip() or _CONTINUES_RE.match(line):
+        if not line.strip() or continues.match(line):
             continue
         if sweep._indent_width(line) <= indent:
             return j
@@ -872,6 +977,8 @@ def symbol_regions(path: str, text: str, symbol: str) -> tuple[tuple[int, int], 
         return _markdown_regions(text, symbol)
     if suffix in BRACE_REGION_SUFFIXES:
         return _declaration_regions(text, symbol)
+    if suffix in SWIFT_REGION_SUFFIXES:
+        return _swift_regions(text, symbol)
     if suffix == ".json":
         return _json_regions(text, symbol)
     if suffix in YAML_REGION_SUFFIXES:

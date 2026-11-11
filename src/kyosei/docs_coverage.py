@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import docs_obligations, docs_parse, docs_targets
+from . import docs_obligations, docs_parse, docs_regions, docs_targets
 from .config import config_path_for, guard_glob_matches, read_raw_config
 from .contracts import GUARDED_BRANCH_DIRS
 from .errors import KyoseiError
@@ -305,6 +305,15 @@ class DocumentReach:
 
 
 @dataclass(frozen=True)
+class SymbolOnly:
+    """One governed file that every governing target narrows to a symbol (KYO-832)."""
+
+    path: str
+    #: The symbols the targets name in it, sorted.
+    symbols: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Coverage:
     """What :func:`measure` found."""
 
@@ -324,8 +333,12 @@ class Coverage:
     excluded: tuple[str, ...]
     broad_targets: tuple[SectionReach, ...]
     documents: tuple[DocumentReach, ...]
+    #: The governed files that no target governs whole (KYO-832): each of their targets
+    #: is narrowed to a symbol's region, so a change outside those regions, a new
+    #: function included, raises nothing. Reported, and no part of :func:`finding`.
+    symbol_only: tuple[SymbolOnly, ...] = ()
     #: ``unmapped`` globs that match no tracked file.
-    unmatched_unmapped: tuple[str, ...]
+    unmatched_unmapped: tuple[str, ...] = ()
 
     @property
     def in_neither(self) -> tuple[str, ...]:
@@ -369,6 +382,62 @@ def _governs(path: str, targets: Sequence[docs_parse.GovernsTarget]) -> bool:
         elif path in target.paths:
             return True
     return False
+
+
+def _symbol_only(
+    code_root: Path, governed: Sequence[str], targets: Sequence[docs_parse.GovernsTarget]
+) -> tuple[SymbolOnly, ...]:
+    """The files of ``governed`` that every target governing them narrows to a symbol.
+
+    A target governs a file whole when it names no symbol, when it is a recx module's
+    prefix, when the file's suffix has no region reader, or when the reader finds no
+    region for the symbol in the file as it stands: in each case
+    :func:`kyosei.docs_obligations._target_raises` raises on any change to the file. A
+    bare-symbol target narrows the files that define the symbol and, where some file
+    defines it, raises nothing for the others, so it is counted for the first and left
+    out for the second. A file is reported when at least one target narrows it and
+    none governs it whole.
+    """
+    narrowed: dict[str, set[str]] = {}
+    whole: set[str] = set()
+    wanted = set(governed)
+    texts: dict[str, str | None] = {}
+
+    def placed(path: str, symbol: str) -> bool:
+        if path not in texts:
+            try:
+                texts[path] = (code_root / path).read_text(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                texts[path] = None
+        text = texts[path]
+        return text is not None and bool(docs_regions.symbol_regions(path, text, symbol))
+
+    for target in targets:
+        if target.prefix or not target.symbol:
+            if target.prefix:
+                prefix = (target.path or "").strip("/")
+                whole.update(
+                    p for p in wanted
+                    if not prefix or p == prefix or p.startswith(prefix + "/")
+                )
+            else:
+                whole.update(p for p in target.paths if p in wanted)
+            continue
+        for path in target.paths:
+            if path not in wanted or path in whole:
+                continue
+            if target.path is None and target.defined_in:
+                if path in target.defined_in:
+                    narrowed.setdefault(path, set()).add(target.symbol)
+            elif docs_regions.narrows_by_symbol(path) and placed(path, target.symbol):
+                narrowed.setdefault(path, set()).add(target.symbol)
+            else:
+                whole.add(path)
+    return tuple(
+        SymbolOnly(path, tuple(sorted(narrowed[path])))
+        for path in governed
+        if path in narrowed and path not in whole
+    )
 
 
 def measure(
@@ -436,6 +505,7 @@ def measure(
         excluded=tuple(excluded),
         broad_targets=tuple(broad),
         documents=tuple(reaches),
+        symbol_only=_symbol_only(code_root, governed, live_targets),
         unmatched_unmapped=unmatched,
     )
 
