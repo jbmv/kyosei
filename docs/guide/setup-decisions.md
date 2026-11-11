@@ -390,11 +390,22 @@ decides, and how a setup agent can find the answer before asking.
     `<DOC>-<n>` ids, one prefix per owning document, ids never reused or renumbered, and an
     `id_pattern` regex that matches them (`'[A-Z]{1,4}-\d+'`). Then declare the `ssot:` set
     before writing, so the first spec is checked from its first line.
+- **Coverage of the code.** A `governs:` line raises an obligation only for the code it
+  names, so code that no section governs asks nobody to check a document. `kyo docs coverage`
+  counts the source files no section governs, lists them by directory and prints the steps
+  to a map: declare `code:` under `docs_coverage:`, draft `governs:` lines per document set,
+  list exclusions as `unmapped:` with a reason, run `kyo docs check`. `kyo docs coverage
+  --level notice|problem|off` records the answer. `notice` reports the count in `kyo doctor`,
+  `problem` fails the check and requires the `code:` list, and `off` records that the project
+  does not want a map. Until a level is recorded, `kyo onboard --check` reads `docs_coverage`
+  as missing where documents exist, and every session-start brief asks the orchestrator to
+  put the question to the operator.
 - **Who writes docs:** workers propose doc changes on their branch. The orchestrator merges
   them and assembles numbered sections, so sections never collide.
 - **Decides:** the operator chooses which documents are authoritative, which style each set
-  uses, the id scheme, and warn or block for the history lint. The setup agent runs
-  `kyo docs suggest` and walks through its output.
+  uses, the id scheme, and warn or block for the history lint, and whether the project wants
+  a coverage map, a reminder or neither. The setup agent runs `kyo docs suggest` and walks
+  through its output, then `kyo docs coverage`.
 - **Detect:** `kyo docs suggest`; a `docs/` or `specs/` tree with no code beside it means the
   documents are being written first.
 

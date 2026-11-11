@@ -1972,6 +1972,34 @@ def _build_change_lines(change: dict | None) -> list[str]:
 COMPACT_EMPTY_SECTIONS_LEAD = "  empty (0 each): "
 
 
+def docs_coverage_ask_lines(ask: dict | None) -> list[str]:
+    """KYO-802.c1: the DOCS COVERAGE block of the session-start brief, with a leading blank
+    line, or nothing where ``ask`` is ``None``.
+
+    Addressed to an orchestrator that has no history of the work: it says what the counts
+    mean, gives the reason with its source (the audit KYO-790), names the person as the one
+    who decides, and gives both commands. ``kyo docs coverage --level`` ends it, ``notice``
+    included, so it is asked until answered and not afterwards (proposal
+    docs/proposals/docs-coverage.md of the store repository, section 5).
+    """
+    if not ask:
+        return []
+    named = ", ".join(f"{directory} {count}" for directory, count in ask["directories"])
+    return [
+        "",
+        "DOCS COVERAGE: not yet decided for this project",
+        f"  {ask['ungoverned']} of {ask['code']} source files are governed by no document "
+        "section, so a change to them asks nobody to check a document "
+        f"(largest: {named}).",
+        "  Reason: in Kyosei's own repository an audit found 74 documentation errors, and 41 "
+        "of the 71 it located were in sections that governed no code (KYO-790).",
+        "  Put this to your person before planning other work, with the options: draft the "
+        "map, keep the reminder, or decline.",
+        "  `kyo docs coverage` prints the files and the steps; `kyo docs coverage --level "
+        "notice|problem|off` records the answer and ends this block.",
+    ]
+
+
 def brief_text(data: dict, *, compact: bool) -> str:
     """``kyo brief``'s human rendering (KYO-8.c6). ``compact`` drops the
     per-item detail a hook injects into a session start (ids and counts only).
@@ -2012,6 +2040,10 @@ def brief_text(data: dict, *, compact: bool) -> str:
     if data.get("prior_art_unchosen"):
         out.append("")
         out.append(data["prior_art_unchosen"])
+
+    # KYO-802.c1: a decision for the project's person, put at session start, under
+    # `--compact` too, until a coverage level is recorded.
+    out.extend(docs_coverage_ask_lines(data.get("docs_coverage_ask")))
 
     out.append("")
     out.append("counts by kind:")
