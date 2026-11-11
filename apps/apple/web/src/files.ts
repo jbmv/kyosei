@@ -553,43 +553,73 @@ export const SEARCH_MIN_CHARS = 2;
 
 /** One file the search found, with the lines of it that hold the text. */
 export interface FoundFile {
+  root: string;
   path: string;
   /** Whether the file's path holds the text. */
   byName: boolean;
+  /** The first lines holding it, as the server gave them, and how many the file holds. */
   lines: { line: number; text: string }[];
-}
-
-/** One root's part of a search's answer, as the Files view draws it. */
-export interface FoundGroup {
-  root: string;
-  files: FoundFile[];
-  /** Whether the server found more than it returned. */
-  more: boolean;
+  count: number;
+  mtime: number | null;
 }
 
 /**
- * One root's answer from `files/search` (KYO-814), its results gathered by file: the files
- * found by name first, in the server's order, then the others in the order of their first
- * line. Null when the document is not such an answer.
+ * One root's answer from `files/search` (KYO-814), its results gathered by file. Null when
+ * the document is not such an answer.
  */
-export function foundGroup(root: string, document: unknown): FoundGroup | null {
+export function foundFiles(root: string, document: unknown): FoundFile[] | null {
   const results = (document as { results?: unknown })?.results;
   if (!Array.isArray(results)) return null;
   const byPath = new Map<string, FoundFile>();
   for (const result of results as Record<string, unknown>[]) {
     if (result?.root !== root || typeof result.path !== "string") continue;
-    const file = byPath.get(result.path) ?? { path: result.path, byName: false, lines: [] };
+    const file = byPath.get(result.path)
+      ?? { root, path: result.path, byName: false, lines: [], count: 0, mtime: null };
     byPath.set(result.path, file);
+    if (typeof result.mtime_ns === "number") file.mtime = result.mtime_ns;
     if (result.match === "name") file.byName = true;
     else if (result.match === "contents" && typeof result.line === "number") {
       file.lines.push({ line: result.line, text: typeof result.text === "string" ? result.text : "" });
+      file.count = typeof result.count === "number" ? result.count : Math.max(file.count, file.lines.length);
     }
   }
-  const files = [...byPath.values()];
+  return [...byPath.values()];
+}
+
+/** Whether a file is a document to read rather than source code (KYO-818). */
+export function isDocument(path: string): boolean {
+  return /\.(md|markdown|txt|rst|adoc)$/i.test(path);
+}
+
+/**
+ * The files a search found, in the two lists the Files view draws (KYO-818): those whose path
+ * holds the text, then those whose contents do, across every root. Within each list a file
+ * whose own name holds the text comes before one whose folder does, a document before source
+ * code, a file opened recently before others (most recent first), and then the most recently
+ * modified.
+ */
+export function orderFound(
+  files: FoundFile[], query: string, recent: { root: string; path: string }[],
+): { names: FoundFile[]; contents: FoundFile[] } {
+  const needle = query.toLowerCase();
+  const opened = (file: FoundFile) => {
+    const index = recent.findIndex((item) => item.root === file.root && item.path === file.path);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  const keys = (file: FoundFile): number[] => [
+    nameOf(file.path).toLowerCase().includes(needle) ? 0 : 1,
+    isDocument(file.path) ? 0 : 1,
+    opened(file),
+    -(file.mtime ?? 0),
+  ];
+  const order = (a: FoundFile, b: FoundFile) => {
+    const [ka, kb] = [keys(a), keys(b)];
+    for (let i = 0; i < ka.length; i += 1) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  };
   return {
-    root,
-    files: [...files.filter((file) => file.byName), ...files.filter((file) => !file.byName)],
-    more: (document as { more?: unknown }).more === true,
+    names: files.filter((file) => file.byName).sort(order),
+    contents: files.filter((file) => !file.byName && file.lines.length).sort(order),
   };
 }
 

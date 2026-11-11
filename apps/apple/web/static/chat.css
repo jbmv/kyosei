@@ -1022,14 +1022,21 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 #files-landing.searching > :not(.files-search):not(.files-found) { display: none; }
 #files-side > .files-found { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .files-found[hidden] { display: none; }
-.files-found h4 { margin: 10px 10px 4px; }
-.files-found h4:first-child { margin-top: 2px; }
 .found-file, .found-line { padding: 4px 10px; border-radius: 7px; cursor: default; }
 .found-file:hover, .found-line:hover { background: var(--panel); }
-.found-line { padding-left: 22px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.found-line { padding-left: 26px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .found-line .found-at { margin-right: 6px; font-variant-numeric: tabular-nums; }
 .found-line mark, .found-file mark { background: color-mix(in srgb, var(--pastel-blue) 42%, transparent); color: inherit; border-radius: 2px; }
 .found-note { padding: 4px 10px; color: var(--muted); font-size: 12.5px; }
+.found-note.found-more { padding-left: 26px; }
+/* The search's two sections (KYO-818), divided by a rule, each folded by its head. */
+.files-found .found-head { display: flex; align-items: center; gap: 6px; margin: 12px 4px 4px; padding: 10px 6px 0; border-top: 1px solid var(--soft-line); cursor: default; }
+.files-found .found-head:first-child { margin-top: 2px; padding-top: 0; border-top: 0; }
+.found-head .chevron, .found-toggle { flex: none; display: inline-block; width: 10px; color: var(--muted); text-align: center; transition: transform 0.12s; }
+.found-head[aria-expanded="true"] .chevron, .found-file.open .found-toggle { transform: rotate(90deg); }
+.found-file { display: flex; align-items: baseline; gap: 6px; }
+.found-words { min-width: 0; flex: 1; }
+.found-line + .found-file, .found-note + .found-file { margin-top: 2px; }
 
 .tree-row { display: flex; align-items: baseline; gap: 5px; padding: 3px 10px 3px 8px; border-radius: 6px; font-size: 13.5px; line-height: 1.45; white-space: nowrap; cursor: default; }
 .tree-row:hover { background: var(--panel); }

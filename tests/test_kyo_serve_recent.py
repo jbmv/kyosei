@@ -97,6 +97,19 @@ def test_search_finds_names_and_lines_in_both_roots_and_root_narrows_it(served: 
     assert {item["match"] for item in store_only["results"]} == {"name", "contents"}
 
 
+def test_a_file_gives_at_most_five_lines_with_its_count_and_every_result_its_time(
+    served: Served,
+) -> None:
+    # KYO-818: the app draws one row per file, ordered partly by when it was modified.
+    write(served.code, "src/many.txt", "".join(f"needle {n}\n" for n in range(1, 9)))
+    git(served.code, "add", "src/many.txt")
+    _, answer = served.json("search?q=needle&root=code")
+    many = [item for item in answer["results"] if item["path"] == "src/many.txt"]
+    assert [item["line"] for item in many] == [1, 2, 3, 4, 5]
+    assert {item["count"] for item in many} == {8}
+    assert all(isinstance(item["mtime_ns"], int) for item in answer["results"])
+
+
 def test_search_matches_one_phrase_and_names_the_remedy_for_a_bad_request(
     served: Served,
 ) -> None:

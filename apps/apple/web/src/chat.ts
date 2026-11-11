@@ -9,7 +9,7 @@ import {
 } from "./marks";
 import {
   type Answer, type ChatLink, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
-  type FoundGroup, type Recent, SEARCH_MIN_CHARS, addressLink, answerOf, foundGroup, recentEntries, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
+  type FoundFile, type Recent, SEARCH_MIN_CHARS, addressLink, answerOf, foundFiles, orderFound, recentEntries, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
   languageOf, lineCount, linkPlace, localPath, looksOutside, webAddresses, withLink, mentioned, nameOf, pathSpans, rootLabel,
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
@@ -5026,6 +5026,7 @@ document.addEventListener("keydown", (event) => {
 
 const FILES_ROOT_KEY = "files-root";
 const FILES_DOTFILES_KEY = "files-dotfiles";
+const FILES_FOLDED_KEY = "files-search-folded";
 /** How often the open file is asked for again, and every how many times the tree is too. */
 const FILE_REFRESH_MS = 3000;
 const TREE_REFRESH_EVERY = 4;
@@ -5072,7 +5073,10 @@ let chosenRoot = stored<string>(FILES_ROOT_KEY, "code");
 let showDotfiles = stored<boolean>(FILES_DOTFILES_KEY, false) === true;
 /** The Files search (KYO-814): the text asked about, and each root's answer as it comes. */
 let filesQuery = "";
-const filesFound = new Map<string, FoundGroup | "waiting" | { problem: string }>();
+const filesFound = new Map<string, { files: FoundFile[]; more: boolean } | "waiting" | { problem: string }>();
+/** Which of the search's two sections are folded, and which contents files show their lines. */
+const foldedSections = new Set<string>(stored<string[]>(FILES_FOLDED_KEY, []) ?? []);
+const openFound = new Set<string>();
 let filesSearchTimer: number | undefined;
 /** The files opened in the app for the project, on any device, newest first (KYO-814). */
 let recentFiles: Recent[] = [];
@@ -5613,6 +5617,7 @@ function searchFiles(text: string): void {
   if (query === filesQuery) return;
   filesQuery = query;
   filesFound.clear();
+  openFound.clear();
   if (query.length >= SEARCH_MIN_CHARS) {
     for (const info of fileRoots) {
       if (info.name !== "code" && info.name !== "store") continue;
@@ -5646,42 +5651,88 @@ function drawFound(): void {
   }
 }
 
+function note(text: string): HTMLElement {
+  return Object.assign(document.createElement("div"), { className: "found-note", textContent: text });
+}
+
+/** A section's head, which folds the section when pressed (KYO-818). */
+function foundHead(section: string, label: string): HTMLElement {
+  const head = document.createElement("h4");
+  head.className = "found-head";
+  head.dataset.foundSection = section;
+  head.setAttribute("aria-expanded", String(!foldedSections.has(section)));
+  head.append(span("chevron", "›"), label);
+  return head;
+}
+
+function foundFileRow(file: FoundFile, contents: boolean): HTMLElement {
+  const first = contents ? file.lines[0]?.line ?? null : null;
+  const row = foundRow("found-file", file.root, file.path, first);
+  const key = `${file.root}:${file.path}`;
+  if (contents) {
+    const toggle = span("chevron found-toggle", "›");
+    toggle.dataset.foundToggle = key;
+    if (openFound.has(key)) row.classList.add("open");
+    row.append(toggle);
+  }
+  const words = document.createElement("div");
+  words.className = "found-words";
+  const name = span("mention-name", "");
+  name.append(file.byName ? marked(nameOf(file.path), filesQuery) : nameOf(file.path));
+  const folder = folderOf(file.path);
+  const place = span("mention-place", "");
+  place.append(`${rootLabel(file.root)}${folder ? " · " : ""}`);
+  if (folder) place.append(file.byName ? marked(folder, filesQuery) : folder);
+  if (contents) place.append(` · ${file.count === 1 ? "1 line" : `${file.count} lines`}`);
+  words.append(name, place);
+  row.append(words);
+  return row;
+}
+
+/**
+ * The search's answers in two sections across every root (KYO-818): the files whose path holds
+ * the text, then those whose contents do, one row each, its lines shown when its arrow is
+ * pressed. `orderFound` puts each section in order.
+ */
 function foundRows(): HTMLElement[] {
   const rows: HTMLElement[] = [];
+  const files: FoundFile[] = [];
+  let waiting = false;
+  let more = false;
   for (const [root, answer] of filesFound) {
-    const head = document.createElement("h4");
-    head.textContent = rootLabel(root);
-    rows.push(head);
-    if (answer === "waiting") {
-      rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: "Searching…" }));
-      continue;
+    if (answer === "waiting") waiting = true;
+    else if ("problem" in answer) rows.push(note(`${rootLabel(root)}: ${answer.problem}`));
+    else {
+      files.push(...answer.files);
+      more ||= answer.more;
     }
-    if ("problem" in answer) {
-      rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: answer.problem }));
-      continue;
-    }
-    if (!answer.files.length) rows.push(Object.assign(document.createElement("div"), { className: "found-note", textContent: "Nothing found." }));
-    for (const file of answer.files) {
-      const row = foundRow("found-file", root, file.path, null);
-      const name = span("mention-name", "");
-      name.append(file.byName ? marked(nameOf(file.path), filesQuery) : nameOf(file.path));
-      const folder = folderOf(file.path);
-      const place = span("mention-place", "");
-      place.append(file.byName ? marked(folder, filesQuery) : folder);
-      row.append(name, place);
-      rows.push(row);
+  }
+  const { names, contents } = orderFound(files, filesQuery, recentFiles);
+  rows.push(foundHead("names", `Names · ${names.length}`));
+  if (!foldedSections.has("names")) {
+    if (!names.length) rows.push(note(waiting ? "Searching…" : "No file is named so."));
+    for (const file of names) rows.push(foundFileRow(file, false));
+  }
+  rows.push(foundHead("contents", `Contents · ${contents.length} ${contents.length === 1 ? "file" : "files"}`));
+  if (!foldedSections.has("contents")) {
+    if (!contents.length) rows.push(note(waiting ? "Searching…" : "No file holds it."));
+    for (const file of contents) {
+      rows.push(foundFileRow(file, true));
+      if (!openFound.has(`${file.root}:${file.path}`)) continue;
       for (const { line, text } of file.lines) {
-        const item = foundRow("found-line", root, file.path, line);
+        const item = foundRow("found-line", file.root, file.path, line);
         item.append(span("found-at", String(line)), marked(text.trim(), filesQuery));
         rows.push(item);
       }
-    }
-    if (answer.more) {
-      rows.push(Object.assign(document.createElement("div"), {
-        className: "found-note", textContent: "More were found than are shown; a longer search narrows them.",
-      }));
+      if (file.count > file.lines.length) {
+        const more = note(`and ${file.count - file.lines.length} more in the file`);
+        more.classList.add("found-more");
+        rows.push(more);
+      }
     }
   }
+  if (waiting && (names.length || contents.length)) rows.push(note("Still searching…"));
+  if (more) rows.push(note("More were found than are shown; a longer search narrows them."));
   return rows;
 }
 
@@ -5904,8 +5955,10 @@ const fileFrames = {
   /** One root's answer to the Files search, kept only while its text is still the one asked. */
   filesSearched(frame: { q: string; root: string; status?: number; document?: unknown; error?: string | null }): void {
     if (frame.q !== filesQuery || !filesFound.has(frame.root)) return;
-    const group = frame.status === 200 ? foundGroup(frame.root, frame.document) : null;
-    filesFound.set(frame.root, group ?? { problem: frame.error || "The server did not answer the search." });
+    const files = frame.status === 200 ? foundFiles(frame.root, frame.document) : null;
+    filesFound.set(frame.root, files
+      ? { files, more: (frame.document as { more?: unknown })?.more === true }
+      : { problem: frame.error || "The server did not answer the search." });
     drawFound();
   },
 
@@ -5996,6 +6049,23 @@ document.addEventListener("click", (event) => {
     } else if (row.dataset.file !== undefined) {
       showFile(root, row.dataset.file, null, entryAt(root, row.dataset.file));
     }
+    return;
+  }
+  const section = target.closest<HTMLElement>("[data-found-section]");
+  if (section?.dataset.foundSection) {
+    const name = section.dataset.foundSection;
+    if (foldedSections.has(name)) foldedSections.delete(name);
+    else foldedSections.add(name);
+    store(FILES_FOLDED_KEY, [...foldedSections]);
+    drawFound();
+    return;
+  }
+  const toggle = target.closest<HTMLElement>("[data-found-toggle]");
+  if (toggle?.dataset.foundToggle) {
+    const key = toggle.dataset.foundToggle;
+    if (openFound.has(key)) openFound.delete(key);
+    else openFound.add(key);
+    drawFound();
     return;
   }
   const found = target.closest<HTMLElement>("[data-found-root]");

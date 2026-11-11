@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, foundGroup, recentEntries, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
+  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, foundFiles, isDocument, orderFound, recentEntries, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
   headOf, hrefPath, inOrder, languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, webAddresses, withLink,
   pathSpans, rootLabel, rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
   withoutLine,
@@ -447,27 +447,50 @@ test("a prompt's web addresses are found without the punctuation around them", (
 
 // ------------------------------------------------------------------------- searching the files
 
-// What `files/search?q=guide&root=code` returned from a scratch server (KYO-814), with a
-// result of another root that a root's group must leave out.
-const searched = {
-  ok: true, limit: 200, more: true,
+// What `files/search?q=native` returned for each root from a scratch server (KYO-814,
+// KYO-818), with a result of another root that a root's reading must leave out.
+const codeAnswer = {
+  ok: true, limit: 200, more: false,
   results: [
-    { root: "code", path: "docs/guide.md", match: "name" },
-    { root: "code", path: "README.md", match: "contents", line: 4, text: "See the guide." },
-    { root: "code", path: "docs/guide.md", match: "contents", line: 1, text: "# The guide" },
-    { root: "code", path: "README.md", match: "contents", line: 9, text: "The guide again." },
-    { root: "store", path: "ideas/guide.md", match: "name" },
+    { root: "code", path: "apps/native/build.swift", match: "name", mtime_ns: 300 },
+    { root: "code", path: "src/native.py", match: "name", mtime_ns: 900 },
+    { root: "code", path: "docs/native.md", match: "name", mtime_ns: 100 },
+    { root: "code", path: "README.md", match: "contents", line: 4, text: "the native app", count: 9, mtime_ns: 50 },
+    { root: "code", path: "README.md", match: "contents", line: 7, text: "native again", count: 9, mtime_ns: 50 },
+    { root: "code", path: "src/a.py", match: "contents", line: 1, text: "# native", count: 1, mtime_ns: 999 },
+    { root: "store", path: "elsewhere.md", match: "name" },
+  ],
+};
+const storeAnswer = {
+  ok: true, limit: 200, more: false,
+  results: [
+    { root: "store", path: "docs/proposals/native-apps.md", match: "name", mtime_ns: 10 },
+    { root: "store", path: "ideas/x.md", match: "contents", line: 2, text: "native", count: 1, mtime_ns: 20 },
   ],
 };
 
-test("a root's search answer is gathered by file, the files found by name first", () => {
-  const group = foundGroup("code", searched)!;
-  assert.equal(group.more, true);
-  assert.deepEqual(group.files.map((file) => [file.path, file.byName, file.lines.map((l) => l.line)]), [
-    ["docs/guide.md", true, [1]],
-    ["README.md", false, [4, 9]],
+test("a root's answer is read by file, with its lines, count and time", () => {
+  const files = foundFiles("code", codeAnswer)!;
+  const readme = files.find((file) => file.path === "README.md")!;
+  assert.deepEqual([readme.byName, readme.lines.map((l) => l.line), readme.count, readme.mtime], [false, [4, 7], 9, 50]);
+  assert.equal(files.some((file) => file.root !== "code"), false);
+  assert.equal(foundFiles("code", { error: "x" }), null);
+});
+
+test("names come before contents across roots: own name, then documents, then recent, then modified", () => {
+  const files = [...foundFiles("code", codeAnswer)!, ...foundFiles("store", storeAnswer)!];
+  const recent = [{ root: "store", path: "docs/proposals/native-apps.md" }];
+  const { names, contents } = orderFound(files, "native", recent);
+  assert.deepEqual(names.map((file) => file.path), [
+    "docs/proposals/native-apps.md", // a document whose own name matches, opened recently
+    "docs/native.md", // a document whose own name matches
+    "src/native.py", // source code whose own name matches
+    "apps/native/build.swift", // only its folder matches
   ]);
-  assert.equal(foundGroup("code", { error: "x" }), null);
+  // Neither document is named for it or opened: the one modified last comes first, source last.
+  assert.deepEqual(contents.map((file) => file.path), ["README.md", "ideas/x.md", "src/a.py"]);
+  assert.equal(isDocument("a/b.MD"), true);
+  assert.equal(isDocument("a/b.ts"), false);
 });
 
 test("the recently opened files are read from the route's answer, and nothing else is", () => {

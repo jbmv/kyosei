@@ -42,10 +42,13 @@ test("a search asks each root, and draws each root's files and lines under its n
   assert.deepEqual(asked, [{ q: "guide", root: "code" }, { q: "guide", root: "store" }]);
   const drawn = await page.run<{ searching: boolean; landing: boolean; heads: string[]; rows: string[] }>(`(() => {
     window.kyo.filesSearched({ q: "guide", root: "code", status: 200, document: { ok: true, more: false, results: [
-      { root: "code", path: "docs/guide.md", match: "name" },
-      { root: "code", path: "README.md", match: "contents", line: 4, text: "See the guide." },
+      { root: "code", path: "src/guide.py", match: "name", mtime_ns: 9 },
+      { root: "code", path: "README.md", match: "contents", line: 4, text: "See the guide.", count: 2, mtime_ns: 5 },
+      { root: "code", path: "README.md", match: "contents", line: 6, text: "The guide again.", count: 2, mtime_ns: 5 },
     ] } });
-    window.kyo.filesSearched({ q: "guide", root: "store", status: 200, document: { ok: true, more: false, results: [] } });
+    window.kyo.filesSearched({ q: "guide", root: "store", status: 200, document: { ok: true, more: false, results: [
+      { root: "store", path: "docs/guide.md", match: "name", mtime_ns: 1 },
+    ] } });
     // An answer to an older text is not drawn.
     window.kyo.filesSearched({ q: "gui", root: "code", status: 200, document: { ok: true, results: [
       { root: "code", path: "old.md", match: "name" },
@@ -55,29 +58,48 @@ test("a search asks each root, and draws each root's files and lines under its n
       searching: document.getElementById("files-side").classList.contains("searching") && !found.hidden,
       // The page Files shows with no file open has the field too, and the same answers.
       landing: document.querySelector("#files-landing .files-search").value === "guide"
-        && document.querySelectorAll("#files-landing .files-found .found-line").length === 1,
-      heads: Array.from(found.querySelectorAll("h4")).map((h) => h.textContent),
-      rows: Array.from(found.querySelectorAll(".found-file, .found-line, .found-note")).map((r) => r.textContent),
+        && document.querySelectorAll("#files-landing .files-found .found-file").length === 3,
+      heads: Array.from(found.querySelectorAll(".found-head")).map((h) => h.textContent),
+      rows: Array.from(found.querySelectorAll(".found-file, .found-line")).map((r) => r.textContent),
     };
   })()`);
   assert.equal(drawn.searching, true);
   assert.equal(drawn.landing, true);
-  assert.deepEqual(drawn.heads, ["Code", "Kyosei"], "each root under the label its chip has");
-  assert.deepEqual(drawn.rows, ["guide.mddocs", "README.md", "4See the guide.", "Nothing found."]);
+  // KYO-818: names across both roots first, a document before source code; contents one row
+  // per file, its lines hidden.
+  assert.deepEqual(drawn.heads, ["›Names · 2", "›Contents · 1 file"]);
+  assert.deepEqual(drawn.rows, ["guide.mdKyosei · docs", "guide.pyCode · src", "›README.mdCode · 2 lines"]);
 });
 
-test("pressing a found line opens the file there and records it as opened", async (t) => {
+test("a contents file's arrow shows its lines, a line opens the file there and records it", async (t) => {
   if (!page) return t.skip("no Chrome here");
-  const opened = await page.run<{ path: string; posted: unknown[] }>(`(() => {
+  const opened = await page.run<{ lines: string[]; path: string; posted: unknown[] }>(`(() => {
+    document.querySelector('#files-side .files-found [data-found-toggle]').click();
+    const lines = Array.from(document.querySelectorAll("#files-side .files-found .found-line")).map((r) => r.textContent);
     window.posted.length = 0;
-    document.querySelector('#files-side .files-found .found-line[data-found-line="4"]').click();
+    document.querySelector('#files-side .files-found .found-line[data-found-line="6"]').click();
     return {
+      lines,
       path: document.getElementById("files-path").textContent,
       posted: window.posted.filter((p) => p.body.want === "opened").map((p) => p.body),
     };
   })()`);
+  assert.deepEqual(opened.lines, ["4See the guide.", "6The guide again."]);
   assert.match(opened.path, /README\.md/);
   assert.deepEqual(opened.posted, [{ want: "opened", root: "code", path: "README.md" }]);
+});
+
+test("a section's head folds it, and the fold is kept", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const rows = await page.run<number[]>(`(() => {
+    const count = () => document.querySelectorAll("#files-side .files-found .found-file").length;
+    const before = count();
+    document.querySelector('#files-side .files-found [data-found-section="names"]').click();
+    const folded = count();
+    document.querySelector('#files-side .files-found [data-found-section="names"]').click();
+    return [before, folded, count()];
+  })()`);
+  assert.deepEqual(rows, [3, 1, 3]);
 });
 
 test("Escape in the field ends the search and shows the tree and the lists again", async (t) => {

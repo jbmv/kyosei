@@ -1480,8 +1480,10 @@ cannot be read and one with a NUL byte in its first 8 KiB (taken to be binary) a
 name only. Contents are read directly, not with `git grep`, which would not see an untracked
 file. The response holds `results`, in root order and, within a root, the name matches before
 the line matches; each result has its `root`, its `path` and `match` (`name` or `contents`),
-and a contents result also has its `line` number and `text` (cut at 400 characters). At most
-`limit` results (200) are returned, and `more` is true when another was found. The session
+and a contents result also has its `line` number and `text` (cut at 400 characters). A file
+gives at most five lines, and each of them carries the file's `count` of matching lines. Every
+result carries the file's `mtime_ns`, by which the Mac app orders what it found (KYO-818). At
+most `limit` results (200) are returned, and `more` is true when another was found. The session
 scratchpads are not searched. An empty or over-long text, an unknown query key and a `root`
 that is not a served root are refused.
 

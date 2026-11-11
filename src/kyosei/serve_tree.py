@@ -89,6 +89,8 @@ RECENT = "recent"
 
 #: The search's results: how many one response holds, and the longest text it takes.
 SEARCH_LIMIT = 200
+#: The matching lines a search returns for one file; ``count`` says how many it holds (KYO-818).
+SEARCH_LINES_PER_FILE = 5
 MAX_QUERY_CHARS = 256
 #: A matching line is returned up to this many characters.
 MAX_LINE_CHARS = 400
@@ -814,6 +816,14 @@ def _regular_file(root: Root, relpath: str, shown: set[str]) -> Path | None:
     return real
 
 
+def _mtime_ns(real: Path | None) -> int | None:
+    """A file's modification time, by which a client orders what it found (KYO-818)."""
+    try:
+        return real.stat().st_mtime_ns if real is not None else None
+    except OSError:
+        return None
+
+
 def _lines_holding(real: Path, needle: str) -> list[tuple[int, str]]:
     """The ``(line number, line)`` pairs of a text file holding ``needle``, lower-cased.
 
@@ -843,7 +853,9 @@ def search(paths: serve_files.ProjectPaths, text: str, only_root: str | None) ->
     are read directly rather than by ``git grep``, which would not see an untracked file and
     would read what the size limit forbids. Results are in root order, and within a root the
     files whose name matches come before the matching lines; the first
-    :data:`SEARCH_LIMIT` are returned and ``more`` says whether another was found.
+    :data:`SEARCH_LIMIT` are returned and ``more`` says whether another was found. A file gives
+    at most :data:`SEARCH_LINES_PER_FILE` lines, each carrying the file's ``count`` of
+    matching lines, and every result carries the file's ``mtime_ns`` (KYO-818).
     """
     if not text.strip():
         raise Refusal(
@@ -866,24 +878,28 @@ def search(paths: serve_files.ProjectPaths, text: str, only_root: str | None) ->
         shown = [item for item in _git_shows(root, "") if not item.endswith("/")]
         shown_set = set(shown)
         by_name = [item for item in shown if needle in item.lower()]
-        by_contents: list[tuple[str, int, str]] = []
-        found = [
-            {"root": root.name, "path": item, "match": "name"} for item in by_name
+        by_contents: list[dict[str, Any]] = []
+        found: list[dict[str, Any]] = [
+            {
+                "root": root.name, "path": item, "match": "name",
+                "mtime_ns": _mtime_ns(_regular_file(root, item, shown_set)),
+            }
+            for item in by_name
         ]
         for item in shown:
             real = _regular_file(root, item, shown_set)
             if real is None:
                 continue
-            for number, line in _lines_holding(real, needle):
-                by_contents.append((item, number, line))
-                if len(results) + len(found) + len(by_contents) > SEARCH_LIMIT:
-                    break
+            lines = _lines_holding(real, needle)
+            mtime = _mtime_ns(real) if lines else None
+            for number, line in lines[:SEARCH_LINES_PER_FILE]:
+                by_contents.append({
+                    "root": root.name, "path": item, "match": "contents", "line": number,
+                    "text": line, "count": len(lines), "mtime_ns": mtime,
+                })
             if len(results) + len(found) + len(by_contents) > SEARCH_LIMIT:
                 break
-        found += [
-            {"root": root.name, "path": item, "match": "contents", "line": number, "text": line}
-            for item, number, line in by_contents
-        ]
+        found += by_contents
         room = SEARCH_LIMIT - len(results)
         results += found[:room]
         if len(found) > room:
