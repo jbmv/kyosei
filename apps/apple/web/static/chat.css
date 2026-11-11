@@ -282,6 +282,10 @@ body.terminal-open #jump-bottom { display: none; }
 #agenda-why[hidden], #agenda-note[hidden], #agenda-add[hidden] { display: none; }
 #agenda-items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
 #agenda-items:empty { display: none; }
+.agenda-divider { height: 0; margin: 3px 0 3px 21px; border-top: 1px solid var(--line); }
+#agenda-completed { align-self: flex-start; margin-left: 21px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+#agenda-completed:hover, #agenda-completed:focus-visible { color: var(--text); }
+#agenda-completed[hidden] { display: none; }
 .agenda-item { display: flex; align-items: baseline; gap: 8px; }
 .agenda-item input[type="checkbox"] { flex: none; margin: 0; position: relative; top: 1px; accent-color: var(--link); }
 .agenda-text, .agenda-edit { flex: 1; min-width: 0; overflow-wrap: anywhere; }

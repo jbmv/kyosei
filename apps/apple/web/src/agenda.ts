@@ -51,7 +51,18 @@ export interface AgendaView {
   shown: boolean;
   /** Why the list is not shown, in the bubble's one line; null when it is. */
   why: string | null;
+  /**
+   * The rows to draw, the person's first and then the orchestrator's, each group in the
+   * list's own order. A checked item is left out unless completed items are being shown, and
+   * then follows the unchecked ones of its group.
+   */
   rows: Row[];
+  /** The index in `rows` the divider is drawn before; null unless both groups have rows. */
+  dividerAt: number | null;
+  /** How many checked items the list holds, of whoever's; the control states it. */
+  completed: number;
+  /** Whether the checked items are drawn. */
+  showCompleted: boolean;
   /** Whether the person can add an item. */
   canAdd: boolean;
 }
@@ -60,19 +71,33 @@ export interface AgendaView {
 export const MAX_TEXT = 500;
 
 /** The bubble for the last frame the app sent; null before any has arrived. */
-export function agendaView(frame: AgendaFrame | null): AgendaView {
-  if (!frame || frame.state === "absent") return { shown: false, why: null, rows: [], canAdd: false };
-  if (frame.state === "unavailable") return { shown: true, why: frame.why, rows: [], canAdd: false };
+export function agendaView(frame: AgendaFrame | null, showCompleted = false): AgendaView {
+  const none = { rows: [], dividerAt: null, completed: 0, showCompleted: false, canAdd: false };
+  if (!frame || frame.state === "absent") return { shown: false, why: null, ...none };
+  if (frame.state === "unavailable") return { shown: true, why: frame.why, ...none };
+  const row = (item: AgendaItem): Row => ({
+    id: item.id,
+    text: item.text,
+    checked: item.checked,
+    mine: item.author === "person",
+    whose: item.author === "person" ? "you" : "orchestrator",
+  });
+  const completed = frame.items.filter((item) => item.checked).length;
+  // Within a group the list's own order holds: the unchecked items, then, when they are
+  // shown, the checked ones.
+  const group = (author: AgendaItem["author"]): Row[] => {
+    const own = frame.items.filter((item) => item.author === author);
+    return [...own.filter((item) => !item.checked), ...(showCompleted ? own.filter((item) => item.checked) : [])].map(row);
+  };
+  const mine = group("person");
+  const theirs = group("orchestrator");
   return {
     shown: true,
     why: null,
-    rows: frame.items.map((item) => ({
-      id: item.id,
-      text: item.text,
-      checked: item.checked,
-      mine: item.author === "person",
-      whose: item.author === "person" ? "you" : "orchestrator",
-    })),
+    rows: [...mine, ...theirs],
+    dividerAt: mine.length > 0 && theirs.length > 0 ? mine.length : null,
+    completed,
+    showCompleted,
     canAdd: true,
   };
 }
