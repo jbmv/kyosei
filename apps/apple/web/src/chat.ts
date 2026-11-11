@@ -925,6 +925,21 @@ function setText(id: string, text: string): void {
   document.getElementById(id)!.textContent = text;
 }
 
+/**
+ * A list's "N finished" line with its disclosure mark (KYO-751). The mark is one drawing, a
+ * chevron centred in a square box, that is turned about the box's centre when the list is open;
+ * swapping one text glyph for another put the open mark off the closed one's centre.
+ */
+function drawFinished(id: string, count: number, open: boolean): void {
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  mark.setAttribute("viewBox", "0 0 10 10");
+  mark.setAttribute("class", open ? "disclosure open" : "disclosure");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M3.5 2 L6.5 5 L3.5 8");
+  mark.append(path);
+  document.getElementById(id)!.replaceChildren(`${count} finished `, mark);
+}
+
 function drawSide(): void {
   const session = menu?.sessions.sessions.find((row) => row.session_id === menu?.current);
   setText("top-title", session?.title ?? menu?.project ?? windowProject);
@@ -942,7 +957,7 @@ function drawSide(): void {
       ? finishedOwn.map((call) => ({ label: ownLabel(call), took: tookWords(call) }))
       : [],
   );
-  setText("side-finished", `${finishedOwn.length} finished ${showFinishedTasks ? "⌄" : "›"}`);
+  drawFinished("side-finished", finishedOwn.length, showFinishedTasks);
 }
 
 function tookWords(call: ToolCall): string | undefined {
@@ -1048,7 +1063,7 @@ function drawAgents(): void {
   document.getElementById("side-agents-done")!.replaceChildren(
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
-  setText("side-agents-finished", `${finished.length} finished ${showFinishedAgents ? "⌄" : "›"}`);
+  drawFinished("side-agents-finished", finished.length, showFinishedAgents);
   // The status bar lists the running ones: what each is, and since when.
   (window as any).webkit?.messageHandlers?.strip?.postMessage({
     subagents: running.length,
