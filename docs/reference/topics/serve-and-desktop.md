@@ -1472,6 +1472,9 @@ GET /v1/projects/<name>/files/resolve?path=<text>      where a path written in p
 GET /v1/projects/<name>/files/search?q=<text>[&root=<root>]   files whose path or lines hold the text
 GET /v1/projects/<name>/files/recent                   the files opened in the app, newest first
 POST /v1/projects/<name>/files/recent                  record one: {"root": "code", "path": "src/a.py"}
+GET /v1/projects/<name>/files/starred                  the starred files, newest first
+POST /v1/projects/<name>/files/starred                 star one: {"root": "code", "path": "src/a.py"}
+DELETE /v1/projects/<name>/files/starred               unstar one, with the same body
 ```
 
 **The permission.** Every one of these needs a device token holding the `files` permission,
@@ -1485,7 +1488,7 @@ kyo devices issue my-ipad --permission files --permission send
 does not read source. `kyo devices grant <name> --permission files` adds it to a token
 already issued. The token is
 checked before the path, so a request without the permission learns nothing about any path.
-The routes do not ask for the `serve_send` setting, and they write nothing except the recent list below.
+The routes do not ask for the `serve_send` setting, and they write nothing except the recent and starred lists below.
 
 **The roots.** `code` is the project's code repository and `store` is its store repository,
 the two directories `kyo where` prints. Under the split layout they are two repositories and
@@ -1555,6 +1558,19 @@ reasons, and nothing is recorded. Only `code` and `store` files can be listed. T
 one JSON file per project under `$KYOSEI_HOME/composer/recent-files/`, beside the drafts,
 outside every repository and readable by this account alone. This is the one file route that
 writes, and it writes only that file. Both routes need the `files` permission.
+
+**Starred files (KYO-837).** `files/starred` keeps, per project and on the server, the files
+a client has starred, so that devices share one list. GET returns `entries`, each `{root,
+path, starred_at}`, in the order they were starred with the newest first, and `limit` (200),
+the most a project keeps. POST takes `{"root", "path"}` and stars that file, which is checked
+as `files/recent` checks it; a file starred already is left where it is, so each appears
+once. A POST past the limit is refused with the reason `starred-full`, which DELETE clears.
+DELETE takes the same body and removes the file's star, answering the list; the root and the
+path's text are checked but the file need not still exist, so the star of a deleted file can
+be removed, and a file not starred leaves the list unchanged. All three answer with the list.
+It is one JSON file per project under `$KYOSEI_HOME/composer/starred-files/`, beside the
+recent list, outside every repository and readable by this account alone, and every method
+needs the `files` permission.
 
 A path is relative to its root and is refused as text, before anything is looked at on disk,
 when it is absolute or holds a NUL byte, an empty segment, a `.` or `..` segment, or a `.git`

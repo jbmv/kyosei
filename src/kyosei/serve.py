@@ -96,12 +96,13 @@ and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
 THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
 directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
 ``files/resolve?path=`` (a path as an agent writes one), all GET, with ``files/search?q=``
-(KYO-814) and ``files/recent`` (GET, and POST to record an open). They read the code repository
+(KYO-814), ``files/recent`` (GET, and POST to record an open) and ``files/starred`` (GET, POST
+and DELETE; KYO-837). They read the code repository
 and the store repository as git shows them, and a session's scratchpad directory
 (``files/scratch/{session}/tree`` and ``.../blob/{relpath}``) only as that session reported it
 with ``kyo sessions scratch``; nothing outside these is read. They need a device token
-holding the ``files`` permission, and write nothing but the list of recent opens, which goes
-through :mod:`kyosei.serve_files`; :mod:`kyosei.serve_tree` holds the rest.
+holding the ``files`` permission, and write nothing but the lists of recent opens and stars,
+which go through :mod:`kyosei.serve_files`; :mod:`kyosei.serve_tree` holds the rest.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
@@ -857,6 +858,9 @@ class ServeHandler(BaseHTTPRequestHandler):
         elif rest[:1] == ["projects"] and rest[2:] == [PROJECT_FILES_ROUTE, "recent"]:
             # KYO-814: the files opened in the app; the one files route that is written.
             allowed = ("GET", "POST")
+        elif rest[:1] == ["projects"] and rest[2:] == [PROJECT_FILES_ROUTE, "starred"]:
+            # KYO-837: the files starred in the app.
+            allowed = ("GET", "POST", "DELETE")
         elif (
             len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE
         ) or (len(rest) == 3 and rest[0] == "projects" and rest[2] == SEARCH_ROUTE):
