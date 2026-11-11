@@ -1,0 +1,58 @@
+// Run with `npm test`. KYO-809: a held prompt taken back returns with its anchors and tags on
+// any device. The page here has never held the prompt (nothing of it was kept in its storage,
+// as on a second machine) and is handed the frame the Mac app builds from the server's answer
+// to the retraction. The server's half, that the answer carries the prompt's marks, is tested
+// against a real server in tests/test_kyo_serve_held.py. A machine with no Chrome skips these.
+import assert from "node:assert/strict";
+import { after, before, test } from "node:test";
+import { openPage, type Page } from "./chrome.ts";
+
+let page: Page | null = null;
+before(async () => { page = await openPage(); });
+after(async () => { await page?.close(); });
+
+const marks = [
+  {
+    line: 0,
+    anchors: [
+      { kind: "turn", session: "S1", start: 3, end: 9, uuid: "u-1" },
+      { kind: "record", id: "KYO-12" },
+    ],
+    tags: ["review"],
+  },
+  { line: 1, anchors: [{ kind: "file", root: "store", path: "docs/a.md", lines: [2, 4] }], tags: [] },
+];
+
+test("a prompt taken back on another device keeps its anchors and tags", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await page.reload();
+  const saved = await page.run<{ text: string; marks: { line: number; items: { kind: string }[] }[] }>(`(async () => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.retracted(${JSON.stringify({ text: "first\nsecond", prompt: { marks } })});
+    await new Promise((done) => setTimeout(done, 1200));
+    const asked = window.posted.filter((message) => message.name === "saveDraft");
+    return asked[asked.length - 1].body.boxes.find((box) => box.text === "first\\nsecond");
+  })()`);
+  assert.ok(saved, "the box was rebuilt");
+  assert.deepEqual(saved.marks.map((mark) => [mark.line, mark.items.map((item) => item.kind)]), [
+    [0, ["anchor", "record", "tag"]],
+    [1, ["path"]],
+  ]);
+  const drawn = await page.run<string[]>(
+    `[...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)`);
+  assert.deepEqual(drawn, [
+    "anchor: an earlier message (session ended)\nanchor: KYO-12\n#review",
+    "anchor: a.md:2",
+  ]);
+});
+
+test("a plain prompt taken back is its text alone", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await page.reload();
+  const texts = await page.run<string[]>(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.retracted({ text: "plain" });
+    return [...document.querySelectorAll("#boxes textarea")].map((area) => area.value);
+  })()`);
+  assert.deepEqual(texts, ["plain"]);
+});

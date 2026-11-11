@@ -782,6 +782,31 @@ def test_a_retracted_prompt_files_nothing_and_gives_back_its_segments_and_marks(
     assert keys_sent(bed) == []
 
 
+def test_a_prompt_taken_back_on_a_second_device_returns_its_anchors_and_tags(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    """KYO-809: the marks come back from the server, so no copy kept by the sender is needed."""
+    first = file_note(bed, notes_path, can_send)
+    document = marked_prompt(first)
+    _, sent = post(bed, SEND_PROMPT, document, can_send)
+    other = issue("studio", "send")
+    assert other != can_send
+    status, _, body = bed.client.request(
+        HELD_ROUTE,
+        method="DELETE",
+        headers={"Authorization": f"Bearer {other}", "If-Match": sent["held"]["id"]},
+    )
+    retracted = body_json(body)
+    assert status == 200, retracted
+    marks = retracted["prompt"]["marks"]
+    assert marks == document["marks"]
+    assert marks[0]["anchors"] and marks[0]["tags"] == ["#Ask"]
+    assert marks[1]["anchors"] == [{"kind": "note", "id": first["id"]}]
+    assert "".join(s["text"] for s in retracted["prompt"]["segments"]) == "".join(
+        s["text"] for s in PROMPT_SEGMENTS
+    )
+
+
 def test_an_empty_marked_line_is_sent_as_its_on_lines_alone_and_filed(
     bed: Bed, notes_path: str, can_send: str
 ) -> None:
