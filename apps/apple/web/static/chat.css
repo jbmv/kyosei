@@ -658,7 +658,7 @@ body.terminal-open #terminal { display: flex; }
 ::highlight(found) { background-color: color-mix(in srgb, var(--pastel-blue) 16%, transparent); }
 ::highlight(found-current) { background-color: color-mix(in srgb, var(--pastel-blue) 42%, transparent); }
 .top-part[data-view="chat"] { flex: 1; }
-#find { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+#find { margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; }
 #find[hidden] { display: none; }
 #find-field { width: 200px; }
 #find-count { min-width: 56px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }

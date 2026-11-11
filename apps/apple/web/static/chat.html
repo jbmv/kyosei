@@ -43,13 +43,7 @@
     <!-- An element with data-view is shown only while that view is the current one. -->
     <header id="top">
       <span class="top-part" data-view="chat"><span id="top-title"></span><span id="top-activity"></span>
-      <!-- Search in the chat (KYO-741): opened by Command-F, closed by Escape. -->
-      <span id="find" hidden>
-        <input id="find-field" class="records-search" type="search" placeholder="Search this chat" aria-label="Search this chat" />
-        <span id="find-count"></span>
-        <button id="find-prev" class="nav-icon" data-nav-icon="up" title="Previous (Shift-Return)" aria-label="Previous hit"></button>
-        <button id="find-next" class="nav-icon" data-nav-icon="down" title="Next (Return)" aria-label="Next hit"></button>
-      </span></span>
+      </span>
       <span class="top-part" data-view="records" hidden>
         <span class="nav-icons" data-nav="records">
           <button id="records-home" class="nav-icon" data-nav-icon="home" title="Home" aria-label="Home"></button>
@@ -66,6 +60,14 @@
         </span>
         <span id="files-path"></span>
         <span id="files-meta"></span>
+      </span>
+      <!-- Search (KYO-741, KYO-754): in the chat, the open record or the open file, whichever view shows;
+           opened by Command-F, closed by Escape. -->
+      <span id="find" hidden>
+        <input id="find-field" class="records-search" type="search" placeholder="Search this chat" aria-label="Search this chat" />
+        <span id="find-count"></span>
+        <button id="find-prev" class="nav-icon" data-nav-icon="up" title="Previous (Shift-Return)" aria-label="Previous hit"></button>
+        <button id="find-next" class="nav-icon" data-nav-icon="down" title="Next (Return)" aria-label="Next hit"></button>
       </span>
     </header>
 
