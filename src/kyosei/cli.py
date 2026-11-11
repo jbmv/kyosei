@@ -31,6 +31,7 @@ from collections.abc import Callable, Sequence
 from . import changelog as changelog_module
 from . import (
     cmd_accept,
+    cmd_agenda,
     cmd_brief,
     cmd_check_branch,
     cmd_check_build,
@@ -273,6 +274,10 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # writes is local state beside `kyosei.db`, gitignored and rebuilt by the next
     # session, exactly as the database is.
     "sessions": (cmd_sessions.cmd_sessions, PROJECT_OPTIONAL),
+    # KYO-770: a session's task list, written as the orchestrator. PROJECT_OPTIONAL and not
+    # in MUTATING_COMMANDS: the list is session state under $KYOSEI_HOME, named by the
+    # session's id alone, and no store is opened.
+    "agenda": (cmd_agenda.cmd_agenda, PROJECT_OPTIONAL),
     # KYO-657: PROJECT_OPTIONAL on `sessions`' reasoning, and for its hook form on
     # `check-build`'s: it runs on every prompt. Not in MUTATING_COMMANDS: the files it
     # writes are gitignored local state beside `kyosei.db`, and no record or event.
@@ -1969,7 +1974,9 @@ def build_parser() -> KyoseiParser:
         help="read Claude Code's SessionStart / Stop / SessionEnd payload on stdin and "
         "record this session in the store's local sessions.json; how the packaged hook "
         "invokes this. Silent on success, and always exit 0 — a session that could not "
-        "be recorded must still start, turn and end",
+        "be recorded must still start, turn and end. At Stop it also announces the "
+        "session's task list as a hook systemMessage, when there is something to say "
+        "(KYO-770)",
     )
     p_sessions.add_argument(
         "words",
@@ -1979,6 +1986,56 @@ def build_parser() -> KyoseiParser:
         "named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's "
         "`scratch` root; refused for a directory that is `/`, a home directory, either "
         "served root, or lies inside a git repository (KYO-735)",
+    )
+
+    p_agenda = sub.add_parser(
+        "agenda",
+        parents=[common],
+        help="this session's task list, shared with the person: print it, or add, edit, "
+        "check, uncheck, remove or move an item as the orchestrator (KYO-770)",
+        description="The session's task list, which the person and the orchestrator both "
+        "write: the person from a device through `kyo serve`, the orchestrator with this "
+        "command. With no action it prints the items with their ids. The orchestrator may "
+        "change any item; a device may change only the person's. The session is the one "
+        "named by $CLAUDE_CODE_SESSION_ID, or --session. The list is session state under "
+        "$KYOSEI_HOME, not part of the store.",
+    )
+    p_agenda.add_argument(
+        "action",
+        nargs="?",
+        choices=cmd_agenda.ACTIONS,
+        default="list",
+        help="what to do; `list` when left out",
+    )
+    p_agenda.add_argument(
+        "ids",
+        nargs="*",
+        metavar="ID",
+        help="the id of an item, as the list prints it: one for edit and move, one or "
+        "more for check, uncheck and remove, none for add",
+    )
+    p_agenda.add_argument(
+        "--text",
+        metavar="WORDS",
+        help="the item's words, on one line; add and edit need this or --text-file",
+    )
+    p_agenda.add_argument(
+        "--text-file",
+        metavar="FILE",
+        help="read the item's words from a file, or '-' for stdin; its lines are joined "
+        "into one",
+    )
+    p_agenda.add_argument(
+        "--to",
+        type=int,
+        metavar="POSITION",
+        help="where the item goes, counted from 1 at the top: required by move, and "
+        "optional for add, which otherwise adds at the end",
+    )
+    p_agenda.add_argument(
+        "--session",
+        metavar="SESSION_ID",
+        help="the session whose list this is; defaults to $CLAUDE_CODE_SESSION_ID",
     )
 
     p_turns = sub.add_parser(

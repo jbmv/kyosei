@@ -4059,6 +4059,36 @@ UNREACHED: dict[str, str] = {
         "the same command as `kyo sessions` or `kyo sessions scratch <dir>`; proved by "
         "test_kyo735_sessions_takes_nothing_but_scratch_and_a_directory"
     ),
+    # KYO-770: `kyo agenda`, each refusal's re-invocation run by the test the reason names.
+    "cmd_agenda.py:_session_of#0": (
+        "the same command with --session, or run inside a session; proved by "
+        "tests/test_kyo_agenda.py::test_outside_a_session_the_verb_is_refused_and_naming_one_clears_it"
+    ),
+    "cmd_agenda.py:_session_of#1": (
+        "the same command naming a session id `kyo sessions` lists; proved by "
+        "tests/test_kyo_agenda.py::test_an_id_that_cannot_name_a_file_is_refused"
+    ),
+    "cmd_agenda.py:_text_of#1": (
+        "the same command with a shorter --text; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    "cmd_agenda.py:_found#0": (
+        "`kyo agenda --session <id>` for the ids, then the same command with one of them; "
+        "proved by "
+        "tests/test_kyo_agenda.py::test_an_unknown_item_is_refused_and_the_listing_it_names_gives_the_id"
+    ),
+    "cmd_agenda.py:cmd_agenda#0": (
+        "the same words after an action, as `kyo agenda add --text`; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    "cmd_agenda.py:cmd_agenda#2": (
+        "`kyo agenda` for the ids, then the same command with one; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    "cmd_agenda.py:cmd_agenda.change#0": (
+        "`kyo agenda remove <id>`, then the same command; proved by "
+        "tests/test_kyo_agenda.py::test_a_full_list_refuses_another_item_and_removing_one_clears_it"
+    ),
     # KYO-658: `decision-requires-discussion`; each named remedy is run by the test cited.
     "cmd_discuss.py:_filing_discussion#5": (
         "the same command with --opened-late, or with --discussion naming the discussion "
@@ -4662,6 +4692,30 @@ RECORDED: dict[str, str] = {
         "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "
         "moving it aside; proved by "
         "tests/test_kyo_projects.py::test_an_unparseable_registry_is_refused_by_name_never_read_as_empty"
+    ),
+    # KYO-770: `kyo agenda` refusals whose remedy is a flag on the same command.
+    "cmd_agenda.py:_text_of#0": (
+        "the same command with --text; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    "cmd_agenda.py:cmd_agenda#1": (
+        "the same command without the id; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    "cmd_agenda.py:cmd_agenda#4": (
+        "the same command with --to; proved by "
+        "tests/test_kyo_agenda.py::test_each_action_missing_what_it_needs_is_refused_and_given_it_runs"
+    ),
+    # KYO-770: a session's task-list file that cannot be read; the remedy is removing it.
+    "cmd_agenda.py:parse#0": (
+        "removing the file under $KYOSEI_HOME/composer/agendas/ that the message names; "
+        "proved by "
+        "tests/test_kyo_agenda.py::test_a_file_that_is_not_a_list_is_refused_and_removing_it_clears_it"
+    ),
+    "cmd_agenda.py:parse#1": (
+        "removing the file under $KYOSEI_HOME/composer/agendas/ that the message names; "
+        "proved by "
+        "tests/test_kyo_agenda.py::test_a_file_that_is_not_a_list_is_refused_and_removing_it_clears_it"
     ),
     "cmd_projects.py:read_entries#4": (
         "correcting $KYOSEI_HOME/projects.json by hand in the shape the message quotes, or "

@@ -60,9 +60,11 @@ permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is t
 
 THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
 composer boxes, and ``draft`` (GET, PUT, KYO-763) the project's own, kept between its
-sessions (:mod:`kyosei.serve_drafts`); ``sessions/{id}/held`` (GET, POST, DELETE) is a
+sessions (:mod:`kyosei.serve_drafts`); ``sessions/{id}/agenda`` (GET, PUT, KYO-770) is the
+session's task list, saved as the person (:mod:`kyosei.serve_agenda`);
+``sessions/{id}/held`` (GET, POST, DELETE) is a
 message held until the turn ends (:mod:`kyosei.serve_held`), and ``sessions/{id}/held-now`` (POST,
-KYO-722) delivers it at once, during a turn. Both need a device token.
+KYO-722) delivers it at once, during a turn. Each needs a device token.
 ``sessions/{id}/attachments`` (POST) and ``sessions/{id}/attachments/{attachment}`` (GET,
 KYO-715) are the files a prompt attaches (:mod:`kyosei.serve_attachments`); that POST is the
 one that carries a file's own bytes and type rather than JSON, and only the types that module
@@ -281,6 +283,8 @@ NOT_SERVED: dict[str, str] = {
     # KYO-699: a device must not be able to issue itself a token.
     "devices": "it issues and revokes the tokens this server checks, on this machine only",
     "statusline": "it is Claude Code's status line command, and writes this machine's settings",
+    # KYO-770: the orchestrator's own writes; a device saves the list by its route.
+    "agenda": "it writes a session's task list as the orchestrator; a device uses the route",
 }
 
 #: Query keys refused by name: the server sets `--root` from `{project}`, runs as
@@ -330,6 +334,8 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
     "send-notes": ("POST",),
     # KYO-709: one composer prompt with its marks in place (serve_notes).
     "send-prompt": ("POST",),
+    # KYO-770: the session's task list, saved as the person (serve_agenda).
+    "agenda": ("GET", "PUT"),
 }
 
 #: KYO-763: ``draft``, the project's own draft, kept between its sessions.
@@ -1116,6 +1122,21 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(
                 sender(self.server, name, root_of, session_id, authorization, self._body)
             )
+        if route == "agenda":
+            from . import serve_agenda
+
+            status, document = serve_agenda.perform(
+                self.server.environ,
+                root_of,
+                session_id,
+                method,
+                authorization,
+                if_match=self.headers.get("If-Match"),
+                if_none_match=self.headers.get("If-None-Match"),
+                read_body=self._body,
+            )
+            etag = document["etag"]
+            return status, _json_bytes(document), _JSON_TYPE, {"ETag": etag} if etag else {}
         if route == "draft":
             status, document = serve_drafts.perform(
                 self.server.environ,

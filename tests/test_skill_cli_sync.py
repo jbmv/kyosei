@@ -1142,6 +1142,15 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-770: the list's less common flags; a refusal names each where it is needed.
+    ("agenda", "--session"): (
+        "names a session other than the one the command runs in, which an orchestrator's "
+        "own shell never needs; the refusal outside a session names it"
+    ),
+    ("agenda", "--to"): (
+        "the position for `move`, and optionally for `add`; `kyo agenda move` without it "
+        "names it"
+    ),
     # KYO-658: the discussion flags the workflow does not type by heart.
     ("discuss", "--dropped"): (
         "closes a discussion that produced nothing; the refusal of a bare `close` names it"

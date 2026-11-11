@@ -252,8 +252,57 @@ body.terminal-open #jump-bottom { display: none; }
 #interrupt[hidden] { display: none; }
 #interrupt:hover { text-decoration: underline; }
 #boxes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-.box:first-child { margin-top: auto; }
+/* The prompts sit at the bottom of their column. The session's list is the column's first
+   child and sits directly above them, so it rises as they grow, and once they need the room
+   it scrolls up and out of view with them (KYO-771). */
+#agenda { margin-top: auto; }
+#agenda[hidden] + .box { margin-top: auto; }
 .box { flex: none; }
+
+/* The session's task list: a bubble shaped as a prompt's is and slightly dimmed, since it is
+   read more often than it is written. It comes to full strength under the pointer or the caret. */
+#agenda {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.72;
+  transition: opacity 0.12s;
+}
+#agenda[hidden] { display: none; }
+#agenda:hover, #agenda:focus-within { opacity: 1; }
+#agenda-why, #agenda-note { color: var(--muted); font-size: 12.5px; }
+#agenda-why[hidden], #agenda-note[hidden], #agenda-add[hidden] { display: none; }
+#agenda-items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+#agenda-items:empty { display: none; }
+.agenda-item { display: flex; align-items: baseline; gap: 8px; }
+.agenda-item input[type="checkbox"] { flex: none; margin: 0; position: relative; top: 1px; accent-color: var(--link); }
+.agenda-text, .agenda-edit { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agenda-item.mine .agenda-text { cursor: text; }
+.agenda-item.checked .agenda-text { color: var(--muted); text-decoration: line-through; }
+.agenda-whose { flex: none; color: var(--muted); font-size: 11.5px; }
+.agenda-remove { flex: none; width: 16px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; visibility: hidden; }
+.agenda-item:hover .agenda-remove, .agenda-remove:focus-visible { visibility: visible; }
+.agenda-remove:hover { color: var(--apple-red); }
+/* The orchestrator's items keep the column the remove button takes, so the names line up. */
+.agenda-item:not(.mine)::after { content: ""; flex: none; width: 16px; }
+#agenda-add, .agenda-edit {
+  padding: 2px 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+}
+#agenda-add { margin-left: 21px; }
+#agenda-add::placeholder { color: var(--muted); }
 
 #held { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; background: var(--line); font-size: 13.5px; }
 #held[hidden] { display: none; }

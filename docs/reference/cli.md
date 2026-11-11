@@ -23,6 +23,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | --- | --- | --- | --- |
 | [`kyo accept`](#kyo-accept) | yes | yes | apply an ingested report you have read — its criteria verdicts, its docs verdicts and its touch-drift correction — as one act (KYO-331) |
 | [`kyo activity`](#kyo-activity) | yes | no | the dispatch activity rows: every running dispatch and the newest finished ones, with record, verdict counts, worker tokens, end time and what git says about each worktree; read-only (KYO-454) |
+| [`kyo agenda`](#kyo-agenda) | optional | no | this session's task list, shared with the person: print it, or add, edit, check, uncheck, remove or move an item as the orchestrator (KYO-770) |
 | [`kyo attach`](#kyo-attach) | yes | yes | attach an evidence artifact, stored verbatim (law 5, 9) |
 | [`kyo base`](#kyo-base) | yes | no | saved view definitions (kyosei/bases.yml) over records, ideas/ or docs/: list them, or run one read-only |
 | [`kyo brief`](#kyo-brief) | yes | yes | the session briefing, derived from the store (M6) |
@@ -146,6 +147,32 @@ Usage: `kyo activity [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--sli
 
 - `--finished N` — optional. how many finished dispatches to show beside every running one (default: 12)
 - `--against REF` — optional. the branch a worktree's HEAD is asked to be contained in (default: main)
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo agenda`
+
+this session's task list, shared with the person: print it, or add, edit, check, uncheck, remove or move an item as the orchestrator (KYO-770)
+
+Needs a Kyosei project: **optional** — it runs, and says so, where there is no project.
+
+Writes to the store: **no** — this command only reads.
+
+Top-level ids in `--json`: `session_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+
+Usage: `kyo agenda [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--text WORDS] [--text-file FILE] [--to POSITION] [--session SESSION_ID] [{list,add,edit,check,uncheck,remove,move}] [ID ...]`
+
+### Positional arguments
+
+- `[{list,add,edit,check,uncheck,remove,move}]` — optional. what to do; `list` when left out
+- `[ID ...]` — optional. the id of an item, as the list prints it: one for edit and move, one or more for check, uncheck and remove, none for add
+
+### Options
+
+- `--text WORDS` — optional. the item's words, on one line; add and edit need this or --text-file
+- `--text-file FILE` — optional. read the item's words from a file, or '-' for stdin; its lines are joined into one
+- `--to POSITION` — optional. where the item goes, counted from 1 at the top: required by move, and optional for add, which otherwise adds at the end
+- `--session SESSION_ID` — optional. the session whose list this is; defaults to $CLAUDE_CODE_SESSION_ID
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
@@ -1478,7 +1505,7 @@ Usage: `kyo sessions [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--sli
 
 ### Options
 
-- `--hook` — optional. read Claude Code's SessionStart / Stop / SessionEnd payload on stdin and record this session in the store's local sessions.json; how the packaged hook invokes this. Silent on success, and always exit 0 — a session that could not be recorded must still start, turn and end
+- `--hook` — optional. read Claude Code's SessionStart / Stop / SessionEnd payload on stdin and record this session in the store's local sessions.json; how the packaged hook invokes this. Silent on success, and always exit 0 — a session that could not be recorded must still start, turn and end. At Stop it also announces the session's task list as a hook systemMessage, when there is something to say (KYO-770)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

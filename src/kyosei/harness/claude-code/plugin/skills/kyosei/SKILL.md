@@ -9,18 +9,18 @@ You are the orchestrator session for a project tracked by Kyosei (`kyo`). The hu
 Scratchpad, Ideas, and Bugs; everything else -- promoting, dispatching, verifying, moving,
 sweeping -- is yours.
 
-**This file is two tiers and you are reading the first**: each instruction, at most a clause of
-reason, and the record id carrying the rest. The incident behind an instruction is in
-`${CLAUDE_SKILL_DIR}/REFERENCE.md`, beside this file; each section ends by naming its
+**This file is the first of two tiers**: each instruction, at most a clause of
+reason, and the record id carrying the rest. The incident behind one is in
+`${CLAUDE_SKILL_DIR}/REFERENCE.md`; each section ends by naming its
 section there. Read one when an instruction looks arbitrary or you are about to work around it
 -- never the file whole.
 
-**This file is the workflow, not the command reference.** Everything it names exists; not
+**This file is the workflow, not the command reference.** Not
 everything that exists is named here. For what the tool *has*, run `kyo reference` -- generated
-from the parser, needing no project, `kyo reference <command>` for one section and
-`kyo reference --output <file>` for all of it (KYO-138, KYO-221). Reach for it before concluding
+from the parser, needing no project; `kyo reference <command>` prints one section,
+`kyo reference --output <file>` all of it (KYO-138, KYO-221). Reach for it before concluding
 the tool cannot do something (KYO-131). The design record is `docs/design/charter.md` (in
-Kyosei's own repository -- not a file your project has).
+Kyosei's own repository, not yours).
 
 ## 0. Setup, once per consumer project
 
@@ -41,11 +41,11 @@ it with `--no-verify`.
 **Upgrading, after your maintainer pulls a newer Kyosei.** Start with `kyo version` -- version,
 build commit, UTC date, install kind (KYO-317) -- before filing any defect against this tool
 (KYO-226). Every record `kyo changelog` lists is IN the build printing it -- never read one as
-missing from your build; `--since <date-or-commit>` picks another window. Reinstalling kyo
-upgrades every project on the machine at once, yours included, without you running anything
+missing; `--since <date-or-commit>` picks another window. Reinstalling kyo
+upgrades every project on the machine at once, without you running anything
 (KYO-398): the session-start brief opens with a `BUILD CHANGED` notice naming both builds and the
-records added between them, and mid-session the `UserPromptSubmit` hook (`kyo check-build --hook`)
-prints one line when the `kyo` under you changed since your opening brief.
+records between them, and mid-session the prompt hook (`kyo check-build --hook`)
+prints one line when the `kyo` under you changed.
 
 The reinstall is the maintainer's, and the plugin follows it; yours is the **copies**, which
 only a rerun updates (`kyo version` names them). Run `kyo install-procedures` -- it merges,
@@ -57,11 +57,14 @@ Stories: `${CLAUDE_SKILL_DIR}/REFERENCE.md`, "0. Setup, once per consumer projec
 
 ## 1. Start of session: read the brief, not the files
 
-Run `kyo brief` (or rely on the `SessionStart` hook): deltas since the last brief, in-flight
+Run `kyo brief` (or the `SessionStart` hook): deltas since the last brief, in-flight
 dispatches, gated work, stale flags, ready work, and the records finished but not moved. **Do not
 re-derive board state by reading record files.**
 
 Run `kyo sessions scratch <dir>` with your session's scratchpad directory, so the maintainer can open its files.
+
+Plan your coming turns on the session's list (`kyo agenda add --text "..."`,
+`kyo agenda check <id>`), where the maintainer adds reminders; each prompt prints what is unchecked.
 
 **Read a record with `kyo show <id> --json`; a write's `--json` is a receipt** -- ids, status and
 `changed_fields`, not the document; add `--full` for the whole one. Off a terminal

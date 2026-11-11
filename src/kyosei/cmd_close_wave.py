@@ -684,7 +684,12 @@ def cmd_close_wave(ctx: Context, args: Namespace) -> Output:
     # 4. the after-steps
     data["after"] = _after(cfg, state, args, lines)
     data["complete"] = True
-    return Output(lines, data)
+    output = Output(lines, data)
+    # KYO-770: the wave's item on the session's task list is checked, when there is one.
+    from . import cmd_agenda
+
+    cmd_agenda.after_close_wave(ctx, args, output)
+    return output
 
 
 def _refresh_only_line(complete: str) -> str:

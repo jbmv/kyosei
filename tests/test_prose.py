@@ -54,6 +54,10 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
     text_bearing = {
         "--title", "--why", "--do", "--method", "--quote", "--enforced-by", "--source-other",
         "--device",  # KYO-705: one line naming where a note was written
+        # KYO-770: one item of a session's task list, which is session state and not the
+        # store; single-line, and refused on shell residue by `cmd_agenda._text_of`, which
+        # names its --text-file twin (tests/test_kyo_agenda.py).
+        "--text",
     }  # fmt: skip
     file_bearing = {f for f in value_flags if f.endswith("-file")}
     structural = {
@@ -93,6 +97,7 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--supersedes",
         "--brief-out",  # a file path to write to, not prose content (M5, KYO-7)
         "--to-successor",  # a list of criterion ids, not prose (M5, KYO-7)
+        "--to",  # a position in a session's task list, an integer (KYO-770)
         "--out",  # a directory path to write the static viewer to, not prose (M7, KYO-11)
         "--also-covers",  # a list of record ids, not prose (M8, KYO-13.c4)
         "--against",  # a git ref name, not prose (M8, KYO-13.c5)

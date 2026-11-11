@@ -124,6 +124,21 @@ private func readyFrame(state: String?, text: String?) -> ServerEvent {
     #expect(watch.wantsRead(at: start + .seconds(10)))
 }
 
+@Test func aTaskListFrameIsTheReadersAndLeavesThePaneAsStated() {
+    // KYO-770: the reader announces a change to the session's list, so the frame shows the
+    // reader is reading. It says nothing of the pane, which stays as the stream last stated it.
+    let start = ContinuousClock.now
+    var watch = StreamWatch(quiet: .seconds(10))
+    watch.received(readyFrame(state: "idle", text: "before"), at: start)
+    let stated = watch.stated
+    watch.received(
+        ServerEvent(name: "agenda", data: #"{"session_id": "s", "etag": "\"e\""}"#, id: nil),
+        at: start + .seconds(9))
+    #expect(watch.confirmed)
+    #expect(watch.stated == stated)
+    #expect(!watch.wantsRead(at: start + .seconds(10)))
+}
+
 @Test func aReadyFrameAloneIsNotProofAndAMatchingReadIs() {
     let start = ContinuousClock.now
     var watch = StreamWatch(quiet: .seconds(10))

@@ -43,6 +43,17 @@ from the session the anchor names. Its chip in the composer is drawn dimmed with
 outline and takes no press, because the chat on screen has no place for it to open. The choice
 of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
+A live session's task list (KYO-770, KYO-771) is drawn above the composer's prompts, in a
+slightly dimmed bubble that is the first thing in the prompts' own scrolling column: it rises
+as the prompts grow and scrolls out of view with them when they need the room. The person
+adds items and edits, checks and removes their own; the orchestrator's items show their state
+and take no press, since the server refuses a device's change to one. The app reads the list
+when it turns to a live session and again when the session's stream says its etag changed,
+and a save the server refuses as stale leaves the typed words in their field and says so. With
+no live session there is no bubble, and a token that may not read the list is told why in it.
+The app's part is `showAgenda` and `saveAgenda` in `SessionFeed.swift`; the page's is
+`web/src/agenda.ts` and the section of `web/src/chat.ts` that draws it.
+
 The app opens on the project it last showed. On a first run, or when the server no longer
 lists that project, it shows the list of projects in place of the chat. The logic is in
 `web/src/projects.ts`, and the switch is `SessionFeed.open`.

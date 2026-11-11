@@ -450,6 +450,60 @@ def idea_tree(paths: ProjectPaths) -> dict:
 # ---------------------------------------------------------------------- writes
 
 
+def expected(
+    path: Path, shown: str, *, if_match: str | None, if_none_match: str | None
+) -> bytes | None:
+    """The bytes ``path`` holds now, when they are what the headers say a write expects.
+
+    Raises the refusal :func:`put_file` gives for a precondition that is missing, malformed
+    or not met, and writes nothing. A caller that must judge a write against the stored
+    copy asks this first, so that a stale writer is told it is stale before anything else.
+    """
+    if if_match is None and if_none_match is None:
+        raise Refusal(
+            428,
+            f"a PUT to {shown} must say what it expects to replace: send If-Match: "
+            "<etag> (the ETag a GET returned) to replace the file, or If-None-Match: * "
+            "to create it -- so two viewers never overwrite each other silently",
+            path=shown,
+        )
+    if if_none_match is not None and if_none_match.strip() != "*":
+        raise Refusal(
+            400,
+            "If-None-Match on a PUT is honoured only as '*' (create, never overwrite)",
+            path=shown,
+        )
+    if path.is_dir():
+        raise Refusal(409, f"{shown} is a directory, not a file", path=shown)
+    current = _current(path)
+    if if_none_match is not None:
+        if current is not None:
+            raise Refusal(
+                412,
+                f"{shown} already exists, and a create never overwrites a file; GET "
+                "it and PUT with If-Match: <its etag> to replace it",
+                path=shown,
+                etag=etag_of(current),
+            )
+    elif current is None:
+        raise Refusal(
+            412,
+            f"{shown} does not exist, so nothing matches If-Match; create it with "
+            "If-None-Match: *",
+            path=shown,
+            etag=None,
+        )
+    elif not _matches(if_match, current):
+        raise Refusal(
+            412,
+            f"{shown} changed since that etag was read: GET it again, merge, and PUT "
+            "with the current etag",
+            path=shown,
+            etag=etag_of(current),
+        )
+    return current
+
+
 def put_file(
     path: Path,
     shown: str,
@@ -466,49 +520,8 @@ def put_file(
     the resolver has already placed ``path``; for the scratchpad, its per-project home.
     ``private`` creates the file readable by this account alone (a composer draft).
     """
-    if if_match is None and if_none_match is None:
-        raise Refusal(
-            428,
-            f"a PUT to {shown} must say what it expects to replace: send If-Match: "
-            "<etag> (the ETag a GET returned) to replace the file, or If-None-Match: * "
-            "to create it -- so two viewers never overwrite each other silently",
-            path=shown,
-        )
-    if if_none_match is not None and if_none_match.strip() != "*":
-        raise Refusal(
-            400,
-            "If-None-Match on a PUT is honoured only as '*' (create, never overwrite)",
-            path=shown,
-        )
     with _WRITE_LOCK:
-        if path.is_dir():
-            raise Refusal(409, f"{shown} is a directory, not a file", path=shown)
-        current = _current(path)
-        if if_none_match is not None:
-            if current is not None:
-                raise Refusal(
-                    412,
-                    f"{shown} already exists, and a create never overwrites a file; GET "
-                    "it and PUT with If-Match: <its etag> to replace it",
-                    path=shown,
-                    etag=etag_of(current),
-                )
-        elif current is None:
-            raise Refusal(
-                412,
-                f"{shown} does not exist, so nothing matches If-Match; create it with "
-                "If-None-Match: *",
-                path=shown,
-                etag=None,
-            )
-        elif not _matches(if_match, current):
-            raise Refusal(
-                412,
-                f"{shown} changed since that etag was read: GET it again, merge, and PUT "
-                "with the current etag",
-                path=shown,
-                etag=etag_of(current),
-            )
+        current = expected(path, shown, if_match=if_match, if_none_match=if_none_match)
         path.parent.mkdir(parents=True, exist_ok=True)
         _write_atomically(path, data, create=current is None, private=private)
     return (201 if current is None else 200), {

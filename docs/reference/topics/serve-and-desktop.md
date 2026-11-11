@@ -646,6 +646,104 @@ The send log records holds, retractions and deliveries with the actions `hold`, 
 held. On a session's event stream, the `ready` event carries `held` and a `held` event reports
 `outcome` (`held`, `delivered`, `retracted`), `id` and the message; neither carries text.
 
+### A session's task list (KYO-770)
+
+A session has one ordered list of items that the person and the orchestrator both write. The
+person keeps reminders on it, and the orchestrator keeps its plan for the coming turns. The
+person writes from a device, through the route below; the orchestrator writes with
+`kyo agenda`, from the session's shell. The list is kept in
+`$KYOSEI_HOME/composer/agendas/<session id>.json`, beside the session's draft and private to
+your account. It is session state and not part of the store: no record, event or export
+names it.
+
+Each item has an `id`, its `text`, its `author` (`person` or `orchestrator`), whether it is
+`checked`, and `added_at` and `changed_at`. An item's author is the side that added it and
+does not change. An item a command added also carries `for`, naming the dispatch or the wave
+it stands for.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `agenda` | GET | The items, or `items: []` and `etag: null` when the session has no list |
+| `agenda` | PUT | Save the list as the person: `{"items": [{"id": ..., "text": ..., "checked": ...}, ...]}` |
+
+The route is under `/v1/projects/<name>/sessions/<id>/` and stands where the draft routes
+stand: a device token with the `send` permission, no query string, and a project that has
+opted in to reading transcripts and records the session. Sending need not be switched on.
+
+**A `PUT` carries the whole list**, in the order the person sees it. An item the list already
+holds carries the `id` a `GET` gave it; an item with no `id` is added as the person's and may
+not arrive checked. A device cannot state an author. The person's items take the text and the
+check that were sent, and one left out is removed. An item of the orchestrator's must be sent
+as it was read: a `PUT` that edits, checks, unchecks or leaves out one is refused with 403
+(`reason: orchestrator-item`), names the item, and changes nothing. A list holds at most 100
+items of at most 500 characters each.
+
+**The draft's etag rule applies.** A `PUT` states `If-Match: <etag>`, or `If-None-Match: *`
+for a session's first list, and a writer holding an older etag is refused with 412 and the
+current etag. The etag covers the stored file, so it changes when a device saves and when the
+orchestrator's `kyo agenda` does. The precondition is judged before the items are: a device
+holding an old copy is told to read again, and is not told that its change is forbidden.
+
+**A change is announced** on the session's event stream. The `ready` event carries
+`agenda: {"etag": ...}` and an `agenda` event carries `session_id` and the new `etag`, within
+one sampling interval of the save by either side. Neither carries an item, because the stream
+asks for no device token; a client reads the list again when the etag is not the one it holds.
+
+**`kyo agenda`** is the orchestrator's side. With no action it prints the items with their
+ids. `add --text "..."` adds one at the end, or at `--to POSITION`; `edit <id> --text "..."`
+rewords one, and `--text-file FILE` (`-` for stdin) carries words a shell would alter; `check`, `uncheck` and `remove` take one or more ids; `move <id> --to POSITION`
+reorders, with positions counted from 1 at the top. It may change any item, including the
+person's. The session is the one named by `$CLAUDE_CODE_SESSION_ID`, or `--session <id>`
+outside one. The server and this command take the same lock for each write, so neither
+overwrites what the other saved.
+
+**Other commands keep the list** for the session they run in, and only when that session
+already has a list. Outside a session, or in one with no list, each changes nothing, and none
+can fail its own command over the list.
+
+- `kyo dispatch` adds `Accept <dispatch id>: <record title>`. `kyo accept` checks it once
+  everything it applies has landed, and `kyo dispatch close` checks it.
+- `kyo accept` adds `Close the wave (kyo close-wave): <record ids>`, naming the records still
+  to be closed, or adds their ids to that item if it is there and unchecked. With `--close`
+  it adds nothing when every covered record was closed. `kyo close-wave` checks the item when
+  it has closed the records it was given.
+
+**The hooks print three things.**
+
+- The prompt hook, `kyo check-build --hook`, prints the unchecked items into the session's
+  context on each prompt, and nothing when there are none:
+
+  ```
+  session list, unchecked (`kyo agenda`):
+    1 person: push before close
+    2 orchestrator: dispatch wave 3
+  ```
+
+- At `Stop`, `kyo sessions --hook` announces the person's unchecked items, and says when
+  dispatches are in flight and the list holds no item of the orchestrator's:
+
+  ```
+  Unchecked on the session list, yours (2): push before close; email the notes
+  1 dispatch(es) are running or unaccepted and the session list holds no item of the orchestrator's (kyo agenda add --text "...")
+  ```
+
+  The two sentences are printed as one hook `systemMessage`, which Claude Code shows to the
+  person. It does not block the stop and does not reach the agent: at `Stop`, text that
+  reaches the agent makes it take another turn. The agent reads the same items on the next
+  prompt. A dispatch counts as in flight while it is running, or when it was created in this
+  session, has reported, is not closed and has not been accepted.
+
+- A session's first brief, `kyo brief --session-start`, prints what the project's previous
+  session left unchecked. The person's items are added to the new session's list, and the
+  orchestrator's are only shown. The previous list is then marked, so this is printed once:
+
+  ```
+  the previous session (108d6543) left 2 unchecked on its list:
+    person: push before close (carried into this session's list)
+    orchestrator: dispatch wave 3
+    `kyo agenda` prints this session's list
+  ```
+
 ### Attachments (KYO-715)
 
 A client on another machine attaches a file, such as an image pasted into a paragraph of a

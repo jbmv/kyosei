@@ -354,6 +354,13 @@ refusing, for each `module <id>` section the entries answer that no
 `Recx-Checked` trailer on the branch tip names (KYO-614; see "RECX.yaml as a
 governed document" in docs-governance.md).
 
+**A session's task list follows the loop** (KYO-770). When the session these commands run
+in has a task list, `kyo dispatch` adds an item for the dispatch it creates, `kyo accept`
+and `kyo dispatch close` check it, and `kyo accept` adds an item for closing the wave. The
+list is session state and not the store's; outside a session, or in one with no list, the
+commands do nothing with it, and they cannot fail over it. See "A session's task list" in
+serve-and-desktop.md.
+
 **Accepting a report: `kyo accept <dispatch-id>`** (KYO-331). Applying one
 report was seven commands and about ten reports a session, and a step was easy
 to drop — a doc-ref obligation on KYO-263 and a drift correction on KYO-314 each
@@ -559,6 +566,10 @@ each rung meets the same transition contracts), runs the project's declared gene
 commits the store's export and every file the generators changed in one commit, and then
 prints the declared after-steps. Before the moves, the changelog would be regenerated
 from records not yet closed — the order is the point.
+
+When the session it runs in has a task list, a close-wave that has closed its records also
+checks the list's item for the wave's close (KYO-770; "A session's task list" in
+serve-and-desktop.md). A dry run checks nothing.
 
 Which commands are the suite, the generators and the after-steps is the project's to
 declare, under `close_wave:` in `kyosei/config.yml`:
