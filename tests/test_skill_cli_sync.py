@@ -1030,6 +1030,10 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
         "the turn index a hook keeps (KYO-657); an orchestrator never runs it to do its "
         "work, and `kyo sessions` is its nearest sibling"
     ),
+    "dossier": (
+        "a page about one decision for a reader outside the project (KYO-659); the person "
+        "asks for it by name, and no step of the workflow reaches for it"
+    ),
     # KYO-331's entry for `accept` was deleted by KYO-328, which is the debt collecting
     # itself exactly as that entry said it would: the record rewriting the skill's report
     # section named `kyo accept` there, and this check failed until the now-false reason

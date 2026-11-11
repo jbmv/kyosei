@@ -42,6 +42,7 @@ from . import (
     cmd_controller,
     cmd_discuss,
     cmd_dispatch,
+    cmd_dossier,
     cmd_evidence,
     cmd_flags,
     cmd_harness,
@@ -223,6 +224,9 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     "notes": (cmd_notes.cmd_notes, PROJECT_REQUIRED),
     # KYO-658: a discussion opened when it starts, at a turn the turn index stamped.
     "discuss": (cmd_discuss.cmd_discuss, PROJECT_REQUIRED),
+    # KYO-659: one decision as a page for a reader outside the project. Not in
+    # MUTATING_COMMANDS: it reads the store and the turn index and writes nothing.
+    "dossier": (cmd_dossier.cmd_dossier, PROJECT_REQUIRED),
     "docs": (cmd_views.cmd_docs, PROJECT_REQUIRED),
     # KYO-138.c1: the command-and-option reference, generated from the parser below
     # rather than written. PROJECT_NONE on `report-schema`'s reasoning exactly: this
@@ -1986,6 +1990,22 @@ def build_parser() -> KyoseiParser:
         "named by $CLAUDE_CODE_SESSION_ID, which `kyo serve` then serves as that session's "
         "`scratch` root; refused for a directory that is `/`, a home directory, either "
         "served root, or lies inside a git repository (KYO-735)",
+    )
+
+    p_dossier = sub.add_parser(
+        "dossier",
+        parents=[common],
+        help="print one decision as a Markdown page for a reader outside the project: "
+        "the decision, the problem, what was on the table, who decided and in what "
+        "words, the timeline, the depth of the discussion, what happened next, and how "
+        "the record was made, each part naming its source in the store (KYO-659). It "
+        "reads no transcript; a go-ahead is never shown as a decision",
+    )
+    p_dossier.add_argument(
+        "id",
+        metavar="ID",
+        help="a decision record, or any record a `decided` credit is on; a credit id "
+        "(PREFIX-N.pN) selects one decision of a record that holds several",
     )
 
     p_agenda = sub.add_parser(

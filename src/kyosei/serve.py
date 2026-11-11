@@ -285,6 +285,9 @@ NOT_SERVED: dict[str, str] = {
     "statusline": "it is Claude Code's status line command, and writes this machine's settings",
     # KYO-770: the orchestrator's own writes; a device saves the list by its route.
     "agenda": "it writes a session's task list as the orchestrator; a device uses the route",
+    # KYO-659: a page meant to leave the project, so the person prints it where the store
+    # is and decides where it goes; no viewer asks for it.
+    "dossier": "it prints a page for a reader outside the project, at the store's machine",
 }
 
 #: Query keys refused by name: the server sets `--root` from `{project}`, runs as

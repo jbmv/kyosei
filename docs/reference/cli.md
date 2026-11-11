@@ -43,6 +43,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo dispatch`](#kyo-dispatch) | yes | yes | dispatch a record with a frozen brief, or `dispatch close` a dispatch (M5) |
 | [`kyo docs`](#kyo-docs) | yes | yes | Layer 3 docs-SOT skeleton validator (M8) |
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
+| [`kyo dossier`](#kyo-dossier) | yes | no | print one decision as a Markdown page for a reader outside the project: the decision, the problem, what was on the table, who decided and in what words, the timeline, the depth of the discussion, what happened next, and how the record was made, each part naming its source in the store (KYO-659). It reads no transcript; a go-ahead is never shown as a decision |
 | [`kyo edit`](#kyo-edit) | yes | yes | change a record |
 | [`kyo export`](#kyo-export) | yes | no | rewrite drifted export documents from the db (KYO-6) |
 | [`kyo flag`](#kyo-flag) | yes | yes | list, acknowledge/resolve a sweep flag (M6) |
@@ -641,6 +642,22 @@ Usage: `kyo doctor [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 ### Options
 
 - `--hook` — optional. print ONE line to stderr instead of the whole report, and write the report to doctor-report.txt beside kyosei.db; how the packaged Stop / SessionEnd hook invokes this (KYO-362). The same checks run and the exit status is unchanged — silent, and the report file removed, when nothing fails
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo dossier`
+
+print one decision as a Markdown page for a reader outside the project: the decision, the problem, what was on the table, who decided and in what words, the timeline, the depth of the discussion, what happened next, and how the record was made, each part naming its source in the store (KYO-659). It reads no transcript; a go-ahead is never shown as a decision
+
+Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo dossier [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] ID`
+
+### Positional arguments
+
+- `ID` — **required**. a decision record, or any record a `decided` credit is on; a credit id (PREFIX-N.pN) selects one decision of a record that holds several
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
