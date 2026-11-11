@@ -644,6 +644,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-792` (task) — The guide and the operating reference match the CLI: quick start, hooks, methods and config keys
 - **2026-11-11** — `KYO-790` (investigation) — Audit of the public documents against the CLI as built on 2026-11-11
 - **2026-11-11** — `KYO-786` (task) — A decision records who proposed each option and the work it produced, for the dossier
+- **2026-11-11** — `KYO-785` (task) — The Records list filters by kind, with a dropdown of checkboxes and a kind: prefix
 - **2026-11-11** — `KYO-781` (task) — The session list in the app groups the person's items, then the orchestrator's, with checked items behind a toggle
 - **2026-11-11** — `KYO-780` (bug) — The composer's undo does not take back an anchor, and a removed anchor stays highlighted in the chat
 - **2026-11-11** — `KYO-773` (task) — A dispatch's brief says each thing once: touches by path, and its length by section
