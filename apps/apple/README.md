@@ -97,7 +97,11 @@ millisecond for each marked range that lies in a shut fold. The matching is in
 
 Records shows the project's records, one at a time. With none open it lists them all by
 kind; the side bar lists them newest first above the records viewed most recently. Search
-and the three filters (Open, Dispatchable, Awaiting you) apply to both lists. A
+and the three filters (Open, Dispatchable, Awaiting you) apply to both lists, as does a Kind
+control beside the search field (KYO-785): a dropdown of the kinds the store holds, with a
+checkbox each. A `kind:plan` or `kind:plan,task` token typed in the search field checks the
+same kinds, and the rest of the query is searched as text. While a kind is checked the control
+names it in the accent colour, with an x that clears it. A
 `kyosei://` link in the chat opens its record there. The view reads `cmd/list`, `cmd/next`,
 `cmd/gates` and `cmd/show/<id>`, which need no device token, and reads them again when the
 project's event stream reports a change to the store. Its logic is in `web/src/records.ts`.

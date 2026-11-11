@@ -873,6 +873,26 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .records-search:focus { border-color: var(--muted); }
 .records-search::placeholder { color: var(--muted); }
 
+/* The search field and the Kind control beside it (KYO-785). The control reads "Kind" in the
+   ordinary colour; with a kind checked it names them in the accent colour, bordered, with an
+   x that clears them. */
+.records-searchrow { display: flex; align-items: center; gap: 6px; }
+.records-searchrow .records-search { flex: 1; min-width: 0; width: auto; }
+.kind-control { position: relative; flex: none; display: flex; align-items: stretch; max-width: 55%; }
+.kind-button, .kind-clear { padding: 5px 9px; border: 1px solid var(--line); background: var(--background); color: var(--muted); font: 13.5px -apple-system, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+.kind-button { border-radius: 7px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kind-button:hover { color: var(--text); border-color: var(--muted); }
+.kind-control.active .kind-button { color: var(--link); border-color: var(--link); font-weight: 600; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.kind-control.active .kind-clear { color: var(--link); border-color: var(--link); border-left: 0; border-radius: 0 7px 7px 0; font-size: 15px; line-height: 1; }
+.kind-clear:hover { background: color-mix(in srgb, var(--link) 12%, transparent); }
+.kind-clear[hidden] { display: none; }
+.kind-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; min-width: 150px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
+.kind-menu[hidden] { display: none; }
+.kind-menu label { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; font-size: 13.5px; cursor: pointer; }
+.kind-menu label:hover { background: var(--panel); }
+.kind-menu input { margin: 0; accent-color: var(--link); }
+.kind-menu .kind { font-size: 13.5px; font-weight: 400; color: inherit; }
+
 /* The filters are the view's only chips. */
 .records-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 2px 11px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
@@ -908,7 +928,7 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 #menu:focus-within #menu-panel { transform: none; }
 body.view-records #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
 #records-side { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-#records-side > .records-search { flex: none; width: auto; margin: 0 4px; }
+#records-side > .records-searchrow { flex: none; margin: 0 4px; }
 #records-side > .records-filters { flex: none; margin: 0 4px; }
 #records-list { flex: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #records-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
@@ -916,7 +936,7 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 
 /* The landing page: one line for each record, newest first, with its kind beside its id. */
 .records-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
-.records-tools .records-search { flex: 1; min-width: 200px; }
+.records-tools .records-searchrow { flex: 1; min-width: 200px; }
 #records-groups .rec-row { display: flex; align-items: baseline; gap: 12px; }
 #records-groups .rec-id { flex: none; min-width: 64px; }
 #records-groups .kind { flex: none; min-width: 84px; }

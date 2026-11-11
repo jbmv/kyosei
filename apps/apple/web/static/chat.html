@@ -75,7 +75,14 @@
     <nav id="menu">
       <div id="menu-panel">
         <div id="records-side" data-view="records" hidden>
-          <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+          <div class="records-searchrow">
+            <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+            <div class="kind-control">
+              <button class="kind-button" type="button" aria-haspopup="true" aria-expanded="false">Kind</button>
+              <button class="kind-clear" type="button" aria-label="Clear the kind filter" title="Clear the kind filter" hidden>&times;</button>
+              <div class="kind-menu" role="group" aria-label="Kinds" hidden></div>
+            </div>
+          </div>
           <div class="records-filters">
             <button class="chip" data-filter="open" aria-pressed="false">Open</button>
             <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>
@@ -186,7 +193,14 @@
         <div id="records-note" hidden></div>
         <div id="records-landing">
           <div class="records-tools">
-            <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+            <div class="records-searchrow">
+              <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
+              <div class="kind-control">
+                <button class="kind-button" type="button" aria-haspopup="true" aria-expanded="false">Kind</button>
+                <button class="kind-clear" type="button" aria-label="Clear the kind filter" title="Clear the kind filter" hidden>&times;</button>
+                <div class="kind-menu" role="group" aria-label="Kinds" hidden></div>
+              </div>
+            </div>
             <div class="records-filters">
               <button class="chip" data-filter="open" aria-pressed="false">Open</button>
               <button class="chip" data-filter="dispatchable" aria-pressed="false">Dispatchable</button>

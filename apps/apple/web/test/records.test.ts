@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   HISTORY_LIMIT, awaitingIds, dispatchableIds, historyFrom, historyRows,
-  latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
+  kindControlText, kindsOf, kindsPresent, textOf, withKinds, latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
   pressed, reportItem, taskOf,
 } from "../src/records.ts";
@@ -478,4 +478,42 @@ test("a record a dispatch covers draws the dispatch and its report, which it onc
   const report = page.sections.find((part) => part.name === "Reports")!.items[0];
   assert.equal(report.ref, "KYO-9.r1");
   assert.ok(report.lines!.some((one) => one.group === "Verdicts"));
+});
+
+test("a kind: token in the search names kinds and is no part of the words searched", () => {
+  assert.deepEqual(kindsOf("kind:plan"), ["plan"]);
+  assert.deepEqual(kindsOf("Kind:Plan,task native kind:bug"), ["plan", "task", "bug"]);
+  assert.deepEqual(kindsOf("mac kind: app"), []);
+  assert.equal(textOf("kind:plan mac app").trim(), "mac app");
+  assert.equal(textOf("mac kind:plan,task app").replace(/\s+/g, " "), "mac app");
+  // Part of a word is no token.
+  assert.deepEqual(kindsOf("subkind:plan"), []);
+});
+
+test("kind: shows only the records of those kinds, and the rest of the query is searched as text", () => {
+  const found = (search: string) => ids(narrow(rows, { ...all, search }, new Set()));
+  assert.deepEqual(found("kind:task"), ["KYO-1", "KYO-30", "KYO-25"]);
+  assert.deepEqual(found("kind:plan,decision"), ["KYO-7", "KYO-21"]);
+  assert.deepEqual(found("kind:task serve"), ["KYO-25"]);
+  assert.deepEqual(found("serve kind:task"), ["KYO-25"]);
+  assert.deepEqual(found("kind:plan native"), ["KYO-7"]);
+  assert.deepEqual(found("kind:plan serve"), []);
+  assert.deepEqual(found("kind:nothing"), []);
+  assert.equal(found("").length, rows.length);
+});
+
+test("withKinds sets the token the dropdown shows, and none removes it", () => {
+  assert.equal(withKinds("", ["plan"]), "kind:plan ");
+  assert.equal(withKinds("mac app", ["plan", "task"]), "kind:plan,task mac app");
+  assert.equal(withKinds("kind:plan mac app", ["task"]), "kind:task mac app");
+  assert.equal(withKinds("kind:plan mac app", []), "mac app");
+  assert.equal(withKinds("kind:plan ", []), "");
+  assert.deepEqual(kindsPresent(rows), ["bug", "decision", "plan", "task"]);
+});
+
+test("the Kind control names the kinds checked, and says when one is no kind of the store", () => {
+  const present = kindsPresent(rows);
+  assert.deepEqual(kindControlText("mac", present), { text: "Kind", active: false, unknown: [] });
+  assert.deepEqual(kindControlText("kind:plan,task", present), { text: "Kind: plan, task", active: true, unknown: [] });
+  assert.deepEqual(kindControlText("kind:foo", present), { text: "Kind: foo (no such kind)", active: true, unknown: ["foo"] });
 });

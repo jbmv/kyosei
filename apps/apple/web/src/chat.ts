@@ -16,9 +16,9 @@ import {
 import { highlight, render } from "./pipeline";
 import { chipPieces } from "./chipwords";
 import {
-  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, pressed,
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
   dispatchableIds, historyFrom, historyRows, narrow, newestFirst, parseLink, prefixOf,
-  recordOf, recordPage, refParts, visit, when,
+  recordOf, recordPage, refParts, visit, when, withKinds,
 } from "./records";
 import {
   type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
@@ -4136,6 +4136,44 @@ function fill(holder: HTMLElement, rows: HTMLElement[]): void {
   holder.scrollTop = place;
 }
 
+/**
+ * The Kind controls beside the two search fields (KYO-785). The checked kinds are the ones
+ * the search text names with `kind:`, so the field and the dropdown are one state.
+ */
+function drawKindControls(): void {
+  const present = kindsPresent(recordRows);
+  const label = kindControlText(narrowing.search, present);
+  const checked = kindsOf(narrowing.search);
+  document.querySelectorAll<HTMLElement>(".kind-control").forEach((control) => {
+    const button = control.querySelector<HTMLButtonElement>(".kind-button")!;
+    button.textContent = label.text;
+    button.title = label.unknown.length
+      ? `No record has the kind ${label.unknown.join(", ")}, so none is shown.` : "";
+    control.classList.toggle("active", label.active);
+    control.querySelector<HTMLElement>(".kind-clear")!.hidden = !label.active;
+    const menu = control.querySelector<HTMLElement>(".kind-menu")!;
+    if (menu.dataset.kinds !== present.join(",")) {
+      menu.dataset.kinds = present.join(",");
+      menu.replaceChildren(...present.map((kind) => {
+        const row = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.value = kind;
+        box.addEventListener("change", () => {
+          const now = kindsOf(narrowing.search);
+          narrowing.search = withKinds(
+            narrowing.search, box.checked ? [...now.filter((k) => k !== kind), kind] : now.filter((k) => k !== kind));
+          drawRecordLists();
+        });
+        row.append(box, span("kind", kind));
+        (row.lastChild as HTMLElement).dataset.kind = kind;
+        return row;
+      }));
+    }
+    menu.querySelectorAll<HTMLInputElement>("input").forEach((box) => { box.checked = checked.includes(box.value); });
+  });
+}
+
 /** The side bar's list and history, the landing page's groups, and the filters' state. */
 function drawRecordLists(): void {
   document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip) => {
@@ -4145,6 +4183,7 @@ function drawRecordLists(): void {
   document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").forEach((field) => {
     if (field.value !== narrowing.search) field.value = narrowing.search;
   });
+  drawKindControls();
   const shown = narrow(newestFirst(recordRows), narrowing, readyRecords, awaitingRecords);
   const nothing = !listsRead ? "Reading the records." : "No record matches.";
   fill(recordsList, shown.length ? shown.map((row) => recordRow(row, "side")) : [emptyRow(nothing)]);
@@ -4478,6 +4517,23 @@ document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").
   field.addEventListener("keydown", (event) => {
     if (event.key === "Escape") field.blur();
   });
+});
+
+document.querySelectorAll<HTMLElement>(".kind-control").forEach((control) => {
+  const button = control.querySelector<HTMLButtonElement>(".kind-button")!;
+  const menu = control.querySelector<HTMLElement>(".kind-menu")!;
+  const shut = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  button.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    button.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  control.querySelector(".kind-clear")!.addEventListener("click", () => {
+    narrowing.search = withKinds(narrowing.search, []);
+    shut();
+    drawRecordLists();
+  });
+  control.addEventListener("keydown", (event) => { if (event.key === "Escape") shut(); });
+  document.addEventListener("mousedown", (event) => { if (!control.contains(event.target as Node)) shut(); });
 });
 
 document.querySelectorAll<HTMLButtonElement>(".chip[data-filter]").forEach((chip) => {
