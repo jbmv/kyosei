@@ -778,7 +778,7 @@ def test_the_readme_layer_3_section_shows_one_suggestions_output() -> None:
         next(
             item.body
             for item in readme.sections
-            if item.heading == "Layer 3: the docs-SOT skeleton validator"
+            if item.heading == "Which files are documents: `documents.yml` and `kyo docs suggest`"
         )
     )
 

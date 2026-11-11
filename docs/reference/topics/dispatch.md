@@ -4,7 +4,7 @@ Dispatching work to workers, ingesting their reports, and the sweep, next and br
 
 ## The dispatch loop
 
-governs: src/kyosei/cmd_dispatch.py, src/kyosei/cmd_worktrees.py, src/kyosei/dispatch_close.py, src/kyosei/dispatch_docs.py, src/kyosei/report_ingest.py, src/kyosei/stop_audit.py, src/kyosei/stop_target.py, src/kyosei/touch_drift.py, src/kyosei/worker_tokens.py, templates/brief-template.md, src/kyosei/cmd_accept.py, src/kyosei/cmd_confirm.py, src/kyosei/cmd_evidence.py, src/kyosei/report_schema.py, src/kyosei/git_queries.py, src/kyosei/commands.py#touch_cooccurrence, src/kyosei/commands.py#touch_test_history
+governs: src/kyosei/cmd_dispatch.py#_cmd_dispatch_create, src/kyosei/cmd_dispatch.py#cmd_dispatch, src/kyosei/cmd_dispatch.py#_refuse_a_finished_record, src/kyosei/cmd_dispatch.py#_refuse_a_blocked_record, src/kyosei/cmd_dispatch.py#_broad_claim_warnings, src/kyosei/commands.py#touch_narrowings, src/kyosei/touch_drift.py#declaration_provenance, src/kyosei/touch_drift.py#provenance_lines
 
 A **dispatch** is its own dimension from record status — dispatching a record
 never moves it. `kyo dispatch <record>` refuses (exit 2, naming the colliding
@@ -36,11 +36,6 @@ whose `A` is not settled on the status ladder (a gated `A` is unsettled) — wit
 (`cmd_next.unsettled_blockers`). `--force` dispatches it anyway; the echo and `--json`'s
 `blocked_overridden` name the blockers it overrode.
 
-Under the split layout the code repository's `.kyosei` may stay untracked. A worktree
-cut from HEAD then carries no link of its own, and `kyo` there reads the main checkout's
-link at the same relative position, with the worktree as the code root (KYO-580; see
-"Where the store lives"), so a `--branch` or `--worktree` dispatch needs no committed link.
-
 **One exception, and only where both sides were precise** (KYO-147.c5): when both
 records name the *same* file at `#symbol`s that do not overlap, that is a **shared
 file, not a collision**. It is not refused; `kyo dispatch` states the file and each
@@ -63,44 +58,6 @@ brief, which `kyo show <dispatch-id>` reads back. It is still refused when the f
 already exists, when the other dispatch names that same path, and in the other
 direction (a candidate claiming `dir/` while a running dispatch creates a file in it).
 
-**A symbol claim is checked against the work, not only against other claims**
-(KYO-300). `kyo touch-drift` reports a branch that edited a file the record claims
-by `#symbol` *outside* every symbol it named — a finding the file-level list cannot
-carry, since the path is in the claim — and names the symbol touch to add; and it
-reports a branch that changed or removed existing lines of a file claimed only
-additively (`path#+`). Both rest on the stated textual approximation of a symbol's
-region, placed in the branch tip's copy of the file the diff's line numbers belong
-to, never in the orchestrator's checkout (KYO-406); and both say `not-run` rather than
-"clean" whenever the diff could not be had (a merged branch, no branch, no git), or
-name the paths whose diff or tip copy could not be read. The correction the command prints
-carries the record's existing `#symbol`s and does not reduce them to bare paths.
-
-**The correction applies where the workflow says to apply it** (KYO-307). A drift
-correction is applied *after* the merge, because a file the branch created exists only
-on that branch until then — and after the merge a `+path` new-file touch names a file
-that is now present, which touch validation refuses ("that path is already there").
-So a `+path` line whose file now exists is emitted as the plain path it has become, by
-`kyo touch-drift` and `kyo edit --touches-from-drift` alike, and both say which lines
-they converted; while the file is still only on the branch the `+` form is kept
-exactly as it was. The conversion is in the correction and not in validation, so the
-printed lines still paste into `kyo edit --touches-file` and a hand-written `+path`
-for a file that is already there is refused. A `dir/` directory touch needs
-none of this — it is accepted whether or not the tree exists. The converse case
-(KYO-436): a claimed file that no longer exists — the branch deleted it, or another
-merge removed it from the trunk — is left out of the correction, and both commands name
-each dropped line and which of the two happened. A plain path must exist to be claimed,
-and work that removed a file has reached that claim rather than left it unfinished. A
-third case is dropped the same way (KYO-543): a file the branch itself created, merged,
-and then deleted on the trunk — a notes fragment `kyo docs assemble` consumed — which the
-branch tip still has; whether the tip is an ancestor of HEAD, not whether it has the file,
-tells it from unlanded work, and it is named as this branch's own file deleted after the
-merge. A file the branch created and the merge has not landed yet is kept, as
-`+path` rather than the plain path (KYO-543.c2), so `kyo accept` run
-*before* the merge stores the correction instead of meeting the plain-path refusal; after
-the merge the KYO-307 conversion above turns it back into the plain path. Only a branch
-git can still read proves that: with no branch to ask the line stays plain and is listed
-as waiting on the merge.
-
 **What the check establishes** (KYO-147.c1). Disjointness is computed
 from DECLARED touches on both sides, which are predictions written before the work,
 so a passing check
@@ -111,6 +68,71 @@ stale its table is — `never-checked`, `reconciled`, or `unreconciled`, the las
 the files an earlier report on that claim proved it is missing. With nothing else
 running it says that too: nothing was compared, so the dispatch is unconstrained by
 the check rather than cleared by it.
+
+`kyo dispatch <record> --also-covers ID [ID ...]` (KYO-13.c4) lets one dispatch
+formally cover more than one record — each covered record's own criteria are
+appended to the frozen brief under its own heading, and the covered ids are
+frozen onto the dispatch (`dispatches.covers_json`) alongside it. Without
+`--also-covers`, a dispatch covers exactly its own record.
+
+**A session's task list follows the loop** (KYO-770). When the session these commands run
+in has a task list, `kyo dispatch` adds an item for the dispatch it creates, `kyo accept`
+and `kyo dispatch close` check it, and `kyo accept` adds an item for closing the wave. The
+list is session state and not the store's; outside a session, or in one with no list, the
+commands do nothing with it, and they cannot fail over it. See "A session's task list" in
+serve-and-desktop.md.
+
+The sections that follow describe the parts of the loop: the worktree a dispatch is given,
+its frozen brief, guard tests, what is recorded about the worker, touch drift, reports and
+their acceptance, a person's confirmation, closing a dispatch, and `kyo split`.
+
+### The dispatch's worktree
+
+governs: src/kyosei/cmd_dispatch.py#_plan_the_worktree, src/kyosei/cmd_dispatch.py#_WorktreeCreation, src/kyosei/cmd_dispatch.py#_resolve_base, src/kyosei/cmd_dispatch.py#_refuse_a_foreign_worktree, src/kyosei/cmd_dispatch.py#_refuse_an_invalid_branch_name, src/kyosei/git_queries.py#worktree_add, src/kyosei/git_queries.py#checked_out_branch, src/kyosei/git_queries.py#local_branch_sha, src/kyosei/git_queries.py#resolve_commit
+
+With `--branch` and no `--worktree`, `kyo dispatch` creates the derived worktree
+itself (KYO-485): `git worktree add` in the code repository — never the store
+repository — cutting a new branch at the base sha, or checking the branch out when
+it already exists. It runs after every refusal and immediately before the dispatch
+row is written, so a refused dispatch creates nothing, a failed `git worktree add`
+is a Kyosei error carrying git's message with no dispatch recorded, and a failure
+after the worktree exists removes it again. A path that already holds a worktree of
+this repository on that branch is reused; any other directory there is refused,
+naming `--worktree` and a different `--branch`. `--base <ref>` records the commit
+the ref names as the dispatch's base sha (the brief states it) and cuts the branch
+there, so a re-dispatch from a predecessor's unmerged branch reports a
+`worked_from_sha` that matches. A branch that already exists needs no `--base`
+(KYO-487): its worktree checks it out as it stands, so the dispatch records that
+branch's tip as its base sha and the brief says so, rather than the code
+repository's HEAD. `--no-create-worktree` records and prints instead.
+`worktree_setup` is printed, never run.
+`--brief-out` is checked before anything is written, so a missing directory or an
+unwritable file refuses with no dispatch created; a write that still fails after
+the dispatch is recorded says which dispatch exists and not to re-run.
+
+A second dispatch of the same record is refused when it would land in the
+worktree a running dispatch of that record already holds — the derived
+`<worktrees>/<branch>` path makes that the default for a retry — with the running
+dispatch named; pass `--worktree` for a tree of its own, or `--force` (KYO-411).
+
+Under the split layout the code repository's `.kyosei` may stay untracked. A worktree
+cut from HEAD then carries no link of its own, and `kyo` there reads the main checkout's
+link at the same relative position, with the worktree as the code root (KYO-580; see
+"Where the store lives"), so a `--branch` or `--worktree` dispatch needs no committed link.
+
+### The frozen brief
+
+governs: templates/brief-template.md, src/kyosei/brief.py#generate_brief, src/kyosei/brief.py#_touches_block, src/kyosei/brief.py#_worker_rules_block, src/kyosei/brief.py#brief_section_lengths, src/kyosei/commands.py#touch_cooccurrence, src/kyosei/commands.py#touch_test_history, src/kyosei/touch_drift.py#touch_symbol_lines, src/kyosei/touch_drift.py#_cooccurrence_lines, src/kyosei/cmd_dispatch.py#_brief_sections_line
+
+The frozen brief is generated
+entirely from the record — never hand-typed — per `templates/brief-template.md`'s
+machine-filled slots, plus one orchestrator-written task section (`--task-file`).
+`--brief-out FILE` also writes it to disk for handing to a worker, at the moment
+this invocation freezes it — it is not a way to re-read a brief that already
+exists, and running it against a record that already has a dispatch freezes a
+second one (KYO-177). `kyo show <dispatch-id>` is the read-back path: it prints
+a dispatch's frozen brief by the dispatch's own id, read-only, so running it
+twice changes nothing.
 
 **Files that usually change with the declared ones** (KYO-147.c2/c3). The brief's Touches
 section also lists files that dispatches touching each declared file have historically
@@ -152,40 +174,28 @@ prints one rule in full and `kyo rules` lists them. On one project's ledger the
 section measured about 4.2 KB in this form, against 9.8 KB with each rule in full.
 The standing **stance** is not a rule and is carried verbatim.
 
-The frozen brief is generated
-entirely from the record — never hand-typed — per `templates/brief-template.md`'s
-machine-filled slots, plus one orchestrator-written task section (`--task-file`).
-`--brief-out FILE` also writes it to disk for handing to a worker, at the moment
-this invocation freezes it — it is not a way to re-read a brief that already
-exists, and running it against a record that already has a dispatch freezes a
-second one (KYO-177). `kyo show <dispatch-id>` is the read-back path: it prints
-a dispatch's frozen brief by the dispatch's own id, read-only, so running it
-twice changes nothing.
+`kyo dispatch` does not print the whole frozen brief to the terminal by
+default (KYO-326): it prints its warnings, the
+drag-in summary, the disjointness lines and the worktree line, and, in
+the brief's place, a length/digest line naming `kyo show <dispatch-id>` as where
+to read it. A typical brief is about 35 KB, which would otherwise stay in the
+orchestrator's context and be re-read on every turn. `--print-brief` prints the
+full brief to the terminal; `--brief-out` and `--json` are unaffected.
 
-A second dispatch of the same record is refused when it would land in the
-worktree a running dispatch of that record already holds — the derived
-`<worktrees>/<branch>` path makes that the default for a retry — with the running
-dispatch named; pass `--worktree` for a tree of its own, or `--force` (KYO-411).
+Under that line `kyo dispatch` prints the brief's length by section, in characters and
+in the order the brief is written (KYO-773): the header, the record summary, the
+criteria, the covered records (`also covers`), the touches, the claims, the write scope,
+the standing rules, the stance, the task and the report instructions (`report`). Three
+sections are listed only when the brief has them: `also covers` when the dispatch covers
+other records, and, between the touches and the claims, `ledger hand-off` when the
+touches include the packaged procedures ledger and `numbered documents` when the project
+declares a numbered, append-only document. The numbers sum to the total on the line
+above, so a brief that grew shows which section grew. `--json` carries the same list as
+`brief_sections`.
 
-With `--branch` and no `--worktree`, `kyo dispatch` creates the derived worktree
-itself (KYO-485): `git worktree add` in the code repository — never the store
-repository — cutting a new branch at the base sha, or checking the branch out when
-it already exists. It runs after every refusal and immediately before the dispatch
-row is written, so a refused dispatch creates nothing, a failed `git worktree add`
-is a Kyosei error carrying git's message with no dispatch recorded, and a failure
-after the worktree exists removes it again. A path that already holds a worktree of
-this repository on that branch is reused; any other directory there is refused,
-naming `--worktree` and a different `--branch`. `--base <ref>` records the commit
-the ref names as the dispatch's base sha (the brief states it) and cuts the branch
-there, so a re-dispatch from a predecessor's unmerged branch reports a
-`worked_from_sha` that matches. A branch that already exists needs no `--base`
-(KYO-487): its worktree checks it out as it stands, so the dispatch records that
-branch's tip as its base sha and the brief says so, rather than the code
-repository's HEAD. `--no-create-worktree` records and prints instead.
-`worktree_setup` is printed, never run.
-`--brief-out` is checked before anything is written, so a missing directory or an
-unwritable file refuses with no dispatch created; a write that still fails after
-the dispatch is recorded says which dispatch exists and not to re-run.
+### Guard tests
+
+governs: src/kyosei/config.py#GuardRule, src/kyosei/config.py#parse_guard_tests, src/kyosei/config.py#guard_glob_matches, src/kyosei/config.py#matched_guard_tests, src/kyosei/brief.py#_guard_tests_bullet, src/kyosei/doctor_install.py#check_guard_tests
 
 A project declares its guard tests in `guard_tests` in `kyosei/config.yml` (KYO-744): the
 tests that fail on a change made elsewhere, which a worker choosing tests for its own
@@ -211,26 +221,11 @@ declaration refuses `kyo dispatch` and no other command, and `kyo doctor`'s `gua
 check names it, along with any declared test file that does not exist in the code
 repository. The commands are printed, never run.
 
-`kyo dispatch` does not print the whole frozen brief to the terminal by
-default (KYO-326): it prints its warnings, the
-drag-in summary, the disjointness lines and the worktree line, and, in
-the brief's place, a length/digest line naming `kyo show <dispatch-id>` as where
-to read it. A typical brief is about 35 KB, which would otherwise stay in the
-orchestrator's context and be re-read on every turn. `--print-brief` prints the
-full brief to the terminal; `--brief-out` and `--json` are unaffected.
+### What a worker leaves outside its worktree (KYO-535)
 
-Under that line `kyo dispatch` prints the brief's length by section, in characters and
-in the order the brief is written (KYO-773): the header, the record summary, the
-criteria, the covered records (`also covers`), the touches, the claims, the write scope,
-the standing rules, the stance, the task and the report instructions (`report`). Three
-sections are listed only when the brief has them: `also covers` when the dispatch covers
-other records, and, between the touches and the claims, `ledger hand-off` when the
-touches include the packaged procedures ledger and `numbered documents` when the project
-declares a numbered, append-only document. The numbers sum to the total on the line
-above, so a brief that grew shows which section grew. `--json` carries the same list as
-`brief_sections`.
+governs: src/kyosei/cmd_check_clean.py#take_baseline, src/kyosei/cmd_check_clean.py#baseline_path, src/kyosei/stop_audit.py#UnblockedStop, src/kyosei/stop_audit.py#record_unblocked_stop, src/kyosei/stop_audit.py#unblocked_stops, src/kyosei/stop_audit.py#unblocked_stop_lines
 
-**What a worker leaves outside its worktree is named at its stop** (KYO-535). Once the
+What a worker leaves outside its worktree is named at its stop. Once the
 dispatch row exists, `kyo dispatch` writes a baseline into the code repository's git
 common directory (`kyosei-dispatch-baselines/<dispatch-id>.json`, `outside_baseline` in
 `--json`): the main checkout's untracked files outside `kyosei/` and `ideas/`, the
@@ -249,6 +244,10 @@ dispatch with no baseline says so rather than passing silently. Each `kyo dispat
 removes the baselines of this store's dispatches that are no longer running. From
 inside a running dispatch's worktree, `kyo init` and `kyo projects add` refuse the real
 home (see "Where the store lives").
+
+### What a worker cost, and when it finished
+
+governs: src/kyosei/worker_tokens.py, src/kyosei/cmd_worktrees.py, src/kyosei/stop_target.py, src/kyosei/stop_audit.py
 
 `kyo show <dispatch-id>` also prints **what that dispatch's worker cost**
 (KYO-284): input, cache-creation, cache-read and output tokens, and the model
@@ -309,17 +308,51 @@ time. `dispatches.closed_at` is written by `kyo dispatch close` and by nothing
 else, so a dispatch that simply reported has none — which is why a consumer
 measuring a run time from `closed_at` alone measures one that keeps growing.
 
-`--terminated-no-report`, `--withdrawn`, `--why` and `--why-file` are meaningful
-only with
-`kyo dispatch close <dispatch-id>` (below); passed alongside a record id instead,
-they are a usage error naming the correct form and, when the
-record already has a running dispatch, that dispatch's own id (KYO-133).
+### Touch drift
 
-`kyo dispatch <record> --also-covers ID [ID ...]` (KYO-13.c4) lets one dispatch
-formally cover more than one record — each covered record's own criteria are
-appended to the frozen brief under its own heading, and the covered ids are
-frozen onto the dispatch (`dispatches.covers_json`) alongside it. Without
-`--also-covers`, a dispatch covers exactly its own record.
+governs: src/kyosei/touch_drift.py, src/kyosei/git_queries.py#branch_changed_files, src/kyosei/git_queries.py#branch_is_contained_in, src/kyosei/git_queries.py#_git_diff_hunks, src/kyosei/git_queries.py#_git_file_at
+
+**A symbol claim is checked against the work, not only against other claims**
+(KYO-300). `kyo touch-drift` reports a branch that edited a file the record claims
+by `#symbol` *outside* every symbol it named — a finding the file-level list cannot
+carry, since the path is in the claim — and names the symbol touch to add; and it
+reports a branch that changed or removed existing lines of a file claimed only
+additively (`path#+`). Both rest on the stated textual approximation of a symbol's
+region, placed in the branch tip's copy of the file the diff's line numbers belong
+to, never in the orchestrator's checkout (KYO-406); and both say `not-run` rather than
+"clean" whenever the diff could not be had (a merged branch, no branch, no git), or
+name the paths whose diff or tip copy could not be read. The correction the command prints
+carries the record's existing `#symbol`s and does not reduce them to bare paths.
+
+**The correction applies where the workflow says to apply it** (KYO-307). A drift
+correction is applied *after* the merge, because a file the branch created exists only
+on that branch until then — and after the merge a `+path` new-file touch names a file
+that is now present, which touch validation refuses ("that path is already there").
+So a `+path` line whose file now exists is emitted as the plain path it has become, by
+`kyo touch-drift` and `kyo edit --touches-from-drift` alike, and both say which lines
+they converted; while the file is still only on the branch the `+` form is kept
+exactly as it was. The conversion is in the correction and not in validation, so the
+printed lines still paste into `kyo edit --touches-file` and a hand-written `+path`
+for a file that is already there is refused. A `dir/` directory touch needs
+none of this — it is accepted whether or not the tree exists. The converse case
+(KYO-436): a claimed file that no longer exists — the branch deleted it, or another
+merge removed it from the trunk — is left out of the correction, and both commands name
+each dropped line and which of the two happened. A plain path must exist to be claimed,
+and work that removed a file has reached that claim rather than left it unfinished. A
+third case is dropped the same way (KYO-543): a file the branch itself created, merged,
+and then deleted on the trunk — a notes fragment `kyo docs assemble` consumed — which the
+branch tip still has; whether the tip is an ancestor of HEAD, not whether it has the file,
+tells it from unlanded work, and it is named as this branch's own file deleted after the
+merge. A file the branch created and the merge has not landed yet is kept, as
+`+path` rather than the plain path (KYO-543.c2), so `kyo accept` run
+*before* the merge stores the correction instead of meeting the plain-path refusal; after
+the merge the KYO-307 conversion above turns it back into the plain path. Only a branch
+git can still read proves that: with no branch to ask the line stays plain and is listed
+as waiting on the merge.
+
+### Reports: `kyo report`
+
+governs: src/kyosei/report_ingest.py, src/kyosei/report_schema.py, src/kyosei/dispatch_docs.py, src/kyosei/cmd_evidence.py#_verify_from_report, src/kyosei/cmd_evidence.py#_report_verdicts, src/kyosei/cmd_evidence.py#_selected_verdicts, src/kyosei/git_queries.py#_git_commit_reachability
 
 `kyo report <dispatch-id> --file .kyosei-report.json` validates the file against the report
 schema `kyo report-schema` prints (required keys, verdict/method enums, the
@@ -368,14 +401,43 @@ refusing, for each `module <id>` section the entries answer that no
 `Recx-Checked` trailer on the branch tip names (KYO-614; see "RECX.yaml as a
 governed document" in docs-governance.md).
 
-**A session's task list follows the loop** (KYO-770). When the session these commands run
-in has a task list, `kyo dispatch` adds an item for the dispatch it creates, `kyo accept`
-and `kyo dispatch close` check it, and `kyo accept` adds an item for closing the wave. The
-list is session state and not the store's; outside a session, or in one with no list, the
-commands do nothing with it, and they cannot fail over it. See "A session's task list" in
-serve-and-desktop.md.
+**A resumed worker's corrected report** (KYO-90). The workflow this loop sits
+inside resumes workers: a report is ingested, the branch is merged, the merged
+tree turns out to be wrong, and the same worker goes back to the same branch. A
+second report that declares nothing is still refused (`dispatch-already-terminal`
+— a different account landing silently over the first would make the
+frozen-brief-and-report pairing worthless), but a report carrying
+`"amends": "<report-id>"` at its top level is ingested as a **new, current**
+report, and the one it names becomes **superseded**: same id, same ingest time,
+every word intact, and `kyo show` says which of the two is the account of what
+happened. The declaration is a field in the report rather than a flag on the
+command because the party who knows the first report was wrong is the worker,
+who cannot type the orchestrator's flags — and because it names *which* account is
+being replaced, so an `amends` pointing at anything but the dispatch's current
+report is refused (`report-amends-wrong-report`) rather than reconciled. Every
+consumer also re-runs over the corrected
+report — schema validation, the branch check that still refuses a commit not
+reachable from the declared branch, and touch drift over `touched_files[]`.
+Nothing is reopened: `state` stays `reported`, `closed_at` stays whatever it
+was, and `kyo doctor`'s `report_amendment_chain` check keeps a dispatch's
+reports one chain ending at the current one.
 
-**Accepting a report: `kyo accept <dispatch-id>`** (KYO-331). Applying one
+**An orchestrator's commits on a finished worker's branch** (KYO-745). When the
+orchestrator fixes the branch itself, `kyo accept` refuses it as moved past the
+report and names `kyo report <dispatch-id> --amend-with-branch`, which files the
+amending report without a JSON file: the latest report's body carried whole, and
+the branch's commits it does not name added to `commits[]`, oldest first, each
+subject prefixed `[orchestrator]` (the schema carries no per-commit author).
+`--check` runs the same checks and writes nothing. It refuses, naming the remedy,
+a dispatch with no ingested report (`report-amend-no-ingested-report`: file the
+worker's report with `--file` first) and a branch with no commit beyond the report
+(`report-amend-nothing-beyond`: `kyo accept` takes the report as it stands).
+
+### Accepting a report: `kyo accept` (KYO-331)
+
+governs: src/kyosei/cmd_accept.py
+
+Applying one
 report takes several commands, and a step is easily omitted (a doc-ref
 obligation on KYO-263 and a drift correction on KYO-314 each
 needed a second pass). `kyo accept` runs three of them as one act: `kyo verify
@@ -447,7 +509,11 @@ an `INCOMPLETE` line under the headline naming the refused steps and the records
 left open. A script that keys on the exit status alone reads a partial acceptance
 as a whole one; key on `complete` instead.
 
-**Confirming a person's look: `kyo confirm`** (KYO-494). Closing a human gate
+### Confirming a person's look: `kyo confirm` (KYO-494)
+
+governs: src/kyosei/cmd_confirm.py
+
+Closing a human gate
 takes three commands: `kyo verify` on the criterion as `human-observed` with
 the maintainer's words as evidence, `kyo ungate`, and `kyo move` (of 46 human-gate
 clearings measured across two stores, 39 were followed by a move within fifteen
@@ -534,37 +600,9 @@ the steps commit one at a time, a partial result exits 0 with `complete: false`
 in `--json` and an `INCOMPLETE` line, and a second run with the same words
 applies nothing twice.
 
-**A resumed worker's corrected report** (KYO-90). The workflow this loop sits
-inside resumes workers: a report is ingested, the branch is merged, the merged
-tree turns out to be wrong, and the same worker goes back to the same branch. A
-second report that declares nothing is still refused (`dispatch-already-terminal`
-— a different account landing silently over the first would make the
-frozen-brief-and-report pairing worthless), but a report carrying
-`"amends": "<report-id>"` at its top level is ingested as a **new, current**
-report, and the one it names becomes **superseded**: same id, same ingest time,
-every word intact, and `kyo show` says which of the two is the account of what
-happened. The declaration is a field in the report rather than a flag on the
-command because the party who knows the first report was wrong is the worker,
-who cannot type the orchestrator's flags — and because it names *which* account is
-being replaced, so an `amends` pointing at anything but the dispatch's current
-report is refused (`report-amends-wrong-report`) rather than reconciled. Every
-consumer also re-runs over the corrected
-report — schema validation, the branch check that still refuses a commit not
-reachable from the declared branch, and touch drift over `touched_files[]`.
-Nothing is reopened: `state` stays `reported`, `closed_at` stays whatever it
-was, and `kyo doctor`'s `report_amendment_chain` check keeps a dispatch's
-reports one chain ending at the current one.
+### Closing a dispatch: `kyo dispatch close`
 
-**An orchestrator's commits on a finished worker's branch** (KYO-745). When the
-orchestrator fixes the branch itself, `kyo accept` refuses it as moved past the
-report and names `kyo report <dispatch-id> --amend-with-branch`, which files the
-amending report without a JSON file: the latest report's body carried whole, and
-the branch's commits it does not name added to `commits[]`, oldest first, each
-subject prefixed `[orchestrator]` (the schema carries no per-commit author).
-`--check` runs the same checks and writes nothing. It refuses, naming the remedy,
-a dispatch with no ingested report (`report-amend-no-ingested-report`: file the
-worker's report with `--file` first) and a branch with no commit beyond the report
-(`report-amend-nothing-beyond`: `kyo accept` takes the report as it stands).
+governs: src/kyosei/dispatch_close.py
 
 `kyo dispatch close <id>` refuses (exit 2) to close a dispatch with no ingested
 report unless one of the two report-less states is named explicitly, rather than
@@ -586,6 +624,16 @@ its record is answered; a withdrawn one is listed in no brief at all, and
 `kyo show <record-id>` prints it in the record's dispatch history under its own
 word. `kyo doctor` holds both to the same invariant: a state that means "no
 report" implies a recorded why, and implies no `report_id`.
+
+`--terminated-no-report`, `--withdrawn`, `--why` and `--why-file` are meaningful
+only with
+`kyo dispatch close <dispatch-id>`; passed alongside a record id instead,
+they are a usage error naming the correct form and, when the
+record already has a running dispatch, that dispatch's own id (KYO-133).
+
+### Moving unmet criteria to a successor: `kyo split`
+
+governs: src/kyosei/report_ingest.py#cmd_split
 
 `kyo split <record> --to-successor <criterion-id>...` refuses a met or already-void
 criterion; for each named (necessarily unmet) criterion it creates a new
@@ -688,7 +736,7 @@ documented sequence whole:
 
 ## Sweep, next, and the session briefing
 
-governs: src/kyosei/sweep.py, src/kyosei/brief.py
+governs: src/kyosei/sweep.py, src/kyosei/brief.py, src/kyosei/docs_staleness.py
 
 `kyo sweep` flags — it never edits a record (charter: "flags, never
 auto-edits"). Only records whose kind is `archetype: work` and carries
