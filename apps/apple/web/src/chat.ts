@@ -1692,6 +1692,31 @@ const kyo = {
   },
 
   /**
+   * The app is about to quit (KYO-782): the save that was waiting for a pause, which the app
+   * then makes itself and waits for, or null when everything typed has been sent to it. The
+   * answer is the call's own value, so the app holds the text before it lets the process end.
+   */
+  pendingDraft(): { boxes: SavedBox[] } | null {
+    if (draftSave === undefined) return null;
+    clearTimeout(draftSave);
+    draftSave = undefined;
+    return { boxes: currentBoxes() };
+  },
+
+  /**
+   * The prompts the app kept when it last quit without the server's answer to their save
+   * (KYO-782). They are newer than the server's draft, so they replace what it gave, and are
+   * saved to it after the usual pause.
+   */
+  restoreDraft(frame: { boxes: SavedBox[] }): void {
+    const boxes = frame.boxes.filter((box) => box.text || box.marks?.length);
+    loadingDraft = true;
+    showTexts(boxes.map((box) => box.text), boxes);
+    loadingDraft = false;
+    remember();
+  },
+
+  /**
    * The followed session's task list (KYO-771), or that there is none to show, or why it
    * cannot be read. A frame that answers a save says `saved`, and the field the save came
    * from is then done with; any other frame is a change made elsewhere, and leaves what the
