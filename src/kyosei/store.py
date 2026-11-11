@@ -1249,11 +1249,17 @@ def lock_contention_message(db_path: Path | None) -> str:
 def read_only_refusal(what: str) -> str:
     """The sentence a write on a store `kyo serve` opened read-only is refused with
     (KYO-453) -- raised by :meth:`Store.transaction` and, for a write that
-    reached SQLite's ``query_only`` without opening one, by :func:`kyosei.cli.run`."""
+    reached SQLite's ``query_only`` without opening one, by :func:`kyosei.cli.run`.
+
+    It states law 12 with its one exception: the note routes
+    (:mod:`kyosei.serve_notes`) open a writable connection of their own and never reach
+    this refusal."""
     return (
-        f"{what} tried to write to the store, and kyo serve opens every store "
-        "read-only: the HTTP server serves reads and never a write to kyosei/ (law 12). "
-        "Run the command in a terminal on the machine that holds the store instead"
+        f"{what} tried to write to the store, and kyo serve runs every served command "
+        "on a store opened read-only: no viewer changes a record, and the one thing the "
+        "HTTP server files in the store is a person's note, through its note routes "
+        "(law 12). Run the command in a terminal on the machine that holds the store "
+        "instead"
     )
 
 

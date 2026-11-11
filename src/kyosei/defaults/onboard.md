@@ -88,7 +88,8 @@ Ask these together, in one message.
   once records cite it.)" Derive it from the folder name: 2 to 4 letters and digits,
   starting with a letter.
 - **[B4] Trunk branch.** Do not ask when git's answer is `main` or matches the branch the
-  project merges to: Kyosei asks `origin/HEAD`, then `init.defaultBranch`, then `main`.
+  project merges to: Kyosei asks `origin/HEAD`, then `init.defaultBranch`, then `main`, then
+  `master`.
   Ask only when Step 2 shows the project merges to something else (for example `develop`).
 - **[C1] Hooks and skill: the plugin, or the copies.** Ask: "May I run
   `kyo harness install claude-code`? It registers Kyosei's Claude Code plugin on this
@@ -278,8 +279,16 @@ Ask these together, in one message. Propose an answer for each from what you rea
 - **[E1] Machine layout.** Ask: "CLI only on this machine (default), this machine with the
   desktop app, or a dev box you reach from a laptop?"
 - **[E3] `kyo serve`.** Ask only if **[E1]** is not CLI only: "May I run
-  `kyo serve --install --apply` so the server starts at login? (Loopback only, no password:
-  every account on this machine can read it.)"
+  `kyo serve --install --apply` so the server starts at login? (Loopback only. The routes
+  that need no token have no password: every account on this machine can read the records
+  and write `ideas/` through it, and `kyo sessions --json`, which lists a project's
+  sessions and their transcript paths, is served without a token too. With a device token a device can also read a project's
+  Claude Code sessions, send input to a session, file your notes in the store, start an
+  orchestrator session, type into a session's terminal and read a project's files. Notes
+  are the one thing the server writes to a store, and no viewer changes a record.)" Issue
+  no token and do not turn sending on: say that a token comes from
+  `kyo devices issue <name> --permission <p>`, and that the send and terminal routes also
+  refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.
 - **[E4] Desktop app and record links.** Ask only if **[E1]** includes the app: "Do you read
   the orchestrator through the desktop app? (If so I write record ids as `kyosei://` links;
   elsewhere they are noise around an id.)" A "no" is recorded as `E4: declined` under

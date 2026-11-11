@@ -43,8 +43,8 @@ decides, and how a setup agent can find the answer before asking.
 ### A2. Which agent harness?
 
 - **Default:** Claude Code. The skill, the hooks and the worker agent types all target it.
-- **Why:** the guardrails are Claude Code hooks (SessionStart, Stop, SubagentStop,
-  PreToolUse, UserPromptSubmit). Another harness can run `kyo` commands, but nothing would
+- **Why:** the guardrails are Claude Code hooks (SessionStart, Stop, SessionEnd,
+  SubagentStop, PreToolUse, UserPromptSubmit). Another harness can run `kyo` commands, but nothing would
   enforce the rules.
 - **Decides:** the operator. The setup prompt should say plainly what is lost on another
   harness rather than pretend it works the same.
@@ -105,7 +105,7 @@ decides, and how a setup agent can find the answer before asking.
 ### B4. Which branch is trunk?
 
 - **Default:** absent from config. Kyosei uses git's `origin/HEAD`, then `init.defaultBranch`,
-  then `main`.
+  then `main`, then `master`.
 - **Set `trunk:`** only when the project merges to something else (for example `develop`).
   Merged-ness checks, touch drift and worktree pruning read it.
 
@@ -134,11 +134,13 @@ decides, and how a setup agent can find the answer before asking.
   | Every prompt | `kyo check-build --hook` | One line when the installed `kyo` changed mid-session, and the unchecked items of the session's task list. |
   | Every prompt | `kyo turns --hook` | Silent; indexes the prompt where D14 is yes. |
   | Before a `git push` | `kyo check-push` | Refuses a push that would publish an in-repo store until acknowledged. |
-  | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see E3). |
+  | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see D5). |
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
-  | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
+  | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
   | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |
   | The session stops | `kyo discuss check --hook` | Where D14 is yes, asks the orchestrator to open a discussion when a turn put a choice to you and none is open. |
+  | Session start, stop and end | `kyo sessions --hook` | Silent; records the session in the store's local `sessions.json`. At a stop it also announces the session's task list when there is something to say. |
+  | The session ends | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index from the transcript and copies the transcript to the local archive. |
 
 - **Without them:** the commands still work, but every rule above becomes something the agent
   has to remember.
@@ -497,9 +499,10 @@ were written then and are unchanged, without seeing the rest (KYO-663).
 - **The seal key:** 32 random bytes made on first use, in `$KYOSEI_HOME/seal.key` with mode
   0600. It is the one secret to back up: without it no committed message can be shown to
   match. `kyo turns --seal-key keychain` moves it to the macOS login keychain, and `kyo
-  turns --seal-key icloud-keychain` to a synchronizable keychain item that iCloud Keychain
-  copies to your other Apple devices. With that last choice the key leaves this machine,
-  end-to-end encrypted by iCloud Keychain; it is never chosen for you.
+  turns --seal-key icloud-keychain --key-leaves-this-machine` to a synchronizable keychain
+  item that iCloud Keychain copies to your other Apple devices. With that last choice the
+  key leaves this machine, end-to-end encrypted by iCloud Keychain; it is never chosen for
+  you, and the command is refused without the second flag, which states that you chose it.
 - **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
   git repository, and which a credit is checked against when the original is absent.
@@ -546,32 +549,51 @@ and runs no orchestrator; it only views and talks to them.
 - **`~/kyosei/`** (`$KYOSEI_HOME`) is the machine's Kyosei home:
   - `projects.json`, the projects this machine knows, which `kyo serve` and
     `kyo orchestrator` read;
-  - `settings.yml`, machine settings such as `controller_command`;
+  - `settings.yml`, the machine's settings: `orchestrator_command` (E5) and `serve_send`
+    (E3);
   - the split stores, one directory per project;
-  - each store's `dispatch worktrees/`.
+  - each store's `dispatch worktrees/`;
+  - `device-tokens.json`, the digests of the tokens `kyo devices` issued (E3), and
+    `composer/`, the unsent text `kyo serve` keeps for a device;
+  - `seal.key` and `transcript-archive/`, where D14 is yes;
+  - `harness/claude-code`, the link the Claude Code plugin is loaded through (C1).
 - **PATH is the usual trap.** `~/.local/bin` is on PATH in a login shell. It is not on PATH
   in a non-interactive `ssh host kyo ...`, nor in anything launchd starts without help.
   That is why:
   - remote commands run as `ssh host "zsh -lc 'kyo ...'"`;
-  - orchestrator sessions start as `zsh -lc 'exec <controller_command>'`;
+  - orchestrator sessions start as `zsh -lc 'exec <orchestrator_command>'`;
   - the `kyo serve` login agent records the installing shell's PATH.
 
 ### E3. `kyo serve`
 
 - **What it is:** an HTTP server on loopback (port 47370) that serves every project in
-  `projects.json` to any viewer. It serves what the CLI's `--json` reads, and allows
-  exactly two writes: files under a project's `ideas/` and its session scratchpad. It
-  starts no process and writes no record.
+  `projects.json` to a viewer.
+- **Without a device token** a viewer reads what the CLI's `--json` reads and the text of
+  governed documents, and writes two things: files under a project's `ideas/` and its
+  session scratchpad.
+- **With a device token** a device can also do what its token's permissions allow: read a
+  project's Claude Code sessions (any token, where D14 is yes), send input to a session and
+  keep drafts and a task list for it (`send`), file the operator's notes in the store
+  (`notes`), start an orchestrator session (`start`), type into a session's terminal
+  (`terminal`) and read a project's files (`files`). Notes are the one thing the server
+  writes to a store, and no viewer changes a record.
+- **Tokens and sending are not part of setup.** No token exists until the operator runs
+  `kyo devices issue <name> --permission <p>` on the machine, and the send and terminal
+  routes also refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.
+  The setup agent does neither; it says that both exist.
 - **Locally:** `kyo serve` in a terminal for a trial, or `kyo serve --install --apply` to
   run it at login (a LaunchAgent on macOS, a systemd user unit on Linux).
 - **Restart it after every upgrade** (`kyo serve --restart`). A running server keeps
   serving the build it started as, and `kyo serve --status` says when it is stale.
-- **Loopback only, with no password.** Every account on the machine can reach it. On a
-  shared machine, that is everyone who logs in.
+- **Loopback only, and the routes that need no token have no password.** Every account on
+  the machine can read the records and write `ideas/` through it. On a shared machine, that
+  is everyone who logs in. `kyo sessions --json`, which lists a project's sessions and
+  their transcript paths, is served without a token too.
 - **From another machine:** Tailscale Serve proxies the tailnet to it with a certificate
   Tailscale provisions. Run `kyo serve --install --allow-host <machine>.<tailnet>.ts.net
   --apply`, then `tailscale serve --bg 47370`. Restrict access with a tailnet rule.
-  **Never `tailscale funnel` this port**: that publishes every project to the internet.
+  **Never `tailscale funnel` this port**: that publishes every project's records to the
+  internet.
 
 ### E4. The desktop app (macOS)
 
@@ -593,7 +615,7 @@ and runs no orchestrator; it only views and talks to them.
 ### E5. Orchestrator sessions under tmux (`kyo orchestrator`, macOS)
 
 - **What it is:** `kyo orchestrator start <project>` starts a detached tmux session named
-  after the project's prefix, running the machine's `controller_command` in the project's
+  after the project's prefix, running the machine's `orchestrator_command` in the project's
   directory. `list`, `attach` and `stop` do the rest. A session keeps running when you
   disconnect.
 - **Why a dedicated tmux server** (`tmux -L kyosei`), started at login by
@@ -601,10 +623,11 @@ and runs no orchestrator; it only views and talks to them.
   keychain. A process started straight from an SSH login cannot read it; a session spawned
   by a server that the desktop login started can. Over SSH, `start` refuses rather than
   start a server in the wrong context.
-- **`controller_command`** in `~/kyosei/settings.yml` is a list of arguments, with
+- **`orchestrator_command`** in `~/kyosei/settings.yml` (also read under its earlier name,
+  `controller_command`) is a list of arguments, with
   `{prefix}` replaced by the project's prefix. The default is `claude`. To name each session
   in claude.ai and give it Chrome:
-  `controller_command: ["claude", "--chrome", "--remote-control", "{prefix}"]`.
+  `orchestrator_command: ["claude", "--chrome", "--remote-control", "{prefix}"]`.
 - **Attach from another machine:** `ssh -t <machine> "zsh -lc 'kyo orchestrator attach
   <PREFIX>'"`. Plain `tmux ls` over SSH shows nothing, because it reads the default server.
 - **Careful:** stopping the `-L kyosei` server, or `kyo orchestrator --uninstall --apply`,
@@ -618,6 +641,7 @@ and runs no orchestrator; it only views and talks to them.
 
 The setup prompt ends with a fixed block the operator can check. It lists:
 
+- the build of `kyo` that ran the setup;
 - the store path and layout, and whether the store has a remote;
 - the record id prefix;
 - the harness: the plugin's state, or, for a project on the copies, the installed hooks and
@@ -627,7 +651,8 @@ The setup prompt ends with a fixed block the operator can check. It lists:
 - the declared scopes and documents;
 - whether Kyosei may read transcripts (D14);
 - the decisions the operator declined or deferred, from the `onboarding:` map below;
-- the machine layout from E1, and which of E3 to E5 are running;
+- the machine layout from E1, and whether `kyo serve` (E3) and the orchestrator's tmux
+  server (E5) are installed at login;
 - the result of `kyo doctor`.
 
 The next step it names is: write your first idea as its own file in `ideas/`, or ask the

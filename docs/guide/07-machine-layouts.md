@@ -39,18 +39,32 @@ through a login shell: `ssh host "zsh -lc 'kyo ...'"`.
 ## `kyo serve`
 
 ([E3](setup-decisions.md#e3-kyo-serve)) A small HTTP server on loopback (port 47370) that
-serves every project in `projects.json` to a viewer. It serves what the CLI's `--json`
-output shows, and accepts only two kinds of write: files under a project's `ideas/`, and its
-session scratchpad. It starts no process and writes no record.
+serves every project in `projects.json` to a viewer.
+
+- **Without a device token**, a viewer reads what the CLI's `--json` output shows and the
+  text of governed documents, and writes two things: files under a project's `ideas/`, and
+  its session scratchpad.
+- **With a device token**, issued on the machine by `kyo devices issue <name>
+  --permission <p>`, a device can also read a project's Claude Code sessions (any token),
+  send input to a session and keep drafts and a task list for it (`send`), file your notes
+  in the store (`notes`), start an orchestrator session (`start`), type into a session's
+  terminal (`terminal`) and read a project's files (`files`). Sending and the terminal also
+  need `serve_send: true` in `~/kyosei/settings.yml`, and are off until you add it.
+- No viewer changes a record. Notes are the one thing the server writes to a store.
+
+The reference lists
+[which routes need a device token](../reference/topics/serve-and-desktop.md#which-routes-need-a-device-token).
 
 - Try it with `kyo serve`, or start it at every login with `kyo serve --install --apply`.
 - Restart it after every upgrade (`kyo serve --restart`); a running server keeps serving the
   build it started as, and `kyo serve --status` says when it is stale.
-- It has no password. Every account on the machine can reach it.
+- The routes that need no token have no password. Every account on the machine can reach
+  them, and so can read your records and write your `ideas/`. `kyo sessions --json`, which
+  lists a project's sessions and their transcript paths, is one of those routes.
 - To reach it from another machine, put it behind Tailscale Serve
   (`kyo serve --install --allow-host <machine>.<tailnet>.ts.net --apply`, then
   `tailscale serve --bg 47370`) and restrict access with a tailnet rule. Never use
-  `tailscale funnel` on this port: that publishes every project to the internet.
+  `tailscale funnel` on this port: that publishes every project's records to the internet.
 
 ## The desktop app
 
@@ -63,6 +77,10 @@ switcher and give it the dev box's tailnet address and an SSH host.
 The app registers `kyosei://` links, so an orchestrator can write each record id as a link
 that opens the record. That helps only if you read the orchestrator where the app is
 installed; elsewhere the link is noise around an id, so the setup agent asks.
+
+The repository also holds a native Mac app under `apps/apple/`, a client of the session,
+send and note routes. It is built from source for the maintainer's own devices and is not
+distributed; [its README](../../apps/apple/README.md) describes it.
 
 ## Orchestrator sessions under tmux
 
@@ -79,7 +97,8 @@ cannot read. Over SSH, `kyo orchestrator start` refuses rather than start a sess
 cannot authenticate. Stopping that tmux server ends every orchestrator session on the
 machine.
 
-`controller_command` in `~/kyosei/settings.yml` sets what a session runs; the default is
-`claude`. Turn on Remote Login (System Settings, General, Sharing) for any of the SSH paths.
+`orchestrator_command` in `~/kyosei/settings.yml` sets what a session runs; the default is
+`claude`. (`controller_command` is the same key under its earlier name, and is still
+read.) Turn on Remote Login (System Settings, General, Sharing) for any of the SSH paths.
 
 Back to [the guide's contents](README.md).

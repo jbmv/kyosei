@@ -29,8 +29,10 @@ Everything else reads through it.
 
 **The server and the app are optional.**
 
-- `kyo serve` is a small HTTP server on your own machine that lets a viewer read your
-  projects. It writes no records.
+- `kyo serve` is a small HTTP server on your own machine through which a viewer reads your
+  projects and writes files under `ideas/`. A device you issue a token to with
+  `kyo devices` can also read a project's Claude Code sessions, send input to one and file
+  your notes in the store. No viewer changes a record.
 - The desktop app (macOS) is one such viewer: a board, record pages and a terminal per
   project. Without it, `kyo brief`, `kyo list` and `kyo show` answer the same questions in
   the terminal.
