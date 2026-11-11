@@ -329,14 +329,14 @@ The key's earlier spelling is `controller_only_commands` (KYO-519), and the two
 spellings mean the same thing; a file giving both with different commands is refused by
 name. Use `controller_only_commands` until every `kyo` that reads the store, including
 the one on PATH that the hooks run, is at least KYO-519: an older build refuses the new
-spelling and every hook goes blind. `kyo doctor` prints a notice for the old spelling
+spelling and every hook fails to read the store. `kyo doctor` prints a notice for the old spelling
 that names this precondition; renaming the key by hand afterwards, then checking that
 `kyo doctor` shows no `path_build_lag` problem, finishes the rename. Keeping the old
 spelling is also valid.
 
 A freshly written `config.yml` carries the key commented out, under its earlier
-spelling and with the same explanation, so nobody has to know the key exists to find it. Absent or empty
-means *nothing is refused*, which is the opt-out, not a degraded mode.
+spelling and with the same explanation, so the key can be found without knowing that it exists. Absent or empty
+means *nothing is refused*, which is how a project opts out.
 
 **The hook.** The hooks (the plugin, or `kyo install-hooks` on the copies) wire
 `kyo check-command --pre-tool-use` into
@@ -370,11 +370,12 @@ directory spelled with a variable or a substitution (`cd "$WT"`), `cd -`, a
 as the command), `{ …; }` groups, `sudo`, `xargs`, `bash -c '…'`, and a suite run
 from inside a script this project ships.
 
-**The override is one word, and it is meant to be used.** `KYOSEI_SUITE_OK=1 make
-test` runs. The refusal says so in the same breath as it refuses, and asks the
-worker to report having used it in its report's `disagreements[]`. Contradicting
-a rule has to cost less than complying with one that is wrong, and a prefix on the
-command line is visible in the transcript in a way an exported variable is not.
+**The override is one word.** `KYOSEI_SUITE_OK=1 make
+test` runs. The refusal names the override and asks the
+worker to report having used it in its report's `disagreements[]`. The override is
+cheap by design, so that a worker with a reason to run the suite is not pushed into
+complying with a rule that is wrong for its case, and a prefix on the
+command line is visible in the transcript where an exported variable is not.
 
 **The notice.** `kyo doctor` prints a notice — never a failure — for each
 `worktree_setup` entry that is itself a declared orchestrator-only command. That is
@@ -387,8 +388,8 @@ as additive fields, `context_rewrites` and `context_rewrite_tokens` — assistan
 messages after the first whose cache creation was both over 50,000 tokens and at
 least 80% of that message's whole context. Those thresholds found exactly the two
 re-writes above across five transcripts and none in the three workers that ran
-test files only. So whether the policy is working is a number you read off your
-own store, per dispatch, rather than a claim in this document.
+test files only. Whether the policy is working can therefore be read from your
+own store, per dispatch.
 
 **The second refusal on the same hook: a timeout ceiling
 (`worker_command_timeout_ceiling_seconds`, KYO-312).** Separately opt-in, and
@@ -400,12 +401,12 @@ running dispatch's worktree:
 worker_command_timeout_ceiling_seconds: 240
 ```
 
-The case it is for is the next turn of the same screw, measured on the wave after
+The case it covers was measured on the wave after
 the one above: a worker that had the standing rule in its brief detached its long
-run correctly and then sat in one foreground wait on it — `until [ -f
-...status ]; do sleep 30; done`, timeout 1,800,000 ms — for 10.1 minutes, and
-later 6.1, re-writing 250,466 and 255,899 tokens. A dispatched worker has no way
-to be idle except a foreground command, so "waiting once" for a long run *is* a
+run correctly and then waited on it in one foreground command (`until [ -f
+...status ]; do sleep 30; done`, timeout 1,800,000 ms) for 10.1 minutes, and
+later 6.1, re-writing 250,466 and 255,899 tokens. A dispatched worker can be idle
+only inside a foreground command, so waiting once for a long run is itself a
 long foreground command. The refusal names the remedy — detach it, then look in
 bounded slices under the ceiling, because each look is a cache read that keeps
 the cache alive while one expiry is a full context re-write — and the override is
@@ -420,10 +421,10 @@ the question by hand.
 
 ### Doc fragments: a document that grows by numbered section (KYO-299)
 
-**Opt-in, in one block of `kyosei/documents.yml`, and a project that declares
-nothing is unaffected.** Nothing below fires until you declare it.
+**This is opt-in, through one block of `kyosei/documents.yml`, and a project that
+declares nothing is unaffected.** Nothing below applies until the project declares it.
 
-**The problem, taken from a real project rather than imagined.** A long
+**The problem, as observed in one project.** A long
 engineering-notes file, append-only by that project's own rule, sections headed
 `## 204. <title> (<date>)`, the numbers cited across the repository, and two
 index files generated from it by `make notes-index`. Two workers in one wave who
@@ -506,14 +507,14 @@ after the ones that do, and the output says which each fragment got. Numbers com
 from the document's own last numbered heading, so a document with none starts at
 1 and a heading quoted inside a code fence is not mistaken for one.
 
-**It is all-or-nothing.** A fragment that cannot be assembled — no placeholder
+**A run is all-or-nothing.** A fragment that cannot be assembled — no placeholder
 heading, more than one (a fragment receives one number, so two sections in one
 file would share it; split it into one file per section), a target document that
 is not declared, or a `{{next}}` that would be left behind in the document — is
 refused by name *before anything is written*,
 and that refusal voids the whole run including the documents that had no problem.
-Half a wave assembled consumes numbers, deletes the fragments that carried them,
-and leaves you reconstructing which half happened. Each refusal names the remedy
+A partial run would consume numbers, delete the fragments that carried them,
+and leave it unclear which fragments had been assembled. Each refusal names the remedy
 that clears it, and `tests/test_doc_fragments.py` (in Kyosei's own repository)
 runs each remedy and asserts it does.
 
@@ -598,7 +599,7 @@ that kind.
 choice: a retry after a failure, or a one-off search for a record of any kind. It
 supersedes the record's previous prior-art claim.
 
-**The results are strangers' data.** Each search is stored as an evidence artifact holding
+**The results are data written by third parties.** Each search is stored as an evidence artifact holding
 recx's JSON, under a derived claim whose one-line statement Kyosei writes from the ranks,
 repository names and scores. The text under each result's `manifest` and `matches` was
 written by the authors of the repositories found. `kyo show` prints the artifact after a
@@ -611,9 +612,9 @@ the operator's say.
 Under the in-repo layout the store is committed beside the code, so every
 `kyo` mutation leaves files for the next commit to carry. Most of them are
 small: one record document per record it touched, rewritten in full, and
-`_allocations.json`. **The append-only ledgers are the ones worth knowing
-about**, because they only grow — `kyosei/export/_events/` (one file per shard,
-a JSON line per event, and the big one), `_sweeps.jsonl`, `_briefs.jsonl`,
+`_allocations.json`. The append-only ledgers are the exception,
+because they only grow: `kyosei/export/_events/` (one file per shard,
+a JSON line per event, and the largest), `_sweeps.jsonl`, `_briefs.jsonl`,
 `_shift_notes.jsonl`. A commit re-stores whichever of these changed, **whole**:
 git stores a changed tracked file as a complete new object, not as a diff, so a
 file that grows by appending costs its entire size again on every commit that
@@ -621,51 +622,51 @@ touches it. That is why the events ledger is written as **bounded shards**
 rather than as one file — only the newest shard changes on a mutation, and every
 closed shard is an object git already has.
 
-This was measured on one store-bearing repository, and the measurement is why the
-shards exist. Its `kyosei/export/_events.jsonl` was **224.1 MB** in the working tree, at about 55 MB per compressed copy, and the object store
-held **5,783 loose objects totalling 7.23 GiB** against a 219 MiB pack — almost
+The shards follow from a measurement on one store-bearing repository. Its
+`kyosei/export/_events.jsonl` was 224.1 MB in the working tree, at about 55 MB per
+compressed copy, and the object store
+held 5,783 loose objects totalling 7.23 GiB against a 219 MiB pack, almost
 all of it successive versions of that one file. A `git maintenance run --auto`
-that a store commit had triggered was then twelve minutes into `git
-pack-objects`, **22 GB resident, 21 GB of it compressed, with system swap at
-27.6 GB of 28.6 GB**; the machine was unusable, and killing that one process
-brought swap back to 7.8 GB within a minute. The cost surfaces as an unresponsive machine with no
-process a maintainer can name, which is the only reason this section exists.
+that a store commit had triggered was observed twelve minutes into `git
+pack-objects`, at 22 GB resident, 21 GB of it compressed, with system swap at
+27.6 GB of 28.6 GB; ending that one process
+brought swap back to 7.8 GB within a minute. The cost therefore appears as an
+unresponsive machine, with no process that identifies the store as its cause.
 
-**One git setting is worth having either way**, and it is the one thing that
-makes a repack of a large existing history survivable:
+**One git setting helps whichever form the ledger has**, because it bounds the
+memory a repack of a large existing history needs:
 
 ```sh
 git config core.bigFileThreshold 32m
 ```
 
 Above that size git stores a blob whole and never delta-searches it, which is
-exactly the search that took 22 GB of memory above. It fixes the repack cost
-and **nothing else** — the objects are still written, the `.git` is still large,
-and a 224 MB file is still 224 MB per commit. It is a stopgap in front of the
-shard layout, not an alternative to it.
+the search that took 22 GB of memory above. It addresses the repack cost
+only: the objects are still written, the `.git` is still large,
+and a 224 MB file still costs 224 MB per commit. It is a stopgap and does not
+replace the shard layout.
 
-**What the two changes are each worth, measured on that same ledger
-rather than estimated — and they do different jobs.** (226.3 MB and 7,931 events
+**What each of the two changes saves, measured on that same ledger.** (226.3 MB and 7,931 events
 below, against the 224.1 MB above: the ledger is append-only, so the two numbers
 are the same file at two moments.) Reducing an event's evidence to
-`{id, sha256}` applies to events written from now on: it would have taken this
+`{id, sha256}` applies to events written after that change: it would have taken this
 ledger from 226.3 MB to 172.6 MB across 7,931 events — 53.7 MB, the
 copies of evidence bodies, a quarter of the file — had every line been written
-that way. **It does not shrink the lines you already have.** The migration moves
-every line verbatim, which is exactly what makes it lossless, so an existing
-ledger keeps its size and only stops growing that way. And even at 172.6 MB this
-would not be the fix: what remains is dominated by the frozen dispatch briefs
+that way. It does not shrink existing lines. The migration moves
+every line verbatim, which is what makes it lossless, so an existing
+ledger keeps its size and stops growing in that way. At 172.6 MB the problem
+would remain: what is left is dominated by the frozen dispatch briefs
 (68.3 MB) and ingested worker reports (49.1 MB) a record document also embeds,
-and a 172.6 MB file re-stored per commit is the same problem one size down.
+and a 172.6 MB file would still be re-stored on every commit.
 
-**The shards are the fix, and they work on the ledger you actually have.**
+**The shards address the per-commit cost, and apply to an existing ledger.**
 Migrating that 226.3 MB ledger produces 58 shards in 2.3 seconds,
 byte-for-byte the same events in the same order, at most one of which any
 mutation can touch — so what a commit hands git drops from 226.3 MB to 4 MiB, and
 the other 57 are objects git already has.
 
 **If your export still has a single `kyosei/export/_events.jsonl`**, it predates
-this and still works: every reader takes the monolithic file first and the
+the shards and still works: every reader takes the monolithic file first and the
 shards after it, in that order. `kyo doctor` reports it as a **notice** —
 naming the file, its size, and the command — and `kyo export --migrate-events`
 converts it in one run, moving every line verbatim and removing the old file.
@@ -727,7 +728,7 @@ own data directory beside `project.json`: the address and the project, and nothi
 secret. A remembered server's projects are offered in the switcher as `PREFIX @
 host:port`.
 
-**The app's old server is yours to remove by hand.** Builds before KYO-459 ran a server
+**An earlier build's server is removed by hand.** Builds before KYO-459 ran a server
 of their own ("Install Project Server…", the `dev.kyosei.server` login agent, with a
 password, tokens and a self-minted certificate). The app does not remove
 `dev.kyosei.server` itself (KYO-576). A machine that went straight from a build before
@@ -1238,8 +1239,8 @@ refused by name. One file shape files by whichever route a kind demands (KYO-340
 `kyo promote` has no `--plan` flag of its own, but its `--from` file's `plan:` sets
 one anyway, validated exactly as `kyo new --plan` validates one; `kyo spawn` takes `--plan`
 and a `plan:` key on the same terms (KYO-749). `kyo promote`'s own
-description is always the idea being promoted — but a `--from` file's body now
-displaces it when the body actually differs from the idea's own text (whitespace
+description is always the idea being promoted — but a `--from` file's body
+displaces it when the body differs from the idea's own text (whitespace
 aside); a body that merely echoes the idea back changes nothing, and the write-echo
 says which text was stored either way.
 
