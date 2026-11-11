@@ -13,7 +13,9 @@ Under ``/v1/projects/{project}/``, all GET and all read-only:
 - ``files/search?q=<text>[&root=<root>]`` -- the files of ``code`` and ``store`` whose path
   holds the text and the lines of them that do (KYO-814);
 - ``files/recent`` -- GET lists, and POST ``{"root", "path"}`` records, the files opened in
-  the app for the project, kept on the server (KYO-814).
+  the app for the project, kept on the server (KYO-814);
+- ``files/starred`` -- GET lists, POST ``{"root", "path"}`` stars and DELETE with the same
+  body unstars the project's starred files, kept on the server (KYO-837).
 
 THE PERMISSION. Every one of them needs a device token holding the ``files`` permission
 (:mod:`kyosei.device_tokens`), checked before a path is looked at. It is a permission of its
@@ -86,6 +88,7 @@ BLOB = "blob"
 #: KYO-814: the routes under ``files/`` that are no root's.
 SEARCH = "search"
 RECENT = "recent"
+STARRED = "starred"
 
 #: The search's results: how many one response holds, and the longest text it takes.
 SEARCH_LIMIT = 200
@@ -100,6 +103,11 @@ _BINARY_SNIFF = 8192
 #: How many opened files a project's recent list keeps; the oldest is dropped.
 RECENT_LIMIT = 50
 _RECENT_LOCK = threading.Lock()
+
+#: KYO-837: how many files a project may star. A star is the user's own mark, so a full
+#: list refuses another and names the remedy instead of dropping the oldest.
+STARRED_LIMIT = 200
+_STARRED_LOCK = threading.Lock()
 
 #: What follows ``files/`` on the route that resolves a path as text; never a root's name.
 RESOLVE = "resolve"
@@ -996,6 +1004,120 @@ def record_recent(
     return _recent_document(entries)
 
 
+# ---------------------------------------------------------------- the starred list
+
+
+def _starred_entries(environ: dict[str, str], project: str) -> list[dict[str, Any]]:
+    """The saved list, newest first; one that is absent or unreadable is an empty one."""
+    try:
+        document = json.loads(
+            serve_files.project_starred_path(environ, project).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and isinstance(entry.get("root"), str)
+        and isinstance(entry.get("path"), str)
+    ]
+
+
+def _starred_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"ok": True, "limit": STARRED_LIMIT, "entries": entries}
+
+
+def starred(environ: dict[str, str], project: str) -> dict[str, Any]:
+    """The files starred for ``project``, in the order they were starred, newest first."""
+    return _starred_document(_starred_entries(environ, project))
+
+
+def _starred_body(body: dict[str, Any]) -> tuple[str, str]:
+    root_name, relpath = body.get("root"), body.get("path")
+    if not isinstance(root_name, str) or not isinstance(relpath, str):
+        raise Refusal(
+            400,
+            f'the JSON body needs "root" (`{ROOT_CODE}` or `{ROOT_STORE}`) and "path" (a '
+            "path relative to that root), both text",
+            reason="bad-request",
+        )
+    return root_name, relpath
+
+
+def _save_starred(environ: dict[str, str], project: str, entries: list[dict[str, Any]]) -> None:
+    file = serve_files.project_starred_path(environ, project, create=True)
+    serve_files.write_private(file, json.dumps({"entries": entries}, indent=1).encode("utf-8"))
+
+
+def star(
+    environ: dict[str, str],
+    paths: serve_files.ProjectPaths,
+    project: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Star one file; a path the blob route refuses is refused, and a repeat changes nothing."""
+    root_name, relpath = _starred_body(body)
+    root = _root(paths, root_name)
+    target = _file_target(root, relpath)
+    try:
+        regular = stat.S_ISREG(target.stat().st_mode)
+    except OSError as exc:
+        raise _not_shown(root, relpath, "file") from exc
+    if not regular:
+        raise Refusal(
+            409,
+            f"{relpath} in {_where(root)} is not a regular file, and only a file is starred",
+            reason="not-a-file",
+            root=root.name,
+            path=relpath,
+        )
+    with _STARRED_LOCK:
+        kept = _starred_entries(environ, project)
+        if any((item["root"], item["path"]) == (root.name, relpath) for item in kept):
+            return _starred_document(kept)
+        if len(kept) >= STARRED_LIMIT:
+            raise Refusal(
+                409,
+                f"{len(kept)} files are starred, the most a project keeps; DELETE "
+                f"{ROUTE}/{STARRED} with one file's root and path unstars it, which makes "
+                "room",
+                reason="starred-full",
+            )
+        entry = {
+            "root": root.name,
+            "path": relpath,
+            "starred_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        }
+        entries = [entry, *kept]
+        _save_starred(environ, project, entries)
+    return _starred_document(entries)
+
+
+def unstar(
+    environ: dict[str, str],
+    paths: serve_files.ProjectPaths,
+    project: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Unstar one file. The root and the path's text are checked, but the file need not
+    still exist, so a star whose file was deleted can be removed; one not starred is a no-op."""
+    root_name, relpath = _starred_body(body)
+    root = _root(paths, root_name)
+    _check_text(root, relpath)
+    with _STARRED_LOCK:
+        kept = _starred_entries(environ, project)
+        entries = [
+            item for item in kept if (item["root"], item["path"]) != (root.name, relpath)
+        ]
+        if len(entries) != len(kept):
+            _save_starred(environ, project, entries)
+    return _starred_document(entries)
+
+
 # ------------------------------------------------------------------------ the route
 
 
@@ -1017,7 +1139,8 @@ def not_served(rest: list[str]) -> Refusal:
         f"roots), GET {ROUTE}/{{root}}/{TREE}[/{{relpath}}] (a directory), GET "
         f"{ROUTE}/{{root}}/{BLOB}/{{relpath}} (a file's bytes) and GET "
         f"{ROUTE}/{RESOLVE}?path=<text>, GET {ROUTE}/{SEARCH}?q=<text>, GET and POST "
-        f"{ROUTE}/{RECENT}, {{root}} being `{ROOT_CODE}` or `{ROOT_STORE}`; "
+        f"{ROUTE}/{RECENT}, GET, POST and DELETE {ROUTE}/{STARRED}, {{root}} being "
+        f"`{ROOT_CODE}` or `{ROOT_STORE}`; "
         f"a session's scratchpad is {ROUTE}/{ROOT_SCRATCH}/{{session}}/{TREE} and "
         f"{ROUTE}/{ROOT_SCRATCH}/{{session}}/{BLOB}/{{relpath}}",
         reason="not-served",
@@ -1051,9 +1174,21 @@ def respond(
             paths = serve_files.project_paths(root_of(), environ)
             return 200, record_recent(environ, paths, project, read_body()), None, {}
         return 200, recent(environ, project), None, {}
+    if rest and rest[0] == STARRED:
+        if len(rest) != 1:
+            raise not_served(rest)
+        _no_query(query_pairs, f"`{ROUTE}/{STARRED}`")
+        if method in ("POST", "DELETE"):
+            assert read_body is not None
+            paths = serve_files.project_paths(root_of(), environ)
+            change = star if method == "POST" else unstar
+            return 200, change(environ, paths, project, read_body()), None, {}
+        return 200, starred(environ, project), None, {}
     if method != "GET":
         raise Refusal(
-            405, f"{method} is not served under {ROUTE}; only {ROUTE}/{RECENT} is written",
+            405,
+            f"{method} is not served under {ROUTE}; only {ROUTE}/{RECENT} and "
+            f"{ROUTE}/{STARRED} are written",
             reason="bad-request",
         )
     if rest and rest[0] == SEARCH:
