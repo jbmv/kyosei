@@ -204,7 +204,7 @@ a { color: var(--link); }
   overflow-y: scroll;
   overscroll-behavior: contain;
 }
-body.terminal-open #page { bottom: 46%; }
+/* The open terminal covers the chat pane (KYO-753), which keeps its size and scroll place beneath. */
 html, body { overflow: hidden; }
 #jump-bottom {
   position: fixed; z-index: 3; bottom: 18px;
@@ -218,7 +218,7 @@ html, body { overflow: hidden; }
 #jump-bottom:hover { color: var(--link); }
 #jump-bottom.shown { display: flex; }
 body.view-records #jump-bottom, body.view-files #jump-bottom { display: none; }
-body.terminal-open #jump-bottom { bottom: calc(46% + 18px); }
+body.terminal-open #jump-bottom { display: none; }
 
 #composer {
   position: fixed;
@@ -408,12 +408,11 @@ body.terminal-open #terminal-toggle { background: var(--line); }
   display: none;
   position: fixed;
   z-index: 2;
+  top: calc(46px + var(--views-height));
   left: 0;
   right: calc(var(--composer-width) + 6px);
   bottom: 0;
-  height: 46%;
   flex-direction: column;
-  border-top: 1px solid var(--line);
   background: var(--terminal-background);
   color: var(--terminal-text);
 }
@@ -780,7 +779,6 @@ body.no-project #views-divider, body.no-project #view-items { display: none; }
   overscroll-behavior: contain;
   background: var(--background);
 }
-body.terminal-open .view-pane { bottom: 46%; }
 .records-inner { max-width: 780px; margin: 0 auto; padding: 22px 28px 40px; }
 
 /* ---------------------------------------------------------------------------- Records */
