@@ -1,4 +1,6 @@
 .also_covers
+.answered_prompt
+.answered_prompt_note
 .blocked_overridden
 .branch
 .brief_sections

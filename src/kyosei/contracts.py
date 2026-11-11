@@ -1312,6 +1312,10 @@ EMBEDDED_PROSE_EXEMPT: dict[tuple[str, str], str] = {
         "dispatched past a disjointness question the tool could not answer"
     ),
     ("dispatches", "covers_json"): "a list of record ids",
+    ("dispatches", "answered_prompt_json"): (
+        "ids, a timestamp and an origin name from the turn index (KYO-661); the index holds no "
+        "text, so neither does this"
+    ),
     ("dispatches", "report_id"): "id",
     ("dispatches", "terminated_why"): (
         "an orchestrator-written reason — prose, but authored at closure rather than "
