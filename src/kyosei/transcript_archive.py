@@ -61,6 +61,20 @@ def archive_dir(config: Config, environ: dict[str, str] | None = None) -> Path:
     return store_home(environ) / TRANSCRIPT_ARCHIVE_DIRNAME / project_archive_name(config)
 
 
+def archived_session_ids(archive: Path) -> list[str]:
+    """The ids of the sessions whose transcript ``archive`` holds, sorted (KYO-812).
+
+    A copy kept aside as ``<id>.rewritten-<time>.jsonl`` names no session of its own.
+    """
+    if not archive.is_dir():
+        return []
+    return sorted(
+        path.stem
+        for path in archive.glob("*.jsonl")
+        if _SESSION_FILE.match(path.stem) and path.is_file()
+    )
+
+
 def enclosing_git_repository(path: Path) -> Path | None:
     """The directory holding ``.git`` at or above ``path``, or None.
 

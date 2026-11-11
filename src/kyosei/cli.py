@@ -71,6 +71,7 @@ from . import (
     query,
     report_ingest,
     touch_drift,
+    transcript_search,
 )
 from . import serve as serve_module
 from . import store as store_module
@@ -286,6 +287,10 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # `check-build`'s: it runs on every prompt. Not in MUTATING_COMMANDS: the files it
     # writes are gitignored local state beside `kyosei.db`, and no record or event.
     "turns": (cmd_turns.cmd_turns, PROJECT_OPTIONAL),
+    # KYO-812: the search of what was said in a project's sessions. Not in
+    # MUTATING_COMMANDS: the index it keeps is derived local state under $KYOSEI_HOME,
+    # outside the store and rebuilt from the transcripts, and no record or event.
+    "transcripts": (transcript_search.cmd_transcripts, PROJECT_REQUIRED),
     "install-hooks": (commands.cmd_install_hooks, PROJECT_REQUIRED),
     "install-skill": (commands.cmd_install_skill, PROJECT_REQUIRED),
     # KYO-212: the third of the "your copy, updated" commands, and the only one that
@@ -2126,6 +2131,43 @@ def build_parser() -> KyoseiParser:
         action="store_true",
         help="with --seal-key icloud-keychain: confirms the person chose it knowing the key "
         "then leaves this machine, end-to-end encrypted by iCloud Keychain",
+    )
+
+    p_transcripts = sub.add_parser(
+        "transcripts",
+        parents=[common],
+        help="search what the person and the assistant said in this project's sessions, in "
+        "a project that opted in to reading transcripts; this searches no record (KYO-812)",
+    )
+    p_transcripts.add_argument(
+        "action",
+        choices=("search", "rebuild"),
+        help="search: list the prompts and replies holding the phrase, newest first, from "
+        "live transcripts and archived ones; tool calls, tool results, thinking and "
+        "subagents are not searched. rebuild: delete the local index "
+        "($KYOSEI_HOME/transcript-search/<project>/) and write it again from the "
+        "transcripts; a search brings the index up to date itself, so this is for an index "
+        "that is suspected wrong",
+    )
+    p_transcripts.add_argument(
+        "phrase",
+        nargs="*",
+        metavar="PHRASE",
+        help="for search: the words to find, matched as one phrase as find in a browser "
+        "matches them: case is ignored, a space matches any white space, and no character "
+        "is an operator",
+    )
+    p_transcripts.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help=f"for search: how many results a page holds (default "
+        f"{transcript_search.DEFAULT_LIMIT}, at most {transcript_search.MAX_LIMIT})",
+    )
+    p_transcripts.add_argument(
+        "--cursor",
+        metavar="CURSOR",
+        help="for search: the `cursor` of the previous page, to list the results after it",
     )
 
     p_install_hooks = sub.add_parser(

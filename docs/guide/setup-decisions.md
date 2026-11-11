@@ -517,9 +517,13 @@ were written then and are unchanged, without seeing the rest (KYO-663).
   you, and the command is refused without the second flag, which states that you chose it.
 - **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
-  git repository, and which a credit is checked against when the original is absent.
-- **What never leaves the machine:** the transcripts, the archive, the turn index, the
-  prompt history, and the seal key unless you choose the iCloud Keychain option.
+  git repository, and which a credit is checked against when the original is absent. A
+  search of what was said (`kyo transcripts search`, and the search route of `kyo serve`)
+  keeps an index holding the text of your prompts and the agent's replies in
+  `$KYOSEI_HOME/transcript-search/<project>/`, beside the archive and outside every git
+  repository; it is written when a search is first run and can be deleted at any time.
+- **What never leaves the machine:** the transcripts, the archive, the search index, the
+  turn index, the prompt history, and the seal key unless you choose the iCloud Keychain option.
   Kyosei sends none of them anywhere and copies none of them into the store; a store remote
   carries only what is listed as stored.
 - **Where it lives:** `read_transcripts: true` or `read_transcripts: false` in
@@ -567,7 +571,7 @@ and runs no orchestrator; it only views and talks to them.
   - each store's `dispatch worktrees/`;
   - `device-tokens.json`, the digests of the tokens `kyo devices` issued (E3), and
     `composer/`, the unsent text `kyo serve` keeps for a device;
-  - `seal.key` and `transcript-archive/`, where D14 is yes;
+  - `seal.key`, `transcript-archive/` and `transcript-search/`, where D14 is yes;
   - `harness/claude-code`, the link the Claude Code plugin is loaded through (C1).
 - **PATH:** `~/.local/bin` is on PATH in a login shell. It is not on PATH
   in a non-interactive `ssh host kyo ...`, nor in anything launchd starts without help.

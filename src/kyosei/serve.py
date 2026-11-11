@@ -265,6 +265,10 @@ NOT_SERVED: dict[str, str] = {
     # KYO-658: it stamps a person's turn from this machine's turn index into the store.
     "discuss": _WRITES_STORE,
     "turns": "it is a session hook writing the local turn index and archive, not a read",
+    "transcripts": (
+        "it reads what was said in the project's sessions, which is served only to a device "
+        "token: GET /v1/projects/{project}/search"
+    ),
     "install-hooks": _WRITES_FILES,
     "install-skill": _WRITES_FILES,
     "install-procedures": _WRITES_FILES,
@@ -314,6 +318,12 @@ FILE_ROUTES: dict[str, tuple[str, ...]] = {
 
 #: The file routes that take a path after their name.
 _PATH_ROUTES = ("ideas", "docs")
+
+#: KYO-812: ``projects/{project}/search``, the search of what was said in its sessions.
+SEARCH_ROUTE = "search"
+
+#: The query keys the search route takes.
+_SEARCH_QUERY_KEYS = ("q", "limit", "cursor")
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
 SESSION_ROUTES = ("turns", "events", "screen", "changes")
@@ -723,6 +733,18 @@ class ServeHandler(BaseHTTPRequestHandler):
     server: KyoServer
     server_version = "kyo-serve"
 
+    def log_request(self, code="-", size="-") -> None:  # noqa: ANN001 - the stdlib's signature
+        """The request line, without the query of a search (KYO-812).
+
+        What a person looks for in their transcripts is their own words, and the phrase is
+        in the query string, so the log is given the route alone.
+        """
+        line = self.requestline
+        path, mark, _query = self.path.partition("?")
+        if mark and path.rstrip("/").endswith(f"/{SEARCH_ROUTE}"):
+            line = line.replace(self.path, f"{path}?[not logged]", 1)
+        self.log_message('"%s" %s %s', line, getattr(code, "value", code), size)
+
     # --------------------------------------------------------------- methods
 
     def do_GET(self) -> None:  # noqa: N802 - http.server's naming
@@ -823,7 +845,9 @@ class ServeHandler(BaseHTTPRequestHandler):
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
             allowed = ("POST",)
-        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE:
+        elif (
+            len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE
+        ) or (len(rest) == 3 and rest[0] == "projects" and rest[2] == SEARCH_ROUTE):
             allowed = ("GET",)
         elif len(rest) == 3 and rest[0] == "projects" and rest[2] == PROJECT_DRAFT_ROUTE:
             allowed = PROJECT_DRAFT_METHODS
@@ -901,6 +925,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._orchestrator_start(rest[1], split.query)
         if rest[2] == PROJECT_FILES_ROUTE:
             return self._project_files(rest[1], rest[3:], split.query)
+        if rest[2] == SEARCH_ROUTE:
+            return self._search(rest[1], split.query)
         if rest[2] == PROJECT_DRAFT_ROUTE:
             return self._session_composer(method, rest[1], None, "draft", split.query)
         if rest[2] == NOTES_ROUTE:
@@ -1066,6 +1092,31 @@ class ServeHandler(BaseHTTPRequestHandler):
         )
         self._session_events(project, session_id, given)
         return None
+
+    def _search(self, name: str, query: str) -> tuple:
+        """The search of what was said in a project's sessions (KYO-812).
+
+        A session read route in what it reads, so the device token is checked first, as
+        :meth:`_session_route` checks it (KYO-791), and the project's opt-in next.
+        """
+        from . import serve_send, serve_sessions
+
+        serve_send.require_reader(self.server.environ, self.headers.get("Authorization"))
+        root = self.server.project(name).root
+        project = serve_sessions.ProjectSessions(root, self.server.environ)
+        given: dict[str, str] = {}
+        for key, value, _bare in _query_pairs(query):
+            if key not in _SEARCH_QUERY_KEYS:
+                raise Refusal(
+                    400,
+                    f"?{key} is not a query the search route takes; it takes ?q, the phrase "
+                    "to find, ?limit, how many results a page holds, and ?cursor, the cursor "
+                    "of an earlier response",
+                )
+            given[key] = value
+        return 200, _json_bytes(
+            project.search(name, given.get("q", ""), given.get("limit"), given.get("cursor"))
+        )
 
     def _session_send(self, name: str, session_id: str, action: str, query: str) -> tuple:
         """One send route. Everything it decides is :mod:`kyosei.serve_send`'s."""
@@ -1602,7 +1653,7 @@ def _no_route(method: str, path: str) -> Refusal:
         f"{API_PREFIX}/projects, GET {project}/cmd/{{command}}, GET {project}/ideas/, "
         f"GET/PUT/DELETE {project}/ideas/{{relpath}}, POST {project}/ideas-move and "
         f"{project}/ideas-mkdir, GET/PUT {project}/scratchpad, GET {project}/docs/{{relpath}}, "
-        f"GET {project}/events, GET {project}/sessions and GET "
+        f"GET {project}/events, GET {project}/search?q=, GET {project}/sessions and GET "
         f"{project}/sessions/{{id}}/turns, .../events, .../screen, .../changes, "
         f".../images/{{turn}}/{{index}} or .../subagents/{{agent}}, POST "
         f"{project}/sessions/{{id}}/send, .../slash, .../interrupt, .../send-notes or "

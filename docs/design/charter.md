@@ -620,6 +620,9 @@ kyo report <dispatch-id> --file .kyosei-report.json   # structured ingest; absen
 kyo note --shift                  # append to the current shift log (stdin/file; continuous, never at closeout)
 kyo notes add|list|show|tag|tags  # what a person wrote, on what it addresses; found by tag or anchor (KYO-705);
                                   #   `tags` lists the tags in use with their counts (KYO-710)
+kyo transcripts search|rebuild    # the prompts and replies of the project's sessions that hold a
+                                  #   phrase, where transcripts may be read; the index is derived
+                                  #   and kept under $KYOSEI_HOME, outside the store (KYO-812)
 kyo next                          # ready work: dispatchable, ungated, disjoint from running work
                                     # (undeclared touches = its own counted class, never "disjoint")
 kyo brief [--compact]             # session briefing: counts (actionable kinds only), ready list,

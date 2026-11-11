@@ -2161,3 +2161,128 @@ def test_records_documents_and_ideas_are_still_read_without_a_token(bed: Bed) ->
         assert status == 200, (path, body)
     # The same request, on a session route, is the one that is refused.
     assert bed.client.request(SESSIONS)[0] == 401
+
+
+# ------------------------------------------------- KYO-812: the search of what was said
+
+SEARCH = f"{BASE}/search"
+#: Words of a reply in ``OLD_FILE``, and of the prompt it answers.
+REPLY_PHRASE = "a fixed structure"
+PROMPT_PHRASE = "how lighthouses work"
+
+
+def search_route(phrase: str, **more: str) -> str:
+    return f"{SEARCH}?{urllib.parse.urlencode({'q': phrase, **more})}"
+
+
+def test_the_search_route_finds_a_reply_and_a_prompt_and_names_where(bed: Bed) -> None:
+    status, _, body = bed.get(search_route(REPLY_PHRASE))
+    assert status == 200, body
+    document = body_json(body)
+    (reply,) = document["results"]
+    assert (reply["project"], reply["session_id"], reply["role"]) == ("proj", OLD, "assistant")
+    assert {"text": "a fixed structure", "match": True} in reply["excerpt"]
+    # The result's place is one the chat's own objects carry: a reply's record and message.
+    turns = body_json(bed.get(f"{SESSIONS}/{OLD}/turns")[2])
+    drawn = {(r["uuid"], r["message_id"]): r for r in turns["replies"]}
+    assert drawn[(reply["message"], reply["message_id"])]["at"] == reply["at"]
+
+    (prompt,) = body_json(bed.get(search_route(PROMPT_PHRASE.upper()))[2])["results"]
+    assert prompt["role"] == "person"
+    assert prompt["message"] in {turn["id"] for turn in turns["turns"]}
+
+
+def test_the_search_route_does_not_search_a_tool_result(bed: Bed) -> None:
+    turns = body_json(bed.get(f"{SESSIONS}/{OLD}/turns")[2])
+    result = next(c["result"]["text"] for c in turns["tool_calls"] if c["name"] == "Read")
+    assert "alpha\n2\tbeta" in result
+    assert body_json(bed.get(search_route("alpha 2 beta"))[2])["results"] == []
+
+
+def test_the_search_route_is_refused_without_a_token_and_answers_with_one(bed: Bed) -> None:
+    route = search_route(REPLY_PHRASE)
+    status, headers, refused = status_of(bed, route, {})
+    assert status == 401 and refused["reason"] == "no-token", refused
+    assert headers["WWW-Authenticate"] == "Bearer"
+    assert "a fixed structure" not in json.dumps(refused)
+
+    result = invoke(["devices", "issue", "search-laptop", "--json"])  # the remedy, as written
+    assert result.code == 0, result
+    token = json.loads(result.out)["token"]
+    assert status_of(bed, route, {"Authorization": f"Bearer {token}"})[0] == 200
+    unknown = {"Authorization": "Bearer kyo_dev_not-one-this-machine-issued"}
+    assert status_of(bed, route, unknown)[0] == 401
+
+
+def test_the_search_route_refuses_until_the_project_opts_in(unopted: Client, project: Path) -> None:
+    status, _, body = unopted.get(search_route(REPLY_PHRASE))
+    document = body_json(body)
+    assert status == 403 and "read_transcripts: true" in document["error"], document
+    assert "results" not in document
+    opt_in_transcripts(project)  # the remedy, as it is written
+    status, _, body = unopted.get(search_route(REPLY_PHRASE))
+    assert status == 200 and len(body_json(body)["results"]) == 1
+
+
+def test_the_search_route_pages_and_refuses_what_it_does_not_take(bed: Bed) -> None:
+    every = body_json(bed.get(search_route("ok", limit="100"))[2])
+    assert len(every["results"]) > 2 and every["more"] is False
+    first = body_json(bed.get(search_route("ok", limit="2"))[2])
+    assert first["results"] == every["results"][:2] and first["more"] is True
+    second = body_json(bed.get(search_route("ok", limit="2", cursor=first["cursor"]))[2])
+    assert second["results"] == every["results"][2:4]
+
+    for route, named in (
+        (f"{SEARCH}?q=ok&session=x", "?session is not a query the search route takes"),
+        (f"{SEARCH}?q=ok&limit=many", "?limit is a number"),
+        (f"{SEARCH}?q=ok&limit=1000", "between 1 and 100"),
+        (f"{SEARCH}?q=ok&cursor=zzz", "cursor"),
+        (SEARCH, "needs a phrase"),
+    ):
+        status, _, body = bed.get(route)
+        assert status == 400 and named in body_json(body)["error"], (route, body)
+    status, _, body = bed.client.request(
+        SEARCH, method="POST", headers={**bed.client.reader, "Content-Type": "application/json"}
+    )
+    assert status == 405, body
+
+
+def test_the_request_log_does_not_hold_the_phrase_searched_for(bed: Bed) -> None:
+    assert bed.get(search_route("a fixed structure"))[0] == 200
+    assert bed.get(f"{SESSIONS}/{OLD}/turns?cursor=")[0] in (200, 400)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        written = bed.server.log_stream.stream.getvalue()
+        if f"{SESSIONS}/{OLD}/turns" in written:
+            break
+        time.sleep(0.02)
+    assert f'"GET {SEARCH}?[not logged] HTTP/1.1" 200' in written, written
+    assert "fixed" not in written and "structure" not in written
+    assert f"{SESSIONS}/{OLD}/turns?cursor=" in written  # another route's query is logged
+
+
+def test_a_session_sessions_json_dropped_is_served_from_the_archive_and_searched(
+    bed: Bed, project: Path, store_home: Path
+) -> None:
+    """``sessions.json`` keeps the most recent sessions only. An older one the project's
+    archive holds is still the project's, so a search result in it can be opened."""
+    from kyosei import transcript_archive
+    from kyosei.config import load_config
+
+    older = bed.transcripts / f"{NEW}.jsonl"
+    shutil.copyfile(NEW_FILE, older)
+    assert bed.get(f"{SESSIONS}/{NEW}/turns")[0] == 404  # in no file of this project's
+    archive = transcript_archive.archive_dir(load_config(project), bed.server.environ)
+    transcript_archive.archive_session(older, archive)
+    older.unlink()
+
+    status, _, body = bed.get(f"{SESSIONS}/{NEW}/turns")
+    assert status == 200, body
+    turns = body_json(body)
+    assert turns["replies"] or turns["turns"]
+    words = (turns["replies"] or turns["turns"])[0]["text"].split("\n")[0][:24]
+    found = body_json(bed.get(search_route(words))[2])["results"]
+    assert NEW in {result["session_id"] for result in found}
+    # A session in none of the project's files is still refused, whatever Claude Code holds.
+    shutil.copyfile(OLD_FILE, bed.transcripts / f"{ELSEWHERE}.jsonl")
+    assert bed.get(f"{SESSIONS}/{ELSEWHERE}/turns")[0] == 404

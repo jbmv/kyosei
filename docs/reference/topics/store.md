@@ -463,6 +463,15 @@ a transcript older than that period, and a credit can then be checked only again
 archive's copy. Setting the key to 365 or more in Claude Code's `settings.json` clears
 the notice (KYO-657).
 
+**The transcript search index (KYO-812).** `kyo transcripts search` and the search route of
+`kyo serve` keep an index of the text of the prompts and replies in
+`$KYOSEI_HOME/transcript-search/<project>/index.db`, beside the archive and, like it,
+outside every git repository; a search is refused when that directory lies inside one. It
+is derived from the transcripts and the archive: a search brings it up to date,
+`kyo transcripts rebuild` writes it again, and it can be deleted at any time. The route and
+the matching are described under "Searching what was said" in
+[serve-and-desktop.md](serve-and-desktop.md).
+
 **The code directory's git state decides whether the store records an identity.** The
 split store's `code_repo_id` is the code repository's root commit, so `kyo init` treats
 four cases differently:

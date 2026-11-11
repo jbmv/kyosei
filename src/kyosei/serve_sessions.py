@@ -20,6 +20,9 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
   and its text.
 
+And beside them ``GET search?q=`` -- the prompts and replies of the project's sessions that
+hold a phrase (KYO-812), which :mod:`kyosei.transcript_search` answers.
+
 The shapes are in ``docs/reference/topics/serve-and-desktop.md``.
 
 THROUGH THE SESSION LAYER ONLY. This module reads no transcript row and no pane screen; it
@@ -29,9 +32,10 @@ parses a Claude Code transcript row.
 
 READ ONLY, AND NEVER THE SENDING HALF. These routes change no session. Only
 :mod:`kyosei.serve_send` calls the layer's sending methods (``tests/test_kyo_serve_send.py``
-fails if another ``kyosei.serve*`` module reaches them). The one thing these routes can cause
-to be written is the layer's own log of an uncatalogued screen under
-``$KYOSEI_HOME/pane-unrecognised``, outside any repository.
+fails if another ``kyosei.serve*`` module reaches them). Two things these routes can cause
+to be written: the layer's own log of an uncatalogued screen under
+``$KYOSEI_HOME/pane-unrecognised``, outside any repository, and the search's derived index
+under ``$KYOSEI_HOME/transcript-search``, beside the archive (:mod:`kyosei.transcript_search`).
 
 A DEVICE TOKEN (KYO-791). Every route here is refused with 401 unless the request carries
 the token of a device this machine issued one to and has not revoked
@@ -42,8 +46,9 @@ on this machine or a device on the tailnet that reaches the server reads no sess
 
 OPT-IN (KYO-656). Every route refuses, naming ``read_transcripts``, in a project that has not
 opted in. The check is made first, before ``sessions.json`` is read. A session is also
-served only by the project whose ``sessions.json`` records it, so an opted-in project cannot
-be used to read another project's transcript by id: the layer's own lookup is by id alone.
+served only by a project that records it, in ``sessions.json``, in its turn index or in its
+transcript archive (KYO-812), so an opted-in project cannot be used to read another
+project's transcript by id: the layer's own lookup is by id alone.
 
 THE CURSOR. A client passes back the ``cursor`` of the last response. It is counts, one per
 list of objects, of how many objects the transcript has yielded in order, and a digest of
@@ -87,7 +92,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from . import session_layer
+from . import session_layer, transcript_search
 from .cmd_sessions import STATE_ENDED, read_sessions
 from .config import READ_TRANSCRIPTS_KEY, Config, load_config, transcripts_opted_in
 from .errors import KyoseiError, NotFound
@@ -499,15 +504,44 @@ class ProjectSessions:
             raise Refusal(403, session_layer.NOT_OPTED_IN, setting=READ_TRANSCRIPTS_KEY)
 
     def require(self, session_id: str) -> None:
-        """Refuse a session this project's ``sessions.json`` does not record."""
+        """Refuse a session this project does not record.
+
+        ``sessions.json`` keeps only the most recent sessions. A session it has dropped is
+        still this project's when the turn index names it or the project's archive holds its
+        transcript, which is how a search result in an older session is opened (KYO-812).
+        """
         recorded = read_sessions(self.paths.sessions).entries
-        if not any(entry.get("session_id") == session_id for entry in recorded):
+        if any(entry.get("session_id") == session_id for entry in recorded):
+            return
+        known = transcript_search.project_session_ids(
+            self.config, self.paths.store_root, self.environ
+        )
+        if session_id not in known:
             raise Refusal(
                 404,
                 f"session {session_id} is not recorded for this project in "
-                f"{self.paths.sessions}; GET {API_PREFIX}/projects/{{project}}/sessions lists "
-                "the sessions it serves",
+                f"{self.paths.sessions}, in its turn index or in its transcript archive; "
+                f"GET {API_PREFIX}/projects/{{project}}/sessions lists its recent sessions",
             )
+
+    def search(self, project: str, query: str, limit: str | None, cursor: str | None) -> dict:
+        """One page of the prompts and replies holding ``query`` (KYO-812)."""
+        if limit is not None and not limit.isdecimal():
+            raise Refusal(400, f"?limit is a number of results, not {limit!r}; pass digits only")
+        try:
+            return transcript_search.search(
+                self.config,
+                self.paths.store_root,
+                project,
+                query,
+                limit=transcript_search.DEFAULT_LIMIT if limit is None else int(limit),
+                cursor=cursor,
+                environ=self.environ,
+            )
+        except KyoseiError as exc:
+            raise Refusal(400, str(exc)) from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise Refusal(500, f"the transcript search index could not be used: {exc}") from exc
 
     def open_live(self, session_id: str) -> session_layer.LiveSession:
         """The layer's view of a session this project records, or a refusal."""
