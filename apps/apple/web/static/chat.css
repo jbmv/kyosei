@@ -847,17 +847,12 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 #records-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
 #records-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
-/* The landing page: one line for each record, under its kind. */
+/* The landing page: one line for each record, newest first, with its kind beside its id. */
 .records-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .records-tools .records-search { flex: 1; min-width: 200px; }
-.kind-head { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 4px; padding: 2px 10px; cursor: default; }
-.kind-head:hover .chevron { color: var(--text); }
-.kind-head .chevron { display: inline-block; color: var(--muted); }
-.kind-head.open .chevron { transform: rotate(90deg); }
-.kind-head .kind { font-size: 13.5px; }
-.kind-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 #records-groups .rec-row { display: flex; align-items: baseline; gap: 12px; }
 #records-groups .rec-id { flex: none; min-width: 64px; }
+#records-groups .kind { flex: none; min-width: 84px; }
 #records-groups .rec-title { flex: 1; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
 #records-note { margin-bottom: 14px; color: var(--muted); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 #records-note[hidden] { display: none; }

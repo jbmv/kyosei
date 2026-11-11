@@ -16,8 +16,8 @@ import {
 import { highlight, render } from "./pipeline";
 import { chipPieces } from "./chipwords";
 import {
-  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, byKind, pressed,
-  dispatchableIds, historyFrom, historyRows, isFolded, narrow, newestFirst, parseLink, prefixOf,
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, pressed,
+  dispatchableIds, historyFrom, historyRows, narrow, newestFirst, parseLink, prefixOf,
   recordOf, recordPage, refParts, visit, when,
 } from "./records";
 import {
@@ -3332,7 +3332,6 @@ projectButton.addEventListener("keydown", (event) => {
 // --------------------------------------------------------------------- Records (KYO-732)
 
 const FILTERS_KEY = "records-filters";
-const FOLDS_KEY = "records-folds";
 const REVEAL_MS = 1600;
 const recordsPane = document.getElementById("view-records")!;
 const recordsNote = document.getElementById("records-note")!;
@@ -3353,7 +3352,6 @@ const narrowing: Narrowing = {
   ...stored<Partial<Narrowing>>(FILTERS_KEY, {}),
 };
 narrowing.search = "";
-let kindFolds = stored<Record<string, boolean>>(FOLDS_KEY, {});
 let viewedRecords: string[] = [];
 /** The records opened, in order, with the landing page as home (KYO-738). */
 let recordPlaces: History<string> = fresh();
@@ -3453,7 +3451,7 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
     head.append(id, kindLabel(row.kind));
     item.append(head, title);
   } else {
-    item.append(id, title);
+    item.append(id, kindLabel(row.kind), title);
     if (row.status && row.status !== "open") item.append(span("rec-status", row.status));
   }
   return item;
@@ -3491,24 +3489,9 @@ function drawRecordLists(): void {
       ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
       : [emptyRow("No record has been viewed.")]);
 
-  const groups: HTMLElement[] = [];
-  for (const group of byKind(shown)) {
-    const folded = isFolded(group.kind, group.rows.length, kindFolds);
-    const head = document.createElement("div");
-    head.className = folded ? "kind-head" : "kind-head open";
-    head.setAttribute("role", "button");
-    head.setAttribute("aria-expanded", String(!folded));
-    head.append(span("chevron", "›"), kindLabel(group.kind), span("kind-count", String(group.rows.length)));
-    head.addEventListener("click", () => {
-      kindFolds = { ...kindFolds, [group.kind]: !folded };
-      store(FOLDS_KEY, kindFolds);
-      drawRecordLists();
-    });
-    groups.push(head);
-    if (!folded) groups.push(...group.rows.map((row) => recordRow(row, "landing")));
-  }
+  // The landing page lists the same rows in the same order, without groups (KYO-759).
   document.getElementById("records-groups")!.replaceChildren(
-    ...(groups.length ? groups : [emptyRow(nothing)]));
+    ...(shown.length ? shown.map((row) => recordRow(row, "landing")) : [emptyRow(nothing)]));
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  FOLD_ABOVE, HISTORY_LIMIT, awaitingIds, byKind, dispatchableIds, historyFrom, historyRows, isFolded,
+  HISTORY_LIMIT, awaitingIds, dispatchableIds, historyFrom, historyRows,
   latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
   pressed, reportItem, taskOf,
@@ -27,6 +27,22 @@ test("the newest record comes first", () => {
     { id: "A-2", kind: "task", title: "", status: "open", created_at: "2026-03-01T00:00:00Z" },
   ];
   assert.deepEqual(ids(newestFirst(dated)), ["A-2", "A-1"]);
+});
+
+test("the time a record was filed leads, and its number is no stand-in", () => {
+  const mixed = [
+    { id: "KYO-9", kind: "task", title: "", status: "open", seq: 9, created_at: "2026-01-01T00:00:00Z" },
+    { id: "OPS-2", kind: "bug", title: "", status: "open", seq: 2, created_at: "2026-02-01T00:00:00Z" },
+    { id: "KYO-8", kind: "plan", title: "", status: "open", seq: 8, created_at: "2026-02-01T00:00:00Z" },
+  ];
+  assert.deepEqual(ids(newestFirst(mixed)), ["KYO-8", "OPS-2", "KYO-9"]);
+});
+
+test("filters and search narrow the flat list and keep its order", () => {
+  const dated = rows.map((row, index) => ({ ...row, created_at: `2026-01-0${index + 1}T00:00:00Z` }));
+  const order = ids(newestFirst(dated));
+  const shown = ids(narrow(newestFirst(dated), { ...all, open: true }, new Set(), new Set()));
+  assert.deepEqual(shown, order.filter((id) => shown.includes(id)));
 });
 
 test("with nothing chosen and nothing typed, every record is shown", () => {
@@ -101,22 +117,6 @@ test("Awaiting you combines with the other two filters and the search", () => {
   assert.deepEqual(shown({ search: "serve" }), ["KYO-21", "KYO-25"]);
   assert.deepEqual(shown({ open: true, search: "serve" }), ["KYO-21"]);
   assert.deepEqual(shown({ open: true, dispatchable: true, search: "serve" }), []);
-});
-
-test("the landing page groups by kind, newest first within each", () => {
-  const groups = byKind(rows);
-  assert.deepEqual(groups.map((group) => group.kind), ["task", "bug", "plan", "decision"]);
-  assert.deepEqual(ids(groups[0].rows), ["KYO-30", "KYO-25", "KYO-1"]);
-  // A kind the order does not name comes after those it does.
-  const odd = byKind([...rows, { id: "KYO-40", kind: "audit", title: "", status: "open", seq: 40 }]);
-  assert.equal(odd.at(-1)!.kind, "audit");
-});
-
-test("a long group starts folded, and a person's choice stands", () => {
-  assert.equal(isFolded("bug", FOLD_ABOVE + 1, {}), true);
-  assert.equal(isFolded("bug", FOLD_ABOVE, {}), false);
-  assert.equal(isFolded("bug", 300, { bug: false }), false);
-  assert.equal(isFolded("plan", 2, { plan: true }), true);
 });
 
 test("a viewed record goes to the front of the history, once", () => {

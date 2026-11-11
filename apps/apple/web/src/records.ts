@@ -22,12 +22,16 @@ export interface Narrowing {
   search: string;
 }
 
-/** The records with the one created last first. */
+/**
+ * The records with the one filed last first (KYO-759). A record's number is the order it was
+ * made in a scope, and scopes number apart, so the time it was filed leads; the number only
+ * settles records filed together, or rows that carry no time.
+ */
 export function newestFirst<T extends RecordRow>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const bySeq = (b.seq ?? 0) - (a.seq ?? 0);
-    if (bySeq) return bySeq;
-    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+    const byTime = (b.created_at ?? "").localeCompare(a.created_at ?? "");
+    if (byTime) return byTime;
+    return (b.seq ?? 0) - (a.seq ?? 0);
   });
 }
 
@@ -105,39 +109,6 @@ export function narrow<T extends RecordRow>(
     && (!narrowing.dispatchable || ready.has(row.id))
     && (!narrowing.awaiting || awaiting.has(row.id))
     && matchesSearch(row, narrowing.search));
-}
-
-/** The kinds a project usually has, in the order the landing page lists them. */
-export const KIND_ORDER = [
-  "task", "bug", "chore", "plan", "proposal", "decision", "investigation", "discussion",
-  "evidence", "reminder",
-];
-
-export interface KindGroup<T extends RecordRow> { kind: string; rows: T[] }
-
-/** The rows under their kinds, newest first within each; a kind with no row is left out. */
-export function byKind<T extends RecordRow>(rows: T[]): KindGroup<T>[] {
-  const groups = new Map<string, T[]>();
-  for (const row of newestFirst(rows)) {
-    const group = groups.get(row.kind);
-    if (group) group.push(row);
-    else groups.set(row.kind, [row]);
-  }
-  const place = (kind: string) => {
-    const index = KIND_ORDER.indexOf(kind);
-    return index < 0 ? KIND_ORDER.length : index;
-  };
-  return [...groups.entries()]
-    .sort(([a], [b]) => place(a) - place(b) || a.localeCompare(b))
-    .map(([kind, rows]) => ({ kind, rows }));
-}
-
-/** A group this long starts folded, so that the kinds after it can be seen. */
-export const FOLD_ABOVE = 12;
-
-/** Whether a kind's group is folded: as the person last left it, or by its length. */
-export function isFolded(kind: string, count: number, chosen: Record<string, boolean>): boolean {
-  return Object.hasOwn(chosen, kind) ? chosen[kind] : count > FOLD_ABOVE;
 }
 
 /** How many viewed records are remembered. */
