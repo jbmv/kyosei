@@ -625,6 +625,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
 - **2026-11-11** — `KYO-727` (bug) — Mac app composer: an empty prompt vanishes, an anchor lands on a new line, and the view jumps while typing
+- **2026-11-11** — `KYO-722` (task) — Mac app: Send now on a held prompt, delivered at the session's next tool call
 - **2026-11-11** — `KYO-721` (task) — Mac app: a real terminal on the session's pane, served by kyo serve
 - **2026-11-11** — `KYO-720` (bug) — Mac app: an attached file in a sent prompt is shown as its path, not the image
 - **2026-11-11** — `KYO-719` (task) — kyo serve starts an orchestrator session, and the Mac app has a Start button
