@@ -106,6 +106,9 @@ class Output:
 
     lines: list[str] = field(default_factory=list)
     data: dict = field(default_factory=dict)
+    #: KYO-747: print the lines joined by newlines with none after the last, and no
+    #: footer, so that the output can be piped as a value (`kyo devices issue --token-only`).
+    bare: bool = False
 
 
 @dataclass
