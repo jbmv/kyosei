@@ -1130,7 +1130,7 @@ kyo docs suggest                           # draft the documents.yml declaration
                                             # paste. Writes nothing, enforces nothing; one
                                             # doctor NOTICE, off with docs_suggest_notice:
                                             # false (KYO-303)
-kyo docs coverage [--level LEVEL]          # the code no document section governs, by
+kyo docs coverage [--level notice]         # the code no document section governs, by
                                             # directory, with the files only a pointer
                                             # comment reaches, the targets reaching more
                                             # than 20 files and the sections governing
