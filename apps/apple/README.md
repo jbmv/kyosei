@@ -47,6 +47,7 @@ how the app draws each and where its code is.
 - apps/apple/Package.swift
 - apps/apple/Sources/KyoseiClient/ServeClient.swift
 - apps/apple/Sources/KyoseiMac/App.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
 - apps/apple/web/build.mjs
 - apps/apple/web/static/chat.css
 - apps/apple/web/src/pipeline.ts
@@ -95,7 +96,13 @@ describe.
 ## Projects
 
 <!-- governs:
-- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#toggleProjectList
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#choose
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#sendProjects
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#projects
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#readProjects
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#followProjects
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#verifyProject
 - apps/apple/web/src/projects.ts
 - apps/apple/web/src/chat.ts#projectRows
 - apps/apple/web/src/chat.ts#chooseProject
@@ -124,7 +131,14 @@ returns to the project the window was showing.
 ### Drafts of unsent prompts
 
 <!-- governs:
-- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#DraftPlace
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#draftPath
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#loadDraft
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#draftChanged
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#handDraft
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#saveDraft
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#settleDraftBeforeQuit
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#sendPendingDraft
 - apps/apple/Sources/KyoseiClient/DraftSettlement.swift
 - apps/apple/web/src/drafts.ts
 - apps/apple/web/src/projects.ts
@@ -210,7 +224,11 @@ it the frames the app would send, and are skipped on a machine with no Chrome.
 ### A session's task list
 
 <!-- governs:
-- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#showAgenda
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#agendaFrame
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#loadAgenda
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#agendaChanged
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#saveAgenda
 - apps/apple/web/src/agenda.ts
 - apps/apple/web/src/chat.ts#agendaFrame
 - apps/apple/web/src/chat.ts#agendaItemsNow
@@ -357,7 +375,7 @@ they are. The logic is in `web/src/files.ts`. All of this needs the device token
 
 <!-- governs:
 - apps/apple/web/src/searchhistory.ts
-- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#history
 - apps/apple/web/src/chat.ts#enterHistory
 - apps/apple/web/src/chat.ts#askHistory
 - apps/apple/web/src/chat.ts#drawHistory
@@ -382,7 +400,7 @@ that has opted in to reading transcripts. The logic is in `web/src/searchhistory
 
 <!-- governs:
 - apps/apple/web/src/files.ts#localPath
-- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#files
 -->
 
 `kyo serve` serves no file outside those roots, so a path that lies elsewhere on the server's
