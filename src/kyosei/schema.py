@@ -352,7 +352,15 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: of it, since no line was sealed, and a seal is never derived at load time: a hash
 #: computed now would claim a commitment made when the words were sent, which is the one
 #: thing it could not show. A real DDL change, so a real new hash.
-SCHEMA_VERSION = 33
+#: Bumped to 34 for KYO-661 (decision KYO-654, DC9, candidate C4'):
+#: ``dispatches.answered_prompt_json``, the prompt a dispatch was made in reply to, as the
+#: turn index held it at ``kyo dispatch``: session, prompt id, time and the origin the index
+#: knew (``human``, or the transcript's own name for a notification, or ``unconfirmed``). It
+#: states that the work began in reply to that message and when, and nothing about approval.
+#: A record document written at 33 or earlier carries no such key on its dispatches
+#: (:data:`DISPATCH_FIELD_DEFAULTS` [34]); NULL is what was true of it, and a prompt is never
+#: derived at load time from a dispatch's time. A real DDL change, so a real new hash.
+SCHEMA_VERSION = 34
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -613,6 +621,11 @@ CREATE TABLE dispatches (
     worker_model        TEXT,
     touch_override_json TEXT,
     covers_json         TEXT,
+    -- KYO-661: the prompt this dispatch answered, a JSON object {session, prompt_id, turn,
+    -- at, origin} read from the turn index when `kyo dispatch` ran. NULL when there was no
+    -- session, no opted-in index or no line for it, and `kyo show` says which of those it
+    -- was only on the dispatch's own echo; the column cannot tell them apart.
+    answered_prompt_json TEXT,
     report_id           TEXT REFERENCES reports(id),
     terminated_why      TEXT,
     closed_at           TEXT,
@@ -1667,6 +1680,12 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
             "render.show_text",
         ),
         "touch_override_json": ("export.record_document", "cmd_dispatch.cmd_dispatch"),
+        # KYO-661: written once, by `kyo dispatch`, from the turn index.
+        "answered_prompt_json": (
+            "export.record_document",
+            "cmd_dispatch.answered_prompt",
+            "render.show_text",
+        ),
         "covers_json": (
             "export.record_document",
             "cmd_dispatch.cmd_dispatch",
@@ -2314,6 +2333,9 @@ DISPATCH_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     #: `StopAuditLedger.untranscribed`), so `None` here means exactly "no counted
     #: tick", never "unknown".
     23: {"tick_audit": None},
+    #: KYO-661: a dispatch exported before this field existed was made with no prompt
+    #: recorded, and None says so. Never derived from the turn index at load time.
+    34: {"answered_prompt": None},
 }
 
 #: KYO-22: fields *within* each evidence artifact, same per-child shape. An
