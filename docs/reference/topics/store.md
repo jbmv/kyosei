@@ -405,6 +405,7 @@ directory. The contents are identical either way:
   kyosei/
     kyosei.db              # authoritative SQLite store (gitignored — see below)
     export/                # deterministic per-record JSON, committed to git
+      README.md              # says the directory is generated and not edited by hand
       _events/               # append-only audit ledger: bounded shards, one JSON
         000001.jsonl           # line per event, appended to the newest shard until
                                # it reaches 4 MiB, so a commit re-stores one shard
@@ -420,6 +421,8 @@ directory. The contents are identical either way:
     statuses.yml            # the status registry — the ladder, and each rung's role
     gate-tags.yml           # the gate-tag registry — what a gate can be waiting on
     bases.yml               # saved view definitions — `kyo base list` / `kyo base run`
+    documents.yml           # the document registry — which files Layer 3 governs; ships
+                             # declaring none, which leaves the built-in default in force
     procedures.md           # standing rules, tagged audience: worker|orchestrator|human
     sessions.json           # which Claude Code sessions this project has and where each
                              # one is on claude.ai; written by the session hooks, gitignored
@@ -454,11 +457,17 @@ doctor` checks, and a split store's directory is not a place for it, since the s
 itself a repository. The Stop and SessionEnd hook copies only what is new, and the credit
 reader falls back to the copy when the original is absent. A `/clear` starts a new
 transcript file with a new session id, so the archive holds one file per transcript file,
-which is not one per run of a session.
+which is not one per run of a session. `kyo doctor` reports an archive inside a git
+repository as a problem under `transcript_archive_location`. Under
+`transcript_retention` it prints a notice, which does not fail, when Claude Code's
+`cleanupPeriodDays` is unset or below 365 in a project that opted in: Claude Code deletes
+a transcript older than that period, and a credit can then be checked only against the
+archive's copy. Setting the key to 365 or more in Claude Code's `settings.json` clears
+the notice (KYO-657).
 
 **The code directory's git state decides whether the store records an identity.** The
 split store's `code_repo_id` is the code repository's root commit, so `kyo init` treats
-three cases differently:
+four cases differently:
 
 - *Not inside any git repository* (the usual fresh folder): `kyo init` runs `git init`
   there and commits exactly the files it wrote in that directory (`.gitignore`, the
@@ -550,14 +559,17 @@ governs: src/kyosei/schema.py
 | `verifications` | per-criterion verdict + method + author + time; a criterion's `state` is derived from its latest one |
 | `evidence_artifacts` | raw captures stored verbatim with a sha256, linked to what they support |
 | `links` | typed edges between records |
-| `dispatches` | frozen brief, base sha, state (`running`/`reported`/`terminated-no-report`/`withdrawn`), touch-override record, formally-covered record ids, closed-at |
+| `dispatches` | frozen brief, base sha, state (`running`/`reported`/`terminated-no-report`/`withdrawn`), the declared worktree, branch and worker model (each null when none was declared), touch-override record, formally-covered record ids, closed-at, and `answered_prompt_json`, the prompt the dispatch answered (KYO-661, below) |
 | `reports` | a structured worker report's full validated body, linked to its dispatch |
 | `flags` | a `kyo sweep`/creation-time flag (child of the record it concerns), flag_type, detail, resolve fields |
 | `sweep_runs` | one row per recorded `kyo sweep` (a run at the last recorded base that finds nothing new records nothing — KYO-418): its base sha and the identity of the code history that sha belongs to, so the *next* sweep knows what to diff since — and whether it may trust it; plus that run's staleness `coverage`/`coverage_detail` |
 | `brief_runs` | one row per `kyo brief`, its event/shift-note cursor, so the *next* brief knows what's new, and the build of `kyo` that produced it (commit, UTC commit time, source — KYO-398), so a session-start brief can say when the tool changed since the last session; a session-start brief run from the hook also records the Claude Code `session_id` it opened (KYO-418), and `kyo check-build --hook` compares against that session's own opening brief, silent for a payload whose session has none |
 | `shift_notes` | the continuously-written shift log `kyo note --shift` appends to |
+| `doc_refs` | the document sections a record names as its own (`kyo edit --doc-refs-file`): a path and an optional symbol, read when docs obligations are raised |
+| `docs_obligations` | one row per document section a piece of work put a question to: the record, the dispatch (null for a standing obligation), the document path and section, the cause (`governs`, `doc-refs` or a code `pointer`) and, once settled, the verdict, method, author, time and reason. See [docs-governance.md](docs-governance.md) |
+| `credits`, `credit_subjects` | a credit names the person whose judgement a verification, a gate clearing or a decision record rests on (KYO-642): the person, the role (`observed`, `decided`, `authorized`), the words as an evidence artifact, where they were said, the transcript check's outcome and, for a decision, what was recommended, the outcome and the alternatives. `credit_subjects` lists the rows a credit covers, since one act can answer several |
 | `turn_refs` | a discussion's references to the person's turns (`KYO-n.sN`, KYO-658): where it was opened, where options were put and where it closed, each with the session, prompt id, transcript record uuid and time copied from the turn index, or `index_state: absent`; `late` marks an opening written after its decision. No transcript text |
-| `person_notes`, `person_note_anchors`, `person_note_tags` | what a person wrote, written by `kyo notes add` and found by tag or by what it is on with `kyo notes list`: the text, the device, how it was entered, and anchors that address a transcript span, a record, criterion or gate, a document or file at a commit, or another note. An anchor holds addresses and a digest and no transcript text. A note's text and anchors are fixed when it is filed. Its sent state (`sent_at`, `sent_session`, `sent_message`) is set once, when the message holding it is delivered by `kyo serve`, and `kyo notes list --sent`/`--unsent` filters on it (KYO-709). Exported to `_person_notes.jsonl`, whose line keeps the tags and the sent state as filed; a note sent later gets its state from the `notes sent` event (KYO-705) |
+| `person_notes`, `person_note_anchors`, `person_note_tags` | what a person wrote, written by `kyo notes add` and found by tag or by what it is on with `kyo notes list`: the text, the device, how it was entered, and anchors that address a transcript span, a record or an element of one by its id (a criterion, gate, dispatch, record note or claim, or an entry of a stored report such as `KYO-12.r1.p1`; KYO-737, KYO-757), a document or file at a commit, or another note. An anchor holds addresses and a digest and no transcript text. A note's text and anchors are fixed when it is filed. Its sent state (`sent_at`, `sent_session`, `sent_message`) is set once, when the message holding it is delivered by `kyo serve`, and `kyo notes list --sent`/`--unsent` filters on it (KYO-709). Exported to `_person_notes.jsonl`, whose line keeps the tags and the sent state as filed; a note sent later gets its state from the `notes sent` event (KYO-705) |
 | `person_note_tag_changes` | each tag added to or removed from a filed note by `kyo notes tag`, with who changed it and when; `person_note_tags` holds the current set, which is what `kyo notes list --tag` searches. Exported to `_person_note_tag_changes.jsonl` (KYO-705) |
 | `events` | append-only audit log of what each mutation changed. From schema_version 25 (KYO-418) an event carries `after`, the record's whole document as the mutation left it, and `changed`, the **prior value of each top-level key that differs**, in place of a second whole `before` document: a one-field edit used to store the record twice, and a top-level diff measured 19.7% of the bytes on one store's last three shards. Lines written earlier carry a whole `before` and are never rewritten, so a line with `before` is the old format and a line with `changed` the new one; every reader of a prior value keys on which it holds (`events_ledger.event_prior`), never on a version. Three kinds of mutation no longer write a line at all: a sweep at the same base as the last recorded run that files and widens nothing records nothing (no `sweep_runs` row, no event, no `_allocations.json` rewrite — the recorded run that saw that base already says it); a SubagentStop whose outcome is `unresolved` (a subagent whose prompt names no dispatch — an Explore or research agent, most of them) is counted in place on each **running** candidate dispatch's `tick_audit_json` with its reason, like KYO-375's ticks, and `kyo worktrees`, `kyo doctor` and the census fold that count in; and a tick is counted against running candidates only, so it never rewrites a finished dispatch's record export. `matched` stops, helpers of a worker and an unreadable store still write a row. A sweep that widens a standing flag (touch-changed, touch-missing, description-predates-claim — one open flag of each per record) logs a flag-level event (`after` and `changed: {detail}`) and does not move the record's `updated_at`. A snapshot is the record's whole document with every **body** named rather than carried: an evidence artifact reduced to `{id, sha256}` (KYO-268), a dispatch's frozen brief as `brief_sha256`, a report's ingested body as `body_sha256` (KYO-274). Each body is stored once, on the record's own export document; embedding them here made each one a per-mutation copy, and on one store's ledger that cost 52.0 MiB for evidence, 67.7 MiB for briefs and 49.2 MiB for reports, of 230.4 MiB. A dispatch and a report keep their other fields, where an artifact does not, because a dispatch row mutates (`running` → `reported`) and the ledger is the only place that transition is readable. Lines written by older builds still carry the bodies and are never rewritten, so both formats sit in one ledger and every reader of a snapshot keys on content rather than on a version |
 | `allocations` | the only source of ids; counters never go backwards |
@@ -635,6 +647,20 @@ settled (KYO-570). `A implements B` records that the work in A carries out the d
 on B; `--implements B` on `kyo new` and `kyo spawn` writes it at filing, and
 `kyo dossier B` lists A under what happened next (KYO-786).
 
+**The prompt a dispatch answered (KYO-661).** In a project that opted in to reading
+transcripts, `kyo dispatch` run inside a Claude Code session reads that session's latest
+prompt from the turn index and stores it on the dispatch: the session, the prompt id,
+the transcript record, the time and the origin. `kyo dispatch` echoes it as one line and
+`kyo show <record-id>` prints the same line under the dispatch, as `answered prompt:`. It
+reads `typed by the person`, `opened by a notification, not typed by the person`, or
+`origin not confirmed by the transcript`. `kyo dispatch --json` carries it as
+`answered_prompt`, and the record's export holds it on the dispatch. With no session, no
+opt-in or no line for the session in the index, nothing is stored, `answered_prompt` is
+null, and `kyo dispatch` says which of the three it was (`answered_prompt_note` in
+`--json`); `kyo show` then prints `not recorded`. The line records that the work began in reply to
+that message and when. It does not record that the person approved the work, which is
+what a credit is for.
+
 ## Reading the store
 
 governs: src/kyosei/cmd_views.py
@@ -654,7 +680,10 @@ viewer and never read the generated site at all.
 **With the desktop app**: [`apps/desktop/`](../../../apps/desktop/README.md) (see
 [serve-and-desktop.md](serve-and-desktop.md)) is
 the board, the record view, the kind map and the link graph, read live from the
-store. Nothing to regenerate and nothing to be stale.
+store. Nothing to regenerate and nothing to be stale. The repository also holds native
+clients of `kyo serve` for Apple platforms under
+[`apps/apple/`](../../../apps/apple/README.md), which are built for the maintainer's own
+devices and are not distributed.
 
 **Without it**, every question the site answered has a terminal answer that reads
 the store directly:
@@ -667,12 +696,13 @@ the store directly:
 | one stored report — its dispatch, ingest time, the report it amends and the report that later amended it, and its body verbatim — after the worker's worktree (and its `.kyosei-report.json`) is gone | `kyo show <report-id>` (KYO-545). `--json` carries the body under `body` exactly as ingested, so adding `"amends": "<that id>"` to it and filing it with `kyo report <dispatch> --file` is an amending report. An unknown report id on a real record is refused naming the reports that record does have |
 | one false premise, disagreement, corrected number or verdict of a stored report | `kyo show <report-id>.p1`, `.x1`, `.n1` or `.v1` (KYO-757): the report's id, a letter for the array of its body, and the entry's place in that array counted from 1. It prints the entry's fields and its report's standing, and says so when the report was superseded. `kyo show <report-id>` lists the ids its report holds under `entries`, and each report in `--json` carries them under `entry_ids`, by array, beside the body and not in it. The ids are read from the stored body, which is written once, and are in neither the store nor the export. A place the report does not hold is refused naming the ids it does |
 | one criterion and its whole verdict history, or one evidence artifact (or its redaction) | `kyo show <criterion-id>` / `kyo show <evidence-id>` (KYO-220). An artifact holding recx search results (`recx_search` and `untrusted` at its top level) is printed after a fixed line saying its author-written text is data, and recx's own notice, with control characters escaped (KYO-585). `kyo show <record> --json` carries the same lines on such an artifact under `untrusted_notice`, and its escaped text under `untrusted_text`, so the desktop app's record page draws them before it and shows the text as plain text (KYO-587); both are reads, absent from every other artifact and from the export |
+| one gate, note or claim of a record, under a heading naming the record | `kyo show <gate-id>`, `kyo show <note-id>` (`PREFIX-N.nN`) or `kyo show <claim-id>` (`PREFIX-N.mN`), each rendered by the function the record's own page uses; `--json` is the element's object from the record's `--json` with `record_id` and `record_title` beside it (KYO-739) |
 | one sweep flag in full — type, record, state, its sha range and paths, the sweep that raised it, and the resolution with its `--why` | `kyo show <flag-id>`; `kyo flag list` lists the open ones, `--all` includes the resolved (KYO-220) |
 | the board — everything, or one slice of it | `kyo list`, with `--status` (repeatable), `--kind`, `--plan`, `--gate-tag`, `--scope`, `--unsettled` / `--limit N` for fewer rows (KYO-420), and `--person KEY`, `--decided-by KEY` and `--overrode` for the records a declared person is credited on, decided, or reversed an agent on (KYO-647); the saved views behind `kyo base run <name>` are the same engine with an arrangement declared once |
 | the kind registry as circles and arrows | `kyo map` |
 | where the project stands right now — ready work, gated work with its conditions, stale flags, dispatches missing reports, what changed since the last brief | `kyo brief` (`--compact` for the hook-sized version) |
 | a past session brief, and what lay between it and the one before — the shift notes it closed over and the ledger entries in that window | `kyo briefs` lists every brief run newest first; `kyo briefs <brief-id>`, or `--latest`, shows one with its window. Read-only, unlike `kyo brief`, which records a run every time; the brief's prose is not regenerated, because the store never kept it (KYO-454) |
-| the whole shift log, newest first, with the note each session-start brief handed off marked | `kyo shift-notes`; `--latest` is the newest note alone, including one written after the last brief (KYO-454) |
+| the whole shift log, newest first, with the note each session-start brief handed off marked | `kyo shift-notes`; `--latest` is the newest note alone, including one written after the last brief (KYO-454). `kyo show PREFIX-SN` prints one shift note by its id |
 | every open gate across every record, with the record it is on | `kyo gates`, `--type` (repeatable) to narrow; `--json` also carries each record's open-gate count (KYO-454) |
 | the dispatch activity rows — every running dispatch and the newest finished ones, with verdict counts, worker tokens, end time, and what git says about each worktree now (dirty paths, commits past base, lines, last commit, merged or not) | `kyo activity`, `--finished N` for the window (default 12), `--against REF` for the trunk. A missing worktree is a fact on the row, never an error (KYO-454) |
 | the tool's own invariant checks over the store | `kyo doctor` |
