@@ -758,6 +758,15 @@ body.terminal-open #terminal { display: flex; }
 .tag-suggestions:empty { display: none; }
 .tag-suggestion { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 12px; }
 .tag-suggestion:hover { color: var(--text); border-color: var(--muted); }
+/* Anchor mode (KYO-823): its button in the + panel, divided from the tag field. */
+.mark-anchor-mode { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--text); font-size: 12.5px; }
+.mark-anchor-mode:hover { border-color: var(--muted); }
+.mark-anchor-mode .icon { width: 14px; height: 14px; }
+.mark-divider { flex-basis: 100%; height: 0; border-top: 1px solid var(--soft-line); }
+body.anchor-mode, body.anchor-mode * { cursor: var(--anchor-cursor) !important; }
+.anchor-dim { opacity: 0.4; transition: opacity 0.1s; }
+.anchor-lit { border-radius: 4px; background: color-mix(in srgb, var(--pastel-blue) 20%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--pastel-blue) 45%, transparent); }
+::highlight(anchor-preview) { background-color: color-mix(in srgb, var(--pastel-blue) 38%, transparent); }
 .mark-thumb { width: 28px; height: 28px; margin-right: 5px; border-radius: 4px; object-fit: cover; vertical-align: middle; }
 .mark-item .icon { margin-right: 4px; }
 

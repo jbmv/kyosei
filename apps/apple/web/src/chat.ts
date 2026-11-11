@@ -1444,6 +1444,7 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 
 const kyo = {
   clear(): void {
+    endAnchorMode();
     turnsLoaded = false;
     drawEmptyChat();
     lastMainActivity = "";
@@ -1862,6 +1863,7 @@ const kyo = {
    * goes, and the composer takes the prompts that were left unsent in this one.
    */
   project(frame: { project?: string; scope?: string }): void {
+    endAnchorMode();
     const leaving = scope;
     windowProject = frame.project ?? "";
     scope = frame.scope ?? windowProject;
@@ -2319,7 +2321,12 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     event.preventDefault();
     addTag(name);
   });
-  markPanel.replaceChildren(...chips, field, suggestions);
+  // KYO-823: the reverse of a right-click, a place in the chat chosen for this paragraph.
+  const anchorButton = boxButton("mark-anchor-mode", "Anchor", () => startAnchorMode(area, id));
+  anchorButton.prepend(icon("anchor"));
+  const divider = document.createElement("div");
+  divider.className = "mark-divider";
+  markPanel.replaceChildren(...chips, anchorButton, divider, field, suggestions);
   suggest();
   markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
   area.closest(".box")!.append(markPanel);
@@ -2541,6 +2548,170 @@ chat.addEventListener("contextmenu", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") anchorMenu.remove();
 });
+
+// ---- anchor mode (KYO-823): from a paragraph's + panel, the next press on a place in the
+// chat, an open record or an open file anchors it to that paragraph, as a right-click would.
+
+let anchorMode: { area: HTMLTextAreaElement; id: number } | null = null;
+let anchorDimmed: Element | null = null;
+let anchorLit: Element | null = null;
+/** Set by a press made in the mode, whose click must not also act on what it fell on. */
+let anchorSwallow = false;
+let anchorHoverFrame = 0;
+
+/** The pointer in the mode: the anchor icon, outlined so it shows on light and dark alike. */
+function anchorCursor(): string {
+  const strokes = (colour: string, width: number) =>
+    `<g fill='none' stroke='${colour}' stroke-width='${width}' stroke-linecap='round' stroke-linejoin='round'>${ICONS.anchor}</g>`;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>`
+    + `${strokes("black", 4)}${strokes("white", 1.8)}</svg>`;
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") 12 12, crosshair`;
+}
+
+function startAnchorMode(area: HTMLTextAreaElement, id: number): void {
+  hideMark();
+  anchorMode = { area, id };
+  document.body.style.setProperty("--anchor-cursor", anchorCursor());
+  document.body.classList.add("anchor-mode");
+}
+
+function clearAnchorHover(): void {
+  showRanges("anchor-preview", []);
+  anchorLit?.classList.remove("anchor-lit");
+  anchorDimmed?.classList.remove("anchor-dim");
+  anchorLit = anchorDimmed = null;
+}
+
+function endAnchorMode(): void {
+  if (!anchorMode) return;
+  anchorMode = null;
+  clearAnchorHover();
+  document.body.classList.remove("anchor-mode");
+}
+
+/**
+ * What a press at `point` on `target` would anchor, found as a right-click finds it, and what
+ * shows it: a range of a prompt or reply, or the record's part or the file's block. Null for
+ * a place that cannot be anchored.
+ */
+function anchorPlaceAt(
+  target: Element, point: { x: number; y: number }, own: boolean,
+): { item: AnchorItem | Place; range: Range | null; element: Element | null } | null {
+  const holder = target.closest<HTMLElement>("#chat > [data-key]");
+  if (holder && chat.contains(holder)) {
+    const key = holder.dataset.key;
+    const session = menu?.current;
+    if (!key || !sources.has(key) || !session) return null;
+    const span = spanAt(holder, key, target as HTMLElement, point, own);
+    if (!span) return null;
+    const item: AnchorItem = { kind: "anchor", key, session, ...span };
+    const range = wordsRange(item);
+    return { item, range, element: range ? null : holder };
+  }
+  if (recordArticle.contains(target)) {
+    const element = target.closest<HTMLElement>("[data-record-ref]");
+    const id = element?.dataset.recordRef;
+    if (!element || !id) return null;
+    const text = element.classList.contains("record-head")
+      ? recordArticle.querySelector("h1")?.textContent ?? ""
+      : element.querySelector(".rec-text")?.textContent ?? "";
+    const words = text.trim() ? `${id} ${firstWords(text, ANCHOR_WORDS)}` : id;
+    return { item: { kind: "record", id, words }, range: null, element };
+  }
+  const file = openFile;
+  if (file && fileArticle.contains(target)) {
+    const place = filePlaceAt(file, target, point, own);
+    if (!place) return null;
+    const session = isPerSession(fileRoots, file.root) ? filesSession : null;
+    const element = target.closest("[data-source-line], .file-line, p, li, pre, tr, h1, h2, h3, h4, blockquote")
+      ?? target;
+    return {
+      item: { kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}) },
+      range: null, element,
+    };
+  }
+  return null;
+}
+
+/** The part of the page a hover that cannot anchor dims: its row or block, never the page. */
+function dimmedPart(target: Element): Element | null {
+  const part = target.closest("#chat > *, button, a, li, .rec-row, .mention-row, .tree-row, .chip, .box, p, div");
+  return part && part !== document.body && part !== document.documentElement ? part : null;
+}
+
+document.addEventListener("mousemove", (event) => {
+  if (!anchorMode || !(event.target instanceof Element)) return;
+  const target = event.target;
+  const point = { x: event.clientX, y: event.clientY };
+  cancelAnimationFrame(anchorHoverFrame);
+  anchorHoverFrame = requestAnimationFrame(() => {
+    if (!anchorMode) return;
+    const found = anchorPlaceAt(target, point, false);
+    clearAnchorHover();
+    if (found?.range) showRanges("anchor-preview", [found.range], 2);
+    else if (found?.element) {
+      anchorLit = found.element;
+      anchorLit.classList.add("anchor-lit");
+    } else if (!found) {
+      anchorDimmed = dimmedPart(target);
+      anchorDimmed?.classList.add("anchor-dim");
+    }
+  });
+}, { passive: true });
+
+document.addEventListener("mousedown", (event) => {
+  if (!anchorMode || event.button !== 0) return;
+  anchorSwallow = true;
+  // A press inside a selection the person made keeps it, to be anchored as it is.
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed && selection.rangeCount) {
+    const inside = Array.from(selection.getRangeAt(0).getClientRects()).some((rect) =>
+      event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom);
+    if (inside) event.preventDefault();
+  }
+}, true);
+
+document.addEventListener("mouseup", (event) => {
+  if (!anchorMode || event.button !== 0 || !(event.target instanceof Element)) return;
+  // A press on a paragraph's + ends the mode, and opens that panel as a press would.
+  if (event.target.closest(".mark")) {
+    anchorSwallow = false;
+    endAnchorMode();
+    return;
+  }
+  const selection = window.getSelection();
+  const own = !!selection && !selection.isCollapsed && selection.rangeCount > 0;
+  const startNode = own ? selection!.getRangeAt(0).startContainer : null;
+  const from = own
+    ? (startNode instanceof Element ? startNode : startNode?.parentElement) ?? event.target
+    : event.target;
+  const found = anchorPlaceAt(from, { x: event.clientX, y: event.clientY }, own);
+  if (!found) return;
+  const { area, id } = anchorMode;
+  endAnchorMode();
+  const line = marksOf.get(area)?.ids.indexOf(id) ?? -1;
+  if (line < 0) return;
+  addAnchor(area, line, found.item);
+  window.getSelection()?.removeAllRanges();
+  area.focus();
+  const end = area.value.split("\n").slice(0, line + 1).join("\n").length;
+  area.setSelectionRange(end, end);
+}, true);
+
+document.addEventListener("click", (event) => {
+  if (!anchorSwallow) return;
+  anchorSwallow = false;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && anchorMode) {
+    event.preventDefault();
+    endAnchorMode();
+  }
+}, true);
 
 function anchorsHeld(): AnchorItem[] {
   return textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
