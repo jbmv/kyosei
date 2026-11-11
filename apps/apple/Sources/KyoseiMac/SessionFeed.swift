@@ -1658,6 +1658,21 @@ final class SessionFeed {
                     #"{"ask": \#(ask), "status": \#(reply?.status ?? 0), "#
                         + #""document": \#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
             }
+        case "turns", "marks":
+            // A session read whole for the History pane, which never switches the chat
+            // (KYO-836): its transcript objects, or the paragraphs sent with marks.
+            guard let session = body["session"] as? String, let want = body["want"] as? String else {
+                return
+            }
+            Task {
+                let reply = try? await client.history(
+                    project: project, under: "sessions", segments: [session, want], token: token)
+                guard project == self.project else { return }
+                send(
+                    want == "turns" ? "historyTurns" : "historyMarks",
+                    #"{"ask": \#(ask), "session": \#(quoted(session)), "status": \#(reply?.status ?? 0), "#
+                        + #""document": \#(filesDocument(reply)), "error": \#(filesProblem(reply))}"#)
+            }
         case "recent", "opened":
             var post: Data?
             if body["want"] as? String == "opened" {

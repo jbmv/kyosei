@@ -62,58 +62,101 @@ test("Command-Shift-F opens History, and the field asks with the longer excerpt"
   assert.equal(typeof asked[0].context, "number");
 });
 
-test("each result is a block with who, when and the marked words; Load more shows for a next page", async (t) => {
+test("results are grouped in a folded box per session; each result inside is a block", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
-  const drawn = await page.run<{ blocks: string[]; marks: string[]; more: boolean; count: string }>(`(() => {
+  const drawn = await page.run<{ groups: string[]; open: boolean[]; blocks: string[]; more: boolean; count: string }>(`(() => {
     const ask = window.posted.filter((p) => p.name === "history").pop().body.ask;
     window.kyo.historySearched({ ask, status: 200, document: ${JSON.stringify(answer)} });
     // An answer to an older request is not drawn.
     window.kyo.historySearched({ ask: ask - 1, status: 200, document: { ok: true, results: [] } });
+    document.querySelector("#history-results [data-group]").click();
     return {
+      groups: [...document.querySelectorAll("#history-results .history-group-title")].map((e) => e.textContent),
+      open: [...document.querySelectorAll("#history-results .history-group")].map((e) => e.classList.contains("open")),
       blocks: [...document.querySelectorAll("#history-results .history-result .history-who")].map((e) => e.textContent),
-      marks: [...document.querySelectorAll("#history-results mark")].map((e) => e.textContent),
       more: !document.getElementById("history-more").hidden,
       count: document.getElementById("history-count").textContent,
     };
   })()`);
+  assert.deepEqual(drawn.groups, ["Today"], "both results are of one session, in one box");
+  assert.deepEqual(drawn.open, [true], "folded at first, opened by its head");
   assert.deepEqual(drawn.blocks, ["Claude", "You"]);
-  assert.deepEqual(drawn.marks, ["anchor", "anchor"]);
   assert.equal(drawn.more, true);
-  assert.equal(drawn.count, "2+ messages");
+  assert.equal(drawn.count, "2+ messages in 1 session");
 });
 
-test("a press on a block opens the chat at the message, lights it, and records it as opened", async (t) => {
+test("a press on a block opens the session in History, never in the chat, at the message", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
-  const result = await page.run<{ chat: boolean; lit: string | null; back: boolean; posted: unknown[] }>(`(() => {
+  const asked = await page.run<{ history: boolean; wants: string[] }>(`(() => {
     window.posted.length = 0;
     document.querySelector('#history-results [data-result="0"]').click();
-    const lit = document.querySelector("#chat .history-flash");
     return {
-      chat: document.getElementById("view-history").hidden,
-      lit: lit ? lit.dataset.key : null,
-      back: !document.getElementById("history-back").hidden,
-      posted: window.posted.filter((p) => p.name === "history").map((p) => p.body),
+      history: !document.getElementById("view-history").hidden,
+      wants: window.posted.filter((p) => p.name === "history").map((p) => p.body.want),
     };
   })()`);
-  assert.equal(result.chat, true);
-  assert.equal(result.lit, "r:msg_1");
-  assert.equal(result.back, true, "a way back to the results");
-  assert.deepEqual(result.posted, [{
-    want: "opened", session: "S1", message: "x-1", words: "The anchor mode builds on right-click.",
-  }]);
-  const back = await page.run<{ view: boolean; kept: number }>(`(() => {
-    document.getElementById("history-back").click();
+  assert.equal(asked.history, true, "the History view stays");
+  assert.deepEqual(asked.wants.sort(), ["marks", "opened", "turns"]);
+  const read = await page.run<{ reader: boolean; lit: string | null; outline: string[]; tags: string[]; selected: boolean; nav: boolean }>(`(() => {
+    const ask = window.posted.filter((p) => p.body.want === "turns").pop().body.ask;
+    window.kyo.historyTurns({ ask, session: "S1", status: 200, document: {
+      turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?" }],
+      replies: [{ message_id: "msg_1", uuid: "x-1", at: "2026-01-01T00:00:01Z", text: "The anchor mode builds on right-click." }],
+      tool_calls: [{ call_id: "c1", uuid: "y1", at: "2026-01-01T00:00:02Z", name: "Bash", input: {}, result: null }] } });
+    window.kyo.historyMarks({ ask, session: "S1", status: 200, document: { marks: [
+      { note: "n1", text: "Look here", tags: ["layout"], anchors: [{ role: "assistant", message: "msg_1" }] } ] } });
     return {
-      view: !document.getElementById("view-history").hidden,
-      kept: document.querySelectorAll("#history-results .history-result").length,
+      reader: !document.getElementById("history-reader").hidden && document.getElementById("history-home-page").hidden,
+      lit: document.querySelector("#history-reader .history-flash")?.dataset.hkey ?? null,
+      outline: [...document.querySelectorAll("#history-outline .outline-row")].map((r) => r.className.replace("outline-row ", "").replace(" current", "") + ":" + r.textContent),
+      tags: [...document.querySelectorAll("#history-tags .mention-name")].map((e) => e.textContent),
+      selected: document.getElementById("chat").querySelector(".history-flash") === null,
+      nav: !document.getElementById("history-home").disabled,
     };
   })()`);
-  assert.deepEqual(back, { view: true, kept: 2 }, "the results are kept");
+  assert.equal(read.reader, true);
+  assert.equal(read.lit, "r:msg_1");
+  assert.deepEqual(read.outline, ["person:Can we spec the anchor mode?", "assistant:The anchor mode builds on right-click."],
+    "prompts and replies only, the person's set in");
+  assert.deepEqual(read.tags, ["#layout"]);
+  assert.equal(read.selected, true, "the chat is untouched");
+  assert.equal(read.nav, true, "Home returns to the results");
+  const back = await page.run<{ results: number; reader: boolean }>(`(() => {
+    document.getElementById("history-home").click();
+    return {
+      results: document.querySelectorAll("#history-results .history-result").length,
+      reader: !document.getElementById("history-reader").hidden,
+    };
+  })()`);
+  assert.deepEqual(back, { results: 2, reader: false }, "the results are kept");
+});
+
+test("Command-F in the reader searches the session, and the drawers dock on a press", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.run(`document.getElementById("history-back").click()`);
+  await page.press("f", META);
+  const found = await page.run<{ find: boolean; placeholder: string }>(`({
+    find: !document.getElementById("find").hidden,
+    placeholder: document.getElementById("find-field").placeholder,
+  })`);
+  assert.deepEqual(found, { find: true, placeholder: "Search this session" });
+  const docks = await page.run<{ left: boolean; right: boolean; outline: boolean }>(`(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.getElementById("menu-icon").click();
+    document.getElementById("outline-icon").click();
+    return {
+      left: document.body.classList.contains("dock-left"),
+      right: document.body.classList.contains("dock-right"),
+      outline: getComputedStyle(document.getElementById("outline")).display !== "none",
+    };
+  })()`);
+  assert.deepEqual(docks, { left: true, right: true, outline: true });
 });
 
 test("the chips ask again for one party, and the opened results are listed", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const result = await page.run<{ role: unknown; rows: string[] }>(`(() => {
+    document.getElementById("history-home").click();
     window.posted.length = 0;
     document.querySelector('.history-filters [data-role="assistant"]').click();
     const role = window.posted.filter((p) => p.body.want === "search").pop()?.body.role;

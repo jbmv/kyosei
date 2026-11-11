@@ -86,3 +86,15 @@ export function openedEntries(document: unknown): Opened[] | null {
       && typeof entry.opened_at === "string")
     .map((entry) => ({ ...entry, words: typeof entry.words === "string" ? entry.words : "" }));
 }
+
+/**
+ * The results gathered by session (KYO-836), each session once, in the order its first
+ * result came, which is newest first; each result keeps its index in the list.
+ */
+export function groupBySession(found: Found[]): { session: string; items: { found: Found; index: number }[] }[] {
+  const groups = new Map<string, { found: Found; index: number }[]>();
+  found.forEach((item, index) => {
+    groups.set(item.session, [...(groups.get(item.session) ?? []), { found: item, index }]);
+  });
+  return [...groups].map(([session, items]) => ({ session, items }));
+}

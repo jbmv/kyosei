@@ -1120,12 +1120,63 @@ body.view-history #jump-bottom { display: none; }
 .history-text { font-size: 14px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .history-text mark { background: color-mix(in srgb, var(--pastel-blue) 42%, transparent); color: inherit; border-radius: 2px; }
 #history-more { display: block; margin: 6px auto 0; }
-#history-more[hidden], #history-back[hidden] { display: none; }
-#history-back { margin-right: 10px; }
+#history-more[hidden] { display: none; }
 body.view-history #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
 #history-side { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #history-side > h4 { margin: 4px 10px 4px; }
 #history-recent { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* Results grouped by session (KYO-836): a box per session, folded until opened. */
+.history-group { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 12px; }
+.history-group-head { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 10px 14px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: default; }
+.history-group-head .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; }
+.history-group.open .history-group-head .chevron { transform: rotate(90deg); }
+.history-group-date { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.history-group-title { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-group-count { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.history-group-body { padding: 0 10px 2px; }
+.history-group:not(.open) .history-group-body { display: none; }
+.history-group .history-result { margin-bottom: 8px; }
+/* The opened session, drawn as the chat draws its prompts and replies, never dimmed. */
+#history-reader { padding-top: 12px; }
+#history-reader[hidden], #history-home-page[hidden], #history-session-side[hidden] { display: none; }
+.history-kind summary { margin: 4px 10px; color: var(--muted); font-size: 13px; cursor: default; }
+.history-kind .mention-row { margin: 0; }
+/* The outline of the opened session: the first words of each message, the person's set in. */
+.outline-row { padding: 3px 10px; border-radius: 6px; font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.outline-row:hover { background: var(--panel); }
+.outline-row.person { padding-left: 34px; color: var(--muted); }
+.outline-row.current { background: var(--line); }
+
+/* ---------------------------------------------------------------- Drawers (KYO-835) */
+/* The left drawer is the side bar; the right one the outline. Each slides out under the
+   pointer and stays docked when its icon is pressed, the view's pane making room. */
+#outline { display: none; }
+body.has-outline:not(.view-chat) #outline { display: block; }
+#outline-icon {
+  position: fixed; top: calc(10px + var(--views-height)); right: calc(var(--composer-width) + 16px); z-index: 3;
+  width: 30px; height: 26px; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: none; color: var(--muted);
+}
+#outline:hover #outline-icon, body.dock-right #outline-icon { background: var(--panel); }
+#outline-panel {
+  position: fixed; z-index: 2; top: var(--views-height); bottom: 0; right: calc(var(--composer-width) + 6px);
+  width: 280px; padding: 48px 8px 12px; overflow-y: auto; background: var(--background);
+  border-left: 1px solid var(--line); box-shadow: -2px 0 14px rgba(0, 0, 0, 0.12);
+  transform: translateX(calc(100% + var(--composer-width) + 6px)); transition: transform 0.14s ease-out;
+}
+#outline:hover #outline-panel, #outline:focus-within #outline-panel, body.dock-right #outline-panel { transform: none; }
+#outline-panel h4 { margin: 0 10px 8px; color: var(--muted); font-size: 13px; }
+#menu-icon { cursor: default; }
+body.dock-left #menu-panel { transform: none; box-shadow: none; }
+/* Docked, a drawer starts under the top bar, which keeps its icons and its words. */
+body.dock-left #menu-panel, body.dock-right.has-outline:not(.view-chat) #outline-panel {
+  top: calc(46px + var(--views-height)); padding-top: 12px;
+}
+body.dock-left #menu-icon { background: var(--panel); }
+body.dock-left #page, body.dock-left .view-pane { left: 300px; }
+body.dock-right.has-outline:not(.view-chat) .view-pane { right: calc(var(--composer-width) + 6px + 280px); }
+body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
+
 /* A message a result opened, lit in the transcript and then faded. */
 @keyframes history-flash { from { background: color-mix(in srgb, var(--pastel-blue) 38%, transparent); } to { background: transparent; } }
 .history-flash { animation: history-flash 2.6s ease-out; border-radius: 8px; }

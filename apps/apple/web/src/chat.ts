@@ -37,7 +37,7 @@ import {
 } from "./agenda";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
-  type Found, type Opened, type Role, chatKey, foundOf, openedEntries, plainWords, searchQuery,
+  type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
 } from "./searchhistory";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
@@ -1449,7 +1449,6 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 const kyo = {
   clear(): void {
     endAnchorMode();
-    flashed = null;
     turnsLoaded = false;
     drawEmptyChat();
     lastMainActivity = "";
@@ -1589,7 +1588,6 @@ const kyo = {
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
       drawChatLinksSoon();
-      revealPending();
       paintAnchors();
       refreshSearch();
     });
@@ -3008,6 +3006,7 @@ function drawFoldsSoon(): void {
 function searchable(): HTMLElement[] {
   if (currentView === "records") return openRecordDoc && !recordArticle.hidden ? [recordArticle] : [];
   if (currentView === "files") return openFile?.text != null && !fileArticle.hidden ? [fileArticle] : [];
+  if (currentView === "history") return historyReader.hidden ? [] : [historyReader];
   return Array.from(chat.children).filter((node): node is HTMLElement => {
     const key = (node as HTMLElement).dataset?.key;
     return !!key && (key.startsWith("t:") || key.startsWith("r:"));
@@ -3095,7 +3094,8 @@ function shutFoldOver(node: Node): HTMLDetailsElement | null {
 }
 
 function searchPane(): HTMLElement {
-  return currentView === "records" ? recordsPane : currentView === "files" ? filesPane : scroller;
+  return currentView === "records" ? recordsPane : currentView === "files" ? filesPane
+    : currentView === "history" ? historyPane : scroller;
 }
 
 /** The top and bottom of the part of the window the searched text is read in. */
@@ -3208,10 +3208,12 @@ function showHit(): void {
 
 const FIND_PLACEHOLDERS: Record<string, string> = {
   chat: "Search this chat", records: "Search this record", files: "Search this file",
+  history: "Search this session",
 };
 
 function openSearch(): void {
-  if (currentView === "records" ? recordArticle.hidden : currentView === "files" ? fileArticle.hidden : false) return;
+  if (currentView === "records" ? recordArticle.hidden : currentView === "files" ? fileArticle.hidden
+    : currentView === "history" ? historyReader.hidden : false) return;
   watchPages();
   findField.placeholder = FIND_PLACEHOLDERS[currentView] ?? "Search";
   findField.setAttribute("aria-label", findField.placeholder);
@@ -4220,6 +4222,7 @@ function showView(id: string): void {
     // being followed, which the stream kept extending, and otherwise at the same place.
     scroller.scrollTop = chatPlace.following ? scroller.scrollHeight : chatPlace.top;
   }
+  applyDocks();
   VIEWS.find((view) => view.id === id)?.entered?.();
 }
 
@@ -6405,10 +6408,6 @@ let historyWaiting = false;
 let historyAsk = 0;
 let historyTimer: number | undefined;
 let historyOpened: Opened[] = [];
-/** A message a result opened, to be shown once its session's chat has drawn it. */
-let pendingReveal: { session: string; message: string; key: string; until: number } | null = null;
-/** The element lit last, so that a redraw does not light it again. */
-let flashed: string | null = null;
 const historyField = document.querySelector<HTMLInputElement>(".history-search")!;
 const historyResults = document.getElementById("history-results")!;
 
@@ -6420,17 +6419,17 @@ function resetHistory(): void {
   historyProblem = null;
   historyWaiting = false;
   historyOpened = [];
-  pendingReveal = null;
-  document.getElementById("history-back")!.hidden = true;
-  drawHistory();
+  readerPlaces = fresh<ReaderPlace>();
+  readerSession = null;
+  showReaderPlace();
   drawOpened();
 }
 
 function enterHistory(): void {
   post("history", { want: "recent" });
-  drawHistory();
+  showReaderPlace();
   drawOpened();
-  historyField.focus();
+  if (current(readerPlaces) === null) historyField.focus();
 }
 
 /** Asks for the field's text, from the first page or, with `more`, the next. */
@@ -6461,8 +6460,7 @@ function resultBlock(found: Found, index: number): HTMLElement {
   head.className = "history-head";
   head.append(
     span("history-who", found.role === "person" ? "You" : "Claude"),
-    span("history-when", when(found.at) ?? ""),
-    span("history-session", sessionTitle(found.session)));
+    span("history-when", when(found.at) ?? ""));
   const text = document.createElement("div");
   text.className = "history-text";
   for (const piece of found.excerpt) {
@@ -6477,8 +6475,32 @@ function historyNote(text: string): HTMLElement {
   return Object.assign(document.createElement("div"), { className: "history-note", textContent: text });
 }
 
+/** Which session groups of the results are open; all start folded (KYO-836). */
+const openSessionGroups = new Set<string>();
+
+function groupBox(session: string, items: { found: Found; index: number }[]): HTMLElement {
+  const box = document.createElement("section");
+  box.className = "history-group";
+  box.dataset.session = session;
+  if (openSessionGroups.has(session)) box.classList.add("open");
+  const head = document.createElement("button");
+  head.className = "history-group-head";
+  head.dataset.group = session;
+  const newest = items[0].found.at;
+  head.append(
+    span("chevron", "›"),
+    span("history-group-date", when(newest) ?? ""),
+    span("history-group-title", sessionTitle(session)),
+    span("history-group-count", `${items.length} ${items.length === 1 ? "match" : "matches"}`));
+  const body = document.createElement("div");
+  body.className = "history-group-body";
+  body.append(...items.map(({ found, index }) => resultBlock(found, index)));
+  box.append(head, body);
+  return box;
+}
+
 function drawHistory(): void {
-  const rows: HTMLElement[] = historyFound.map(resultBlock);
+  const rows: HTMLElement[] = groupBySession(historyFound).map(({ session, items }) => groupBox(session, items));
   const asked = searchQuery(historyText, historyRoles, null) !== null;
   if (historyProblem) rows.push(historyNote(historyProblem));
   else if (historyWaiting && !historyFound.length) rows.push(historyNote("Searching…"));
@@ -6487,9 +6509,13 @@ function drawHistory(): void {
   historyResults.replaceChildren(...rows);
   const more = document.getElementById("history-more")!;
   more.hidden = !historyCursor || historyWaiting;
-  document.getElementById("history-count")!.textContent = asked && !historyWaiting
-    ? `${historyFound.length}${historyCursor ? "+" : ""} ${historyFound.length === 1 && !historyCursor ? "message" : "messages"}`
-    : "";
+  if (current(readerPlaces) === null) {
+    const sessions = new Set(historyFound.map((found) => found.session)).size;
+    document.getElementById("history-count")!.textContent = asked && !historyWaiting
+      ? `${historyFound.length}${historyCursor ? "+" : ""} ${historyFound.length === 1 && !historyCursor ? "message" : "messages"}`
+        + (sessions ? ` in ${sessions} ${sessions === 1 ? "session" : "sessions"}` : "")
+      : "";
+  }
   document.querySelectorAll<HTMLElement>(".history-filters [data-role]").forEach((chip) => {
     chip.setAttribute("aria-pressed", String(historyRoles.has(chip.dataset.role as Role)));
   });
@@ -6508,37 +6534,177 @@ function drawOpened(): void {
   fill(document.getElementById("history-recent")!, rows.length ? rows : [emptyRow("No result opened yet.")]);
 }
 
-/** Opens a message in the chat: its session if another, then the message, lit and faded. */
-function openMessage(session: string, message: string, key: string): void {
-  showView("chat");
-  document.getElementById("history-back")!.hidden = false;
-  flashed = null;
-  pendingReveal = { session, message, key, until: Date.now() + 20000 };
-  if (menu?.current !== session) select(session);
-  revealPending();
+// ---- drawers (KYO-835): the side bar and the outline slide out under the pointer and stay
+// when their icon is pressed, each view and each device keeping its own choice.
+
+const DOCK_KEY = "docked";
+let docked = stored<Record<string, boolean>>(DOCK_KEY, {}) ?? {};
+
+function applyDocks(): void {
+  document.body.classList.toggle("view-chat", currentView === "chat");
+  document.body.classList.toggle("dock-left", docked[`left:${currentView}`] === true);
+  document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
+  document.body.classList.toggle("has-outline", currentView === "history" && !historyReader.hidden);
 }
 
-/** Shows the message waiting to be shown, once its session's chat has drawn it. */
-function revealPending(): void {
-  const want = pendingReveal;
-  if (!want || menu?.current !== want.session) return;
-  if (Date.now() > want.until) {
-    pendingReveal = null;
+function toggleDock(side: "left" | "right"): void {
+  const key = `${side}:${currentView}`;
+  docked = { ...docked, [key]: !docked[key] };
+  store(DOCK_KEY, docked);
+  applyDocks();
+}
+
+document.getElementById("menu-icon")!.addEventListener("click", () => toggleDock("left"));
+document.getElementById("outline-icon")!.addEventListener("click", () => toggleDock("right"));
+
+// ---- the History reader (KYO-836): a result opens its session here, never in the chat.
+
+interface ReaderPlace { session: string; message: string; key: string }
+const historyPane = document.getElementById("view-history")!;
+const historyReader = document.getElementById("history-reader")!;
+let readerPlaces: History<ReaderPlace> = fresh<ReaderPlace>();
+/** The session the reader holds, and its messages by the chat's keys. */
+let readerSession: string | null = null;
+const readerElements = new Map<string, HTMLElement>();
+let readerTurns: Turn[] = [];
+let readerAsk = 0;
+const sameReaderPlace = (a: ReaderPlace, b: ReaderPlace) => a.session === b.session && a.message === b.message;
+
+/** Opens a message in the History pane: its session read whole, the message lit and faded. */
+function openMessage(session: string, message: string, key: string): void {
+  readerPlaces = visitPlace(readerPlaces, { session, message, key }, sameReaderPlace);
+  showReaderPlace();
+}
+
+function showReaderPlace(): void {
+  const place = current(readerPlaces);
+  drawNav("history", place === null, readerPlaces);
+  document.getElementById("history-home-page")!.hidden = place !== null;
+  historyReader.hidden = place === null;
+  document.getElementById("history-session-side")!.hidden = place === null;
+  applyDocks();
+  closeSearch();
+  if (!place) {
+    drawHistory();
     return;
   }
-  // A reply opened from the list of opened results is known by its record uuid alone.
-  const key = elements.has(want.key) ? want.key : recordKeys.get(want.message) ?? `t:${want.message}`;
-  const element = elements.get(key);
-  if (!element || !element.isConnected) return;
-  pendingReveal = null;
-  if (flashed === key) return;
-  flashed = key;
+  if (readerSession !== place.session) {
+    readerSession = place.session;
+    readerElements.clear();
+    readerTurns = [];
+    historyReader.replaceChildren(historyNote("Reading the session…"));
+    document.getElementById("history-outline")!.replaceChildren();
+    for (const id of ["history-tags", "history-anchors", "history-attachments"]) {
+      document.getElementById(id)!.replaceChildren();
+    }
+    readerAsk += 1;
+    post("history", { want: "turns", session: place.session, ask: readerAsk });
+    post("history", { want: "marks", session: place.session, ask: readerAsk });
+    document.getElementById("history-count")!.textContent = sessionTitle(place.session);
+    return;
+  }
+  document.getElementById("history-count")!.textContent = sessionTitle(place.session);
+  revealInReader(place);
+}
+
+/** The reader's element for a message, by the chat's key or, for a reply, its record uuid. */
+function readerElement(place: Pick<ReaderPlace, "message" | "key">): HTMLElement | undefined {
+  return readerElements.get(place.key) ?? readerElements.get(`t:${place.message}`)
+    ?? [...readerElements.values()].find((element) => element.dataset.uuid === place.message);
+}
+
+function revealInReader(place: Pick<ReaderPlace, "message" | "key">): void {
+  const element = readerElement(place);
+  if (!element) return;
   element.scrollIntoView({ block: "center" });
   element.classList.remove("history-flash");
   void element.offsetWidth;
   element.classList.add("history-flash");
   element.addEventListener("animationend", () => element.classList.remove("history-flash"), { once: true });
+  document.querySelectorAll("#history-outline .outline-row.current").forEach((row) => row.classList.remove("current"));
+  document.querySelector(`#history-outline [data-key="${CSS.escape(element.dataset.hkey ?? "")}"]`)?.classList.add("current");
 }
+
+/** The session's prompts and replies, oldest first, drawn as the chat draws them. */
+function drawReader(turns: Turn[], replies: Reply[]): void {
+  readerElements.clear();
+  readerTurns = turns;
+  const items = [
+    ...turns.filter((turn) => turn.text?.trim()).map((turn) => ({ at: turn.at, key: `t:${turn.id}`, uuid: turn.id, person: true,
+      draw: () => drawTurn({ ...turn, images: [] }), text: turn.text })),
+    ...replies.filter((reply) => reply.text?.trim()).map((reply) => ({ at: reply.at, key: `r:${reply.message_id}`, uuid: reply.uuid ?? "", person: false,
+      draw: () => drawReply({ ...reply, thinking: null }), text: reply.text })),
+  ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  const outline: HTMLElement[] = [];
+  historyReader.replaceChildren(...items.map((item) => {
+    const element = item.draw();
+    element.dataset.hkey = item.key;
+    element.dataset.uuid = item.uuid;
+    readerElements.set(item.key, element);
+    const row = document.createElement("div");
+    row.className = `outline-row ${item.person ? "person" : "assistant"}`;
+    row.dataset.key = item.key;
+    row.textContent = firstWords(item.text.replace(/\s+/g, " ").trim(), 8);
+    row.title = when(item.at) ?? "";
+    outline.push(row);
+    return element;
+  }));
+  if (!items.length) historyReader.append(historyNote("This session holds no prompt or reply."));
+  document.getElementById("history-outline")!.replaceChildren(...outline);
+  drawAttachments();
+}
+
+function sideRow(name: string, place: string, onPress: () => void): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "mention-row";
+  row.append(span("mention-name", name), span("mention-place", place));
+  row.addEventListener("click", onPress);
+  return row;
+}
+
+function setKind(id: string, rows: HTMLElement[]): void {
+  document.getElementById(id)!.replaceChildren(...(rows.length ? rows : [emptyRow("None.")]));
+  document.getElementById(`${id}-count`)!.textContent = rows.length ? String(rows.length) : "";
+}
+
+function drawAttachments(): void {
+  const rows = readerTurns.filter((turn) => turn.images?.length).map((turn) => sideRow(
+    `${turn.images!.length} ${turn.images!.length === 1 ? "image" : "images"}`,
+    `in your prompt · ${when(turn.at) ?? ""}`,
+    () => revealInReader({ message: turn.id, key: `t:${turn.id}` })));
+  setKind("history-attachments", rows);
+}
+
+/** The session's sent tags and anchors, each opening the place it belongs to. */
+function drawReaderMarks(marks: SentMark[]): void {
+  const byTag = new Map<string, SentMark[]>();
+  const anchors: HTMLElement[] = [];
+  for (const mark of marks) {
+    for (const tag of mark.tags ?? []) byTag.set(tag, [...(byTag.get(tag) ?? []), mark]);
+    for (const anchor of mark.anchors ?? []) {
+      if (anchor.kind && anchor.kind !== "turn") continue;
+      const key = anchor.role === "assistant" && anchor.message ? `r:${anchor.message}` : `t:${anchor.uuid ?? anchor.message ?? ""}`;
+      anchors.push(sideRow(
+        firstWords((mark.text ?? mark.note ?? "").trim() || "(no words)", 8),
+        anchor.role === "assistant" ? "on a reply" : "on a prompt",
+        () => revealInReader({ message: anchor.uuid ?? anchor.message ?? "", key })));
+    }
+  }
+  const tags = [...byTag].sort(([a], [b]) => a.localeCompare(b)).map(([tag, found]) => {
+    const first = found[0].anchors?.find((anchor) => !anchor.kind || anchor.kind === "turn");
+    const key = first?.role === "assistant" && first.message ? `r:${first.message}` : `t:${first?.uuid ?? first?.message ?? ""}`;
+    return sideRow(`#${tag}`, `${found.length} ${found.length === 1 ? "note" : "notes"}`,
+      () => revealInReader({ message: first?.uuid ?? first?.message ?? "", key }));
+  });
+  setKind("history-tags", tags);
+  setKind("history-anchors", anchors);
+}
+
+document.getElementById("history-outline")!.addEventListener("click", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>("[data-key]");
+  const element = row ? readerElements.get(row.dataset.key!) : undefined;
+  if (element) revealInReader({ message: element.dataset.uuid ?? "", key: row!.dataset.key! });
+});
 
 historyField.addEventListener("input", () => {
   historyText = historyField.value;
@@ -6560,11 +6726,15 @@ document.querySelectorAll<HTMLElement>(".history-filters [data-role]").forEach((
   });
 });
 document.getElementById("history-more")!.addEventListener("click", () => askHistory(true));
-document.getElementById("history-back")!.addEventListener("click", () => {
-  document.getElementById("history-back")!.hidden = true;
-  showView("history");
-});
 historyResults.addEventListener("click", (event) => {
+  const group = (event.target as Element).closest<HTMLElement>("[data-group]");
+  if (group) {
+    const session = group.dataset.group!;
+    if (openSessionGroups.has(session)) openSessionGroups.delete(session);
+    else openSessionGroups.add(session);
+    group.closest(".history-group")!.classList.toggle("open", openSessionGroups.has(session));
+    return;
+  }
   const block = (event.target as Element).closest<HTMLElement>("[data-result]");
   const found = block ? historyFound[Number(block.dataset.result)] : undefined;
   if (!found) return;
@@ -6590,7 +6760,11 @@ const historyFrames = {
   /** Command-Shift-F, when the app's menu takes the key before the page sees it. */
   history(): void {
     if (currentView !== "history") showView("history");
-    else historyField.focus();
+    if (current(readerPlaces) !== null) {
+      readerPlaces = visitPlace(readerPlaces, null, sameReaderPlace);
+      showReaderPlace();
+    }
+    historyField.focus();
     historyField.select();
   },
 
@@ -6607,6 +6781,23 @@ const historyFrames = {
     drawHistory();
   },
 
+  historyTurns(frame: { ask: number; session: string; status?: number; document?: unknown; error?: string | null }): void {
+    if (frame.ask !== readerAsk || frame.session !== readerSession) return;
+    if (frame.status !== 200) {
+      historyReader.replaceChildren(historyNote(frame.error || "The server did not read the session."));
+      return;
+    }
+    const document_ = frame.document as { turns?: Turn[]; replies?: Reply[] };
+    drawReader(document_.turns ?? [], document_.replies ?? []);
+    const place = current(readerPlaces);
+    if (place && place.session === frame.session) revealInReader(place);
+  },
+
+  historyMarks(frame: { ask: number; session: string; status?: number; document?: unknown }): void {
+    if (frame.ask !== readerAsk || frame.session !== readerSession || frame.status !== 200) return;
+    drawReaderMarks(((frame.document as { marks?: SentMark[] })?.marks) ?? []);
+  },
+
   historyRecent(frame: { status?: number; document?: unknown }): void {
     const entries = frame.status === 200 ? openedEntries(frame.document) : null;
     if (!entries) return;
@@ -6615,6 +6806,12 @@ const historyFrames = {
   },
 };
 
+navIcons("history", {
+  home: () => { readerPlaces = visitPlace(readerPlaces, null, sameReaderPlace); showReaderPlace(); },
+  back: () => { readerPlaces = stepBack(readerPlaces); showReaderPlace(); },
+  forward: () => { readerPlaces = stepForward(readerPlaces); showReaderPlace(); },
+});
+drawNav("history", true, readerPlaces);
 drawHistory();
 drawOpened();
 
