@@ -83,9 +83,9 @@ A record's line is its id, which ``kyo show`` reads, and the first words the ele
 file's line is its path relative to its root, the root when it is not the code repository
 (``in the store repository``, ``in the scratchpad``, and ``in the scratchpad of session
 <id>`` when the scratchpad is another session's), its lines counted from 1 (``line 3`` for one,
-``lines 12-14`` for a span), and its words as a turn's are quoted: a selection of fewer than :data:`ANCHOR_WORDS` words as its sentence and
-``at`` the selection, and in a markdown file the block's label after it. Lines are the source's
-lines whatever a client drew from them.
+``lines 12-14`` for a span), and its words as a turn's are quoted: a selection of fewer than
+:data:`ANCHOR_WORDS` words as its sentence and ``at`` the selection, and in a markdown file the
+block's label after it. Lines are the source's lines whatever a client drew from them.
 
 A client gives such a file as ``{"kind": "file", "root", "path", "lines": [first, last]}``,
 with ``"chars": [start, end]`` for a selection inside those lines, counted in code points of
