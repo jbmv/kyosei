@@ -622,6 +622,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-770` (task) — A session's task list, kept by kyo serve and edited by the person and the orchestrator
 - **2026-11-11** — `KYO-764` (bug) — The remedy ledger does not see an error raised through a helper that returns it
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
 - **2026-11-11** — `KYO-749` (task) — kyo spawn takes a plan, and a discussion can produce more than one record
