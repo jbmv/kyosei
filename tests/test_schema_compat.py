@@ -738,6 +738,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # KYO-658: the turn_refs table -- a discussion's references to the person's turns
         # as the turn index stamped them. A real DDL change, so a real new hash.
         32: "aaf2d2ee3bb1aca4306f80e59278015eecf3455cc38e02326eeef8c32b2e34be",
+        # KYO-663: credits gains span_seal -- the hash of the span's last line in the turn
+        # index, whose chain commits every line before it. A real DDL change, so a real
+        # new hash.
+        33: "fabcb9af44ea15cc15bc3538d85acf8a47f513317dfc31a59d7fb38019da65eb",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2524,6 +2528,56 @@ def test_rebuild_accepts_a_schema_28_export_whose_credits_have_no_withdrawal(
     assert rebuilt["criteria"][0]["verifications"][0]["credit"] == credit_id
 
 
+def test_rebuild_accepts_a_schema_32_export_whose_credits_have_no_span_seal(
+    kyo, project: Path
+) -> None:
+    """`span_seal` arrived at schema_version 33 (KYO-663). A credit exported under 32 has
+    no such key, and that absence rebuilds as NULL: no index line was sealed then, and a
+    seal is never computed at load time."""
+    record, credit_id = _credited_record(kyo, project)
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    assert "span_seal" in doc["credits"][0], "this build writes the key"
+    doc["schema_version"] = 32
+    del doc["credits"][0]["span_seal"]
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        assert conn.execute(
+            "SELECT span_seal FROM credits WHERE id = ?", (credit_id,)
+        ).fetchall() == [(None,)]
+    finally:
+        conn.close()
+    rebuilt = kyo("show", record, "--json").json
+    assert rebuilt["criteria"][0]["verifications"][0]["credit"] == credit_id
+
+
+def test_a_span_seal_round_trips_through_export_and_rebuild(kyo, project: Path) -> None:
+    """KYO-663: the seal is the credit's own stored value, so a rebuild restores it from
+    the export and does not need the turn index."""
+    record, credit_id = _credited_record(
+        kyo, project, span_session="s", span_first_turn="a", span_last_turn="b",
+        span_seal="ab" * 32,
+    )  # fmt: skip
+    exported = json.loads(
+        (project / "kyosei" / "export" / f"{record}.json").read_text(encoding="utf-8")
+    )
+    assert exported["credits"][0]["span_seal"] == "ab" * 32
+    (project / "kyosei" / "kyosei.db").unlink()
+    assert kyo("rebuild").code == 0
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        assert conn.execute(
+            "SELECT span_seal FROM credits WHERE id = ?", (credit_id,)
+        ).fetchall() == [("ab" * 32,)]
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------------- KYO-642.c4
 
 
@@ -2621,7 +2675,8 @@ def test_every_new_column_has_a_consumer_and_the_doctor_check_passes(kyo, projec
     from kyosei.schema import COLUMN_CONSUMERS, CONFIG_CONSUMERS
     from kyosei.store import open_store
 
-    assert len(COLUMN_CONSUMERS["credits"]) == 35  # KYO-670 adds the three withdrawn_*
+    # KYO-670 adds the three withdrawn_*, KYO-663 span_seal.
+    assert len(COLUMN_CONSUMERS["credits"]) == 36
     assert len(COLUMN_CONSUMERS["credit_subjects"]) == 3
     assert len(COLUMN_CONSUMERS["turn_refs"]) == 16  # KYO-658
     assert COLUMN_CONSUMERS["gates"]["cleared_as"]
@@ -2799,11 +2854,13 @@ def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -
 
 
 def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
-    """KYO-658 was built on schema 31 (KYO-709) and bumps it by one, to 32."""
-    from kyosei.schema import EXPORT_FIELD_DEFAULTS
+    """KYO-658 was built on schema 31 (KYO-709) and bumped it by one, to 32; KYO-663 was
+    built on 32 and bumps it by one, to 33."""
+    from kyosei.schema import CREDIT_FIELD_DEFAULTS, EXPORT_FIELD_DEFAULTS
 
-    assert SCHEMA_VERSION == 32
+    assert SCHEMA_VERSION == 33
     assert EXPORT_FIELD_DEFAULTS[32] == {"turn_refs": []}
+    assert CREDIT_FIELD_DEFAULTS[33] == {"span_seal": None}
 
 
 def _a_discussion(kyo, project: Path, monkeypatch: pytest.MonkeyPatch) -> str:

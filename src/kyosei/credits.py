@@ -88,12 +88,13 @@ import json
 import shlex
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import yaml
 
-from . import commands, export, ids
+from . import commands, export, ids, seal
 from .cmd_sessions import recorded_transcript_path
-from .cmd_turns import confirmed_paste_flags
+from .cmd_turns import confirm_from_transcript, confirmed_paste_flags, session_lines
 from .commands import Context, Output, _add_evidence, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, declared_people, person_label, transcripts_opted_in
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
@@ -649,7 +650,30 @@ def _measured(
             )
         raise UsageError(f"the discussion span cannot be measured: {measure.why}")
     fields.update(measure.store_fields())
+    fields["span_seal"], _ = _span_seal(ctx, session, last)
     return fields, measure.why
+
+
+def _span_seal(ctx: Context, session: str, last: str) -> tuple[str | None, str]:
+    """KYO-663: the hash of the span's last line in the turn index, or None with why.
+
+    The index learns a prompt's transcript record at the Stop that ends its turn, and a
+    credit is usually written before that Stop, so the session's transcript is folded
+    into the index first, as the Stop hook would (best effort).
+    """
+    through_main = ctx.layout.store_via_main_checkout if ctx.layout is not None else None
+    if through_main is None:
+        try:
+            paths = transcript.candidate_transcripts(
+                session,
+                config=transcript.config_dir(ctx.environ),
+                recorded=recorded_transcript_path(ctx.root, session),
+            )
+            if paths:
+                confirm_from_transcript(ctx.root, session, Path(paths[0]))
+        except (OSError, ValueError):
+            pass
+    return seal.span_seal(session_lines(ctx.root, session), last)
 
 
 def discussion_span(
@@ -761,6 +785,13 @@ def lines(store, credit_id: str, credit: Credit) -> list[str]:
             )
         else:
             out.append(f"  discussion cited by id, not measured: {credit.span_why}")
+        if s.get("span_seal"):
+            out.append(f"  span sealed: {s['span_seal']}")
+        else:
+            out.append(
+                "  span not sealed: the turn index holds no sealed line for the span's "
+                "last turn"
+            )
     return out
 
 
@@ -1255,6 +1286,7 @@ def recheck(ctx: Context, args: Namespace) -> Output:
             "span_active_seconds",
             "span_started_at",
             "span_ended_at",
+            "span_seal",
         )
     }
     subjects = [(r["subject_kind"], r["subject_id"]) for r in store.credit_subjects(credit_id)]

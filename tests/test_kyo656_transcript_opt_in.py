@@ -423,7 +423,10 @@ def test_the_prompt_asks_the_transcript_question_with_its_disclosure() -> None:
     entry = " ".join(_prompt_entry("D14").split())
     assert "Ask" in entry and "?" in entry
     assert "What is read:" in entry and "~/.claude/history.jsonl" in entry
-    assert "What is stored:" in entry and "No text, path or hash of a transcript" in entry
+    assert "What is stored:" in entry and "No text or path of a transcript" in entry
+    # KYO-663: the commitments, the key, and that one key store sends the key off the machine.
+    assert "a salted hash and a line count" in entry and "seal.key" in entry
+    assert "the key leaves this machine, end-to-end encrypted by iCloud Keychain" in entry
     assert "What never leaves this machine:" in entry
     assert "read_transcripts: true" in entry and "read_transcripts: false" in entry
 

@@ -32,6 +32,19 @@ the file and a UserPromptSubmit in another session appending to it would otherwi
 the appended line. The sidecar is read and rewritten under its lock, and damage to it only
 costs a re-read of records whose lines already exist.
 
+THE SEAL (KYO-663, decision KYO-654 DC6). Every line written from schema 33 on is chained:
+it carries ``prev``, the hash of the line before it in its session, so the session's lines
+cannot be edited, reordered or added to without a later hash disagreeing
+(:mod:`kyosei.seal`). A prompt's line also commits its text when it is sent, as a salted
+per-line Merkle root (``root``) and a line count (``lines``), and the Stop hook commits the
+agent's final reply the same way on a line of its own, ``role: assistant``, from the
+payload's ``last_assistant_message``. Still no words are stored. A line the Stop hook adds
+from the transcript was not committed when it was sent, so it is chained with no root;
+that is every message sent mid-turn. Lines written before this are left as they are,
+unchained, and a session that spans the change has a chain that begins at its first new
+line. ``kyo turns --verify`` checks every chain and every credit's ``span_seal``;
+``kyo turns --seal-key`` shows or chooses where the key is kept.
+
 The archive half of the Stop hook is :mod:`kyosei.transcript_archive`.
 """
 
@@ -41,12 +54,12 @@ import json
 import os
 import sys
 from argparse import Namespace
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import transcript_archive
+from . import seal, transcript_archive
 from .commands import Context, Output
 from .config import (
     KYOSEI_DIR,
@@ -57,7 +70,7 @@ from .config import (
     load_config,
     transcripts_opted_in,
 )
-from .errors import KyoseiError
+from .errors import KyoseiError, UsageError
 from .harness import claude_code_transcript as transcript
 
 try:
@@ -69,6 +82,8 @@ except ImportError:  # pragma: no cover - not available on Windows
 UNCONFIRMED = "unconfirmed"
 #: The ``origin`` of a person's turn, the transcript's own word.
 HUMAN = "human"
+#: The ``origin`` of the line that commits the agent's final reply.
+ASSISTANT = "assistant"
 #: A line's ``source``: written by the UserPromptSubmit hook, or added from the transcript.
 SOURCE_HOOK = "hook"
 SOURCE_TRANSCRIPT = "transcript"
@@ -151,12 +166,17 @@ def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
     os.replace(temporary, path)
 
 
-def index_prompt(store_root: Path | str, payload: dict) -> None:
+def index_prompt(
+    store_root: Path | str, payload: dict, environ: Mapping[str, str] | None = None
+) -> None:
     """UserPromptSubmit: one line for this prompt.
 
     Nothing is written for a payload with no prompt id, or for a prompt id this session's
     index already holds, which is what a message sent mid-turn repeats. The check and the
     append hold one lock, so two payloads with one id cannot both find it absent.
+
+    The line is chained to the session's last one and commits the prompt's text
+    (:func:`kyosei.seal.seal_fields`); the text itself is not written.
     """
     session = payload.get("session_id")
     prompt_id = payload.get("prompt_id")
@@ -171,14 +191,92 @@ def index_prompt(store_root: Path | str, payload: dict) -> None:
         "origin": UNCONFIRMED,
         "source": SOURCE_HOOK,
     }
+    key = _key(environ)
     with _locked(store_root):
+        held_lines = read_lines(store_root)
         if any(
-            held.get("session") == session and held.get("prompt_id") == prompt_id
-            for held in read_lines(store_root)
+            held.get("session") == session
+            and held.get("prompt_id") == prompt_id
+            and held.get("role") != seal.ROLE_ASSISTANT
+            for held in held_lines
         ):
             return
-        with turns_path(store_root).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        line.update(
+            seal.seal_fields(
+                held_lines,
+                session,
+                prompt_id,
+                seal.ROLE_USER,
+                prompt if isinstance(prompt, str) else None,
+                key,
+            )
+        )
+        _append(store_root, line)
+
+
+def _key(environ: Mapping[str, str] | None) -> bytes | None:
+    """The seal key, or None when its store cannot be used; the line is then chained and
+    commits nothing, because the hook must not fail the prompt it runs on."""
+    try:
+        return seal.load_key(environ)
+    except (seal.SealKeyError, OSError, ValueError, AttributeError):
+        return None
+
+
+def _append(store_root: Path | str, line: dict) -> None:
+    with turns_path(store_root).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, sort_keys=True) + "\n")
+
+
+def commit_reply(
+    store_root: Path | str, payload: dict, environ: Mapping[str, str] | None = None
+) -> None:
+    """Stop: one line committing the agent's final reply, from ``last_assistant_message``.
+
+    The line takes the prompt id the payload names, or else that of the session's latest
+    prompt line. Nothing is written for a payload with no reply, or for a reply the
+    session's last line already commits, which is what a second Stop with nothing said in
+    between repeats.
+    """
+    session = payload.get("session_id")
+    reply = payload.get("last_assistant_message")
+    if not isinstance(session, str) or not isinstance(reply, str) or not reply:
+        return
+    key = _key(environ)
+    with _locked(store_root):
+        lines = read_lines(store_root)
+        mine = [line for line in lines if line.get("session") == session]
+        prompt_id = payload.get("prompt_id")
+        if not isinstance(prompt_id, str) or not prompt_id:
+            prompt_id = next(
+                (
+                    line["prompt_id"]
+                    for line in reversed(mine)
+                    if line.get("role") != seal.ROLE_ASSISTANT
+                    and isinstance(line.get("prompt_id"), str)
+                ),
+                None,
+            )
+        last = mine[-1] if mine else None
+        if (
+            key is not None
+            and last is not None
+            and last.get("role") == seal.ROLE_ASSISTANT
+            and seal.verify_message(key, last, reply)
+        ):
+            return
+        line = {
+            "session": session,
+            "prompt_id": prompt_id,
+            "at": _now(),
+            "pasted": None,
+            "origin": ASSISTANT,
+            "source": SOURCE_HOOK,
+        }
+        line.update(
+            seal.seal_fields(lines, session, prompt_id, seal.ROLE_ASSISTANT, reply, key)
+        )
+        _append(store_root, line)
 
 
 def _read_cursor(fd: int) -> dict[str, int]:
@@ -223,7 +321,9 @@ def _fold(lines: list[dict], session_id: str, facts: list[transcript.TurnFact]) 
     by_prompt = {
         line["prompt_id"]: line
         for line in lines
-        if line.get("session") == session_id and isinstance(line.get("prompt_id"), str)
+        if line.get("session") == session_id
+        and isinstance(line.get("prompt_id"), str)
+        and line.get("role") != seal.ROLE_ASSISTANT
     }
     known_turns = {
         line["turn"]
@@ -254,6 +354,10 @@ def _fold(lines: list[dict], session_id: str, facts: list[transcript.TurnFact]) 
                 "pasted": fact.pasted,
                 "origin": fact.origin,
                 "source": SOURCE_TRANSCRIPT,
+                # Chained, with no root: its text was not committed when it was sent.
+                **seal.seal_fields(
+                    lines, session_id, fact.prompt_id, seal.ROLE_USER, None, None
+                ),
             }
         )
         known_turns.add(fact.turn)
@@ -292,7 +396,7 @@ def _run_hook(ctx: Context, config: Config, payload: dict) -> dict:
     through_main = ctx.layout.store_via_main_checkout if ctx.layout is not None else None
     if event == "UserPromptSubmit":
         if through_main is None:
-            index_prompt(ctx.root, payload)
+            index_prompt(ctx.root, payload, ctx.environ)
         return {"ok": True, "event": event}
     if event not in ("Stop", "SessionEnd"):
         return {"ok": False, "problem": f"unhandled hook_event_name {event!r}"}
@@ -303,6 +407,9 @@ def _run_hook(ctx: Context, config: Config, payload: dict) -> dict:
     data: dict = {"ok": True, "event": event}
     if through_main is None and path.is_file():
         confirm_from_transcript(ctx.root, session, path)
+    if through_main is None and event == "Stop":
+        # After the fold, so that a message sent mid-turn precedes the reply to it.
+        commit_reply(ctx.root, payload, ctx.environ)
     archive = transcript_archive.archive_dir(config, ctx.environ)
     problem = transcript_archive.archive_location_problem(archive)
     if problem is not None:
@@ -328,9 +435,15 @@ def cmd_turns(ctx: Context, args: Namespace) -> Output:
             data = {"ok": False, "problem": str(exc.strerror or exc)}
         return Output(lines=[], data=data)
 
+    if getattr(args, "seal_key", None) is not None:
+        return _seal_key(ctx, args)
+    if getattr(args, "key_leaves_this_machine", False):
+        raise UsageError("--key-leaves-this-machine goes with --seal-key icloud-keychain")
     config = _config_of(ctx)
     opted_in = config is not None and transcripts_opted_in(config)
     lines = read_lines(ctx.root) if opted_in else []
+    if getattr(args, "verify", False):
+        return _verify(ctx, lines, opted_in, getattr(args, "session", None))
     wanted = getattr(args, "session", None)
     if wanted:
         lines = [line for line in lines if line.get("session") == wanted]
@@ -351,4 +464,91 @@ def cmd_turns(ctx: Context, args: Namespace) -> Output:
     return Output(
         lines=rendered,
         data={"ok": True, "opted_in": opted_in, "origins": origins, "turns": lines},
+    )
+
+
+def session_lines(store_root: Path | str, session: str) -> list[dict]:
+    """One session's lines in file order, which is the order its chain links them in."""
+    return [line for line in read_lines(store_root) if line.get("session") == session]
+
+
+def _seal_key(ctx: Context, args: Namespace) -> Output:
+    """``kyo turns --seal-key [STORE]``: show where the seal key is kept, or choose."""
+    target = args.seal_key
+    acknowledged = getattr(args, "key_leaves_this_machine", False)
+    if target == "show":
+        if acknowledged:
+            raise UsageError("--key-leaves-this-machine goes with --seal-key icloud-keychain")
+        recorded = seal.recorded_choice(ctx.environ)
+        store = seal.chosen_store(ctx.environ)
+        how = "chosen" if recorded else "nothing chosen, so the local file is used"
+        return Output(
+            lines=[
+                f"seal key: kept in the {store} store ({how})",
+                f"  file             {seal.key_path(ctx.environ)}, mode 0600",
+                "  keychain         a generic password in the macOS login keychain",
+                "  icloud-keychain  a synchronizable keychain item. " + seal.ICLOUD_DISCLOSURE,
+                "choose with `kyo turns --seal-key <store>`; the key moves with the choice",
+            ],
+            data={"ok": True, "key_store": store, "chosen": recorded is not None},
+        )
+    if target == seal.STORE_ICLOUD and not acknowledged:
+        raise UsageError(
+            f"{seal.ICLOUD_DISCLOSURE} Nothing was changed. If that is what the person "
+            "wants, run `kyo turns --seal-key icloud-keychain --key-leaves-this-machine`"
+        )
+    if target != seal.STORE_ICLOUD and acknowledged:
+        raise UsageError("--key-leaves-this-machine goes with --seal-key icloud-keychain")
+    try:
+        done = seal.move_key(target, ctx.environ)
+    except seal.SealKeyError as exc:
+        raise KyoseiError(f"the seal key stays where it was: {exc}") from exc
+    lines = [f"seal key: now kept in the {target} store; {done}"]
+    if target == seal.STORE_ICLOUD:
+        lines.append(seal.ICLOUD_DISCLOSURE)
+    return Output(lines=lines, data={"ok": True, "key_store": target, "chosen": True})
+
+
+def _verify(ctx: Context, lines: list[dict], opted_in: bool, wanted: str | None) -> Output:
+    """``kyo turns --verify``: every session's chain, and every credit's ``span_seal``."""
+    by_session: dict[str, list[dict]] = {}
+    for line in lines:
+        session = line.get("session")
+        if isinstance(session, str) and (not wanted or session == wanted):
+            by_session.setdefault(session, []).append(line)
+    failures: list[str] = []
+    chained = 0
+    for session, mine in by_session.items():
+        chained += sum(1 for line in mine if seal.is_sealed(line))
+        failures += [f"session {session}: {problem}" for problem in seal.verify_chain(mine)]
+    credits_checked = 0
+    if opted_in:
+        for credit in ctx.store().sealed_credits():
+            session = credit["span_session"]
+            if wanted and session != wanted:
+                continue
+            credits_checked += 1
+            if credit["span_seal"] not in seal.recomputed_hashes(by_session.get(session, [])):
+                failures.append(
+                    f"credit {credit['id']}: session {session}, recomputed from its first "
+                    "chained line, does not reach the hash its span_seal holds, so a line "
+                    "at or before the span's last was changed or removed"
+                )
+    data = {
+        "ok": not failures,
+        "opted_in": opted_in,
+        "sessions": len(by_session),
+        "chained_lines": chained,
+        "credits_checked": credits_checked,
+        "failures": failures,
+    }
+    if failures:
+        detail = "\n".join(f"  - {failure}" for failure in failures)
+        raise KyoseiError(f"turns: {len(failures)} line(s) or seal(s) do not verify:\n{detail}")
+    return Output(
+        lines=[
+            f"turns: {chained} chained line(s) in {len(by_session)} session(s) verify, "
+            f"and {credits_checked} credit seal(s) match"
+        ],
+        data=data,
     )

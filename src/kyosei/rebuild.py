@@ -843,11 +843,11 @@ def _load(
                     " alternatives_json, refining_session, refining_turn, words_form,"
                     " span_session, span_first_turn, span_last_turn, span_person_turns,"
                     " span_agent_turns, span_active_seconds, span_started_at,"
-                    " span_ended_at, basis_id, author,"
+                    " span_ended_at, span_seal, basis_id, author,"
                     " created_at, superseded_by, superseded_at, withdrawn_at, withdrawn_by,"
                     " withdrawn_why)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         credit["id"],
                         doc["id"],
@@ -876,6 +876,7 @@ def _load(
                         credit["span_active_seconds"],
                         credit["span_started_at"],
                         credit["span_ended_at"],
+                        credit["span_seal"],
                         credit["basis_id"],
                         credit["author"],
                         credit["created_at"],

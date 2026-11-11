@@ -397,6 +397,7 @@ def _credit(store: Store, row: sqlite3.Row) -> dict:
         "span_active_seconds": row["span_active_seconds"],
         "span_started_at": row["span_started_at"],
         "span_ended_at": row["span_ended_at"],
+        "span_seal": row["span_seal"],
         "basis_id": row["basis_id"],
         "author": row["author"],
         "created_at": row["created_at"],

@@ -1688,12 +1688,15 @@ Needs a Kyosei project: **optional** — it runs, and says so, where there is no
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo turns [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--session SESSION] [--hook]`
+Usage: `kyo turns [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--session SESSION] [--hook] [--verify] [--seal-key [STORE]] [--key-leaves-this-machine]`
 
 ### Options
 
 - `--session SESSION` — optional. only this session's lines
 - `--hook` — optional. read Claude Code's UserPromptSubmit, Stop or SessionEnd payload on stdin: add this prompt to the index, or confirm the index from the transcript and copy the transcript to the archive; how the packaged hooks invoke this. Prints nothing and always exits 0
+- `--verify` — optional. check that every session's lines are chained as they were written and that every credit's span_seal is the hash of a line the index holds; exits 1 naming each line or credit that does not verify (KYO-663)
+- `--seal-key [STORE]` — optional. where this machine keeps the key that salts the index's commitments: with no value, show it; with file, keychain or icloud-keychain, keep it there from now on, moving the existing key. file is $KYOSEI_HOME/seal.key with mode 0600, and is used until another is chosen; keychain is the macOS login keychain; icloud-keychain is a synchronizable keychain item, which iCloud Keychain copies to the person's other Apple devices (KYO-663)
+- `--key-leaves-this-machine` — optional. with --seal-key icloud-keychain: confirms the person chose it knowing the key then leaves this machine, end-to-end encrypted by iCloud Keychain
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

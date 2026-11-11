@@ -424,9 +424,11 @@ directory. The contents are identical either way:
     sessions.json           # which Claude Code sessions this project has and where each
                              # one is on claude.ai; written by the session hooks, gitignored
                              # (account-linked local state, never git-canonical) -- KYO-186
-    turns.jsonl             # the turn index: one line per prompt, with session, prompt id,
-                             # time, origin and whether it carried a paste, and no text;
-                             # only in a project that opted in (D14), gitignored -- KYO-657
+    turns.jsonl             # the turn index: one line per prompt and per final reply,
+                             # with session, prompt id, time, origin, whether it carried a
+                             # paste, a salted commitment to the text and the hash of the
+                             # session's line before it, and no text; only in a project
+                             # that opted in (D14), gitignored -- KYO-657, KYO-663
     turns-cursor.json       # how far each session's transcript has been read for that
                              # index, and the lock its writers share; gitignored
     doctor-report.txt       # the full report behind `kyo doctor --hook`'s one line;
@@ -671,7 +673,7 @@ the store directly:
 | every open gate across every record, with the record it is on | `kyo gates`, `--type` (repeatable) to narrow; `--json` also carries each record's open-gate count (KYO-454) |
 | the dispatch activity rows — every running dispatch and the newest finished ones, with verdict counts, worker tokens, end time, and what git says about each worktree now (dirty paths, commits past base, lines, last commit, merged or not) | `kyo activity`, `--finished N` for the window (default 12), `--against REF` for the trunk. A missing worktree is a fact on the row, never an error (KYO-454) |
 | the tool's own invariant checks over the store | `kyo doctor` |
-| the turn index of a project that opted in to reading transcripts: one line per prompt, whose it was and whether it carried a paste | `kyo turns`, `--session` to narrow; `--json` gives the lines. The lines hold no text (KYO-657) |
+| the turn index of a project that opted in to reading transcripts: one line per prompt, whose it was and whether it carried a paste | `kyo turns`, `--session` to narrow; `--json` gives the lines. The lines hold no text (KYO-657). `kyo turns --verify` checks that each session's lines are chained as written and that every credit's `span_seal` is reached by its session's chain; `kyo turns --seal-key` shows or chooses where the seal key is kept (KYO-663) |
 | which Claude Code sessions this project has had, when each was last seen and on which hook event, and where each one is on Remote Control | `kyo sessions`, which reads `kyosei/sessions.json` — the file the packaged session hooks write with `kyo sessions --hook`, and the file the desktop's claude tab reads to decide which session to open on (KYO-186). It is gitignored local state, so it answers this for *your* checkout and no other |
 
 **Credits on what you read (KYO-647).** The `author` of a row stays the agent that wrote

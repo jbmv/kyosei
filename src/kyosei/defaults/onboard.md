@@ -108,17 +108,28 @@ Ask these together, in one message.
   (`~/.claude/projects/` and `~/.claude/history.jsonl`, or under `CLAUDE_CONFIG_DIR`), on
   this machine, when a credit is written or rechecked; each time a session stops, its
   transcript and subagent transcripts, to keep the turn index and archive below; and each
-  prompt, for the marker of pasted content. **What is stored:** the check's
+  prompt, for the marker of pasted content; and each prompt and the agent's final reply,
+  once, to compute the commitment below. **What is stored:** the check's
   outcome, the matched record's id and timestamp, the form of the words (typed, mid-turn,
   a choice, an accepted suggestion), and for a cited discussion the counts of turns, the
-  active seconds and the first and last timestamps. No text, path or hash of a transcript
-  is stored; the words being credited are stored either way, because the credit holds
-  them. Beside the store and gitignored, `kyosei/turns.jsonl` holds one line per prompt:
-  session, prompt id, time, whose it was and whether it carried pasted content, and no
-  text. **What is copied locally:** the session's transcript and subagent transcripts, to
+  active seconds, the first and last timestamps, and `span_seal`, the hash of the
+  discussion's last line in the turn index. No text or path of a transcript is stored, and
+  no hash from which a message could be found by guessing; the words being credited are
+  stored either way, because the credit holds them. Beside the store and gitignored,
+  `kyosei/turns.jsonl` holds one line per prompt and one per final reply of the agent:
+  session, prompt id, time, whose it was, whether it carried pasted content, a commitment
+  to the message (a salted hash and a line count) and the hash of the line before it, and
+  no text. The commitment lets you later show chosen lines of a message and have a reader
+  confirm them; it reveals nothing without the seal key. **The seal key:** 32 random bytes
+  in `$KYOSEI_HOME/seal.key`, mode 0600, the one secret to back up. `kyo turns --seal-key`
+  can move it to the macOS login keychain, or to a synchronizable item that iCloud
+  Keychain copies to your other Apple devices; with that choice the key leaves this
+  machine, end-to-end encrypted by iCloud Keychain, and it is never chosen for you.
+  **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
   is checked against when the original is absent. **What never leaves this
-  machine:** the transcripts, the archive and the prompt history. Kyosei sends none of them
+  machine:** the transcripts, the archive, the turn index, the prompt history, and the
+  seal key unless you choose the iCloud Keychain option. Kyosei sends none of them
   anywhere and copies none of them into the store; a store remote carries only what is
   listed as stored. **Read either way:** the Remote Control session id in a session's
   transcript, and the token totals of dispatched workers; neither reads your words." This

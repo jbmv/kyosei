@@ -2053,6 +2053,32 @@ def build_parser() -> KyoseiParser:
         "transcript to the archive; how the packaged hooks invoke this. Prints nothing and "
         "always exits 0",
     )
+    p_turns.add_argument(
+        "--verify",
+        action="store_true",
+        help="check that every session's lines are chained as they were written and that "
+        "every credit's span_seal is the hash of a line the index holds; exits 1 naming "
+        "each line or credit that does not verify (KYO-663)",
+    )
+    p_turns.add_argument(
+        "--seal-key",
+        nargs="?",
+        const="show",
+        choices=["show", "file", "keychain", "icloud-keychain"],
+        metavar="STORE",
+        help="where this machine keeps the key that salts the index's commitments: with no "
+        "value, show it; with file, keychain or icloud-keychain, keep it there from now "
+        "on, moving the existing key. file is $KYOSEI_HOME/seal.key with mode 0600, and is "
+        "used until another is chosen; keychain is the macOS login keychain; "
+        "icloud-keychain is a synchronizable keychain item, which iCloud Keychain copies "
+        "to the person's other Apple devices (KYO-663)",
+    )
+    p_turns.add_argument(
+        "--key-leaves-this-machine",
+        action="store_true",
+        help="with --seal-key icloud-keychain: confirms the person chose it knowing the key "
+        "then leaves this machine, end-to-end encrypted by iCloud Keychain",
+    )
 
     p_install_hooks = sub.add_parser(
         "install-hooks",
