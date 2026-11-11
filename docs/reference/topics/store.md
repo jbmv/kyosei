@@ -706,6 +706,38 @@ and `kyo show --json` carries the same as `discussion` (id, open, late, index_st
 where it was opened); the export holds the turn references on the discussion's own document
 and none of the derived fields.
 
+**One decision for a reader outside the project: `kyo dossier` (KYO-659).** `kyo dossier
+<id>` prints a Markdown page about one decision for someone who does not know Kyosei, such
+as a reviewer of a portfolio. It takes a decision record, any record a `decided` credit is
+on, or a credit id (`PREFIX-N.pN`) to select one decision of a record that holds several;
+a record with no decision on it is refused. The page has eight parts, and each ends with a
+line naming what in the store it was drawn from:
+
+| Part | Drawn from |
+| --- | --- |
+| The decision | the record's title |
+| The problem | the opening of the record's description, at most three sentences, and the titles of the records it was filed from |
+| What was on the table | the decided credit's recommendation, who made it, and its alternatives; the notes of the discussion |
+| Who decided, and how | the credit's person, its outcome, and the person's words, quoted verbatim |
+| Timeline | the discussion's turn references, the turn index, and the timestamps of credits, records and dispatches |
+| Depth | the message count, reply count and active time measured when the credit was written |
+| What happened next | records linked to the decision, and work records that name it, with each one's dispatches, the method of the latest verdict on each met criterion, and the person's credited observations |
+| How this record was made | whether the credit was written live or reconstructed, the approval a reconstructed credit rests on, the transcript check, how the discussion was opened, and the seal |
+
+The command reads the store and the turn index and opens no transcript, so the only words
+of a conversation on the page are the quotes that credits already store. Record ids are
+replaced by bracketed numbers and listed at the foot; an id inside a person's quoted words
+is left as written. A credit of role `authorized` is printed as a go-ahead, apart from the
+decision, and a record holding only a go-ahead is said to have no credit naming who decided
+it. A work record that only names the decision in its text is listed apart from linked
+work, with a sentence saying that the store does not record whether it follows from the
+decision. Where the store lacks something the page says so: a credit's alternatives carry
+no proposer, a span that was never measured has no depth, and a credit without a
+`span_seal` is "not sealed". Excerpt packs are not built, so no page attaches one.
+Markdown is the one form: it reads as text in a terminal and converts to HTML or PDF with
+ordinary tools. `--json` carries the parts as data (`parts[]`, each with `heading`,
+`blocks` and `source`), the `references[]`, and the page itself as `markdown`.
+
 The link graph is the one view with no terminal equivalent; it is the desktop
 app's or nothing.
 

@@ -781,6 +781,9 @@ kyo discuss open --title "Which store"     # a discussion, stamped at the person
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
                                            # date; the brief shows its age (KYO-497)
 kyo show KYO-1
+kyo dossier KYO-1                          # a decision as a Markdown page for a reader outside
+                                           # the project: eight parts, each naming its source
+                                           # in the store; reads no transcript (KYO-659)
 kyo move KYO-1 working                     # contracts are checked here
 kyo gate KYO-1 awaiting:human-run --do "run the staging migration, then reload the dashboard" \
                                   --tag ui-review   # tags from kyosei/gate-tags.yml;
