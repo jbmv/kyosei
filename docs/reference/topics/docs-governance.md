@@ -494,6 +494,39 @@ suggestion. Every block it emits is run through the real `documents.yml`
 validator before it is offered, and anything that cannot be drafted validly is
 not drafted at all — a suggestion the next command refuses is worse than none.
 
+**Code that no section governs (KYO-801).** A `governs:` line makes a branch that changes
+the named code raise an obligation on its section. Code that no live section names raises
+none, so a document can fall behind it with no one asked. `kyo docs coverage` reads the
+tree, writes nothing and opens no store, and prints the ungoverned code files by
+directory; the files reached only by a `<document>#<anchor>` comment under `src/`, which
+raise for the region around the comment and are therefore listed apart and not counted as
+governed; the targets that resolve to more than 20 files, which are reported and not
+refused; the sections that govern nothing, by document; and the steps to a map. `--json`
+carries the same.
+
+What counts as code is the project's declaration where it has one. `docs_coverage:` in
+`kyosei/config.yml` takes `level` (`off`, `notice` or `problem`), `code` (a list of globs
+in the `documents.yml` dialect, so `**` crosses directories and `*` does not) and
+`unmapped` (a list of `glob` and a one-line `why`, for paths that are not expected to be
+governed). Any other key or value is refused by name. Without `code:` the files are the
+tracked ones with a source-language suffix, outside the document sets, `kyosei/` and
+`ideas/`, and outside directories named `tests`, `test`, `__tests__`, `fixtures`,
+`node_modules`, `vendor`, `dist` and `build`. That is a heuristic, so `level: problem` is
+refused without a `code:` list and the refusal prints a draft that parses. An `unmapped`
+glob that matches no tracked file is reported, as an unresolved `governs:` target is.
+Note that YAML 1.1 reads an unquoted `off` as false; the reader takes it as the level
+`off`, and `kyo docs coverage --level off` writes it quoted.
+
+`kyo doctor` reports one finding, with the count and the directories holding the most
+ungoverned files: as the notice `docs_coverage` where the level is `notice` or absent, as
+the problem `docs_coverage_required` where it is `problem`, and neither where it is `off`
+or where the project has no documents. A declaration that does not parse is named by
+`docs_coverage_required`. `kyo docs coverage --level <level>` records the level, changing
+one line when the key is present and appending the key when it is absent, and echoes what
+it stored; it refuses from a linked worktree whose store is reached through the main
+checkout. Whether the sections that govern a file describe it, and whether their readers
+read them, is outside what the check can establish.
+
 **A second, independent mechanism lives in the same module and the same
 registry file (KYO-299).** A document set may also declare itself `numbered:` —
 append-only, with numbered section headings and an index its own command

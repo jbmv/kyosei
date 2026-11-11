@@ -47,6 +47,10 @@ The checks, and the law each one keeps honest:
 ``check_kind_policy_missing``  KYO-556 — a knowledge kind's ``policy`` lacks a key the
                               packaged default sets. A NOTICE naming the line to add;
                               ``kind_policy_notice: false`` declines it
+``check_docs_coverage``       KYO-801 — code that no document section governs, a NOTICE
+                              by default; ``docs_coverage_required`` reports it as a
+                              PROBLEM where the project chose ``level: problem``, and
+                              ``level: off`` silences both
 ``check_guard_tests``         KYO-744 — ``guard_tests`` in kyosei/config.yml parses, and
                               every test file it declares exists in the code repository
 ``check_prior_art_config``    KYO-585 — ``recx.prior_art`` in kyosei/config.yml parses,
@@ -213,6 +217,8 @@ from .doctor_records import (
     check_ungated_unobserved_criteria,
 )
 from .doctor_registry import (
+    check_docs_coverage,
+    check_docs_coverage_required,
     check_docs_suggestions,
     check_gate_tags,
     check_kind_grants_missing,
@@ -298,6 +304,11 @@ CHECK_ORDER = (
     # project can switch off, and putting it beside the key that switches it off is how
     # the two get read together.
     "docs_suggestions",
+    # KYO-801: beside `docs_suggestions`, the other finding about the documents'
+    # declaration being merely incomplete. At most one of the two speaks: the notice by
+    # default, the problem where the project chose `level: problem`.
+    "docs_coverage",
+    "docs_coverage_required",
     "kind_registry",
     # KYO-394: beside `kind_registry` and after it — a kinds.yml that does not load has
     # a bigger problem than one that loads and grants less than the default, and this
@@ -401,6 +412,8 @@ CHECKS = {
     "orchestrator_only_setup": check_orchestrator_only_setup,
     "guard_tests": check_guard_tests,
     "docs_suggestions": check_docs_suggestions,
+    "docs_coverage": check_docs_coverage,
+    "docs_coverage_required": check_docs_coverage_required,
     "kind_registry": check_kind_registry,
     "kind_grants_missing": check_kind_grants_missing,
     "kind_policy_missing": check_kind_policy_missing,
@@ -498,6 +511,11 @@ TIER_NOTICE = "notice"
 #:   editorial judgment about the project's own file.
 #: * ``docs_suggestions`` (KYO-303.c2): a suggestion must never be a problem, and the
 #:   project can switch it off (``docs_suggest_notice: false``).
+#: * ``docs_coverage`` (KYO-801): an incomplete map of which document sections govern which
+#:   code is the state most projects start in, writing it is a project of its own, and
+#:   exit 3 at every stop would cost more than the finding is worth. A project that wants
+#:   the failure chooses ``level: problem`` and is then served by ``docs_coverage_required``,
+#:   a problem; ``level: off`` silences both.
 #: * ``installed_build_lag`` (KYO-309.c1): in the repository this package is built from
 #:   the build is older than the checkout after every edit until someone reinstalls kyo
 #:   (`make install-tool`, or `uv tool upgrade kyosei` for a release; KYO-466), and the
@@ -534,6 +552,7 @@ NOTICE_CHECKS = frozenset(
         "events_ledger_layout",
         "orchestrator_only_setup",
         "docs_suggestions",
+        "docs_coverage",
         "installed_build_lag",
         "kind_grants_missing",
         "kind_policy_missing",

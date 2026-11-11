@@ -1722,7 +1722,10 @@ def build_parser() -> KyoseiParser:
     )
     p_docs.add_argument(
         "action",
-        choices=["assemble", "check", "index", "obligations", "preview", "settle", "suggest"],
+        choices=[
+            "assemble", "check", "coverage", "index", "obligations", "preview", "settle",
+            "suggest",
+        ],
         help="check: every governs: target must exist. obligations: the document "
         "sections this project's dispatches put a question to. preview: the sections "
         "THIS worktree's branch would raise, read-only and store-free, for a worker to "
@@ -1738,7 +1741,10 @@ def build_parser() -> KyoseiParser:
         "index of each document set declaring `section_status.index` in documents.yml — "
         "per document its section counts by status and code pointers, its non-current "
         "sections with their links and the head of each chain, and the sections no code "
-        "points at (KYO-502)",
+        "points at (KYO-502). coverage: the code no document section governs, by "
+        "directory, with the files a pointer comment alone reaches, the broad targets, "
+        "the sections that govern nothing and the steps to a map; read-only and "
+        "store-free, and with --level it records the level (KYO-801)",
     )
     p_docs.add_argument(
         "id",
@@ -1807,6 +1813,13 @@ def build_parser() -> KyoseiParser:
         help="settle: apply that dispatch's current report's own docs_verdicts[] — each "
         "entry's verdict, method and reason read from the report rather than retyped "
         "(KYO-199.c4); takes no ID, --verdict, --method or --why of its own",
+    )
+    p_docs.add_argument(
+        "--level",
+        choices=["off", "notice", "problem"],
+        help="coverage: record `docs_coverage.level` in kyosei/config.yml and echo what "
+        "was stored. `problem` needs a declared `code:` list and prints a draft when it "
+        "is missing (KYO-801)",
     )
     p_docs.add_argument(
         "--check",

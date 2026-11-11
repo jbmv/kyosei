@@ -4971,6 +4971,58 @@ RECORDED: dict[str, str] = {
         "a hand edit of kyosei/config.yml, tested by "
         "test_a_malformed_declaration_is_refused_and_each_named_remedy_clears_it"
     ),
+    # KYO-801: the `docs_coverage` refusals. Each remedy is a hand edit of
+    # kyosei/config.yml (delete the key, or write the shape the message prints), which no
+    # `kyo` command performs. Proved for every malformed shape by
+    # tests/test_kyo801_docs_coverage.py::
+    # test_anything_else_is_refused_by_name_and_the_remedy_clears_it, which writes the
+    # printed shape back and then deletes the key; and for `level: problem` with no
+    # `code:` by test_problem_without_a_code_list_is_refused_and_the_printed_draft_parses,
+    # which writes the printed draft under the key.
+    "docs_coverage.py:_globs#0": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:_globs#1": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#0": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#1": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#2": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#3": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#4": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#5": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#6": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#7": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_anything_else_is_refused_by_name_and_the_remedy_clears_it"
+    ),
+    "docs_coverage.py:parse#8": (
+        "a hand edit of kyosei/config.yml, tested by "
+        "test_problem_without_a_code_list_is_refused_and_the_printed_draft_parses"
+    ),
     # KYO-642: `Store.add_credit`'s refusals, whose remedy is a different argument to the
     # Python writer (no `kyo` command calls it until KYO-644). Proved by
     # tests/test_schema_compat.py::test_a_refined_credit_without_its_refining_turn_is_refused
