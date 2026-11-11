@@ -610,6 +610,8 @@ STORE_ONLY_RULES = frozenset(
         "Quote the maintainer verbatim; never file their report as your own paraphrase",
         # 2026-11-06: this repository is public; KYO-669 adds the mechanical half at push.
         "Commit messages describe the change, never the maintainer's circumstances",
+        # 2026-11-11: AGENTS.md's "Writing documents" is this repository's own section.
+        "Write public documents by the rules in AGENTS.md's Writing documents",
     }
 )
 
