@@ -2713,7 +2713,13 @@ def build_parser() -> KyoseiParser:
         metavar="CRITERION_ID",
         nargs="+",
         help="the criteria the words answer; overrides resolution from the gate's payload "
-        "or the record's sole unmet-unobserved criterion",
+        "or the record's sole unmet-unobserved criterion; required when the record holds "
+        "more than one unmet-unobserved criterion (or use --all-unobserved)",
+    )
+    p_confirm.add_argument(
+        "--all-unobserved",
+        action="store_true",
+        help="the words answer every unmet-unobserved criterion on the record (KYO-746)",
     )
     p_confirm.add_argument(
         "--gate",

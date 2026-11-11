@@ -3971,7 +3971,7 @@ UNREACHED: dict[str, str] = {
         "source. Provoked, and the printed line run to exit 0, by "
         "tests/test_kyo_confirm.py::test_a_gate_naming_a_criterion_the_record_lacks_is_refused"
     ),
-    "cmd_confirm.py:_resolve#2": (
+    "cmd_confirm.py:_resolve#1": (
         "each printed `kyo confirm` line carries the refused invocation's own quote "
         "source. Provoked, and the printed line run to exit 0, by "
         "tests/test_kyo_confirm.py::test_nothing_to_confirm_is_refused_and_its_line_clears_it"
@@ -4726,10 +4726,16 @@ RECORDED: dict[str, str] = {
         "it from. Proved by "
         "tests/test_kyo_confirm.py::test_confirm_needs_exactly_one_quote_source"
     ),
-    "cmd_confirm.py:_resolve#1": (
+    "cmd_confirm.py:_refuse_ambiguous_criteria#0": (
         "each printed `kyo confirm` line carries the refused invocation's own quote "
         "source. Provoked, and the printed line run to exit 0, by "
         "tests/test_kyo_confirm.py::test_ambiguous_criteria_is_refused_and_its_line_clears_it"
+    ),
+    "cmd_confirm.py:cmd_confirm#0": (
+        "a usage refusal of the invocation itself (--all-unobserved given with "
+        "--criterion); the remedy is to drop one, which this walk has no invocation to "
+        "drop it from. Proved by "
+        "tests/test_kyo_confirm.py::test_all_unobserved_with_criterion_is_a_usage_error"
     ),
     "cmd_confirm.py:_scope#0": (
         "each printed `kyo confirm` line carries the refused invocation's own quote "

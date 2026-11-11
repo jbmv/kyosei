@@ -415,7 +415,10 @@ exactly (each this record's own and not void; an `unmet-unbuilt` one is allowed
 when named, which is how a proposal's decision criterion is confirmed); else
 every full-form id (`KYO-12.c4`, never a bare `c4`) in the in-scope human
 gate's payload that belongs to this record, another record's id being ignored
-and said so; else the record's sole `unmet-unobserved` criterion; else nothing
+and said so; else the record's sole `unmet-unobserved` criterion; `--all-unobserved`
+names every `unmet-unobserved` criterion at once (KYO-746). With several
+`unmet-unobserved` criteria, a bare `kyo confirm` refuses unless the gate's payload
+names every one of them; else nothing
 is verified and, with a human gate in scope, the words are attached to the
 record as evidence (`kyo attach <record-id> --file … --supports <record-id>`).
 **Only `awaiting:human-review` and `awaiting:human-run` gates clear**:
@@ -423,13 +426,14 @@ record as evidence (`kyo attach <record-id> --file … --supports <record-id>`).
 clearing `holding-for` raises `gate-cleared-stale-criteria`, which wants a
 deliberate `kyo ungate`. The in-scope gate is the record's one open human gate,
 or the one `--gate <gate-id>` names when several are open, and it clears only
-once every criterion its payload names is settled.
+once every criterion its payload names is settled and no criterion of the record is
+left `unmet-unobserved`; the output names any that remain (KYO-746).
 
 Each refusal writes nothing, exits non-zero under its own contract name and
 prints the ready `kyo confirm` line(s) that resolve it:
 `confirm-ambiguous-gate` (several open human gates and no `--gate`),
 `confirm-ambiguous-criteria` (several `unmet-unobserved` criteria and nothing
-naming any — one approval applied to observations nobody named is a rubber
+naming all of them; the remedies are `--criterion <ids>` and `--all-unobserved` — one approval applied to observations nobody named is a rubber
 stamp), `confirm-nothing-to-confirm` (no human gate, no unobserved criterion),
 `confirm-record-retired`, `confirm-dispatch-running` (a look taken while a
 worker is changing the thing is a look at a build about to change; the same line

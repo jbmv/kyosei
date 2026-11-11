@@ -1229,6 +1229,12 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "are rarely one line once written in the who/when/where shape, and the "
         "workflow teaches the file form for prose (law 5); `kyo reference` carries both"
     ),
+    ("confirm", "--all-unobserved"): (
+        "KYO-746: named by the refusal a bare confirm gets on a record with several "
+        "unobserved criteria, beside --criterion; the skill is the orchestrator's to "
+        "edit, and whether it should teach the flag is theirs to decide, not this "
+        "dispatch's"
+    ),
     ("new", "--since-note"): (
         "KYO-498: used once per already-old carried item when a project adopts the carry "
         "kind; docs/reference/topics/registries.md's kind-registry section teaches it, and "
