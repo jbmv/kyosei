@@ -1713,6 +1713,7 @@ const kyo = {
     scope = frame.scope ?? windowProject;
     document.body.classList.toggle("no-project", !windowProject);
     if (scope !== leaving) {
+      closeProjectList();
       // A save that was waiting is the project's that is left. The page sends it before it
       // asks for another project; when the app turned the window by itself there is no
       // session left to save it to, and the prompts are kept here all the same.
@@ -1764,6 +1765,11 @@ const kyo = {
   projects(frame: ProjectsFrame): void {
     projectsFrame = frame;
     drawProjects();
+  },
+
+  /** File > Projects…: the list of projects, or back to the project the window was showing. */
+  projectList(): void {
+    toggleProjectList();
   },
 
   /** What a press of Start orchestrator came to (KYO-719). */
@@ -3190,6 +3196,8 @@ let wanted: { name: string; session: string | null } | null = null;
  */
 function chooseProject(name: string, session: string | null = null): void {
   closeProjects();
+  // The list shown from File > Projects… closes on the project the window already shows.
+  if (name === windowProject && !session) closeProjectList();
   if (sendGate.current !== null || retracting) {
     wanted = { name, session };
     return;
@@ -3250,6 +3258,39 @@ function closeProjects(): void {
   projectPopup.hidden = true;
   projectButton.setAttribute("aria-expanded", "false");
 }
+
+/**
+ * KYO-766: File > Projects… shows the list of projects in place of everything under the top
+ * bar, as a first run does, and the same item or Escape returns to what was showing. Nothing
+ * of the project is cleared, so its chat, composer and view stand as they were.
+ */
+function projectListShown(): boolean {
+  return document.body.classList.contains("pick-project");
+}
+
+function closeProjectList(): void {
+  document.body.classList.remove("pick-project");
+}
+
+function toggleProjectList(): void {
+  // With no project the list already stands there.
+  if (!windowProject) return;
+  if (projectListShown()) {
+    closeProjectList();
+    return;
+  }
+  closeProjects();
+  document.body.classList.add("pick-project");
+  post("projects", { want: "list" });
+  focusProject(windowProject, document.getElementById("projects-list")!)
+    || focusProject(null, document.getElementById("projects-list")!);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !projectListShown()) return;
+  event.preventDefault();
+  closeProjectList();
+}, true);
 
 function openProjects(): void {
   projectPopup.hidden = false;

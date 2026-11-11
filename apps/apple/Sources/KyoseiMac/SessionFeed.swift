@@ -136,6 +136,12 @@ final class SessionFeed {
         open(server: server, project: project, session: nil, save: true)
     }
 
+    /// File > Projects… (KYO-766): the page shows the list of projects in place of the chat,
+    /// or returns to the project it was showing when the list is already up.
+    func toggleProjectList() {
+        send("projectList", "null")
+    }
+
     /// What the page's dropdown and session links ask (KYO-761): another project, with the
     /// session to follow when a link names one. A link to the window's own project turns
     /// the chat to that session.
