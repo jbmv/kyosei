@@ -101,6 +101,8 @@ STOP_RECIPE = "kyo sweep --hook && kyo doctor --hook"
 #: `hook_event_name` rather than by three commands that could drift.
 SESSIONS_RECIPE = "kyo sessions --hook"
 TURNS_RECIPE = "kyo turns --hook"
+#: KYO-662: the discussion check, a third group of the stop fragment, under `Stop` alone.
+DISCUSS_RECIPE = "kyo discuss check --hook"
 
 
 PACKAGED_HOOKS = REPO_ROOT / "src" / "kyosei" / "defaults" / "hooks"
@@ -176,10 +178,9 @@ def test_both_copies_of_the_stop_fragment_run_the_ordered_recipe() -> None:
         # KYO-316 put the PATH guard ahead of the recipe. The ordering this test
         # exists for is the ordering of the RECIPE, so the guard is stripped and the
         # fact that it is there is asserted below, where it is the subject.
-        assert commands == [guarded(STOP_RECIPE), guarded(TURNS_RECIPE)], f"{directory}: {commands}"
-        assert [hook_action(c) for c in commands] == [STOP_RECIPE, TURNS_RECIPE], (
-            f"{directory}: {commands}"
-        )
+        expected = [STOP_RECIPE, TURNS_RECIPE, DISCUSS_RECIPE]
+        assert commands == [guarded(recipe) for recipe in expected], f"{directory}: {commands}"
+        assert [hook_action(c) for c in commands] == expected, f"{directory}: {commands}"
 
 
 # ------------------------------------------------- KYO-316: the missing-`kyo` guard
@@ -236,8 +237,9 @@ def test_every_packaged_hook_carries_the_path_guard() -> None:
     to `/bin/sh: kyo: command not found` on a machine without the CLI."""
     commands = packaged_hook_commands()
     # KYO-398 added the eighth: UserPromptSubmit's `kyo check-build --hook`. KYO-657 added
-    # `kyo turns --hook` on UserPromptSubmit and on Stop.
-    assert len(commands) == 10, commands
+    # `kyo turns --hook` on UserPromptSubmit and on Stop, and KYO-662 `kyo discuss check
+    # --hook` on Stop.
+    assert len(commands) == 11, commands
     for name, command in commands:
         assert command.startswith(PATH_GUARD_PREFIX), f"{name}: {command!r}"
         # ...and the guard is a prefix, never the whole thing: a hook that guards and

@@ -70,7 +70,13 @@ EVENT_ALT = r"SubagentStop|SessionStart|SessionEnd|PreToolUse|Stop"
 #: ``kyo check-branch --against main`` — a long flag may take a value, and
 #: dropping it would let prose name a *different* invocation of the same command
 #: and still pass. The value may not itself start a new command.
-COMMAND = r"kyo [a-z][a-z-]*(?:\s+--[a-z][a-z-]*(?:\s+(?!kyo\b)[a-z][\w./-]*)?)*"
+#: KYO-662: one hook names an action before its flag, ``kyo discuss check --hook``. The
+#: action is admitted by name and only before ``--hook``, since a general second word
+#: would take in whatever prose follows a bare command.
+COMMAND = (
+    r"kyo [a-z][a-z-]*(?:\s+check(?=\s+--hook\b))?"
+    r"(?:\s+--[a-z][a-z-]*(?:\s+(?!kyo\b)[a-z][\w./-]*)?)*"
+)
 #: KYO-298: the word alternatives carry ``\b`` on both sides, and that is a real fix
 #: rather than tidying. ``_SPLIT_RE`` below applies this same alternation to a command
 #: chain that has ALREADY matched, with no boundary of its own — so an unanchored

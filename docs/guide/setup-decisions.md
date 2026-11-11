@@ -138,6 +138,7 @@ decides, and how a setup agent can find the answer before asking.
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
   | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |
+  | The session stops | `kyo discuss check --hook` | Where D14 is yes, asks the orchestrator to open a discussion when a turn put a choice to you and none is open. |
 
 - **Without them:** the commands still work, but every rule above becomes something the agent
   has to remember.

@@ -584,6 +584,8 @@ kyo credit --withdraw <credit> --why  # retract a credit that should not exist, 
 kyo discuss open --title ...      # a discussion, stamped at the person's turn from the turn index (KYO-658)
 kyo dossier <id>                  # one decision as a Markdown page for a reader outside the project,
                                   #   each part naming its source in the store (KYO-659)
+kyo discuss check --hook          # at Stop: asks the agent to open one, or `kyo discuss skip --why`,
+                                  #   when a turn put a choice to the person and none is open (KYO-662)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --criteria c3,c7   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles
@@ -942,6 +944,13 @@ and integrates via:
     reaches the agent makes it take another turn, so an announcement that must not hold
     the session open is addressed to the person and the agent reads the items on the next
     prompt.
+  - `Stop` → `kyo discuss check --hook` (KYO-662), the one place that continuation is wanted:
+    when the turn that ended put a choice to the person and no discussion is open in the
+    session, it returns `hookSpecificOutput.additionalContext`, which Claude Code gives the
+    agent as Stop hook feedback while continuing the conversation, so the agent opens the
+    discussion or records with `kyo discuss skip --why` that it is not one. It is not a
+    block, it is silent when `stop_hook_active` is set and so asks once per turn, and it is
+    in its own group so a failing sweep or doctor does not skip it.
   - Every packaged hook exits 0 with no output where no Kyosei project resolves, because a
     plugin's hooks fire in every session (KYO-591): `kyo`'s own project resolution decides when
     it is on PATH, and the missing-`kyo` guard's marker walk decides when it is not. A blocking

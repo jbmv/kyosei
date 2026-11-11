@@ -778,6 +778,9 @@ kyo new decision --title "Use SQLite" \
 kyo discuss open --title "Which store"     # a discussion, stamped at the person's turn
                                            # from the turn index; a decision spawned from
                                            # it closes it (KYO-658)
+kyo discuss skip --why "a question about a log line"   # the Stop check asked about a turn
+                                           # that is not a discussion; the reason is kept
+                                           # on the turn's index line (KYO-662)
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
                                            # date; the brief shows its age (KYO-497)
 kyo show KYO-1

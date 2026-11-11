@@ -114,9 +114,8 @@ claims all of it. Name symbols on the files your records keep meeting on (KYO-30
 
 **One file instead of the flags** (KYO-330, KYO-340): draft the whole record as one markdown
 file and file it with `kyo new <kind> --from record.md` -- the same file on `kyo promote` and
-`kyo spawn`, whichever route the kind demands. `--from FILE --check` validates against the repo
-and writes nothing, so check a batch before filing any of it. `kyo reference new` has the
-file's shape.
+`kyo spawn`. `--from FILE --check` validates against the repo and writes nothing.
+`kyo reference new` has the file's shape.
 
 **Ideas**: a thought to be found later goes in its own `ideas/<name>.md` (`kyo ideas review`
 lists them). The scratchpad is the file `kyo where` prints as `scratchpad:`, not under `ideas/`.
@@ -152,7 +151,8 @@ it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo sp
 record's own kind (KYO-50). Before answering a turn that puts a choice to the person, run
 `kyo discuss open --title "<topic>"` (KYO-658); file the decision from it, `kyo
 spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
-(KYO-644; `--keep-open` for more). With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
+(KYO-644; `--keep-open` for more). If the Stop hook asks (KYO-662), open it or
+`kyo discuss skip --why "<why>"`. With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
 needing design work first is a proposal.
 
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing

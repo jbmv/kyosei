@@ -53,7 +53,7 @@ from kyosei.install_hooks import (
     packaged_elements,
 )
 
-from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
+from .test_hook_templates_sync import DISCUSS_RECIPE, SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
 
 
 def _settings(project: Path) -> Path:
@@ -206,6 +206,7 @@ def test_install_hooks_does_not_duplicate_an_extended_command(kyo, project: Path
     assert stop == [
         f"{guarded(STOP_RECIPE)} && make docs",
         guarded(TURNS_RECIPE),
+        guarded(DISCUSS_RECIPE),
         guarded(SESSIONS_RECIPE),
     ], stop
 

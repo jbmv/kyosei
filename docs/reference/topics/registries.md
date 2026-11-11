@@ -45,7 +45,32 @@ there is no index (no session, or a project that has not opted in to reading tra
 the reference says `index_state: absent`. `kyo discuss note <id> --file F` keeps what was put
 to the person as a record note with a turn reference. Spawning a decision, proposal, plan
 or task from the discussion closes it, and `kyo discuss close <id> --dropped --why "..."`
-closes one that produced nothing. A store scaffolded before this release has no
+closes one that produced nothing.
+
+**The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
+ended: the person's words and any use of AskUserQuestion from the transcript, and the
+agent's final message from the hook payload. A cue fires when the person's words hold a
+question or a phrase that opens a choice, when the reply holds a recommendation, a request
+for their choice, two or more labelled options or a closing question, or when the turn
+used AskUserQuestion. The turn is attached when a discussion opened in this session is
+still open, or a turn reference already names the turn; a turn whose words name a record
+that no open discussion's title, description, notes or links mention is not attached. When
+a cue fires on an unattached turn, the check prints one line of hook JSON whose
+`hookSpecificOutput.additionalContext` asks the agent to run `kyo discuss open` or `kyo
+discuss skip --why "<one line>"`. Claude Code gives that text to the agent as Stop hook
+feedback and continues the conversation once so the agent can act on it; it is not a
+block and is not reported as a hook error. The check says nothing on the stop that follows
+its own feedback (`stop_hook_active`), so it asks at most once per turn. It is also silent
+in a project that has not opted in to reading transcripts, in a worktree, and whenever it
+cannot read the store, the index or the transcript. `kyo discuss skip` writes its reason
+on the turn's line of the turn index (`skip`, with the time), `--at-prompt <prompt>` naming
+the turn and the session's latest prompt being the default. `kyo doctor` prints, as a
+notice per week, the share of decisions whose discussion was opened live, opened late or
+with no indexed turn, and the number of prompts skipped; and it reports as a problem a
+session that recorded two or more Stops, the last later than every line of the turn
+index, with no line of its own, which means the hooks that write the index did not run.
+
+A store scaffolded before this release has no
 `discussion` entry and no `requires_discussion` key; copy both from the packaged
 `kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it produces.
 

@@ -78,6 +78,13 @@ The checks, and the law each one keeps honest:
                               ``credit_transcripts_appeared``, name `kyo credit`;
                               ``credit_people_undeclared`` (KYO-656) replaces them where
                               `people:` declares nobody
+``check_discussion_shares``   KYO-662 — per week, the share of decisions whose discussion
+                              was opened live, late or with no indexed turn, and the
+                              Stop-check prompts skipped. A NOTICE: it measures whether
+                              `kyo discuss check --hook` is working
+``check_sessions_unindexed``  KYO-662 — a session with two or more recorded Stops, the
+                              last later than every turn-index line, and no line of its
+                              own: the hooks that write the index did not run
 ``check_completed_with_unmet_criteria``  KYO-415 — a record at its complete-role status
                               holding an unmet criterion. A NOTICE naming `kyo split
                               --to-successor` and reopening as the ways out
@@ -194,12 +201,14 @@ from .doctor_records import (
     check_credit_transcripts_appeared,
     check_criterion_states,
     check_criterion_verification_agreement,
+    check_discussion_shares,
     check_flag_resolution_consistency,
     check_flag_types,
     check_links,
     check_open_standing_obligations,
     check_plan_membership,
     check_redactions,
+    check_sessions_unindexed,
     check_statuses,
     check_ungated_unobserved_criteria,
 )
@@ -336,6 +345,8 @@ CHECK_ORDER = (
     "credit_coverage_legacy",
     "credit_coverage_before_people",
     "credit_transcripts_appeared",
+    "discussion_shares",
+    "sessions_unindexed",
     # KYO-656: in place of the two coverage checks where nobody is declared.
     "credit_people_undeclared",
     "redactions",
@@ -411,6 +422,8 @@ CHECKS = {
     "credit_coverage_legacy": check_credit_coverage_legacy,
     "credit_coverage_before_people": check_credit_coverage_before_people,
     "credit_transcripts_appeared": check_credit_transcripts_appeared,
+    "discussion_shares": check_discussion_shares,
+    "sessions_unindexed": check_sessions_unindexed,
     "credit_people_undeclared": check_credit_people_undeclared,
     "redactions": check_redactions,
     "statuses": check_statuses,
@@ -463,6 +476,8 @@ TIER_NOTICE = "notice"
 #: * ``credit_coverage_before_people`` (KYO-684): nothing is enforced until someone is
 #:   declared, so these rows were correct when written and every one appears the moment the
 #:   first person is; exit 3 would make declaring someone the act that breaks the stops.
+#: * ``discussion_shares`` (KYO-662): a measurement, per week, of how decisions' discussions
+#:   were opened. No value of it is a fault in the store.
 #: * ``credit_transcripts_appeared`` (KYO-646): the credit is valid as written; a transcript
 #:   arriving later only makes a stronger check possible.
 #: * ``credit_people_undeclared`` (KYO-656): credits apply only where someone is declared,
@@ -526,6 +541,7 @@ NOTICE_CHECKS = frozenset(
         "credit_coverage_legacy",
         "credit_coverage_before_people",
         "credit_transcripts_appeared",
+        "discussion_shares",
         "credit_people_undeclared",
         "transcript_retention",
     }
