@@ -102,7 +102,8 @@ def test_the_page_has_the_eight_parts_in_order_each_naming_its_source(kyo, live:
     assert [part["heading"] for part in data["parts"]] == HEADINGS
     assert all(part["source"] and part["blocks"] for part in data["parts"])
     assert data["markdown"] == page
-    assert data["reconstructed"] is False and data["sealed"] is False
+    # KYO-663: a credit written over a turn index carries span_seal, so a live decision is sealed.
+    assert data["reconstructed"] is False and data["sealed"] is True
 
 
 def test_the_parts_are_drawn_from_the_credit_the_discussion_and_the_index(
@@ -124,7 +125,7 @@ def test_the_parts_are_drawn_from_the_credit_the_discussion_and_the_index(
     assert f"2 messages from {TEST_PERSON} and 1 reply from the agent" in page
     assert "Recorded live: the credit was written with the decision record." in page
     assert "and were found in a message the person sent" in page
-    assert cmd_dossier.NOT_SEALED in page
+    assert cmd_dossier.SEALED in page
 
 
 def test_record_ids_appear_only_in_the_references(kyo, live: dict) -> None:
