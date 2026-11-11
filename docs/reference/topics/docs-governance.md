@@ -6,9 +6,9 @@ Layer 3: `governs:` sections, `kyo docs check`, documentation obligations and th
 
 governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_obligations.py, src/kyosei/docs_parse.py, src/kyosei/docs_regions.py, src/kyosei/docs_staleness.py, src/kyosei/docs_suggest.py, src/kyosei/docs_targets.py
 
-A project's documents are meant to state only what is *currently true* about
-it — no diary, no history (that's what git commit messages are for). `kyo docs
-check` (KYO-13.c3) is v1's skeleton of the validator that promise needs: a
+A project's documents state what is *currently true* about it, and its history
+belongs in commit messages and decision records. `kyo docs
+check` (KYO-13.c3) is v1's skeleton of the validator that requires: a
 `governs:` line anywhere inside a document section (after one heading, before
 the next) names one or more `path` or `path#symbol` targets, comma-separated:
 
@@ -32,8 +32,8 @@ every failure.
 Each target must resolve — the path must exist as a file relative to the
 project root, and a `#symbol` suffix must additionally appear as a whole-word
 match in that file's text — exactly the same coarse check every
-`--touches-file` (`kyo promote`, `kyo new`, `kyo edit`) already applies to a
-record's `touches`, reused rather than reinvented. `kyo docs check` reports every unresolved target in one pass (exit
+`--touches-file` (`kyo promote`, `kyo new`, `kyo edit`) applies to a
+record's `touches`. `kyo docs check` reports every unresolved target in one pass (exit
 3, the same family as `kyo doctor`'s invariant failures) rather than stopping
 at the first.
 
@@ -322,21 +322,18 @@ matching would have to know that a brace inside a string, a template literal or
 a regex is not a brace, and every case it got wrong would end a region early and
 *suppress* an obligation silently, at a gate that blocks. Indentation cannot
 fail that way — an unformatted or minified file gives a region that is too
-wide, which raises. Every undecidable case still raises, unchanged since
-KYO-153: a symbol whose declaration cannot be found, a file added or deleted by
+wide, which raises. Every undecidable case raises (KYO-153): a symbol whose declaration cannot be found, a file added or deleted by
 this branch, a revision that will not parse.
 
 A class member is a declaration whether or not words stand in front of its name
 — `private`, `public`, `protected`, `static`, `abstract`, `override`,
 `readonly`, `async`, `get`, `set`, a generator's `*` — and the last member of a
-class ends before the class's own closing brace (KYO-358; before it only a bare
-`showLeft(): void {` was found, which missed most of the methods a document
-describes). A declaration ends at its next sibling —
+class ends before the class's own closing brace (KYO-358). A declaration ends at its next sibling —
 the next line indented no further that does not begin with closing punctuation,
 so `): void {` continues a signature — whether or not a blank line separates
 them (KYO-360: a property of the same name in an object literal,
-`serialize: (fn) => this.serialize(fn),`, used to swallow every sibling after
-it, fail the brace check, and take the method's own region down with it). The
+`serialize: (fn) => this.serialize(fn),`, ends at its next sibling as any other
+declaration does). The
 list of words is closed, so
 `return showLeft(` and `await showLeft(` stay calls. And where a `#symbol` on a
 readable suffix still finds no region — the name is only imported or called
@@ -344,8 +341,8 @@ there — `kyo docs check` lists it beside the unreadable-suffix notices as
 "accepted, but no region found", so a project narrowing many targets learns
 which ones took without replaying old merges.
 
-**The data formats (KYO-363), where a section governing `package.json#scripts`
-used to be raised by every dependency bump.** What a symbol means is different
+**The data formats (KYO-363).** A symbol narrows these as well, so a section governing
+`package.json#scripts` is not raised by a dependency bump. What a symbol means is different
 in each, and in each a shape the finder cannot describe is a veto rather than a
 guess:
 
@@ -388,20 +385,20 @@ only where the symbol is defined: a changed file raises when its own diff shows
 the definition changing, appearing or disappearing, and a file that merely uses
 the symbol raises nothing, so long as some file defines it. A file type with no
 region finder still raises, as does a revision that will not parse. When no
-resolved file defines the symbol, every one of them raises on any change, as it
-always did, and `kyo docs check` says so with the file count — in one measured
+resolved file defines the symbol, every one of them raises on any change, and
+`kyo docs check` says so with the file count; in one measured
 project, a bare dataclass field raised its section for every one of 110 files that
 read it.
-In Python, `path#Class.attr` (and the bare `Class.attr`) now locates an
+In Python, `path#Class.attr` (and the bare `Class.attr`) locates an
 assignment in a class body: a dataclass field, a plain class attribute, a
 nested class's field. A bare field name alone locates it only when it is the
 file's one definition of that name.
 
-That precision is opt-in and reversible, but a narrowing that goes wrong is
-invisible — nothing raised is nothing seen — so `kyo docs preview` counts the
+That precision is opt-in and reversible, but a narrowing that goes wrong is not
+visible, because a section that is not raised is not shown, so `kyo docs preview` counts the
 sections a declared `#symbol` suppressed on every run and `--suppressed` lists
 them (`--json` always carries them). A project narrowing many targets at once
-should read that list once before trusting the quiet. The same run counts the
+should read that list once before relying on the narrowing. The same run counts the
 code pointers whose regions this branch did not change (KYO-500), and names
 every pointer obligation raised at file granularity.
 
@@ -412,7 +409,7 @@ governs the file whole, narrows it to a `#symbol`, is named by a pointer in
 it, or is a recx module whose path prefixes it (KYO-606). Comments, blank lines and docstrings are not code tokens; a literal in other
 quotes, a re-indented block, a shebang and a coding cookie are. Python and YAML
 (`.py`, `.yml`, `.yaml`) are read; every other file, and any side that will not
-lex or parse, raises as before. The rule is per file: one changed code token
+lex or parse, raises. The rule is per file: one changed code token
 and every section the file raises is raised. `kyo docs preview` counts what it
 quieted as "quieted as comment-only" and `--suppressed` names each section
 (`comment_only: true` in `--json`); nothing is stored for them.
@@ -421,17 +418,16 @@ quieted as "quieted as comment-only" and `--suppressed` names each section
 assumption (KYO-129).** `kyosei/documents.yml` names sets of documents by
 root-relative glob; a project that declares nothing is scanned for root-level
 `*.md` plus `docs/**/*.md`, so a README beside the code is governed by default
-and a project with no `docs/` directory is no longer scanned for nothing.
+and a project with no `docs/` directory still has its root-level documents scanned.
 Declaring any set *replaces* that default rather than adding to it, and a
 project whose globs match no file is told so (`no-documents`) rather than
 shown the word "clean" over an empty scan.
 
-**The declaration is yours, and `kyo docs suggest` drafts it (KYO-303).** Every
-word above is about a file you write: which files are documents, which sets they
-fall in, which are numbered and append-only. Nothing derives that, and nothing
-ever will — but a file that has to be written from scratch, whose most useful
-block nothing mentions until you go looking for it, is one most projects never
-write. So there is a read-only command that says what the repository *looks*
+**The declaration is the project's, and `kyo docs suggest` drafts it (KYO-303).**
+Everything above depends on a file the project writes: which files are documents,
+which sets they fall in, which are numbered and append-only. Kyosei does not derive
+that file. Because a file that must be written from scratch is easily left
+unwritten, a read-only command reports what the repository *looks*
 like, with the evidence beside each draft and the exact YAML to paste:
 
 ```
@@ -479,20 +475,18 @@ out, and the evidence says so), an `id_pattern` naming exactly those prefixes, a
 `section_status:` that includes `superseded`. The draft is offered only if the
 pasted file loads and `kyo docs check` finds nothing in the documents it does not
 find today, and a document drafted this way is not also offered `numbered:`.
-`--json` carries the same. With nothing to suggest it says so in one line, which is
-a real answer and not silence.
+`--json` carries the same. With nothing to suggest it says so in one line.
 
-It is the posture `kyo new` has had for scope since KYO-100 — "derived
+`kyo new` treats scope the same way (KYO-100: "derived
 (suggestion only, nothing stored) ... derivation never overrides a
-declaration" — and it is held the same way: **nothing is enforced.** No
+declaration"), and here too **nothing is enforced.** No
 `kyo doctor` problem reads a suggestion. Doctor prints one NOTICE when there is
 something to draft, naming the command and the count and nothing else, and a
 project that has read the drafts and declined them turns that line off with
 `docs_suggest_notice: false` in `kyosei/config.yml` (offered, commented out, in
-every freshly written config). A suggestion that cannot be declined is not a
-suggestion. Every block it emits is run through the real `documents.yml`
+every freshly written config). Every block it emits is run through the real `documents.yml`
 validator before it is offered, and anything that cannot be drafted validly is
-not drafted at all — a suggestion the next command refuses is worse than none.
+not drafted, so no draft is offered that the next command would refuse.
 
 **Code that no section governs (KYO-801).** A `governs:` line makes a branch that changes
 the named code raise an obligation on its section. Code that no live section names raises
@@ -534,7 +528,7 @@ generates. That declaration is not about `governs:` targets at all and changes
 nothing this section describes: what it changes is *who writes a new section*.
 Workers write per-dispatch fragment files, `kyo docs assemble` appends them with
 the next number on the merged tree, and `kyo check-branch` refuses a branch that
-adds a numbered heading to the document directly. The adoption story is in
+adds a numbered heading to the document directly. Adoption is described in
 "Operating a Kyosei project", in [operating.md](operating.md): "Doc fragments: a document that grows by
 numbered section".
 

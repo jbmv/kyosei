@@ -16,13 +16,12 @@ too. Any route that creates a store also requires `--read-transcripts yes` or `n
 written as `read_transcripts:` in `kyosei/config.yml`, and refuses without it; linking
 a store that exists does not ask (KYO-686). `kyo init --explain` prints, for the folder it is run in, what each layout keeps
 in or out of the code repository and where dispatch worktrees go, and writes
-nothing; that explanation is no longer printed after a scaffold, where it came after
-the choice. A `kyo init` that makes or links a store ends with the items
+nothing; it is printed only on request, and not after a scaffold. A `kyo init` that makes or links a store ends with the items
 `kyo onboard --check` reads as missing or behind, each with its fix, then
 `kyo onboard`.
 
-The default (`--defaults`) is **not**. The store goes to `~/kyosei/<project>/` — a visible
-directory you control the audience of — and is initialised there as **its own git
+By default (`--defaults`) it is **not**. The store goes to `~/kyosei/<project>/`, a visible
+directory whose audience you control, and is initialised there as **its own git
 repository**, one per project. The code repository ends up carrying no store at
 all: one pointer file, `.kyosei`, naming where the store is, and one
 `.gitignore` entry for `.kyosei-report.json` (KYO-206 — the path a dispatched
@@ -93,9 +92,9 @@ writes what it suspects and what it thinks is going wrong), a person's own notes
 evidence artifacts
 stored verbatim (law 5 — whatever was in the terminal: logs, stack traces, query
 output, customer identifiers), the frozen dispatch briefs quoting all of it, and
-the events ledger, which has already copied every version of every one of them —
-by reference for evidence artifacts since KYO-268, verbatim for everything else.
-None of that is misuse; it is the tool working as designed. `kyo redact` removes
+the events ledger, which holds every version of every one of them,
+by reference for evidence artifacts (KYO-268) and verbatim for everything else.
+All of that is the store working as designed. `kyo redact` removes
 that prose from the store and the ledgers going forward and explicitly cannot
 reach a commit you have already pushed.
 
@@ -103,27 +102,27 @@ reach a commit you have already pushed.
 gitignored, so ignoring `kyosei/export/` too would leave the store untracked in
 its entirety: destroyed by a fresh clone, a `git clean`, or a lost laptop, with
 no recovery path, since `kyo rebuild` reconstructs the database *from* the
-export. The split store gives up none of that. It is still committed, still
-diffable, still rebuildable — to a different remote, not to no remote.
+export. The split store keeps all of that: it is committed, diffable and
+rebuildable, in a repository of its own.
 
-**The in-repo layout stays first-class**, and `kyo init --in-repo` chooses it. It
-is the right answer when the records are not sensitive and you want a record
-change reviewed in the same pull request as the code change that motivated it —
-which is real value, and is exactly what the default gives up.
+**The in-repo layout is fully supported**, and `kyo init --in-repo` chooses it. It
+suits a project whose records are not sensitive and where a record change should be
+reviewed in the same pull request as the code change that motivated it, which the
+default layout does not allow.
 
-**One consequence runs in the helpful direction.** `kyo check-branch` enforces
+**One consequence of the split layout strengthens a guard.** `kyo check-branch` enforces
 "a worker branch must not diff `kyosei/` or `ideas/`". Under the split layout a
 worker branch cannot express that diff at all, because neither directory is in
-the code repository: worker isolation stops being a check that can fail and
-becomes a physical property. Both guards say which of the two guarantees they
+the code repository, so worker isolation holds by construction and does not
+depend on a check. Both guards say which of the two guarantees they
 are making on every run — including saying, in a repository that has configured
 no store at all, that they are guarding nothing and that exit 0 proves nothing.
 
-**One consequence does not.** A split store is *pulled*, so its `kyosei.db` —
+**Another needs a step from the operator.** A split store is *pulled*, so its `kyosei.db` —
 gitignored, and rebuilt locally — can be legitimately **behind** its export, a
-direction that could not arise while one process owned both files. Reads say so
-and stay useful: `kyo list` and the session brief warn that what you just read is
-incomplete, and name `kyo rebuild --force`. Writes refuse. Every mutating command
+direction that cannot arise where one process owns both files. Reads say so
+and still answer: `kyo list` and the session brief warn that what you just read is
+incomplete, and name `kyo rebuild --force`. Writes are refused. Every mutating command
 allocates at least one id from the database's counters and then rewrites
 `kyosei/export/_allocations.json` with them, so over a behind database it would
 lower the git-canonical counters and hand out an id the export has already
@@ -140,7 +139,7 @@ nothing else, so a worker's worktree carries a complete `kyosei/` — `config.ym
 `export/` — and no database at all. `kyo` resolves that through git's common dir
 to the same store in the main checkout and reads it there, so `kyo show
 <dispatch-id>` answers in a worktree the way it answers anywhere else. Three
-things follow, and they are the whole of the behaviour. What you read is the
+things follow. What you read is the
 **main checkout's live database**, not this branch's `kyosei/export/`, which is a
 checkout of the branch and may be behind it — `kyo where` says which store
 answered and that it was reached that way. **Writes are refused**, naming the
@@ -186,7 +185,7 @@ it writes the `.kyosei` link and says so, rather than scaffolding over it. Every
 record, id, event and criterion is preserved: nothing about the store's contents
 changes, only where it is committed from.
 
-**What this does not do, stated plainly:** the prose that is already in the code
+**What this does not do:** the prose that is already in the code
 repository's history stays there. Deleting the files in a new commit removes them
 from the working tree, not from the commits that added them, and not from any
 clone or fork already made. Removing them from history is a history rewrite
@@ -195,12 +194,12 @@ the same limit `kyo redact` names about a commit that has already been pushed.
 
 ### Reclaiming the disk an old events ledger cost (KYO-268)
 
-The shard layout stops the bleeding; it does not refund what an in-repo store has
-already spent. Every commit that touched a monolithic `_events.jsonl` left a
+The shard layout stops the growth and does not recover the disk an in-repo store has
+already used. Every commit that touched a monolithic `_events.jsonl` left a
 complete copy of it in the object store, and those copies stay there after the
 migration — 5,783 loose objects, 7.23 GiB, against a 219 MiB pack, measured on
-one store-bearing repository. Removing them is **one deliberate act per
-repository**, and the design is what makes it lossless.
+one store-bearing repository. Removing them is one deliberate step per
+repository, and the ledger's design makes it lossless.
 
 **Why dropping the earlier versions loses nothing.** The ledger is append-only,
 and `kyo redact` only ever scrubs text *out of* existing lines. So every earlier
@@ -211,13 +210,13 @@ the old versions therefore loses no history — and it removes the un-scrubbed
 copies a redaction could never reach, which is the limit `kyo redact` names about
 a commit that has already been pushed.
 
-**What it is worth, stated as the arithmetic it is.** The measured before is
+**The expected saving.** The measurement before is
 above: 5,783 loose objects at 7.23 GiB against a 219 MiB pack, almost all of it
 versions of one path. Dropping that path drops those objects, so the expected
-after is the pack plus whatever loose objects belong to everything else — a
-`.git` two orders of magnitude smaller. That is arithmetic on a measurement, not
-a second measurement, and the number you should trust is the one
-`git count-objects -vH` gives you before and after your own.
+result is the pack plus whatever loose objects belong to everything else, a
+`.git` about two orders of magnitude smaller. That figure is calculated from the one
+measurement and was not itself measured; `git count-objects -vH` before and after
+your own rewrite gives the actual numbers.
 
 **The order matters, and getting it wrong destroys the ledger.** Migrate first,
 commit the shards, and only then rewrite:
@@ -238,10 +237,10 @@ shards do not.
 reason the caveat above says so: every commit id after the touched point changes,
 so every clone re-clones and every open branch has to be rebased or recreated, and
 a force-push has to be coordinated with everyone who has one. `kyo doctor`
-refuses nothing here and never will — nothing in this tool rewrites a repository's
-history on its own. What is proved rather than asserted is that the rewrite is
-safe to survive: `tests/test_rebuild.py` builds a fixture repository, migrates it,
-really rewrites it with `git filter-branch --index-filter` over that path, drops
+refuses nothing here, and nothing in this tool rewrites a repository's
+history on its own. A test establishes that the store survives the rewrite:
+`tests/test_rebuild.py` builds a fixture repository, migrates it,
+rewrites it with `git filter-branch --index-filter` over that path, drops
 `refs/original` and expires the reflog, and asserts the rebuild produces a
 byte-identical database. (`filter-repo` is the right tool against a real
 repository and drops the same path; the test uses `filter-branch` only because it
@@ -251,14 +250,13 @@ ships with git and the assertion must not depend on what is installed.)
 
 governs: src/kyosei/cmd_publish.py
 
-The layout decision is made once, at `kyo init`, often by someone who has not yet
-written anything private into the store. The consequence arrives at a `git push`
-months later, when the store holds a great deal more than it did and the choice
-has been forgotten — and `kyo redact` cannot help then, for the reason just
+The layout decision is made once, at `kyo init`, usually before anything private has
+been written into the store. Its consequence arrives at a later `git push`, when the
+store holds more than it did, and `kyo redact` cannot help then, for the reason given
 above: it cannot reach a commit that has already been pushed.
 
-So under the in-repo layout, something warns before that push, and it says what
-is actually there rather than describing what a store generally contains:
+Under the in-repo layout a check therefore warns before that push, stating what the
+store holds at that moment:
 
 ```
 $ kyo check-push
@@ -272,11 +270,11 @@ kyo: contract push-publishes-the-store not met:
   -     706 events — ... which has already copied every version of every one of them
 ```
 
-**An agent is blocked; a human is warned.** The hooks (Kyosei's Claude Code plugin,
+**The check blocks an agent and warns a person.** The hooks (Kyosei's Claude Code plugin,
 or `kyo install-hooks` on the copies) wire `kyo
 check-push --pre-tool-use` into `PreToolUse`, where it exits 2 and the push never
-runs — an agent asking to push has no standing to publish the maintainer's
-private thinking, and must surface the decision instead of taking it. Setup
+runs: publishing the store is the maintainer's decision, so an agent raises it
+and does not take it. Setup
 also writes `.git/hooks/pre-push`, which runs `kyo check-push --pre-push`: same
 message, no refusal, and `git push --no-verify` skips it, because a human pushing
 their own repository owns that call. On the plugin `kyo harness install
@@ -304,7 +302,7 @@ else in the hook that reads them. A hook installed before this mode existed stil
 `kyo check-push --advisory`, which warns about the store and reads no commits; running
 the setup command again replaces it.
 
-**It fires once.** Two ways to make it stop, and they are genuinely different:
+**The check is answered once, in one of two ways.** Accept it:
 
 ```sh
 kyo check-push --acknowledge   # accept it: records who and when in kyosei/config.yml
@@ -317,16 +315,16 @@ colleague who clones the project inherits it, and can see from the recorded acto
 that it was not their call.
 
 A project on the split layout is never warned. A project that moved its store out
-but still has the old copy committed in the code repository *is* — that is the
-case this matters most for, and the counts then describe the copy the push would
+but still has the old copy committed in the code repository is warned, and the
+counts then describe the copy the push would
 publish rather than the live store.
 
-**What it does not catch, stated plainly.** Matching a push in a `PreToolUse`
+**What it does not catch.** Matching a push in a `PreToolUse`
 hook is imperfect: `git push`, `git push -u origin main` and a `gh pr create`
 that pushes implicitly are not one pattern, and nothing catches a `make release`
-that pushes three layers down. On a hook that *blocks*, matching broadly is the
-dangerous direction, so the match is narrow and the misses are accepted. The git
-`pre-push` hook is what stands behind that gap: it sees every push git itself
+that pushes from inside a script. Because the hook *blocks*, a broad match would
+refuse commands that are not pushes, so the match is narrow and the misses are
+accepted. The git `pre-push` hook covers that gap: it sees every push git itself
 performs, however it was invoked.
 
 **A private term in a pushed commit is refused, for people and agents (KYO-669).**
@@ -386,7 +384,7 @@ that project's counts — including one nested inside the project's tree, since 
 project above the push's git top level is a different repository — and a push
 into an unacknowledged project from another one is blocked with *its* counts. A
 directory the parse cannot follow (`cd "$DIR"`, `cd -`, `git --git-dir=…`) fails
-closed: it is judged against the hook's own project, as every push was before, and
+closed: it is judged against the hook's own project, and
 `--json` says `directory_followed: false`; the other holes are the
 suite guard's (`$( … )` bodies, shell keywords, `sudo`, `bash -c`, scripts).
 
@@ -473,7 +471,7 @@ four cases differently:
   there and commits exactly the files it wrote in that directory (`.gitignore`, the
   `.kyosei` link and CLAUDE.md), with a message that names `kyo init`, then records the
   identity.
-  `--no-git-init` keeps the old behaviour: no repository is made, no identity is
+  With `--no-git-init` no repository is made, no identity is
   recorded, and the output says so.
 - *A repository with no commits yet*: it may hold your staged work, so `kyo init` makes
   no commit. Its output says no identity was recorded; after your first commit, the
@@ -512,15 +510,15 @@ are the opt-in override for exactly that notice: they rewrite one named rule,
 or the preamble, from the packaged default on request, refusing a rule the
 packaged default does not ship or one already identical — everything else
 stays a notice nothing clears on its own (KYO-151.c2).
-The second top-up is this store's own `.gitignore`, which `kyo init` writes once
-and every project scaffolded before a line was added to it never hears of again:
+The second top-up is this store's own `.gitignore`, which `kyo init` writes once,
+so a project scaffolded before a line was added to the default lacks that line:
 the same command appends any pattern it is missing, additively, leaving your own
 lines and your own ordering alone. The lines KYO-322 added are `kyosei.db-shm`
-and `kyosei.db-wal` — SQLite keeps both beside the database for as long as
-anything has it open, which with the desktop app following your store is always,
-and ignoring only `kyosei.db` made `git add kyosei` fail on a file that vanished
-between the status and the add.
-That command is a **orchestrator** act and refuses to be anything else (KYO-151), on
+and `kyosei.db-wal`: SQLite keeps both beside the database for as long as
+anything has it open, which is always while the desktop app follows the store,
+and with only `kyosei.db` ignored `git add kyosei` can fail on a file that
+disappears between the status and the add.
+That command is an **orchestrator** act (KYO-151) and refuses otherwise, on
 every write it makes — the plain merge or an `--adopt` alike: run from a linked
 git worktree — what `git worktree add`, and so every `kyo dispatch --worktree`,
 creates — or from a branch other than `main` where a `main` exists, it refuses to
@@ -571,7 +569,7 @@ governs: src/kyosei/schema.py
 | `turn_refs` | a discussion's references to the person's turns (`KYO-n.sN`, KYO-658): where it was opened, where options were put and where it closed, each with the session, prompt id, transcript record uuid and time copied from the turn index, or `index_state: absent`; `late` marks an opening written after its decision. No transcript text |
 | `person_notes`, `person_note_anchors`, `person_note_tags` | what a person wrote, written by `kyo notes add` and found by tag or by what it is on with `kyo notes list`: the text, the device, how it was entered, and anchors that address a transcript span, a record or an element of one by its id (a criterion, gate, dispatch, record note or claim, or an entry of a stored report such as `KYO-12.r1.p1`; KYO-737, KYO-757), a document or file at a commit, or another note. An anchor holds addresses and a digest and no transcript text. A note's text and anchors are fixed when it is filed. Its sent state (`sent_at`, `sent_session`, `sent_message`) is set once, when the message holding it is delivered by `kyo serve`, and `kyo notes list --sent`/`--unsent` filters on it (KYO-709). Exported to `_person_notes.jsonl`, whose line keeps the tags and the sent state as filed; a note sent later gets its state from the `notes sent` event (KYO-705) |
 | `person_note_tag_changes` | each tag added to or removed from a filed note by `kyo notes tag`, with who changed it and when; `person_note_tags` holds the current set, which is what `kyo notes list --tag` searches. Exported to `_person_note_tag_changes.jsonl` (KYO-705) |
-| `events` | append-only audit log of what each mutation changed. From schema_version 25 (KYO-418) an event carries `after`, the record's whole document as the mutation left it, and `changed`, the **prior value of each top-level key that differs**, in place of a second whole `before` document: a one-field edit used to store the record twice, and a top-level diff measured 19.7% of the bytes on one store's last three shards. Lines written earlier carry a whole `before` and are never rewritten, so a line with `before` is the old format and a line with `changed` the new one; every reader of a prior value keys on which it holds (`events_ledger.event_prior`), never on a version. Three kinds of mutation no longer write a line at all: a sweep at the same base as the last recorded run that files and widens nothing records nothing (no `sweep_runs` row, no event, no `_allocations.json` rewrite — the recorded run that saw that base already says it); a SubagentStop whose outcome is `unresolved` (a subagent whose prompt names no dispatch — an Explore or research agent, most of them) is counted in place on each **running** candidate dispatch's `tick_audit_json` with its reason, like KYO-375's ticks, and `kyo worktrees`, `kyo doctor` and the census fold that count in; and a tick is counted against running candidates only, so it never rewrites a finished dispatch's record export. `matched` stops, helpers of a worker and an unreadable store still write a row. A sweep that widens a standing flag (touch-changed, touch-missing, description-predates-claim — one open flag of each per record) logs a flag-level event (`after` and `changed: {detail}`) and does not move the record's `updated_at`. A snapshot is the record's whole document with every **body** named rather than carried: an evidence artifact reduced to `{id, sha256}` (KYO-268), a dispatch's frozen brief as `brief_sha256`, a report's ingested body as `body_sha256` (KYO-274). Each body is stored once, on the record's own export document; embedding them here made each one a per-mutation copy, and on one store's ledger that cost 52.0 MiB for evidence, 67.7 MiB for briefs and 49.2 MiB for reports, of 230.4 MiB. A dispatch and a report keep their other fields, where an artifact does not, because a dispatch row mutates (`running` → `reported`) and the ledger is the only place that transition is readable. Lines written by older builds still carry the bodies and are never rewritten, so both formats sit in one ledger and every reader of a snapshot keys on content rather than on a version |
+| `events` | append-only audit log of what each mutation changed. From schema_version 25 (KYO-418) an event carries `after`, the record's whole document as the mutation left it, and `changed`, the **prior value of each top-level key that differs**, in place of a second whole `before` document: a whole `before` stores the record twice for a one-field edit, and a top-level diff measured 19.7% of the bytes on one store's last three shards. Lines written earlier carry a whole `before` and are never rewritten, so a line with `before` is the old format and a line with `changed` the new one; every reader of a prior value keys on which it holds (`events_ledger.event_prior`), never on a version. Three kinds of mutation write no line: a sweep at the same base as the last recorded run that files and widens nothing records nothing (no `sweep_runs` row, no event, no `_allocations.json` rewrite — the recorded run that saw that base already says it); a SubagentStop whose outcome is `unresolved` (a subagent whose prompt names no dispatch — an Explore or research agent, most of them) is counted in place on each **running** candidate dispatch's `tick_audit_json` with its reason, like KYO-375's ticks, and `kyo worktrees`, `kyo doctor` and the census fold that count in; and a tick is counted against running candidates only, so it never rewrites a finished dispatch's record export. `matched` stops, helpers of a worker and an unreadable store still write a row. A sweep that widens a standing flag (touch-changed, touch-missing, description-predates-claim — one open flag of each per record) logs a flag-level event (`after` and `changed: {detail}`) and does not move the record's `updated_at`. A snapshot is the record's whole document with every **body** named rather than carried: an evidence artifact reduced to `{id, sha256}` (KYO-268), a dispatch's frozen brief as `brief_sha256`, a report's ingested body as `body_sha256` (KYO-274). Each body is stored once, on the record's own export document; embedding them here made each one a per-mutation copy, and on one store's ledger that cost 52.0 MiB for evidence, 67.7 MiB for briefs and 49.2 MiB for reports, of 230.4 MiB. A dispatch and a report keep their other fields, where an artifact does not, because a dispatch row mutates (`running` → `reported`) and the ledger is the only place that transition is readable. Lines written by older builds still carry the bodies and are never rewritten, so both formats sit in one ledger and every reader of a snapshot keys on content rather than on a version |
 | `allocations` | the only source of ids; counters never go backwards |
 | `meta` | schema version — the authority `kyo` checks at open time; `kyosei/config.yml` carries a second copy that must agree |
 
@@ -583,22 +581,22 @@ because "finished but not verified live" is a real state. `wont-do` retires the 
 permanently. Entering the `complete` status on a `requires_criteria` kind demands at
 least one `met` criterion with none `unmet-*` — zero or all-void criteria refuse it
 ("all criteria met" is vacuously true at zero of them; the `retired` status is the
-honest one when nothing was actually established).
+accurate one when nothing was established).
 
 **Standings** (knowledge archetype): `current` and `void`, the two states that
 archetype's lifecycle actually has. The `status` column is shared by both archetypes
 and a knowledge record's sits at `open` forever, so every human-facing surface —
 `kyo show`, `kyo list`, the session brief — renders the standing
-instead, derived from the archetype at display time and never stored twice. Before
-this (KYO-44) a decision that could never be anything else read `open`, identically
-to a bug genuinely awaiting dispatch. `kyo list --status current|void` filters on
+instead, derived from the archetype at display time and never stored twice. Without
+that derivation a decision would read `open`, identically
+to a bug awaiting dispatch (KYO-44). `kyo list --status current|void` filters on
 it, and `kyo show --json` carries `standing` beside the stored `status`;
 `kyosei/export/` deliberately carries only `status`, since a derived field in the
 git-canonical export is a second copy of one fact that could go stale.
 
 **Criterion states**: `met`, `unmet-unbuilt`, `unmet-unobserved`,
 `void-premise-gone`, `void-withdrawn`. The last three require a reason —
-"I could not observe it" is not "it is fine", and `void-withdrawn` (deliberately
+a criterion that could not be observed is not thereby met, and `void-withdrawn` (deliberately
 dropped, premise intact) is kept distinct from `void-premise-gone` (premise died)
 so the first can never be used to disguise the second.
 
@@ -665,33 +663,32 @@ what a credit is for.
 
 governs: src/kyosei/cmd_views.py
 
-There is no generated copy of the board to read, and that is the design rather
-than a gap. An earlier build shipped `kyo html`, which regenerated a self-contained
-static site under `kyosei/html/` — board, kind map, link graph, per-record pages,
-all safe to open off disk. It was **retired (KYO-215)**. A
-regenerated site is true at the moment it is written and wrong from the next
-write onward; keeping it true meant re-running it, so the `Stop` hook re-ran it,
-so every session ended with a directory of regenerated HTML churn that no commit
-carried — and `kyo doctor`'s `html_freshness` check, which existed to say when
-the site had fallen behind, lost a race with the session-event write on most
-stops and failed by one event anyway. The desktop app had by then become the
-viewer and never read the generated site at all.
+There is no generated copy of the board to read: every view reads the store
+directly. History: an earlier build shipped `kyo html`, which regenerated a self-contained
+static site under `kyosei/html/` (board, kind map, link graph, per-record pages,
+all safe to open off disk). It was **retired (KYO-215)**, because a
+generated site is out of date from the next write onward. Keeping it current
+meant regenerating it at every `Stop` hook, which left each session with
+regenerated HTML that no commit carried, and `kyo doctor`'s `html_freshness`
+check, which reported when the site had fallen behind, lost a race with the
+session-event write on most stops and failed by one event. The desktop app was
+by then the viewer and did not read the generated site.
 
 **With the desktop app**: [`apps/desktop/`](../../../apps/desktop/README.md) (see
 [serve-and-desktop.md](serve-and-desktop.md)) is
 the board, the record view, the kind map and the link graph, read live from the
-store. Nothing to regenerate and nothing to be stale. The repository also holds native
+store, so nothing is regenerated and nothing can be stale. The repository also holds native
 clients of `kyo serve` for Apple platforms under
 [`apps/apple/`](../../../apps/apple/README.md), which are built for the maintainer's own
 devices and are not distributed.
 
-**Without it**, every question the site answered has a terminal answer that reads
-the store directly:
+**Without it**, a terminal command that reads the store directly answers each of
+these questions:
 
 | what you want | the command |
 |---|---|
 | one record, in full — status, gates, links, touches, claims with their levels, criteria with their verification histories, dispatches and reports, description and notes | `kyo show <id>` (`--json` for the whole document, `--json --fields status,title` for only the keys you name — KYO-420). Docs obligations are collapsed by settlement and detail, since one `kyo docs settle --why` over a governed-file set stamps one note onto every obligation it named; `--expand-obligations` lists them all and `--json` always carries every one (KYO-219) |
-| which of *another* record's dispatches spoke for this one, and where its report is | the same `kyo show <id>`. A record a dispatch formally covers (`kyo dispatch <primary> --also-covers <id>`) carried nothing at all about it — `dispatches (0)`, `reports (0, 0 superseded)` — while the report settling its criteria sat on the primary record. It now prints a `covered by dispatches on other records` block: the dispatch id, its state, the record it was dispatched against, and its report once one is ingested (KYO-291). The record's own `dispatches (N)` count stays a count of *its own*, and a record nothing covers prints exactly what it printed before; `--json` carries `covered_by_dispatches` either way, `[]` when empty. A read of `covers_json`, not a stored field and not a schema change — the report is not split, because a report is one artifact with one sha and `kyo verify --from-report` already settles a covered record's criteria from it |
+| which of *another* record's dispatches spoke for this one, and where its report is | the same `kyo show <id>`. A record a dispatch formally covers (`kyo dispatch <primary> --also-covers <id>`) has no dispatch or report of its own (`dispatches (0)`, `reports (0, 0 superseded)`), because the report settling its criteria is on the primary record. It prints a `covered by dispatches on other records` block: the dispatch id, its state, the record it was dispatched against, and its report once one is ingested (KYO-291). The record's own `dispatches (N)` count stays a count of *its own*, and a record nothing covers prints no such block; `--json` carries `covered_by_dispatches` either way, `[]` when empty. A read of `covers_json`, not a stored field and not a schema change — the report is not split, because a report is one artifact with one sha and `kyo verify --from-report` already settles a covered record's criteria from it |
 | one dispatch's frozen brief, exactly as it was handed to the worker, without dispatching anything — and what its worker cost in tokens | `kyo show <dispatch-id>` (KYO-177; read-only, so running it twice changes nothing). The `worker tokens` line is summed from the transcript the stop-audit resolution matched to that dispatch, and reads `unknown` with that resolution's own named outcome when there is none (KYO-284). It also lists the stops a guard reported without blocking because the worker was already continuing from a blocked one (`unblocked_stops` in `--json`, KYO-592) |
 | one stored report — its dispatch, ingest time, the report it amends and the report that later amended it, and its body verbatim — after the worker's worktree (and its `.kyosei-report.json`) is gone | `kyo show <report-id>` (KYO-545). `--json` carries the body under `body` exactly as ingested, so adding `"amends": "<that id>"` to it and filing it with `kyo report <dispatch> --file` is an amending report. An unknown report id on a real record is refused naming the reports that record does have |
 | one false premise, disagreement, corrected number or verdict of a stored report | `kyo show <report-id>.p1`, `.x1`, `.n1` or `.v1` (KYO-757): the report's id, a letter for the array of its body, and the entry's place in that array counted from 1. It prints the entry's fields and its report's standing, and says so when the report was superseded. `kyo show <report-id>` lists the ids its report holds under `entries`, and each report in `--json` carries them under `entry_ids`, by array, beside the body and not in it. The ids are read from the stored body, which is written once, and are in neither the store nor the export. A place the report does not hold is refused naming the ids it does |
@@ -776,8 +773,8 @@ Markdown is the one form: it reads as text in a terminal and converts to HTML or
 ordinary tools. `--json` carries the parts as data (`parts[]`, each with `heading`,
 `blocks` and `source`), the `references[]`, and the page itself as `markdown`.
 
-The link graph is the one view with no terminal equivalent; it is the desktop
-app's or nothing.
+The link graph is the one view with no terminal equivalent; it is available only
+in the desktop app.
 
 **Who acted: `--actor`, and why a query for the orchestrator matches two values.**
 Every write records an actor: `--actor`, else `$KYOSEI_ACTOR`, else `orchestrator`.
@@ -788,8 +785,8 @@ writes" has to match both `orchestrator` and `controller` in `actor`, `author` a
 `resolved_by`; matching one finds only one side of the rename.
 
 A project that still has a `kyosei/html/` directory from before the retirement is
-told so once, by `kyo doctor`'s `retired_html_directory` **notice** — nothing
-writes it any more, so its pages are frozen at whatever the board looked like when
+told so once, by `kyo doctor`'s `retired_html_directory` **notice**: nothing
+writes it, so its pages show the board as it was when
 they were last generated. It is a notice and not a problem because there is no
-command that clears it: deleting the directory is your decision about your own
-files, and keeping the old pages as a frozen record is a legitimate thing to want.
+command that clears it: deleting the directory is the project's decision, and
+keeping the old pages as a record is a legitimate choice.
