@@ -19,6 +19,9 @@ from kyosei import cmd_check_clean, config, device_tokens, serve, serve_files
 from .test_kyo_serve import body_json
 from .test_kyo_serve_send import enable, issue
 from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
+    BASE,
+    ENDED,
+    KILLED,
     OLD,
     SESSIONS,
     Bed,
@@ -27,6 +30,10 @@ from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
 )
 
 DRAFT = f"{SESSIONS}/{OLD}/draft"
+#: KYO-763: the project's own draft, and the drafts of its two sessions that are not live.
+PROJECT_DRAFT = f"{BASE}/draft"
+ENDED_DRAFT = f"{SESSIONS}/{ENDED}/draft"
+KILLED_DRAFT = f"{SESSIONS}/{KILLED}/draft"
 BOXES = {"boxes": [{"text": "first box"}, {"text": "second", "anchors": ["u-1"]}]}
 
 
@@ -266,3 +273,273 @@ def test_the_composer_directory_is_not_taken_for_a_stray_home_directory(tmp_path
     (tmp_path / config.COMPOSER_DIRNAME).mkdir()
     (tmp_path / "a-project").mkdir()
     assert cmd_check_clean._home_dirs(tmp_path) == ["a-project"]
+
+
+# ------------------------------------------------- KYO-763: the project's draft, between sessions
+
+
+def put(bed: Bed, token: str, path: str, texts: list[str]) -> str:
+    """Create the draft at ``path`` with one box for each text; its etag."""
+    document = {"boxes": [{"text": text} for text in texts]}
+    status, _, made = request(bed, "PUT", document, token, path=path, If_None_Match="*")
+    assert status == 201, made
+    return made["etag"]
+
+
+def texts(bed: Bed, token: str, path: str) -> list[str]:
+    status, _, read = request(bed, "GET", None, token, path=path)
+    assert status == 200, read
+    return [box["text"] for box in read["boxes"]]
+
+
+def project_draft_file(store_home: Path) -> Path:
+    return store_home / config.COMPOSER_DIRNAME / serve_files.PROJECT_DRAFTS / "proj.json"
+
+
+def test_a_project_with_no_draft_reads_as_an_empty_one_and_creates_nothing(
+    bed: Bed, store_home: Path, token: str
+) -> None:
+    status, headers, read = request(bed, "GET", None, token, path=PROJECT_DRAFT)
+    assert status == 200 and "ETag" not in headers
+    assert read["project"] == "proj" and read["boxes"] == [] and read["etag"] is None
+    assert not (store_home / config.COMPOSER_DIRNAME).exists()
+
+
+def test_a_project_draft_is_saved_read_and_replaced_with_its_marks(
+    bed: Bed, store_home: Path, token: str
+) -> None:
+    marked = {"boxes": [{"text": "between sessions", "marks": [{"line": 0, "items": []}]}]}
+    status, headers, made = request(
+        bed, "PUT", marked, token, path=PROJECT_DRAFT, If_None_Match="*"
+    )
+    assert status == 201 and headers["ETag"] == made["etag"]
+
+    status, headers, read = request(bed, "GET", None, token, path=PROJECT_DRAFT)
+    assert status == 200 and headers["ETag"] == made["etag"] == read["etag"]
+    assert read["boxes"] == marked["boxes"] and read["device"]["name"] == "ipad"
+
+    path = project_draft_file(store_home)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+    replacement = {"boxes": [{"text": "rewritten"}]}
+    status, _, _ = request(
+        bed, "PUT", replacement, token, path=PROJECT_DRAFT, If_Match=made["etag"]
+    )
+    assert status == 200 and texts(bed, token, PROJECT_DRAFT) == ["rewritten"]
+
+
+def test_a_stale_save_of_a_project_draft_is_refused_and_reading_again_clears_it(
+    bed: Bed, token: str
+) -> None:
+    etag = put(bed, token, PROJECT_DRAFT, ["first"])
+    newer = {"boxes": [{"text": "written on the other device"}]}
+    status, _, written = request(bed, "PUT", newer, token, path=PROJECT_DRAFT, If_Match=etag)
+    assert status == 200
+
+    stale = {"boxes": [{"text": "stale"}]}
+    status, _, refused = request(bed, "PUT", stale, token, path=PROJECT_DRAFT, If_Match=etag)
+
+    assert status == 412 and refused["etag"] == written["etag"]
+    assert "GET it again" in refused["error"]
+    assert texts(bed, token, PROJECT_DRAFT) == ["written on the other device"]
+
+    fresh = request(bed, "GET", None, token, path=PROJECT_DRAFT)[2]["etag"]  # the remedy named
+    merged = {"boxes": [{"text": "merged"}]}
+    assert request(bed, "PUT", merged, token, path=PROJECT_DRAFT, If_Match=fresh)[0] == 200
+
+
+def test_a_project_draft_write_stating_no_precondition_is_refused(bed: Bed, token: str) -> None:
+    status, _, refused = request(bed, "PUT", BOXES, token, path=PROJECT_DRAFT)
+    assert status == 428 and "If-None-Match: *" in refused["error"]
+    assert request(bed, "PUT", BOXES, token, path=PROJECT_DRAFT, If_None_Match="*")[0] == 201
+
+
+@pytest.mark.parametrize(("method", "document"), [("GET", None), ("PUT", BOXES)])
+def test_a_project_draft_needs_the_permission_a_session_draft_needs(
+    bed: Bed, store_home: Path, method: str, document: dict | None
+) -> None:
+    status, _, refused = request(
+        bed, method, document, None, path=PROJECT_DRAFT, If_None_Match="*"
+    )
+    assert status == 401 and refused["reason"] == "no-token"
+
+    bare = issue("reader")
+    status, _, refused = request(
+        bed, method, document, bare, path=PROJECT_DRAFT, If_None_Match="*"
+    )
+    assert status == 403 and refused["reason"] == "no-send-permission"
+    assert not project_draft_file(store_home).exists()
+
+    token = issue("ipad", device_tokens.PERMISSION_SEND)
+    status, _, _ = request(bed, method, document, token, path=PROJECT_DRAFT, If_None_Match="*")
+    assert status in (200, 201)
+
+
+def test_the_project_draft_route_refuses_a_query_string_and_other_methods(
+    bed: Bed, token: str
+) -> None:
+    status, _, refused = request(bed, "GET", None, token, path=f"{PROJECT_DRAFT}?token={token}")
+    assert status == 400 and "Authorization" in refused["error"]
+    status, headers, _ = request(bed, "DELETE", None, token, path=PROJECT_DRAFT)
+    assert status == 405 and headers["Allow"] == "GET, PUT"
+    status, _, _ = request(bed, "GET", None, token, path=f"{PROJECT_DRAFT}/more")
+    assert status == 404
+
+
+def test_a_project_no_registry_names_has_no_draft(bed: Bed, token: str) -> None:
+    status, _, refused = request(bed, "GET", None, token, path="/v1/projects/other/draft")
+    assert status == 404 and "registry" in refused["error"]
+
+
+def test_a_live_session_with_no_draft_takes_the_projects_once(bed: Bed, token: str) -> None:
+    put(bed, token, PROJECT_DRAFT, ["written between sessions"])
+
+    status, headers, first = request(bed, "GET", None, token)
+
+    assert status == 200 and first["session_id"] == OLD
+    assert [box["text"] for box in first["boxes"]] == ["written between sessions"]
+    assert first["etag"] and headers["ETag"] == first["etag"]
+    # The project's draft is emptied, so the next session is not offered the same boxes.
+    assert texts(bed, token, PROJECT_DRAFT) == []
+    # A second device opening the session reads the draft the first was given.
+    status, _, second = request(bed, "GET", None, token)
+    assert second["boxes"] == first["boxes"] and second["etag"] == first["etag"]
+    # And the session's draft is replaced under the etag the taking returned.
+    kept = {"boxes": [{"text": "edited in the session"}]}
+    assert request(bed, "PUT", kept, token, If_Match=first["etag"])[0] == 200
+
+
+def test_a_session_with_a_draft_of_its_own_leaves_the_projects(bed: Bed, token: str) -> None:
+    put(bed, token, DRAFT, ["the session's own"])
+    put(bed, token, PROJECT_DRAFT, ["the project's"])
+    assert texts(bed, token, DRAFT) == ["the session's own"]
+    assert texts(bed, token, PROJECT_DRAFT) == ["the project's"]
+
+
+def test_a_session_whose_draft_was_emptied_takes_nothing(bed: Bed, token: str) -> None:
+    etag = put(bed, token, DRAFT, ["sent since"])
+    assert request(bed, "PUT", {"boxes": []}, token, If_Match=etag)[0] == 200
+    put(bed, token, PROJECT_DRAFT, ["the project's"])
+    assert texts(bed, token, DRAFT) == []
+    assert texts(bed, token, PROJECT_DRAFT) == ["the project's"]
+
+
+@pytest.mark.parametrize("path", [ENDED_DRAFT, KILLED_DRAFT])
+def test_a_session_that_is_not_live_takes_nothing(bed: Bed, token: str, path: str) -> None:
+    put(bed, token, PROJECT_DRAFT, ["the project's"])
+    status, _, read = request(bed, "GET", None, token, path=path)
+    assert status == 200 and read["boxes"] == [] and read["etag"] is None
+    assert texts(bed, token, PROJECT_DRAFT) == ["the project's"]
+
+
+def test_an_ended_sessions_boxes_become_the_projects_draft(bed: Bed, token: str) -> None:
+    put(bed, token, ENDED_DRAFT, ["left unsent when the session ended"])
+
+    status, headers, read = request(bed, "GET", None, token, path=PROJECT_DRAFT)
+
+    assert status == 200 and headers["ETag"] == read["etag"]
+    assert [box["text"] for box in read["boxes"]] == ["left unsent when the session ended"]
+    assert texts(bed, token, ENDED_DRAFT) == []  # moved, not copied
+    # Read again, the project's draft is the same one: nothing is moved twice.
+    assert request(bed, "GET", None, token, path=PROJECT_DRAFT)[2]["etag"] == read["etag"]
+
+
+def test_ended_sessions_boxes_follow_the_projects_own_oldest_session_first(
+    bed: Bed, token: str
+) -> None:
+    put(bed, token, PROJECT_DRAFT, ["the project's own", "in both"])
+    put(bed, token, ENDED_DRAFT, ["ended at eleven", "in both"])  # ended 11:00
+    put(bed, token, KILLED_DRAFT, ["killed at nine"])  # last seen 09:00, no process
+    # A session recorded as running is known to have ended once its transcript is found
+    # and no process runs it.
+    (bed.transcripts / f"{KILLED}.jsonl").write_text("".join(bed.rows()), encoding="utf-8")
+    assert texts(bed, token, PROJECT_DRAFT) == [
+        "the project's own",
+        "in both",
+        "killed at nine",
+        "ended at eleven",
+    ]
+    assert texts(bed, token, ENDED_DRAFT) == [] and texts(bed, token, KILLED_DRAFT) == []
+
+
+def test_a_live_sessions_draft_is_not_moved_to_the_project(bed: Bed, token: str) -> None:
+    put(bed, token, DRAFT, ["being written in the live session"])
+    assert texts(bed, token, PROJECT_DRAFT) == []
+    assert texts(bed, token, DRAFT) == ["being written in the live session"]
+
+
+def test_a_new_session_takes_what_the_ended_one_left(bed: Bed, token: str) -> None:
+    # No device read the project's draft in between: the ended session's boxes pass
+    # straight to the live session that opens with none.
+    put(bed, token, ENDED_DRAFT, ["left unsent"])
+    assert texts(bed, token, DRAFT) == ["left unsent"]
+    assert texts(bed, token, ENDED_DRAFT) == [] and texts(bed, token, PROJECT_DRAFT) == []
+
+
+def test_devices_opening_a_new_session_together_are_given_the_same_draft(
+    bed: Bed, token: str
+) -> None:
+    import threading
+
+    put(bed, token, PROJECT_DRAFT, ["written between sessions"])
+    answers: list[dict] = []
+
+    def ask() -> None:
+        answers.append(request(bed, "GET", None, token)[2])  # each on its own connection
+
+    threads = [threading.Thread(target=ask) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert len(answers) == 6
+    assert {answer["etag"] for answer in answers} == {answers[0]["etag"]}
+    assert all(
+        [box["text"] for box in answer["boxes"]] == ["written between sessions"]
+        for answer in answers
+    )
+    assert texts(bed, token, PROJECT_DRAFT) == []
+
+
+def test_a_save_made_to_the_project_during_a_taking_is_kept(
+    bed: Bed, token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The session takes the copy it read; a device that saved to the project's draft after
+    # that read holds the newer copy, which is not emptied from under it.
+    from kyosei import serve_drafts
+
+    put(bed, token, PROJECT_DRAFT, ["first"])
+    original = serve_drafts._Drafts.move
+    saved: list[bool] = []
+
+    def move(self, session_id, boxes, etag):
+        if session_id is not None and not saved:
+            saved.append(True)
+            newer = [{"text": "saved meanwhile"}]
+            self.write(None, newer, if_match=self.read(None)[1], if_none_match=None)
+        return original(self, session_id, boxes, etag)
+
+    monkeypatch.setattr(serve_drafts._Drafts, "move", move)
+    assert texts(bed, token, DRAFT) == ["first"]
+    assert texts(bed, token, PROJECT_DRAFT) == ["saved meanwhile"]
+
+
+def test_a_session_whose_state_cannot_be_read_keeps_its_draft(bed: Bed, token: str) -> None:
+    # KILLED is recorded as running and has no transcript here, so nothing says whether a
+    # process runs it; its boxes are not taken from a session that may be live.
+    put(bed, token, KILLED_DRAFT, ["perhaps still running"])
+    assert texts(bed, token, PROJECT_DRAFT) == []
+    assert texts(bed, token, KILLED_DRAFT) == ["perhaps still running"]
+
+
+def test_the_reference_states_the_project_draft_route_and_its_two_moves() -> None:
+    topic = (
+        Path(__file__).parent.parent / "docs" / "reference" / "topics" / "serve-and-desktop.md"
+    ).read_text(encoding="utf-8")
+    assert "| `/v1/projects/<name>/draft` | GET |" in topic
+    assert "| `/v1/projects/<name>/draft` | PUT |" in topic
+    assert f"composer/{serve_files.PROJECT_DRAFTS}/<name>.json" in topic
+    assert "A session that has ended leaves its boxes to the project" in topic
+    assert "A live session with no draft of its own takes the project's" in topic

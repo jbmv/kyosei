@@ -1,6 +1,7 @@
 // The project switcher (KYO-761): what the dropdown lists, which sessions the top bar links,
-// and where the composer's unsent prompts are kept for each project. It holds no state and
-// touches no element, so that it can be tested without a page.
+// and where the composer's unsent prompts are kept for each project. It also holds what the
+// composer decides when a prompt passes from one session to the next (KYO-763). It holds no
+// state and touches no element, so that it can be tested without a page.
 
 /** One project of the server's registry, as `GET /v1/projects` lists it. */
 export interface ProjectRow { name: string; can_open: boolean; problem: string | null }
@@ -132,8 +133,9 @@ export function keepBoxes(keep: Keep, scope: string, boxes: unknown[]): void {
 
 /**
  * A project's unsent prompts as the window last kept them. The server keeps a draft for
- * each session and its copy replaces these when the session opens; these are what is shown
- * until then, and all there is for a project with no session or a device with no token.
+ * each session, and one for the project while none of its sessions is live (KYO-763); its
+ * copy replaces these when it arrives. These are what is shown until then, and all there is
+ * for a device with no token.
  * Prompts kept before the switcher existed belong to the first project that is shown, when
  * `adoptLegacy` is set, and are moved to it.
  */
@@ -156,4 +158,50 @@ export function keptBoxes<T>(keep: Keep, scope: string, adoptLegacy: boolean): T
   if (own?.length || !legacy?.length) return own ?? [];
   keepBoxes(keep, scope, legacy);
   return legacy;
+}
+
+// ------------------------------------------- a prompt carried from one session to the next
+
+/** The key that says a project's kept prompts have met the server's draft on this device. */
+export function metKey(scope: string): string {
+  return `composer-met:${scope}`;
+}
+
+/**
+ * The prompts to show when the server's draft arrives, and whether they differ from it and
+ * so are to be saved. The server's draft replaces what the window kept. The exception is the
+ * first draft a project is given on this device: prompts written before the server kept a
+ * draft between sessions (KYO-763) exist only in this window's storage, so those the
+ * server's draft does not hold, by their text, are kept after it that once.
+ */
+export function meetDraft<T extends { text: string }>(
+  keep: Keep, scope: string, server: T[], local: T[],
+): { boxes: T[]; merged: boolean } {
+  let met = true;
+  try {
+    met = keep.getItem(metKey(scope)) !== null;
+    keep.setItem(metKey(scope), "1");
+  } catch {}
+  if (met) return { boxes: server, merged: false };
+  const held = new Set(server.map((box) => box.text));
+  const own = local.filter((box) => !held.has(box.text));
+  return { boxes: [...server, ...own], merged: own.length > 0 };
+}
+
+/**
+ * Whether an anchor's place can be opened from the chat on screen: it can when the anchor
+ * was made in the session that is followed. A prompt kept between sessions carries its
+ * anchors into the next one, where they are still sent as their words (the server reads them
+ * from the session they name) and have no place in the chat to go to. An anchor with no
+ * session recorded is taken as the followed session's.
+ */
+export function anchorOpens(session: string, followed: string | null | undefined): boolean {
+  return !session || session === followed;
+}
+
+/** What a chip says of an anchor that cannot be opened; `live` is whether its session runs. */
+export function anchorGoneNote(live: boolean): string {
+  return live
+    ? "Made in another session. It is sent with its words, and cannot be opened from this chat."
+    : "Made in a session that has ended. It is sent with its words, and can no longer be opened.";
 }

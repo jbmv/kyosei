@@ -679,6 +679,9 @@ body.terminal-open #terminal { display: flex; }
 .icon { width: 1.05em; height: 1.05em; vertical-align: -0.16em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .mark .icon { width: 16px; height: 16px; vertical-align: -3px; }
 .mark-anchor .icon, .turn-anchor .icon { margin-right: 4px; }
+/* KYO-763: an anchor made in a session that is no longer the one shown cannot be opened. */
+.mark-anchor.gone { color: var(--muted); cursor: default; }
+.mark-item.gone { border: 1px dashed var(--muted); background: none; }
 
 /* What a sent prompt was anchored to: quieter than an unsent one, and it stays. */
 ::highlight(anchored-sent) { background-color: color-mix(in srgb, var(--pastel-blue) 20%, transparent); }

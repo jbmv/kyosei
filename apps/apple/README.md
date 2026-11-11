@@ -26,9 +26,22 @@ route that lists live sessions across projects, so the app reads each project's 
 every five seconds, and the list of projects every thirty and whenever the dropdown is opened.
 
 The composer's unsent prompts belong to the project they were written in. The server keeps a
-draft for each session, and a save that is waiting is sent before the window leaves the
-session. The page also keeps each project's prompts in its own storage, under the server and
-the project, which is what a project with no session or a device with no token has.
+draft for each session and one for the project (KYO-763). The app reads and saves the
+followed session's draft while that session is live, and the project's draft when the
+project has no session or the followed session has ended, so a prompt written between
+sessions is found on any device that opens the project. The server moves the prompts between
+the two: an ended session's go to the project's draft, and a new session's first read takes
+them. The app learns that the followed session has ended from the session list it reads every
+five seconds, and then reads the project's draft in place of what the window holds, so that
+the copy another device saved last is the one shown. A save that is waiting is sent before
+the composer turns from one draft to another. The page also keeps each project's prompts in
+its own storage, under the server and the project, which is all a device with no token has.
+
+A prompt carried into a later session keeps its tags, attachments and anchors. An anchor made
+in a session other than the one shown is sent as its line of words, which the server reads
+from the session the anchor names. Its chip in the composer is drawn dimmed with a dashed
+outline and takes no press, because the chat on screen has no place for it to open. The choice
+of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
 The app opens on the project it last showed. On a first run, or when the server no longer
 lists that project, it shows the list of projects in place of the chat. The logic is in

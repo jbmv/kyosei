@@ -28,6 +28,7 @@ from .test_kyo_serve import body_json, register
 from .test_kyo_serve_held import looks, wait_until
 from .test_kyo_serve_send import FRAME_WORKING, IDLE, enable, issue, keys_sent, log_rows, post
 from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
+    ENDED,
     OLD,
     OLD_FILE,
     SESSIONS,
@@ -821,6 +822,31 @@ def test_a_mark_by_reply_message_is_stored_by_record_and_reads_the_right_words(
         bed, SEND_PROMPT, {**document, "marks": [{"line": 0, "anchors": [past]}]}, can_send
     )
     assert status == 400 and "past the reply's" in refused["error"]
+
+
+def test_an_anchor_made_in_a_session_that_has_ended_is_sent_as_its_line_of_words(
+    bed: Bed, notes_path: str, can_send: str
+) -> None:
+    # KYO-763: a prompt written in one session and sent in the next keeps its anchors. The
+    # line names the session the words are in, since the receiving session never held them.
+    (bed.transcripts / f"{ENDED}.jsonl").write_text("".join(bed.rows()), encoding="utf-8")
+    anchor = {"kind": "turn", "session": ENDED, "message": REPLY_MESSAGE, "start": 0, "end": 200}
+    document = {
+        "segments": [{"kind": "typed", "text": "about this"}],
+        "marks": [{"line": 0, "anchors": [anchor]}],
+    }
+    status, sent = post(bed, SEND_PROMPT, document, can_send)
+    assert status == 200, sent
+    words = " ".join(reply_words().split()[:6])
+    assert sent["message"] == (
+        f'on your reply {REPLY} in session {ENDED} "{words}..."\nabout this'
+    )
+    bed.show(IDLE)
+    message_id = sent["held"]["id"]
+    wait_until(lambda: len(filed_by(bed, notes_path, can_send, message_id)) == 1)
+    (note,) = filed_by(bed, notes_path, can_send, message_id)
+    (stored,) = note["anchors"]
+    assert stored["session"] == ENDED and stored["target"] == REPLY
 
 
 def test_a_prompt_whose_notes_cannot_be_filed_is_kept_delivered_and_filed_at_the_next_start(
