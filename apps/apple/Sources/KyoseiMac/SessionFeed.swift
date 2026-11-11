@@ -112,6 +112,18 @@ final class SessionFeed {
     /// The wait between asking the page for a save that is pending and reading the draft
     /// of the place the composer turns to.
     private static let draftFlushWait = Duration.milliseconds(300)
+    /// The longest a quit waits for the server to acknowledge the composer's last save
+    /// (KYO-782). A save to a server that answers takes a small part of it.
+    static let quitLimit = Duration.seconds(2)
+    /// The save last asked for, which answers whether the server acknowledged it.
+    private var latestSave: Task<Bool, Never>?
+    private var saveCount = 0
+    /// What the latest save holds, from when it is asked for until the server has
+    /// acknowledged it: what a quit keeps on this machine when the server has not.
+    private var unsavedDraft: (count: Int, kept: KeptDraft)?
+    /// Whether the composer was given prompts kept at the last quit, which the next
+    /// acknowledged save then holds.
+    private var restoredDraft = false
     /// The live session whose task list the composer shows, or nil when it shows none
     /// (KYO-771). The list is the session's, so there is none between sessions.
     private var agendaSession: String?
@@ -504,6 +516,19 @@ final class SessionFeed {
                 draftEtags[path] = frame["etag"] as? String
                 shownPlace = place
                 send("draft", String(decoding: json, as: UTF8.self))
+                // Prompts the server had not acknowledged when the app last quit are newer
+                // than its draft, and take its place in the composer (KYO-782). The page
+                // saves them as it saves anything typed, and they are forgotten here once
+                // a save has been acknowledged.
+                if let kept = KeptDraft.kept(
+                    in: .standard, server: client.base.absoluteString, project: project)
+                {
+                    restoredDraft = true
+                    send("restoreDraft", kept.body)
+                    send(
+                        "note",
+                        #"{"text": "Restored what had not been saved when the app last quit."}"#)
+                }
             }
         }
     }
@@ -644,34 +669,96 @@ final class SessionFeed {
     }
 
     /// Replaces the draft the composer was last given. Saves run one at a time, so each
-    /// uses the last etag.
-    func saveDraft(body: [String: Any]) {
+    /// uses the last etag. The task returned answers whether the server acknowledged this
+    /// save; nil is returned when there is nowhere to save to.
+    @discardableResult
+    func saveDraft(body: [String: Any]) -> Task<Bool, Never>? {
         guard let place = shownPlace, let token = Self.deviceToken(),
             let data = try? JSONSerialization.data(withJSONObject: body)
-        else { return }
+        else { return nil }
         let previous = draftTask
         // The server and the draft are those of the moment the page asked. The page asks
         // just before it leaves a project, and the save is then made after the window has
         // turned to the next one (KYO-761).
         let client = client
         let path = draftPath(place)
-        draftTask = Task {
+        saveCount += 1
+        let count = saveCount
+        unsavedDraft = (
+            count,
+            KeptDraft(
+                server: client.base.absoluteString, project: project,
+                body: String(decoding: data, as: UTF8.self))
+        )
+        let save = Task { () -> Bool in
             await previous?.value
             let etag = draftEtags[path]
             guard
                 let reply = try? await client.authorised(
                     "PUT", path, token: token, body: data, ifMatch: etag,
                     ifNoneMatch: etag == nil ? "*" : nil)
-            else { return }
+            else { return false }
             if reply.status == 200 || reply.status == 201 {
                 draftEtags[path] = self.etag(in: reply.data)
+                if unsavedDraft?.count == count { unsavedDraft = nil }
+                if restoredDraft {
+                    restoredDraft = false
+                    KeptDraft.forget(in: .standard)
+                }
+                return true
             } else if reply.status == 412 {
                 // Another device saved first. Keep this text, and let the next edit replace it.
                 draftEtags[path] = self.etag(in: reply.data)
-                guard place == shownPlace, client.base == self.client.base else { return }
+                guard place == shownPlace, client.base == self.client.base else { return false }
                 send("note", #"{"text": "This draft also changed on another device."}"#)
             }
+            return false
         }
+        latestSave = save
+        draftTask = Task { _ = await save.value }
+        return save
+    }
+
+    /// Before the app quits (KYO-782): the page is asked for a save it is holding for a
+    /// pause in the typing, the save is made, and the server's acknowledgement is waited
+    /// for, all within `quitLimit`. What the server has not acknowledged by then is kept
+    /// on this machine, and `loadDraft` gives it back to the composer at the next launch.
+    func settleDraftBeforeQuit() async {
+        let outcome = await settleDraft(limit: Self.quitLimit) { await self.sendPendingDraft() }
+        if outcome == .unsaved, let unsaved = unsavedDraft {
+            unsaved.kept.keep(in: .standard)
+        }
+    }
+
+    /// Sends the page's pending save and answers whether the server acknowledged the
+    /// latest save, or nil when the server already holds everything that was typed.
+    private func sendPendingDraft() async -> Bool? {
+        if let webView {
+            // The page answers in the call's own value, as text, so that the app holds the
+            // prompts before it waits on anything else.
+            let answer: String? = await withCheckedContinuation { continuation in
+                webView.evaluateJavaScript("JSON.stringify(window.kyo.pendingDraft())") { value, _ in
+                    continuation.resume(returning: value as? String)
+                }
+            }
+            if let data = answer?.data(using: .utf8),
+                let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
+                if saveDraft(body: body) == nil {
+                    // There is nowhere to save to: no draft has been read, or no token.
+                    saveCount += 1
+                    unsavedDraft = (
+                        saveCount,
+                        KeptDraft(
+                            server: client.base.absoluteString, project: project,
+                            body: String(decoding: data, as: UTF8.self))
+                    )
+                    return false
+                }
+            }
+        }
+        guard unsavedDraft != nil else { return nil }
+        return await latestSave?.value ?? false
     }
 
     /// The file types the server keeps as they are. Anything else an image can be made from,

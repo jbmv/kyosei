@@ -37,6 +37,14 @@ the copy another device saved last is the one shown. A save that is waiting is s
 the composer turns from one draft to another. The page also keeps each project's prompts in
 its own storage, under the server and the project, which is all a device with no token has.
 
+A quit waits for the last save (KYO-782). The page saves after a pause in typing, so the app
+asks it for a save still waiting, makes that save, and waits up to two seconds for the
+server's acknowledgement before the process ends. Prompts the server has not acknowledged by
+then are kept in the app's defaults with their server and project, replace the server's draft
+in the composer when that project's draft is next read, and are forgotten once a save has
+been acknowledged. The wait and the kept prompts are `settleDraft` and `KeptDraft` in
+`Sources/KyoseiClient/DraftSettlement.swift`.
+
 A prompt carried into a later session keeps its tags, attachments and anchors. An anchor made
 in a session other than the one shown is sent as its line of words, which the server reads
 from the session the anchor names. Its chip in the composer is drawn dimmed with a dashed
@@ -78,6 +86,14 @@ under it. The
 chat stays drawn beneath the others and keeps following its session, so returning to it
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
+
+Command-F searches what the view shows: the chat, the open record or the open file (KYO-741,
+KYO-754). The query is matched as one phrase, without regard to case, against the text as it
+is drawn, and nothing in it is an operator. A record's unopened folds are searched too, and
+stepping to a hit inside one opens it. Every hit is counted, but only the hits on screen are
+marked, and none inside a shut fold: the web view was measured stalling for about a
+millisecond for each marked range that lies in a shut fold. The matching is in
+`web/src/search.ts`.
 
 Records shows the project's records, one at a time. With none open it lists them all by
 kind; the side bar lists them newest first above the records viewed most recently. Search

@@ -32,7 +32,7 @@ import {
   type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
   refusalText,
 } from "./agenda";
-import { findSpans, fold, queryTerms, scrollBy, step, tally } from "./search";
+import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -1692,6 +1692,31 @@ const kyo = {
   },
 
   /**
+   * The app is about to quit (KYO-782): the save that was waiting for a pause, which the app
+   * then makes itself and waits for, or null when everything typed has been sent to it. The
+   * answer is the call's own value, so the app holds the text before it lets the process end.
+   */
+  pendingDraft(): { boxes: SavedBox[] } | null {
+    if (draftSave === undefined) return null;
+    clearTimeout(draftSave);
+    draftSave = undefined;
+    return { boxes: currentBoxes() };
+  },
+
+  /**
+   * The prompts the app kept when it last quit without the server's answer to their save
+   * (KYO-782). They are newer than the server's draft, so they replace what it gave, and are
+   * saved to it after the usual pause.
+   */
+  restoreDraft(frame: { boxes: SavedBox[] }): void {
+    const boxes = frame.boxes.filter((box) => box.text || box.marks?.length);
+    loadingDraft = true;
+    showTexts(boxes.map((box) => box.text), boxes);
+    loadingDraft = false;
+    remember();
+  },
+
+  /**
    * The followed session's task list (KYO-771), or that there is none to show, or why it
    * cannot be read. A frame that answers a save says `saved`, and the field the save came
    * from is then done with; any other frame is a change made elsewhere, and leaves what the
@@ -2637,12 +2662,13 @@ const paintedRanges = new Map<string, any>();
  * view; Chrome does not show that, and replacing the registry's entry, as was done before,
  * is a suspected cause that has not been confirmed.
  */
-function showRanges(name: string, ranges: Range[]): void {
+function showRanges(name: string, ranges: Range[], priority = 0): void {
   const highlights = (CSS as any).highlights;
   if (!highlights) return;
   let highlight = paintedRanges.get(name);
   if (!highlight) {
     highlight = new (window as any).Highlight();
+    highlight.priority = priority;
     paintedRanges.set(name, highlight);
   }
   highlight.clear();
@@ -2650,7 +2676,7 @@ function showRanges(name: string, ranges: Range[]): void {
   if (highlights.get(name) !== highlight) highlights.set(name, highlight);
 }
 
-// ------------------------------------------------------------ search in the chat (KYO-741)
+// ------------------------------------- search in the chat, a record and a file (KYO-741, KYO-754)
 
 /**
  * What is searched is the drawn text of each prompt and reply, not its source, so that every
@@ -2658,16 +2684,72 @@ function showRanges(name: string, ranges: Range[]): void {
  * reply's thinking and the tool calls are not searched. The drawn text and its folded copy
  * are kept for each element, which is replaced when its text changes, so a key typed walks
  * the elements' texts and not the document.
+ *
+ * A hit is kept as its place in the drawn text, and its range is made only when it is to be
+ * painted. Only the hits in the part of the page on screen are painted, and none inside a
+ * fold that is shut (KYO-754): the app's web view was measured stalling for about a
+ * millisecond for each range of a highlight that lies in a shut fold, so a query of one
+ * letter over a record with a folded brief, which is thousands of ranges, held the app for
+ * seconds at each key. The count is of every hit, painted or not.
  */
 const searchIndex = new WeakMap<HTMLElement, { drawn: Drawn; folded: string }>();
 const SEARCH_DEBOUNCE_MS = 120;
+/** The most hits painted at once. A window holds fewer; this bounds a page that hit-testing misreads. */
+const PAINTED_HITS = 1000;
+/** How long one turn of drawing a record's unopened folds may run before it yields. */
+const FOLD_SLICE_MS = 30;
 const findBar = document.getElementById("find")!;
 const findField = document.getElementById("find-field") as HTMLInputElement;
 const findCount = document.getElementById("find-count")!;
-interface Hit { key: string; from: number; range: Range }
+interface Hit { key: string; drawn: Drawn; from: number; to: number }
+/** Where a hit stands, so that it is found again when the text around it is drawn anew. */
+interface HitPlace { key: string; from: number; node: Node; offset: number }
 let hits: Hit[] = [];
 let currentHit = -1;
 let searchTimer: number | undefined;
+/**
+ * The open record's page or the open file, read once and kept until it changes: either is
+ * drawn over again whole, and a link made in it later splits its text, so a watch on the
+ * two articles drops what was read.
+ */
+let pageIndex: { element: HTMLElement; drawn: Drawn; folded: string } | null = null;
+let pageWatch: MutationObserver | null = null;
+let foldTimer: number | undefined;
+let paintFrame: number | undefined;
+
+function watchPages(): void {
+  if (pageWatch) return;
+  pageWatch = new MutationObserver(() => {
+    pageIndex = null;
+    if (findBar.hidden) return;
+    drawFoldsSoon();
+    refreshSearch();
+  });
+  for (const article of [recordArticle, fileArticle]) {
+    pageWatch.observe(article, { childList: true, subtree: true, characterData: true });
+  }
+}
+
+/**
+ * The text of a record's fold not yet opened is searched too, and so is drawn, shut. A brief
+ * is long and a record can hold several, so they are drawn a slice at a time between the
+ * keys typed and not inside the search a key starts; the watch then searches what was drawn.
+ */
+function drawFoldsSoon(): void {
+  if (foldTimer !== undefined || findBar.hidden || currentView !== "records") return;
+  const waiting = () => Array.from(recordArticle.querySelectorAll("details")).filter((fold) => unfilled.has(fold));
+  if (!waiting().length) return;
+  foldTimer = window.setTimeout(() => {
+    foldTimer = undefined;
+    if (findBar.hidden || currentView !== "records") return;
+    const began = performance.now();
+    for (const fold of waiting()) {
+      unfilled.get(fold)?.();
+      if (performance.now() - began > FOLD_SLICE_MS) break;
+    }
+    drawFoldsSoon();
+  }, 0);
+}
 
 /** What the view showing is searched over: the chat's replies, the open record or the open file. */
 function searchable(): HTMLElement[] {
@@ -2680,12 +2762,12 @@ function searchable(): HTMLElement[] {
 }
 
 function indexed(element: HTMLElement) {
-  // A record's page or a file is drawn over again whole, so its text is read each time.
   if (element === recordArticle || element === fileArticle) {
-    // The text of a fold not yet opened is searched too, and so is drawn, shut, before it is read.
-    element.querySelectorAll("details").forEach((fold) => unfilled.get(fold)?.());
-    const drawn = drawnOf(element);
-    return { drawn, folded: fold(drawn.text) };
+    if (pageIndex?.element !== element) {
+      const drawn = drawnOf(element);
+      pageIndex = { element, drawn, folded: fold(drawn.text) };
+    }
+    return pageIndex;
   }
   let entry = searchIndex.get(element);
   if (!entry) {
@@ -2698,8 +2780,8 @@ function indexed(element: HTMLElement) {
 
 /** The range that the drawn characters `from` to `to` of an element's text make. */
 function drawnRange(drawn: Drawn, from: number, to: number): Range | null {
-  const first = drawn.nodes.findLast((held) => held.from <= from);
-  const last = drawn.nodes.findLast((held) => held.from < to);
+  const first = drawn.nodes[lastHolding(drawn.nodes.length, (index) => drawn.nodes[index].from <= from)];
+  const last = drawn.nodes[lastHolding(drawn.nodes.length, (index) => drawn.nodes[index].from < to)];
   if (!first || !last) return null;
   const range = document.createRange();
   range.setStart(first.node, Math.min(from - first.from, first.node.length));
@@ -2707,48 +2789,141 @@ function drawnRange(drawn: Drawn, from: number, to: number): Range | null {
   return range;
 }
 
-/** Marks every hit of the query and the current one, and shows the count. */
-function runSearch(keep?: { key: string; from: number }): void {
-  const terms = queryTerms(findField.value);
+const rangeOf = (hit: Hit) => drawnRange(hit.drawn, hit.from, hit.to);
+
+/** Where the current hit stands, to find it again after the page has been read anew. */
+function currentPlace(): HitPlace | undefined {
+  const hit = hits[currentHit];
+  const range = hit && rangeOf(hit);
+  return range ? { key: hit.key, from: hit.from, node: range.startContainer, offset: range.startOffset } : undefined;
+}
+
+/** The hit at a place kept from before: at the same text node where it is still drawn, else at the same count of characters. */
+function hitAt(place: HitPlace): number {
+  let drawn: Drawn | undefined;
+  let from = place.from;
+  return hits.findIndex((hit) => {
+    if (hit.key !== place.key) return false;
+    if (hit.drawn !== drawn) {
+      drawn = hit.drawn;
+      const held = drawn.nodes.find((own) => own.node === place.node);
+      from = held ? held.from + place.offset : place.from;
+    }
+    return hit.from === from;
+  });
+}
+
+/** Finds every hit of the query, and which is the current one. What is marked is `paintHits`'s. */
+function runSearch(keep?: HitPlace): void {
+  const phrase = queryPhrase(findField.value);
   const found: Hit[] = [];
-  if (terms.length) {
+  if (phrase) {
     for (const element of searchable()) {
       const { drawn, folded } = indexed(element);
-      for (const [from, to] of findSpans(drawn.text, terms, folded)) {
-        const range = drawnRange(drawn, from, to);
-        if (range) found.push({ key: element.dataset.key ?? element.id, from, range });
-      }
+      const key = element.dataset.key ?? element.id;
+      for (const [from, to] of findSpans(drawn.text, phrase, folded)) found.push({ key, drawn, from, to });
     }
   }
   // In the chat the newest is first: the last hit of the page is the first.
   hits = currentView === "chat" ? found.reverse() : found;
-  const kept = keep ? hits.findIndex((hit) => hit.key === keep.key && hit.from === keep.from) : -1;
+  const kept = keep ? hitAt(keep) : -1;
   currentHit = kept >= 0 ? kept : hits.length ? Math.min(Math.max(currentHit, 0), hits.length - 1) : -1;
   if (keep && kept < 0 && hits.length) currentHit = 0;
-  paintHits();
 }
 
+/** The fold that hides a place in the page: one that is shut, other than by its own label. */
+function shutFoldOver(node: Node): HTMLDetailsElement | null {
+  for (let element = node.parentElement; element; element = element.parentElement) {
+    if (!(element instanceof HTMLDetailsElement) || element.open) continue;
+    const label = element.firstElementChild;
+    if (!(label instanceof HTMLElement && label.tagName === "SUMMARY" && label.contains(node))) return element;
+  }
+  return null;
+}
+
+function searchPane(): HTMLElement {
+  return currentView === "records" ? recordsPane : currentView === "files" ? filesPane : scroller;
+}
+
+/** The top and bottom of the part of the window the searched text is read in. */
+function searchBand(): { top: number; bottom: number } {
+  const box = searchPane().getBoundingClientRect();
+  const bar = document.getElementById("top")?.getBoundingClientRect().bottom ?? 0;
+  return { top: Math.max(box.top, bar), bottom: Math.min(box.bottom, window.innerHeight) };
+}
+
+/**
+ * The hits in the part of the page on screen, as the first of them and the one after the
+ * last, counted in the page's order. The two ends of what is on screen are read as places in
+ * the text, and the hits between them found by halving, so nothing is measured for each hit.
+ * Where the ends cannot be read, the hits around the current one are given.
+ */
+function hitsOnScreen(): [number, number] {
+  const count = hits.length;
+  const around: [number, number] = [
+    Math.max(0, currentHit - PAINTED_HITS / 2), Math.min(count, Math.max(currentHit, 0) + PAINTED_HITS / 2)];
+  const box = searchPane().getBoundingClientRect();
+  const band = searchBand();
+  if (band.bottom - band.top < 2 || box.right - box.left < 2) return around;
+  const first = caretAt(box.left + 1, band.top + 1);
+  const last = caretAt(box.right - 1, band.bottom - 1);
+  if (!first || !last) return around;
+  // The chat's hits are held newest first, which is the page's order turned round.
+  const inOrder = (index: number) => hits[currentView === "chat" ? count - 1 - index : index];
+  try {
+    /** Where a place in the page lies against a hit: before it, in it or after it. */
+    const side = (index: number, place: { node: Node; offset: number }) =>
+      rangeOf(inOrder(index))?.comparePoint(place.node, place.offset) ?? 0;
+    const low = lastHolding(count, (index) => side(index, first) > 0) + 1;
+    const high = lastHolding(count, (index) => side(index, last) >= 0) + 1;
+    return currentView === "chat" ? [count - high, count - low] : [low, high];
+  } catch {
+    // A place read from outside the page's own tree compares with nothing in it.
+    return around;
+  }
+}
+
+/** Shows the count, and marks the hits on screen and the current one. */
 function paintHits(): void {
   findCount.textContent = tally(currentHit, hits.length, !findBar.hidden && findField.value.trim() !== "");
-  const highlights = (CSS as any).highlights;
-  if (!highlights) return;
-  const rest = hits.filter((_, index) => index !== currentHit).map((hit) => hit.range);
-  if (rest.length) highlights.set("found", new (window as any).Highlight(...rest));
-  else highlights.delete("found");
-  if (currentHit >= 0) {
-    const current = new (window as any).Highlight(hits[currentHit].range);
-    current.priority = 1;
-    highlights.set("found-current", current);
-  } else {
-    highlights.delete("found-current");
+  if (!(CSS as any).highlights) return;
+  const ranges: Range[] = [];
+  const [low, high] = hits.length ? hitsOnScreen() : [0, 0];
+  for (let at = low; at < high && ranges.length < PAINTED_HITS; at++) {
+    if (at === currentHit) continue;
+    const range = rangeOf(hits[at]);
+    if (!range) continue;
+    const shut = shutFoldOver(range.startContainer);
+    if (shut) {
+      // Every hit the same fold hides follows this one, and is passed over in one step.
+      const hidden = (index: number) => {
+        const within = rangeOf(hits[at + index])?.startContainer;
+        return !!within && shut.contains(within) && shutFoldOver(within) !== null;
+      };
+      at += Math.max(lastHolding(high - at, hidden), 0);
+      continue;
+    }
+    ranges.push(range);
   }
+  showRanges("found", ranges);
+  const current = hits[currentHit] ? rangeOf(hits[currentHit]) : null;
+  showRanges("found-current", current ? [current] : [], 1);
+}
+
+/** The page has moved under the window, or a fold has opened or shut: the hits now on screen are marked. */
+function paintHitsSoon(): void {
+  if (findBar.hidden || !hits.length || paintFrame !== undefined) return;
+  paintFrame = requestAnimationFrame(() => {
+    paintFrame = undefined;
+    if (!findBar.hidden) paintHits();
+  });
 }
 
 /** New text has been drawn: the marks are laid again, the current hit staying where it was. */
 function refreshSearch(): void {
   if (findBar.hidden) return;
-  const at = hits[currentHit];
-  runSearch(at ? { key: at.key, from: at.from } : undefined);
+  runSearch(currentPlace());
+  paintHits();
 }
 
 function moveToHit(forward: boolean): void {
@@ -2756,28 +2931,26 @@ function moveToHit(forward: boolean): void {
     window.clearTimeout(searchTimer);
     searchTimer = undefined;
     runSearch();
-    if (currentHit >= 0) {
-      showHit();
-      return;
-    }
+    showHit();
+    return;
   }
   currentHit = step(currentHit, hits.length, forward);
-  paintHits();
   showHit();
 }
 
+/** Brings the current hit into the window and marks what is then on screen. */
 function showHit(): void {
-  const hit = hits[currentHit];
-  if (!hit) return;
-  // A hit inside a fold the page keeps shut opens it, so that it is seen (KYO-754).
-  for (let node: Node | null = hit.range.startContainer; node; node = node.parentNode) {
-    if (node instanceof HTMLDetailsElement && !node.open) node.open = true;
+  const range = hits[currentHit] ? rangeOf(hits[currentHit]) : null;
+  if (range) {
+    // A hit inside a fold the page keeps shut opens it, so that it is seen (KYO-754).
+    for (let node: Node | null = range.startContainer; node; node = node.parentNode) {
+      if (node instanceof HTMLDetailsElement && !node.open) node.open = true;
+    }
+    const rect = range.getBoundingClientRect();
+    const band = searchBand();
+    searchPane().scrollTop += scrollBy(rect.top, rect.bottom, band.top + 24, band.bottom - 24);
   }
-  const rect = hit.range.getBoundingClientRect();
-  const top = (document.getElementById("top")?.getBoundingClientRect().bottom ?? 0) + 24;
-  const bottom = window.innerHeight - 24;
-  const pane = currentView === "records" ? recordsPane : currentView === "files" ? filesPane : scroller;
-  pane.scrollTop += scrollBy(rect.top, rect.bottom, top, bottom);
+  paintHits();
 }
 
 const FIND_PLACEHOLDERS: Record<string, string> = {
@@ -2786,23 +2959,35 @@ const FIND_PLACEHOLDERS: Record<string, string> = {
 
 function openSearch(): void {
   if (currentView === "records" ? recordArticle.hidden : currentView === "files" ? fileArticle.hidden : false) return;
+  watchPages();
   findField.placeholder = FIND_PLACEHOLDERS[currentView] ?? "Search";
   findField.setAttribute("aria-label", findField.placeholder);
   findBar.hidden = false;
   findField.focus();
   findField.select();
-  if (findField.value) runSearch();
+  drawFoldsSoon();
+  if (findField.value) refreshSearch();
 }
 
 function closeSearch(): void {
   if (findBar.hidden) return;
   if (searchTimer !== undefined) window.clearTimeout(searchTimer);
   searchTimer = undefined;
+  if (foldTimer !== undefined) window.clearTimeout(foldTimer);
+  foldTimer = undefined;
   findBar.hidden = true;
   hits = [];
   currentHit = -1;
   paintHits();
 }
+
+// The hits marked are those on screen, so they are marked again when the page moves under
+// the window, when the window changes size, and when a fold opens or shuts.
+for (const pane of ["page", "view-records", "view-files"]) {
+  document.getElementById(pane)?.addEventListener("scroll", paintHitsSoon, { passive: true });
+}
+window.addEventListener("resize", paintHitsSoon);
+document.addEventListener("toggle", paintHitsSoon, true);
 
 for (const [id, forward] of [["find-prev", false], ["find-next", true]] as const) {
   const button = document.getElementById(id)!;
@@ -3942,7 +4127,7 @@ function drawRecordLists(): void {
     const name = chip.dataset.filter as "open" | "dispatchable" | "awaiting";
     chip.setAttribute("aria-pressed", String(narrowing[name]));
   });
-  document.querySelectorAll<HTMLInputElement>(".records-search").forEach((field) => {
+  document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").forEach((field) => {
     if (field.value !== narrowing.search) field.value = narrowing.search;
   });
   const shown = narrow(newestFirst(recordRows), narrowing, readyRecords, awaitingRecords);
@@ -4041,6 +4226,7 @@ function recordItem(section: string, item: Item): HTMLElement {
     details.append(summary);
     // A brief is long, so it is drawn when it is first opened.
     const fill = () => {
+      unfilled.delete(details);
       if (details.childElementCount === 1) details.append(prose(folded.text));
     };
     unfilled.set(details, fill);
@@ -4061,7 +4247,7 @@ function recordItem(section: string, item: Item): HTMLElement {
   return element;
 }
 
-/** A fold whose body is drawn when it is first opened, with what draws it; a search draws it unopened (KYO-754). */
+/** A fold whose body is not yet drawn, with what draws it: it is drawn when first opened, and a search draws it shut (KYO-754). */
 const unfilled = new WeakMap<Element, () => void>();
 
 function drawRecord(): void {
@@ -4113,7 +4299,6 @@ function drawRecord(): void {
   }
   recordArticle.replaceChildren(...parts);
   recordsPane.scrollTop = place;
-  refreshSearch();
   if (revealRef) {
     const target = [...recordArticle.querySelectorAll<HTMLElement>("[data-ref]")]
       .find((element) => element.dataset.ref === revealRef);
@@ -4269,7 +4454,8 @@ const recordFrames = {
   },
 };
 
-document.querySelectorAll<HTMLInputElement>(".records-search").forEach((field) => {
+// The search bar's field is drawn as these are and is no filter of the lists (KYO-754).
+document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").forEach((field) => {
   field.addEventListener("input", () => {
     narrowing.search = field.value;
     drawRecordLists();
@@ -4929,7 +5115,6 @@ function drawFile(): void {
   const code = fileArticle.querySelector(".file-code");
   if (code) code.scrollLeft = left;
   showFileLine(file);
-  refreshSearch();
 }
 
 /**
