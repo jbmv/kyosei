@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-793` (task) — The charter and the dispatch, governance, store and registry references match the CLI
 - **2026-11-11** — `KYO-781` (task) — The session list in the app groups the person's items, then the orchestrator's, with checked items behind a toggle
 - **2026-11-11** — `KYO-780` (bug) — The composer's undo does not take back an anchor, and a removed anchor stays highlighted in the chat
 - **2026-11-11** — `KYO-773` (task) — A dispatch's brief says each thing once: touches by path, and its length by section
