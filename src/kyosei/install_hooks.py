@@ -311,6 +311,8 @@ SUPERSEDED_HOOK_COMMANDS: dict[str, str] = {
     "kyo check-build --hook": guarded("kyo check-build --hook"),
     # KYO-657: the same: no build shipped it bare; the pairing is the invariant.
     "kyo turns --hook": guarded("kyo turns --hook"),
+    # KYO-662: the same again for the Stop check.
+    "kyo discuss check --hook": guarded("kyo discuss check --hook"),
     # KYO-362: containment cannot carry the new `--hook` flag, so without this every
     # post-KYO-316 install would gain a second doctor group; this supersedes the guarded
     # pre-`--hook` chain they carry (docs/design/scaffold.md#kyo-362).

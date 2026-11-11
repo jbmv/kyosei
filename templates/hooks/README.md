@@ -15,7 +15,7 @@ fails if a packaged fragment is missing from that list.
 
 Every command the hooks below name — `kyo brief`, `kyo doctor`, `kyo sweep`, (KYO-13.c5)
 `kyo check-branch`, (KYO-17) `kyo check-clean`, (KYO-60) `kyo check-push`, (KYO-298)
-`kyo check-command`, (KYO-186) `kyo sessions`, (KYO-398) `kyo check-build` and (KYO-657) `kyo turns` — is a
+`kyo check-command`, (KYO-186) `kyo sessions`, (KYO-398) `kyo check-build`, (KYO-657) `kyo turns` and (KYO-662) `kyo discuss` — is a
 command of the installed CLI.
 
 ## Keeping them current
@@ -488,6 +488,19 @@ prompt hook did not index, and copies the session's transcript and subagent tran
 bytes only, to `$KYOSEI_HOME/transcript-archive/<project>/` (KYO-657, KYO-683). It prints
 nothing and always exits 0, since UserPromptSubmit's stdout is added to the session's context.
 
+### `Stop` → `kyo discuss check --hook`
+
+KYO-662. In a project that opted in to reading transcripts, this reads the turn that ended
+and, when a cue says a choice was put to the person and no discussion is open in the
+session, prints one line of hook JSON whose `hookSpecificOutput.additionalContext` asks the
+agent to run `kyo discuss open` or `kyo discuss skip --why "<one line>"`. Claude Code hands
+that text to the agent as Stop hook feedback and continues the conversation once; it is not
+`decision: "block"` and not exit 2, and it is not shown as a hook error. The check prints
+nothing on the stop that follows its own feedback (`stop_hook_active`), so a turn is asked
+about once. It is in its own group, so a failing sweep or doctor does not skip it, and under
+`Stop` alone, since at `SessionEnd` no agent is left to answer. The cues and what counts as
+attached are in `docs/reference/topics/registries.md`.
+
 ### `UserPromptSubmit` → `kyo check-build --hook`
 
 KYO-398. Every project on a machine runs its one installed `kyo` (KYO-335; the uv tool since
@@ -532,7 +545,7 @@ warning.
 All in `src/kyosei/defaults/hooks/`:
 
 - `session-start.json` — `SessionStart` → `kyo brief --compact --session-start`
-- `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`
+- `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`; `kyo discuss check --hook` in a third group, under `Stop` alone
 - `subagent-stop.json` — `SubagentStop` → `kyo check-clean --subagent-stop`, then `kyo check-branch --subagent-stop --against main`
 - `sessions.json` — `SessionStart`, `Stop` and `SessionEnd` → `kyo sessions --hook`
 - `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`

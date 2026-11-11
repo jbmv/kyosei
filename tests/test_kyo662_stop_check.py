@@ -14,11 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import cmd_discuss, cmd_sessions, install_hooks
+from kyosei import cmd_sessions, cmd_turns, install_hooks
 from kyosei.cmd_discuss import CUE_ASKED, CUE_PERSON, CUE_REPLY, detect, person_cue, reply_cue
 from kyosei.config import load_config
+from kyosei.harness import claude_code_transcript as transcript
 
-from .conftest import opt_in_transcripts
+from .conftest import invoke, opt_in_transcripts
 from .test_kyo658_discussions import (
     DECIDING_WORDS,
     PROMPT_1,
@@ -192,7 +193,7 @@ def test_a_turn_view_reads_the_persons_words_mid_turn_messages_and_the_question_
         agent_text("a-1", "Merged.", "2026-11-06T10:00:30.000Z"),
         person("p-2", PROMPT_2, "thanks", "2026-11-06T10:01:00.000Z"),
     ]
-    first, second = (cmd_discuss.turn_view(turn) for turn in cmd_discuss.split_turns(records))
+    first, second = (transcript.turn_view(turn) for turn in transcript.split_turns(records))
     assert first.prompt_id == PROMPT_1 and first.origin == "human"
     assert first.person == ("merge it", "or should it wait")
     assert first.asked and first.reply == "Merged."
@@ -208,17 +209,17 @@ def test_read_turn_finds_a_turn_that_starts_before_the_first_window(tmp_path: Pa
         person("p-1", PROMPT_1, "should the cache stay?", "2026-11-06T10:00:00.000Z"),
         *(
             agent_text(f"a-{n}", padding, "2026-11-06T10:00:10.000Z")
-            for n in range(1, 2 * cmd_discuss._TAIL_BYTES // 4096)
+            for n in range(1, 2 * transcript._TAIL_BYTES // 4096)
         ),
         agent_text("a-last", "Kept.", "2026-11-06T10:05:00.000Z"),
     ]
     path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-    assert path.stat().st_size > 2 * cmd_discuss._TAIL_BYTES
-    turn = cmd_discuss.read_turn(path, PROMPT_1)
+    assert path.stat().st_size > 2 * transcript._TAIL_BYTES
+    turn = transcript.read_turn(path, PROMPT_1)
     assert turn is not None and turn.person == ("should the cache stay?",)
     assert turn.reply == "Kept."
-    assert cmd_discuss.read_turn(path, None).prompt_id == PROMPT_1
-    assert cmd_discuss.read_turn(path, PROMPT_3) is None
+    assert transcript.read_turn(path, None).prompt_id == PROMPT_1
+    assert transcript.read_turn(path, PROMPT_3) is None
 
 
 # ------------------------------------------------------------------ KYO-662.c2: the hook
@@ -278,6 +279,31 @@ def test_skip_without_at_prompt_marks_the_sessions_latest_prompt(kyo, indexed: P
     assert kyo("discuss", "skip", "--why", "a remark").code == 0
     assert index_line(indexed, PROMPT_3)["skip"]["why"] == "a remark"
     assert "skip" not in index_line(indexed, PROMPT_1)
+
+
+def test_a_line_standing_for_the_agents_reply_is_never_the_one_skipped(
+    kyo, indexed: Path
+) -> None:
+    """A reply line repeats its prompt's id and comes after it; the skip goes on the
+    prompt's line, by default and when the prompt is named."""
+    with cmd_turns.turns_path(indexed).open("a", encoding="utf-8") as handle:
+        replies = ((PROMPT_1, "2026-11-06T10:00:31Z"), (PROMPT_3, "2999-01-01T00:00:00Z"))
+        for prompt_id, at in replies:
+            reply = {
+                "session": SESSION,
+                "prompt_id": prompt_id,
+                "at": at,
+                "origin": "assistant",
+                "role": cmd_turns.REPLY_ROLE,
+                "source": "hook",
+            }
+            handle.write(json.dumps(reply) + "\n")
+    assert kyo("discuss", "skip", "--why", "a remark").code == 0
+    assert kyo("discuss", "skip", "--at-prompt", PROMPT_1, "--why", "another").code == 0
+    lines = cmd_turns.read_lines(indexed)
+    skipped = [(line["prompt_id"], line.get("role")) for line in lines if "skip" in line]
+    assert sorted(skipped) == [(PROMPT_1, None), (PROMPT_3, None)]
+    assert silent(stop(kyo, PROMPT_1, "I recommend keeping it."))
 
 
 def test_skip_refuses_without_a_reason_and_with_one_it_is_recorded(kyo, indexed: Path) -> None:
@@ -387,6 +413,14 @@ def test_check_without_hook_is_refused_naming_the_flag(kyo, project: Path) -> No
     assert kyo("discuss", "check", "--hook", stdin="").code == 0
     misplaced = kyo("discuss", "skip", "--hook", "--why", "x")
     assert misplaced.code == 64 and "--hook belongs to `kyo discuss check`" in misplaced.err
+
+
+def test_the_check_is_silent_where_no_project_resolves(tmp_path: Path) -> None:
+    """A plugin's hooks fire in every session, Kyosei project or not (KYO-591)."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    run = invoke(["--root", str(elsewhere), "discuss", "check", "--hook"], stdin="{}")
+    assert silent(run), run
 
 
 # ------------------------------------------------------------------ the hook group

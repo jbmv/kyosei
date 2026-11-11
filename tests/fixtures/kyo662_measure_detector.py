@@ -19,8 +19,8 @@ Inputs
                 turn that decided).
 
 What is measured, with the detector the hook ships (``kyosei.cmd_discuss.detect``)
-    turns       A turn is what ``kyosei.cmd_discuss.split_turns`` yields; an agent turn is one a
-                prompt opened and the agent answered with text. Each agent turn's end is one
+    turns       A turn is what the transcript adapter's ``split_turns`` yields; an agent turn is
+                one a prompt opened and the agent answered with text. Each agent turn's end is one
                 Stop.
     recall      Over the spans whose first turn is a prompt the person typed (a span that
                 starts with a message sent mid-turn or with a multiple-choice answer has no
@@ -44,7 +44,8 @@ import statistics
 import sys
 from pathlib import Path
 
-from kyosei.cmd_discuss import CUE_ASKED, CUE_PERSON, CUE_REPLY, detect, split_turns, turn_view
+from kyosei.cmd_discuss import CUE_ASKED, CUE_PERSON, CUE_REPLY, detect
+from kyosei.harness.claude_code_transcript import split_turns, turn_view
 
 
 def _records(path: Path):

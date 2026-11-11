@@ -54,8 +54,9 @@ integrity object for a whole prompt is the per-line commitment the index line wi
 
 THE STOP CHECK (KYO-662, decision KYO-654 DC4, proposal section 5.1 Tier 2). ``kyo discuss
 check --hook`` runs at every Stop, in its own hook group. It reads the turn that just ended
-(the person's words and whether AskUserQuestion was used, from the transcript; the reply,
-from the payload's ``last_assistant_message``) and asks two things: does a cue say a choice
+(the person's words and whether AskUserQuestion was used, from the transcript through
+:func:`kyosei.harness.claude_code_transcript.read_turn`; the reply, from the payload's
+``last_assistant_message``) and asks two things: does a cue say a choice
 was put to the person or raised by them (:func:`detect`), and is the turn attached, which
 means a discussion is open in this session or already names the turn. When a cue fires on
 an unattached turn it prints one JSON line carrying ``hookSpecificOutput.additionalContext``.
@@ -85,14 +86,19 @@ import json
 import re
 import sys
 from argparse import Namespace
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import commands, export
 from .clock import now
 from .cmd_sessions import recorded_transcript_path
-from .cmd_turns import HUMAN, confirm_from_transcript, mark_skipped, read_lines
+from .cmd_turns import (
+    HUMAN,
+    confirm_from_transcript,
+    mark_skipped,
+    prompt_lines,
+    read_lines,
+)
 from .commands import Context, Output, _load_registry, _load_status_ladder, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .contracts import TURN_REF_ABSENT, TURN_REF_INDEXED
@@ -816,8 +822,6 @@ CUE_PERSON = "the person's message asks a question or opens a choice"
 CUE_REPLY = "your reply puts a choice to the person"
 CUE_ASKED = "the turn used AskUserQuestion"
 
-ASK_TOOL = "AskUserQuestion"
-
 #: Text the detector does not read: code, URLs and what the harness injected.
 _NOT_PROSE = re.compile(
     r"```.*?(?:```|\Z)|`[^`\n]*`|https?://\S+"
@@ -892,155 +896,6 @@ def detect(person: tuple[str, ...] | list[str], reply: str | None, asked: bool) 
     return cues
 
 
-@dataclass(frozen=True)
-class TurnView:
-    """One turn as the transcript holds it: the prompt that opened it and what followed
-    until the next prompt. ``person`` is the person's words in it: the opening prompt when
-    it is theirs, and each message they sent while the agent worked."""
-
-    prompt_id: str | None
-    origin: str | None
-    at: str | None
-    person: tuple[str, ...]
-    asked: bool
-    reply: str | None
-
-
-def _block_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    return "\n".join(
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
-    )
-
-
-def _opens_prompt(record: dict) -> str | None:
-    """The prompt id a record opens a turn with, for a ``user`` record that is not a tool
-    result; None for every other record."""
-    if record.get("type") != "user" or record.get("toolUseResult") is not None:
-        return None
-    prompt_id = record.get("promptId")
-    return prompt_id if isinstance(prompt_id, str) and prompt_id else None
-
-
-def split_turns(records: Iterator[dict] | list[dict]) -> Iterator[list[dict]]:
-    """Group a transcript's main-chain records into turns, in order. A turn starts at the
-    first record of each prompt id and holds everything up to the next one's."""
-    current: list[dict] = []
-    current_id: str | None = None
-    for record in records:
-        if not isinstance(record, dict) or record.get("isSidechain"):
-            continue
-        prompt_id = _opens_prompt(record)
-        if prompt_id is not None and prompt_id != current_id:
-            if current:
-                yield current
-            current, current_id = [], prompt_id
-        current.append(record)
-    if current:
-        yield current
-
-
-def turn_view(records: list[dict]) -> TurnView:
-    """What the detector reads of one turn of :func:`split_turns`."""
-    opening = records[0] if records else {}
-    prompt_id = _opens_prompt(opening)
-    origin = opening.get("origin")
-    kind = origin.get("kind") if isinstance(origin, dict) else None
-    person: list[str] = []
-    asked = False
-    reply: str | None = None
-    for record in records:
-        own = record.get("origin")
-        if (
-            record.get("type") == "user"
-            and record.get("toolUseResult") is None
-            and not record.get("isMeta")
-            and isinstance(own, dict)
-            and own.get("kind") == HUMAN
-        ):
-            person.append(_block_text((record.get("message") or {}).get("content")))
-            continue
-        if record.get("type") == "attachment":
-            attachment = record.get("attachment")
-            if (
-                isinstance(attachment, dict)
-                and attachment.get("type") == "queued_command"
-                and attachment.get("commandMode") == "prompt"
-                and (attachment.get("origin") or {}).get("kind") == HUMAN
-                and isinstance(attachment.get("prompt"), str)
-            ):
-                person.append(attachment["prompt"])
-        elif record.get("type") == "assistant":
-            content = (record.get("message") or {}).get("content")
-            if isinstance(content, list) and any(
-                isinstance(block, dict)
-                and block.get("type") == "tool_use"
-                and block.get("name") == ASK_TOOL
-                for block in content
-            ):
-                asked = True
-            text = _block_text(content)
-            if text.strip():
-                reply = text
-    stamp = opening.get("timestamp")
-    return TurnView(
-        prompt_id=prompt_id,
-        origin=kind,
-        at=stamp if isinstance(stamp, str) else None,
-        person=tuple(words for words in person if words.strip()),
-        asked=asked,
-        reply=reply,
-    )
-
-
-#: How much of a transcript's tail the check reads first; doubled until the turn's opening
-#: record is inside it.
-_TAIL_BYTES = 2 * 1024 * 1024
-
-
-def _parsed(data: bytes) -> Iterator[dict]:
-    for raw in data.split(b"\n"):
-        if not raw.strip():
-            continue
-        try:
-            record = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(record, dict):
-            yield record
-
-
-def read_turn(path: Path, prompt_id: str | None) -> TurnView | None:
-    """The turn ``prompt_id`` opened, or the transcript's last turn when it is None, read
-    from the end of the file. None when the transcript does not hold it. Raises
-    :class:`OSError`."""
-    size = path.stat().st_size
-    window = _TAIL_BYTES
-    while True:
-        start = max(0, size - window)
-        with path.open("rb") as handle:
-            handle.seek(start)
-            data = handle.read(size - start)
-        if start:
-            data = data[data.find(b"\n") + 1 :]  # the first line is cut somewhere inside
-        turns = list(split_turns(_parsed(data)))
-        # The first turn of a partial window may have lost its opening records.
-        whole = turns[1:] if start else turns
-        for records in reversed(whole):
-            if prompt_id is None or _opens_prompt(records[0]) == prompt_id:
-                return turn_view(records) if _opens_prompt(records[0]) is not None else None
-        if not start:
-            return None
-        window *= 2
-
-
 def _record_ids(prefix: str, text: str) -> set[str]:
     return set(re.findall(rf"\b{re.escape(prefix)}-\d+\b", text))
 
@@ -1077,8 +932,8 @@ def open_discussions(store: Store, session: str) -> list[dict]:
 def _index_line(ctx: Context, session: str, prompt_id: str | None) -> dict | None:
     if prompt_id is None:
         return None
-    for line in read_lines(ctx.root):
-        if line.get("session") == session and line.get("prompt_id") == prompt_id:
+    for line in prompt_lines(ctx.root, session):
+        if line.get("prompt_id") == prompt_id:
             return line
     return None
 
@@ -1099,7 +954,9 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
     if not isinstance(session, str) or not session or not isinstance(raw_path, str):
         return {"fire": False, "why": "no session_id or transcript_path in the hook payload"}
     wanted = payload.get("prompt_id")
-    turn = read_turn(Path(raw_path).expanduser(), wanted if isinstance(wanted, str) else None)
+    turn = transcript.read_turn(
+        Path(raw_path).expanduser(), wanted if isinstance(wanted, str) else None
+    )
     if turn is None:
         return {"fire": False, "why": "the transcript does not hold this turn"}
     last = payload.get("last_assistant_message")
@@ -1142,7 +999,8 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
     message = (
         f"{whose} put a choice to them ({'; '.join(cues)}), and {state}. Open one now with "
         '`kyo discuss open --title "<topic>"`, which stamps the person\'s latest turn, or '
-        f"record that it is not one with `kyo discuss skip --at-prompt {turn.prompt_id} --why "
+        "record that it is not one with `kyo discuss skip --at-prompt "
+        f"{turn.prompt_id} --why "
         '"<one line>"`. This is asked once for this turn and does not block the stop.'
     )
     return result | {"fire": True, "why": state, "message": message}
@@ -1200,11 +1058,7 @@ def _skip(ctx: Context, store: Store, args: Namespace) -> Output:
         )
     _refresh_index(ctx, session)
     lines = sorted(
-        (
-            line
-            for line in read_lines(ctx.root)
-            if line.get("session") == session and isinstance(line.get("at"), str)
-        ),
+        (line for line in prompt_lines(ctx.root, session) if isinstance(line.get("at"), str)),
         key=lambda line: line["at"],
     )
     at = getattr(args, "at", None)

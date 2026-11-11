@@ -88,6 +88,7 @@ own. Outside a Kyosei project every one of them exits silently.
 | The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. |
 | The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the items of yours still unchecked on the session's task list, without holding the session open. |
 | The session stops | `kyo turns --hook` | Where D14 is yes, confirms the turn index from the transcript and copies the transcript and its subagent transcripts to the local archive. Silent. |
+| The session stops | `kyo discuss check --hook` | Where D14 is yes, and the turn put a choice to you while no discussion was open, asks the orchestrator to open one or to record why it is not one. The orchestrator takes one more turn to do so; you are not asked anything. |
 
 The two worker checks block a worker's first attempt to stop and name the remedy. If the
 worker stops again without fixing it, they report the finding without blocking, and the

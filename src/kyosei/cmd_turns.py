@@ -142,6 +142,41 @@ def confirmed_paste_flags(store_root: Path | str, session_id: str) -> dict[str, 
     return flags
 
 
+#: KYO-662: the ``role`` of a line that stands for the agent's reply, not for a prompt. Such
+#: a line repeats its prompt's id, and a skip is never written on it.
+REPLY_ROLE = "assistant"
+
+
+def prompt_lines(store_root: Path | str, session_id: str) -> list[dict]:
+    """One session's lines that each stand for a prompt or a message sent mid-turn, in file
+    order: every line of the session but those whose ``role`` is :data:`REPLY_ROLE`."""
+    return [
+        line
+        for line in read_lines(store_root)
+        if line.get("session") == session_id and line.get("role") != REPLY_ROLE
+    ]
+
+
+def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) -> dict | None:
+    """KYO-662: write ``skip`` on one index line, the reason a turn the Stop check asked
+    about is not a discussion. ``key`` is the line's prompt id or record uuid. Returns the
+    line as written, or None when the session's index holds no such line. The reason and
+    the time it was given are the only words the index holds, and they are the agent's.
+    """
+    with _locked(store_root):
+        lines = read_lines(store_root)
+        for line in lines:
+            if (
+                line.get("session") == session_id
+                and line.get("role") != REPLY_ROLE
+                and key in (line.get("prompt_id"), line.get("turn"))
+            ):
+                line["skip"] = {"why": why, "at": _now()}
+                _rewrite(store_root, lines)
+                return line
+    return None
+
+
 def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
     path = turns_path(store_root)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -179,25 +214,6 @@ def index_prompt(store_root: Path | str, payload: dict) -> None:
             return
         with turns_path(store_root).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(line, sort_keys=True) + "\n")
-
-
-def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) -> dict | None:
-    """KYO-662: write ``skip`` on one index line, the reason a turn the Stop check asked
-    about is not a discussion. ``key`` is the line's prompt id or record uuid. Returns the
-    line as written, or None when the session's index holds no such line. The reason and
-    the time it was given are the only words the index holds, and they are the agent's.
-    """
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in lines:
-            if line.get("session") == session_id and key in (
-                line.get("prompt_id"),
-                line.get("turn"),
-            ):
-                line["skip"] = {"why": why, "at": _now()}
-                _rewrite(store_root, lines)
-                return line
-    return None
 
 
 def _read_cursor(fd: int) -> dict[str, int]:
