@@ -75,6 +75,12 @@ final class SessionFeed {
     /// The last projects frame the page was sent, so that an unchanged one is not sent again.
     private var projectsFrame = ""
     private(set) var state = FeedState.connecting
+    /// Why the server shows this device no session, when the reason is its device token
+    /// (KYO-791): none is saved, or the server refuses the one that is. The status bar says
+    /// it in place of the feed's state, whichever project the window shows, so that sessions
+    /// the server will not list are not taken for sessions that do not exist. Nil once a
+    /// session read has been answered.
+    private(set) var tokenNeeded: String?
     /// The waits between attempts to read the session while they keep failing.
     private var retry = Backoff()
     private(set) var facts: SessionFacts?
@@ -174,7 +180,9 @@ final class SessionFeed {
     }
 
     static func fromEnvironment() -> SessionFeed {
-        SessionFeed(client: ServeClient(base: URL(string: savedServer)!), project: savedProject)
+        SessionFeed(
+            client: ServeClient(base: URL(string: savedServer)!, token: deviceToken()),
+            project: savedProject)
     }
 
     /// Points this window at another server or project, and reads it afresh.
@@ -228,7 +236,11 @@ final class SessionFeed {
             projectVerified = false
             draftEtags = [:]
             agendaEtags = [:]
-            client = ServeClient(base: server)
+            tokenNeeded = nil
+            client = ServeClient(base: server, token: Self.deviceToken())
+        } else {
+            // Settings may have saved another token for the same server.
+            takeSavedToken()
         }
         self.project = project
         selected = session
@@ -335,18 +347,36 @@ final class SessionFeed {
         }
         if let served {
             let names = served.filter(\.can_open).map(\.name)
-            let found = await withTaskGroup(of: (String, [SessionRow]?).self) { group in
+            typealias Read = (name: String, rows: [SessionRow]?, needed: String?)
+            let reads = await withTaskGroup(of: Read.self) { group in
                 for name in names {
-                    group.addTask { (name, try? await client.sessions(project: name)) }
+                    group.addTask {
+                        do {
+                            return (name, try await client.sessions(project: name), nil)
+                        } catch {
+                            return (name, nil, ServeClient.tokenNeeded(error))
+                        }
+                    }
                 }
-                var found: [String: [SessionRow]] = [:]
-                for await (name, rows) in group {
-                    if let rows { found[name] = rows.filter(\.live) }
-                }
-                return found
+                var reads: [Read] = []
+                for await read in group { reads.append(read) }
+                return reads
             }
             guard !Task.isCancelled, client.base == self.client.base else { return }
+            var found: [String: [SessionRow]] = [:]
+            for read in reads {
+                if let rows = read.rows { found[read.name] = rows.filter(\.live) }
+            }
             liveSessions = found
+            // A list with no session link is said to be for want of a token when it is, and
+            // only by reads made with the token the feed now holds.
+            if client.token == self.client.token {
+                if let needed = reads.compactMap(\.needed).first {
+                    tokenNeeded = needed
+                } else if !found.isEmpty {
+                    tokenNeeded = nil
+                }
+            }
         }
         sendProjects()
     }
@@ -379,6 +409,24 @@ final class SessionFeed {
         retry.reset()
         task?.cancel()
         task = Task { await run() }
+    }
+
+    /// Reads the saved token again, and makes the session reads carry it when it is not the
+    /// one they carry. A token saved after the server refused the last one is found here.
+    private func takeSavedToken() {
+        let saved = Self.deviceToken()
+        guard saved != client.token else { return }
+        client = ServeClient(base: client.base, token: saved)
+    }
+
+    /// Takes what a session read answered: a refusal for want of a token is said in the
+    /// status bar, and an answer clears it. Any other failure says nothing about the token.
+    private func noteSessionRead(_ error: Error?) {
+        guard let error else {
+            tokenNeeded = nil
+            return
+        }
+        if let needed = ServeClient.tokenNeeded(error) { tokenNeeded = needed }
     }
 
     /// The device token, read through the system's own `security` tool, which created it.
@@ -1559,6 +1607,7 @@ final class SessionFeed {
                 // A request that answered as the task was cancelled does not throw, and
                 // what follows would clear the chat of the project the window turned to.
                 try Task.checkCancellation()
+                noteSessionRead(nil)
                 guard
                     let row = sessions.first(where: { $0.session_id == selected })
                         ?? sessions.first(where: { $0.live && $0.has_pane }) ?? sessions.first
@@ -1604,6 +1653,9 @@ final class SessionFeed {
             } catch {
                 if Task.isCancelled { return }
                 lose(ServeClient.describe(error))
+                noteSessionRead(error)
+                // The next attempt carries a token saved since this one was refused.
+                if tokenNeeded != nil { takeSavedToken() }
                 print("[feed] \(error)")
             }
             try? await Task.sleep(for: retry.next())

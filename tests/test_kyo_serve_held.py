@@ -1077,7 +1077,7 @@ def test_an_anchor_on_a_held_prompt_with_the_line_still_resolves(
     as_recorded(bed, recorded)
 
     # A client measures against the text the turns route gives, which holds the line.
-    status, _, raw = bed.client.request(f"{SESSIONS}/{OLD}/turns")
+    status, _, raw = bed.get(f"{SESSIONS}/{OLD}/turns")
     (turn,) = [t for t in body_json(raw)["turns"] if t["id"] == HELD_PROMPT]
     assert status == 200 and turn["text"] == recorded
     start = turn["text"].index(SECRET)

@@ -114,7 +114,8 @@ process and no other: a project's orchestrator session, for a device whose token
 one more thing read-only: a governed document's text, at
 `/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
 (KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
-reading transcripts also has its sessions served, read-only (see "Reading sessions" below).
+reading transcripts also has its sessions served, read-only, to a device that presents a
+device token (see "Reading sessions" below).
 
 A device whose token holds the `files` permission can also read the files of a project's code
 and store repositories, as git shows them (see "Reading a project's files" below, KYO-735).
@@ -187,7 +188,9 @@ checks stand in front of every route:
 user logged in to the machine, not only to you. Any process under another account can
 read every project you serve and write every `ideas/` and scratchpad, and those writes
 run as you. On a single-user Mac that is nobody else. On a machine other people log in
-to, it is them too. Kyosei states this rather than engineering around it.
+to, it is them too. Kyosei states this rather than engineering around it. The routes that
+need a device token are the exception: another account reads no session, sends nothing and
+reads no source file without one (see "Which routes need a device token" below).
 
 ### Reading sessions: the session routes (KYO-689)
 
@@ -197,6 +200,39 @@ read-only. These routes answer only in a project that has opted in with
 that setting. A session is served only by the project whose `sessions.json` records it.
 Every route stands behind the Host and Origin checks above, and answers `GET` only. None
 of these routes sends anything to a session.
+
+**Every session route needs a device token (KYO-791).** The request carries
+`Authorization: Bearer <token>`, with a token from `kyo devices issue <name>` (see "Sending
+input" below for how tokens are issued, kept and revoked). The token may hold any permission
+or none, since these routes change nothing: what is asked is that this machine issued the
+token and has not revoked it. A request without one is refused with 401 and
+`WWW-Authenticate: Bearer`, and the refusal carries a `reason`: `no-token`, `unknown-token`
+or `revoked-token`, or `tokens-unreadable` (500) when the token file cannot be parsed. The
+token is checked before the project is looked up and before its opt-in is read, so the
+refusal is the same for a project that has opted in, one that has not and one the server does
+not serve. A revocation takes effect on the next request; a stream that is already open
+stays open until its connection ends.
+
+A device on the tailnet that reaches the server through Tailscale Serve, and any account on
+the server's own machine, therefore sees no session without a token: not the list, a turn,
+the pane's text, an image, a subagent, the working directory's changes or the event stream.
+A browser's `EventSource` cannot send the header, so a client reads the stream with a
+request it can set headers on.
+
+#### Which routes need a device token
+
+| Routes | Token |
+|---|---|
+| `version`, `projects`, `cmd/...` (the records and everything else the CLI's `--json` reads), `docs/...`, `ideas/...`, `scratchpad`, the project's `events` | none |
+| The session routes in the table below | any token that has not been revoked |
+| `sessions/<id>/send`, `slash`, `interrupt`; the draft, held-message and task-list routes; `attachments` | `send` |
+| `notes`, `tags`, `sessions/<id>/marks` and the routes that send notes | `notes`, and `send` where the notes are sent to a session |
+| `orchestrator/start` | `start` |
+| `sessions/<id>/terminal` and the routes beneath it | `terminal` |
+| `files/...` | `files` |
+
+The routes in the first row answer any request that passes the Host and Origin checks, as
+they did before the session routes asked for a token.
 
 A client reads Kyosei's own objects: a Claude Code transcript row is never in a response,
 because that format is not a published interface and changes between releases.
@@ -687,7 +723,8 @@ holding an old copy is told to read again, and is not told that its change is fo
 **A change is announced** on the session's event stream. The `ready` event carries
 `agenda: {"etag": ...}` and an `agenda` event carries `session_id` and the new `etag`, within
 one sampling interval of the save by either side. Neither carries an item, because the stream
-asks for no device token; a client reads the list again when the etag is not the one it holds.
+is open to a device token of any permission and the list is read with one holding `send`; a
+client reads the list again when the etag is not the one it holds.
 
 **`kyo agenda`** is the orchestrator's side. With no action it prints the items with their
 ids. `add --text "..."` adds one at the end, or at `--to POSITION`; `edit <id> --text "..."`

@@ -231,14 +231,17 @@ def _unauthorized(message: str, reason: str) -> Refusal:
     return Refusal(401, message, reason=reason, headers={"WWW-Authenticate": "Bearer"})
 
 
-def _issue_one(permission: str) -> str:
+def _issue_one(permission: str | None) -> str:
+    """The command that issues a token a route accepts; None for a route any token opens."""
+    if permission is None:
+        return "`kyo devices issue <name>`"
     return f"`kyo devices issue <name> --permission {permission}`"
 
 
 def _device_presented(
     environ: dict[str, str],
     authorization: str | None,
-    permission: str = device_tokens.PERMISSION_SEND,
+    permission: str | None = device_tokens.PERMISSION_SEND,
 ) -> device_tokens.Device:
     """The device this request's token was issued to, or a refusal naming ``permission``."""
     issue_one = _issue_one(permission)
@@ -262,14 +265,17 @@ def _device_presented(
     return device
 
 
-def _require_permission(device: device_tokens.Device, permission: str) -> None:
-    issue_one = _issue_one(permission)
+def _require_live(device: device_tokens.Device, permission: str | None) -> None:
     if device.revoked_at is not None:
         raise _unauthorized(
             f"the token of device {device.name} was revoked at {device.revoked_at}; issue a "
-            f"new one with {issue_one}",
+            f"new one with {_issue_one(permission)}",
             "revoked-token",
         )
+
+
+def _require_permission(device: device_tokens.Device, permission: str) -> None:
+    _require_live(device, permission)
     if permission not in device.permissions:
         raise Refusal(
             403,
@@ -297,6 +303,19 @@ def require_device(
     """
     device = _device_presented(environ, authorization, permission)
     _require_permission(device, permission)
+    return device
+
+
+def require_reader(environ: dict[str, str], authorization: str | None) -> device_tokens.Device:
+    """The device presenting this token, whatever its permissions; else the 401 refusal.
+
+    The session read routes ask for this (KYO-791). They change nothing, so they name no
+    permission, and a token issued for any purpose, or for none, opens them: what they
+    need to know is that the reader is a device this machine issued a token to and has not
+    revoked. The machine's ``serve_send`` setting is not consulted, since nothing is sent.
+    """
+    device = _device_presented(environ, authorization, None)
+    _require_live(device, None)
     return device
 
 

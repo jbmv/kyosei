@@ -185,9 +185,15 @@ public enum ServeError: Error, CustomStringConvertible {
 /// are not decoded here, so that a client holds no second copy of the server's schema.
 public struct ServeClient: Sendable {
     public let base: URL
+    /// This device's token, which the server asks for on every session read (KYO-791): the
+    /// list, the turns, the screen, an image, a subagent, the changes and the event stream.
+    /// A token of any permission reads. Nil when the device holds none, and the server then
+    /// refuses each of those reads with 401.
+    public let token: String?
 
-    public init(base: URL) {
+    public init(base: URL, token: String? = nil) {
         self.base = base
+        self.token = token
     }
 
     private func url(_ path: String, cursor: String? = nil) -> URL {
@@ -206,6 +212,25 @@ public struct ServeClient: Sendable {
         return data
     }
 
+    /// The request of a session read, which carries the device token when there is one. Every
+    /// session read is made from this, so that none is sent without the token (KYO-791).
+    func sessionRequest(_ path: String, cursor: String? = nil) -> URLRequest {
+        var request = URLRequest(url: url(path, cursor: cursor))
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private func read(_ path: String) async throws -> (data: Data, response: HTTPURLResponse?) {
+        let (data, response) = try await URLSession.shared.data(for: sessionRequest(path))
+        let http = response as? HTTPURLResponse
+        guard http?.statusCode == 200 else {
+            throw ServeError.status(http?.statusCode ?? 0, String(decoding: data, as: UTF8.self))
+        }
+        return (data, http)
+    }
+
     /// The projects the server serves, in its registry's order (KYO-761).
     public func projects() async throws -> [ProjectRow] {
         try Self.projects(in: await get("v1/projects"))
@@ -216,20 +241,20 @@ public struct ServeClient: Sendable {
     }
 
     public func sessions(project: String) async throws -> [SessionRow] {
-        let data = try await get("v1/projects/\(project)/sessions")
+        let data = try await read("v1/projects/\(project)/sessions").data
         return try JSONDecoder().decode(SessionList.self, from: data).sessions
     }
 
     public func sessionsData(project: String) async throws -> Data {
-        try await get("v1/projects/\(project)/sessions")
+        try await read("v1/projects/\(project)/sessions").data
     }
 
     public func subagent(project: String, session: String, agent: String) async throws -> Data {
-        try await get("v1/projects/\(project)/sessions/\(session)/subagents/\(agent)")
+        try await read("v1/projects/\(project)/sessions/\(session)/subagents/\(agent)").data
     }
 
     public func changes(project: String, session: String) async throws -> Data {
-        try await get("v1/projects/\(project)/sessions/\(session)/changes")
+        try await read("v1/projects/\(project)/sessions/\(session)/changes").data
     }
 
     /// A request a device token authorises. Returns the body and status for the caller to read.
@@ -253,22 +278,18 @@ public struct ServeClient: Sendable {
         project: String, session: String, turn: String, index: Int
     ) async throws -> (data: Data, mediaType: String) {
         let path = "v1/projects/\(project)/sessions/\(session)/images/\(turn)/\(index)"
-        let (data, response) = try await URLSession.shared.data(from: url(path))
-        let http = response as? HTTPURLResponse
-        guard http?.statusCode == 200 else {
-            throw ServeError.status(http?.statusCode ?? 0, String(decoding: data, as: UTF8.self))
-        }
+        let (data, http) = try await read(path)
         return (data, http?.value(forHTTPHeaderField: "Content-Type") ?? "image/png")
     }
 
     public func turns(project: String, session: String) async throws -> Data {
-        try await get("v1/projects/\(project)/sessions/\(session)/turns")
+        try await read("v1/projects/\(project)/sessions/\(session)/turns").data
     }
 
     /// What the session's pane shows now, read afresh by the server's screen route and apart
     /// from any stream. Nil when the route cannot answer, which says nothing about a stream.
     public func screen(project: String, session: String) async -> PaneSnapshot? {
-        var request = URLRequest(url: url("v1/projects/\(project)/sessions/\(session)/screen"))
+        var request = sessionRequest("v1/projects/\(project)/sessions/\(session)/screen")
         request.timeoutInterval = 10
         guard let (data, response) = try? await URLSession.shared.data(for: request),
             (response as? HTTPURLResponse)?.statusCode == 200
@@ -289,8 +310,8 @@ public struct ServeClient: Sendable {
         project: String, session: String, cursor: String?,
         idleLimit: TimeInterval = ServeClient.streamIdleLimit
     ) -> AsyncThrowingStream<ServerEvent, Error> {
-        var request = URLRequest(
-            url: url("v1/projects/\(project)/sessions/\(session)/events", cursor: cursor))
+        var request = sessionRequest(
+            "v1/projects/\(project)/sessions/\(session)/events", cursor: cursor)
         request.timeoutInterval = idleLimit
         let finalRequest = request
         return AsyncThrowingStream { continuation in
@@ -328,8 +349,34 @@ public struct ServeClient: Sendable {
 }
 
 extension ServeClient {
+    /// How a device comes to hold a token, which every sentence about a missing one ends with.
+    static let tokenRemedy =
+        "Issue one on the server's machine with `kyo devices issue <name>` and enter it in "
+        + "Settings."
+
+    /// What the app says when the server refused a session read for want of a device token
+    /// (401, KYO-791), or nil for any other error. The sentence says which of three things
+    /// is wrong, by the refusal's `reason`: the device sent no token, the server did not
+    /// issue the one it sent, or that one was revoked.
+    public static func tokenNeeded(_ error: Error) -> String? {
+        guard case ServeError.status(401, let body) = error else { return nil }
+        let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+        switch object?["reason"] as? String {
+        case "unknown-token":
+            return "The server did not issue the device token saved in Settings, so it shows "
+                + "this device no session. " + tokenRemedy
+        case "revoked-token":
+            return "The device token saved in Settings was revoked, so the server shows this "
+                + "device no session. " + tokenRemedy
+        default:
+            return "A device token is needed: kyo serve shows a session only to a device that "
+                + "holds one. " + tokenRemedy
+        }
+    }
+
     /// An error from a request or a stream, in words for the status bar.
     public static func describe(_ error: Error) -> String {
+        if let needed = tokenNeeded(error) { return needed }
         if case ServeError.status(let code, let body) = error {
             let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
             guard let said = object?["error"] as? String else { return "kyo serve answered \(code)." }

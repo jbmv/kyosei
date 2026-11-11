@@ -34,6 +34,7 @@ from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
     SESSIONS,
     Bed,
     bed,
+    json_body,
     running,
     unopted,
 )
@@ -1000,8 +1001,7 @@ def append_split_reply(bed: Bed) -> str:
             record(SPLIT_SECOND, SPLIT_FIRST, "2026-11-09T14:11:01.000Z", ["delta epsilon"]),
         ]
     )
-    status, turns = get(bed, f"{SESSIONS}/{OLD}/turns", None)
-    assert status == 200, turns
+    turns = json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))
     (reply,) = [r for r in turns["replies"] if r["message_id"] == SPLIT_MESSAGE]
     return reply["text"]
 

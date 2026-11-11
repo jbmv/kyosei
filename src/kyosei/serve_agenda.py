@@ -21,7 +21,8 @@ The precondition is judged before the items are, so a device holding an old copy
 read again and not that its change is forbidden.
 
 A CHANGE IS ANNOUNCED on the session's event stream as ``agenda``, carrying the new etag and
-no item (:mod:`kyosei.serve_sessions`), because that stream asks for no device token.
+no item (:mod:`kyosei.serve_sessions`), because that stream is open to a device token of any
+permission (KYO-791) and the list is read with one holding ``send``.
 """
 
 from __future__ import annotations

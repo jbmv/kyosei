@@ -23,9 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import cmd_sessions, serve, serve_sessions, session_layer, worker_tokens
+from kyosei import cmd_sessions, device_tokens, serve, serve_sessions, session_layer, worker_tokens
 
-from .conftest import git_init, new_record, opt_in_transcripts
+from .conftest import git_init, invoke, new_record, opt_in_transcripts
 from .test_kyo_serve import Client, body_json, register, start, stop
 
 FIXTURES = Path(__file__).parent / "fixtures" / "session_layer"
@@ -55,10 +55,29 @@ ROUTES = [
 ]
 
 
+def issue_reader(name: str = "bed-reader") -> dict[str, str]:
+    """The header of a token issued with no permission, which is all a session read needs."""
+    _, token = device_tokens.issue(name, [])
+    return {"Authorization": f"Bearer {token}"}
+
+
+class ReaderClient(Client):
+    """A client whose ``get`` presents a device token, as every session read route requires
+    (KYO-791). ``request`` sends only what it is given, for the tests of a missing token."""
+
+    def __init__(self, client: Client, reader: dict[str, str]) -> None:
+        super().__init__(client.server)
+        self.reader = reader
+
+    def get(self, path: str, **kwargs) -> tuple[int, dict, bytes]:
+        kwargs["headers"] = {**self.reader, **(kwargs.get("headers") or {})}
+        return self.request(path, **kwargs)
+
+
 class Bed:
     """A served project with a recorded session, a fake tmux and a fake Claude Code home."""
 
-    def __init__(self, project: Path, tmp_path: Path, client: Client) -> None:
+    def __init__(self, project: Path, tmp_path: Path, client: ReaderClient) -> None:
         self.project = project
         self.client = client
         self.server: serve.KyoServer = client.server
@@ -166,7 +185,7 @@ def bed(project: Path, store_home: Path, tmp_path: Path, running) -> Bed:
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
         "CLAUDE_CONFIG_DIR": str(claude),
     }
-    client = running(environ=environ)
+    client = ReaderClient(running(environ=environ), issue_reader())
     client.server.session_sample_seconds = 0.03
     client.server.keepalive_seconds = 0.4
     made = Bed(project, tmp_path, client)
@@ -188,7 +207,7 @@ class Stream:
         self.conn = http.client.HTTPConnection("127.0.0.1", bed.client.port, timeout=15)
         self.conn.putrequest("GET", f"{SESSIONS}/{session_id}/events{query}", skip_host=True)
         self.conn.putheader("Host", f"127.0.0.1:{bed.client.port}")
-        for key, value in headers.items():
+        for key, value in {**bed.client.reader, **headers}.items():
             self.conn.putheader(key.replace("_", "-"), value)
         self.conn.endheaders()
         self.response = self.conn.getresponse()
@@ -1580,7 +1599,9 @@ def unopted(project: Path, store_home: Path, tmp_path: Path, running) -> Client:
     (claude / "sessions").mkdir(parents=True)
     entries = [_entry(OLD, state="running", seen="2026-11-09T10:00:00.000Z")]
     assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(project), entries) is None
-    client = running(environ={**os.environ, "CLAUDE_CONFIG_DIR": str(claude)})
+    client = ReaderClient(
+        running(environ={**os.environ, "CLAUDE_CONFIG_DIR": str(claude)}), issue_reader()
+    )
     client.server.session_sample_seconds = 0.03
     return client
 
@@ -1601,6 +1622,7 @@ def test_every_session_route_refuses_until_the_project_opts_in(
         conn = http.client.HTTPConnection("127.0.0.1", unopted.port, timeout=10)
         conn.putrequest("GET", route, skip_host=True)
         conn.putheader("Host", f"127.0.0.1:{unopted.port}")
+        conn.putheader("Authorization", unopted.reader["Authorization"])
         conn.endheaders()
         response = conn.getresponse()
         assert response.status == 200
@@ -1646,6 +1668,7 @@ def test_a_session_route_answers_an_origin_given_with_allow_origin(
     conn.putrequest("GET", route, skip_host=True)
     conn.putheader("Host", f"127.0.0.1:{trusted.port}")
     conn.putheader("Origin", "http://localhost:5173")
+    conn.putheader("Authorization", bed.client.reader["Authorization"])
     conn.endheaders()
     response = conn.getresponse()
     assert response.status == 200
@@ -1987,3 +2010,141 @@ def test_a_reader_that_is_reading_is_not_retired(bed: Bed, stream) -> None:
     again = stream()
     again.event("ready")
     assert bed.server.session_hub.samplers() == [sampler]
+
+
+# ------------------------------------------------ KYO-791: a device token on every session read
+
+#: Every route ``_session_route`` answers: the session read routes, the stream included.
+READ_ROUTES = [*ROUTES, IMAGE_ROUTE, AGENT_ROUTE]
+
+
+def read_bed(bed: Bed) -> Bed:
+    """The bed holding what the image and the subagent routes serve."""
+    show_delivered(bed)
+    place_agent(bed)
+    return bed
+
+
+def status_of(bed: Bed, route: str, headers: dict[str, str]) -> tuple[int, dict, dict | None]:
+    """The status, the headers and, for a refusal, the document. A stream that opens is closed
+    once its status has been read."""
+    conn = http.client.HTTPConnection("127.0.0.1", bed.client.port, timeout=15)
+    try:
+        conn.putrequest("GET", route, skip_host=True)
+        conn.putheader("Host", f"127.0.0.1:{bed.client.port}")
+        for key, value in headers.items():
+            conn.putheader(key, value)
+        conn.endheaders()
+        response = conn.getresponse()
+        document = None if response.status == 200 else body_json(response.read())
+        response.close()
+        return response.status, dict(response.headers), document
+    finally:
+        conn.close()
+
+
+def test_the_read_routes_under_test_are_all_the_session_route_serves() -> None:
+    """``READ_ROUTES`` holds one route for each thing ``_session_route`` serves, so a read
+    route added to the server's tables without a row here fails this test."""
+    tested = {(route.removeprefix(SESSIONS).split("/") + ["", ""])[2] for route in READ_ROUTES}
+    assert tested == {
+        "",  # the list
+        *serve.SESSION_ROUTES,
+        serve.SESSION_IMAGE_ROUTE,
+        serve.SESSION_SUBAGENT_ROUTE,
+    }
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_a_session_read_without_a_token_is_refused_and_issuing_one_clears_it(
+    bed: Bed, route: str
+) -> None:
+    read_bed(bed)
+    status, headers, refused = status_of(bed, route, {})
+    assert status == 401 and refused["reason"] == "no-token", refused
+    assert headers["WWW-Authenticate"] == "Bearer"
+    assert "`kyo devices issue <name>`" in refused["error"]
+    assert "Authorization: Bearer <token>" in refused["error"]
+
+    result = invoke(["devices", "issue", "laptop", "--json"])  # the remedy, as it is written
+    assert result.code == 0, result
+    token = json.loads(result.out)["token"]
+    assert status_of(bed, route, {"Authorization": f"Bearer {token}"})[0] == 200
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+@pytest.mark.parametrize("permission", [None, *device_tokens.PERMISSIONS])
+def test_a_token_of_any_permission_reads_a_session(
+    bed: Bed, route: str, permission: str | None
+) -> None:
+    read_bed(bed)
+    _, token = device_tokens.issue("laptop", [permission] if permission else [])
+    assert status_of(bed, route, {"Authorization": f"Bearer {token}"})[0] == 200
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_a_token_this_machine_did_not_issue_reads_no_session(bed: Bed, route: str) -> None:
+    read_bed(bed)
+    for header in ("Bearer kyo_not-one-of-ours", "Basic abc", "Bearer "):
+        status, headers, refused = status_of(bed, route, {"Authorization": header})
+        assert status == 401, refused
+        assert headers["WWW-Authenticate"] == "Bearer"
+    status, _, refused = status_of(bed, route, {"Authorization": "Bearer kyo_not-one-of-ours"})
+    assert refused["reason"] == "unknown-token"
+    assert "`kyo devices issue <name>`" in refused["error"]
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_a_revoked_token_reads_no_session_and_a_new_one_does(bed: Bed, route: str) -> None:
+    read_bed(bed)
+    _, token = device_tokens.issue("laptop", [device_tokens.PERMISSION_SEND])
+    presented = {"Authorization": f"Bearer {token}"}
+    assert status_of(bed, route, presented)[0] == 200
+    device_tokens.revoke("laptop")  # read afresh on each request, so no restart
+    status, _, refused = status_of(bed, route, presented)
+    assert status == 401 and refused["reason"] == "revoked-token", refused
+    assert "laptop" in refused["error"] and "`kyo devices issue <name>`" in refused["error"]
+
+    result = invoke(["devices", "issue", "laptop", "--json"])  # the remedy the refusal names
+    assert result.code == 0, result
+    again = json.loads(result.out)["token"]
+    assert status_of(bed, route, {"Authorization": f"Bearer {again}"})[0] == 200
+
+
+def test_a_refused_read_says_nothing_of_the_project(unopted: ReaderClient) -> None:
+    """The token is asked for first: without one, a project that has not opted in and a
+    project the server does not serve answer as an opted-in one does."""
+    for path in (SESSIONS, "/v1/projects/nobody/sessions"):
+        status, _, body = unopted.request(path)
+        assert status == 401 and body_json(body)["reason"] == "no-token", body
+    assert unopted.get(SESSIONS)[0] == 403
+    assert unopted.get("/v1/projects/nobody/sessions")[0] == 404
+
+
+def test_an_unreadable_token_file_refuses_every_read_by_name(bed: Bed, store_home: Path) -> None:
+    path = store_home / device_tokens.TOKENS_FILE
+    kept = path.read_text(encoding="utf-8")
+    path.write_text("{not json", encoding="utf-8")
+    status, _, body = bed.get(SESSIONS)
+    assert status == 500 and body_json(body)["reason"] == "tokens-unreadable", body
+    path.write_text(kept, encoding="utf-8")
+    assert bed.get(SESSIONS)[0] == 200
+
+
+def test_records_documents_and_ideas_are_still_read_without_a_token(bed: Bed) -> None:
+    """Only the session routes ask for a token (KYO-791.c2): what a project's records,
+    documents and idea files answer to a request carrying none is unchanged."""
+    (bed.project / "docs").mkdir(exist_ok=True)
+    (bed.project / "docs" / "note.md").write_text("# A document\n", encoding="utf-8")
+    for path in (
+        "/v1/version",
+        "/v1/projects",
+        f"{BASE}/cmd/list",
+        f"{BASE}/cmd/sessions",
+        f"{BASE}/docs/docs/note.md",
+        f"{BASE}/ideas",
+    ):
+        status, _, body = bed.client.request(path)
+        assert status == 200, (path, body)
+    # The same request, on a session route, is the one that is refused.
+    assert bed.client.request(SESSIONS)[0] == 401
