@@ -1,6 +1,9 @@
 .also_covers
 .blocked_overridden
 .branch
+.brief_sections
+.brief_sections[].chars
+.brief_sections[].section
 .broad_claim_warnings
 .collisions_overridden
 .command

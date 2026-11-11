@@ -136,6 +136,12 @@ not coverage: it is where this project has been putting the tests for these path
 a claim that any of them exercises this change, and a path with no such history
 contributes nothing.
 
+**Each path is one row** (KYO-773). The Touches table has one row for each path, with
+every record that declares it in the first cell and each declared symbol named once, so
+a path that several `--also-covers` records declare is not repeated for each of them.
+The test-history block likewise has one row for each declared file, and the disjointness
+block puts the running dispatches that share a finding on one line.
+
 **And the standing rules are one line each, not their essays** (KYO-327.c1). Every
 worker-audience rule from `kyosei/procedures.md` still reaches every brief — that is
 law 15 and it is tested — but as its title, a one-line `enforced-by` (the level
@@ -213,6 +219,13 @@ to read it. The full brief used to come back on every call (about 35 KB for a
 typical brief) and stay in an orchestrator's context to be re-read every
 turn, unread. `--print-brief` restores the old full terminal print; `--brief-out`
 and `--json` were never affected either way.
+
+Under that line `kyo dispatch` prints the brief's length by section, in characters and
+in the order the brief is written (KYO-773): the header, the record summary, the
+criteria, the covered records, the touches, the claims, the write scope, the standing
+rules, the stance, the task and the report instructions. The numbers sum to the total
+on the line above, so a brief that grew shows which section grew. `--json` carries the
+same list as `brief_sections`.
 
 **What a worker leaves outside its worktree is named at its stop** (KYO-535). Once the
 dispatch row exists, `kyo dispatch` writes a baseline into the code repository's git

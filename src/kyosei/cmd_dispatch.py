@@ -541,6 +541,16 @@ def _broad_claim_lines(warnings: list[dict]) -> list[str]:
     return lines
 
 
+def _brief_sections_line(sections: Iterable[tuple[str, int]]) -> str:
+    """The brief's length by section, as one line under its digest (KYO-773.c2).
+
+    In the order the brief is written, each section under the name
+    :data:`kyosei.brief.BRIEF_SECTION_HEADINGS` gives it; the numbers are characters
+    and sum to the total on the line above.
+    """
+    return "  by section (chars): " + " · ".join(f"{name} {chars}" for name, chars in sections)
+
+
 def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     """``kyo dispatch <record-id> [--force] [--brief-out FILE] [--task-file FILE]``.
 
@@ -1147,6 +1157,7 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     # unchanged — only the brief itself moves off the default terminal print.
     # `--print-brief` restores the old behaviour verbatim; `--brief-out` and `--json`
     # were never affected either way.
+    brief_sections = brief_module.brief_section_lengths(brief_text)
     if args.print_brief:
         lines += echo_block("brief", brief_text)
     else:
@@ -1154,6 +1165,11 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             f"stored brief ({len(brief_text)} chars, sha256:{fingerprint(brief_text)}) — "
             f"read it with `kyo show {dispatch_id}` ({explanations.say('print-brief')})"
         )
+    # KYO-773.c2: the same length, by section, beside the digest. The total alone says
+    # a brief is long and not where; with these an orchestrator sees which section
+    # grew, and whether it is one it wrote (the task, the record's criteria) or one
+    # every brief carries.
+    lines.append(_brief_sections_line(brief_sections))
     if brief_out_path is not None:
         try:
             brief_out_path.write_text(brief_text, encoding="utf-8")
@@ -1225,6 +1241,11 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
             "worker_model": worker_model,
             "worker_model_source": model_source,
             "measurement_warnings": measurements,
+            # KYO-773.c2: the stored brief's length by section, in order; the `chars`
+            # sum to the brief's length.
+            "brief_sections": [
+                {"section": name, "chars": chars} for name, chars in brief_sections
+            ],
             "broad_claim_warnings": broad_claims,
             "also_covers": also_covers,
             "record": after[record_id],
