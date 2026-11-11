@@ -232,6 +232,7 @@ const ICONS = {
   forward: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
   up: '<path d="M5.5 14.5L12 8l6.5 6.5"/>',
   down: '<path d="M5.5 9.5L12 16l6.5-6.5"/>',
+  close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   tag: '<path d="M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0z"/><circle cx="8" cy="8" r="1.3"/>',
 };
 
@@ -2601,6 +2602,10 @@ findField.addEventListener("input", () => {
     showHit();
   }, SEARCH_DEBOUNCE_MS);
 });
+// A press closes the bar, for a reader who does not know Escape does.
+const findClose = document.getElementById("find-close")!;
+findClose.replaceChildren(icon("close"));
+findClose.addEventListener("click", () => closeSearch());
 findField.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
