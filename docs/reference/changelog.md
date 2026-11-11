@@ -417,6 +417,9 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-11** — `KYO-662` (task) — The Stop-hook discussion check and doctor's live, late and unindexed shares
+- **2026-11-11** — `KYO-661` (task) — Each dispatch names the prompt it answered
+- **2026-11-11** — `KYO-659` (task) — kyo dossier: one page per decision for a reader outside the project
 - **2026-11-10** — `KYO-658` (task) — The discussion kind, kyo discuss, turn references, and decisions requiring a discussion
 - **2026-11-09** — `KYO-705` (task) — Notes, anchors and tags in the store (schema)
 - **2026-11-09** — `KYO-702` (bug) — The fake launchctl fixture's teardown errors when its tmux server is slow to stop
