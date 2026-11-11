@@ -1611,15 +1611,18 @@ const kyo = {
   ready(frame: ScreenFrame & { reply_in_progress?: string | { text: string } | null }): void {
     const value = frame.reply_in_progress;
     kyo.live({ text: typeof value === "string" ? value : value?.text ?? null });
-    showHeld((frame as { held?: { id: string } | null }).held?.id ?? null);
+    showHeld((frame as { held?: Held | null }).held ?? null);
     kyo.facts(frame as { facts?: Facts | null });
     kyo.terminal(frame as { terminal?: { text: string; working_line: string | null } | null });
     kyo.screen(frame);
   },
 
-  /** A held message's state: `{"outcome": "held" | "delivered" | "retracted", "id"}`. */
-  held(frame: { outcome?: string; id?: string }): void {
-    showHeld(frame.outcome === "held" ? frame.id ?? null : null);
+  /**
+   * A held message's state: `{"outcome": "held" | "delivered" | "retracted", "id", "held"}`.
+   * `held` is the message as the server keeps it, with why it has not been delivered.
+   */
+  held(frame: { outcome?: string; id?: string; held?: Held | null }): void {
+    showHeld(frame.outcome === "held" ? frame.held ?? (frame.id ? { id: frame.id } : null) : null);
     if (frame.outcome === "delivered") composerNote.textContent = "";
   },
 
@@ -1634,7 +1637,7 @@ const kyo = {
       return;
     }
     composerNote.textContent = "";
-    showHeld(frame.id ?? null);
+    showHeld(frame.id ? { id: frame.id } : null);
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();
     drawSending();
@@ -1930,7 +1933,7 @@ const kyo = {
     background = frame.screen?.background ?? null;
     if (changed) keepingPlace(arrange);
     document.getElementById("interrupt")!.hidden = state !== "working" || sessionEnded;
-    if (heldId) showHeld(heldId);
+    if (held) showHeld(held);
     drawWorking();
     drawSide();
   },
@@ -3645,16 +3648,41 @@ function attemptSend(area: HTMLTextAreaElement): void {
 
 const heldBox = document.getElementById("held")!;
 const heldText = document.getElementById("held-text")!;
+
+/** The held message as the server states it: `retrying` is false once it will not be tried again. */
+interface Held { id: string; reason?: string | null; detail?: string | null; retrying?: boolean }
+
+let held: Held | null = null;
 let heldId: string | null = null;
 
-function showHeld(id: string | null): void {
-  heldId = id;
-  heldBox.hidden = !id;
+/**
+ * What the held box says. A message the server will not try again is named as that, with
+ * what to do about it (KYO-810): a prompt was once typed into the terminal's input box, left
+ * unsubmitted there, and shown here as sent. One that waits on something other than the
+ * turn says what it waits on, in the server's words.
+ */
+function heldWords(message: Held): string {
+  if (message.retrying === false) {
+    return message.reason === "not-submitted"
+      ? "Typed into the session's terminal, but not submitted. Open the terminal and press Enter "
+        + "there, or choose Edit to take the prompt back."
+      : "Not delivered, and part of it may have reached the session's terminal. Look at the "
+        + "terminal, then choose Edit to take the prompt back.";
+  }
+  if (message.reason && message.detail) return `Waiting: ${message.detail}`;
+  return screenState === "working" ? "Waiting for the turn to finish" : "Sending…";
+}
+
+function showHeld(message: Held | null): void {
+  held = message;
+  heldId = message?.id ?? null;
+  heldBox.hidden = !message;
+  const stopped = message?.retrying === false;
   // Send now (KYO-722) is offered only while the turn runs; an idle screen delivers by itself.
-  document.getElementById("held-send-now")!.hidden = !id || screenState !== "working";
-  heldText.textContent = screenState === "working"
-    ? "Waiting for the turn to finish"
-    : "Sending…";
+  document.getElementById("held-send-now")!.hidden = !message || stopped || screenState !== "working";
+  heldBox.classList.toggle("problem", stopped || Boolean(message?.reason && message.detail));
+  heldText.textContent = message ? heldWords(message) : "";
+  heldText.title = message?.detail ?? "";
 }
 
 // ------------------------------------------------------- the session's task list (KYO-771)

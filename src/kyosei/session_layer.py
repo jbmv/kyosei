@@ -74,6 +74,7 @@ class SessionNotFound(KyoseiError):
 Typed = pane.Typed
 Pasted = pane.Pasted
 PaneNotReady = pane.PaneNotReady
+NotSubmitted = pane.NotSubmitted
 
 
 @dataclass

@@ -598,6 +598,11 @@ reaches the transcript as the person's own, so the send log is what keeps it apa
   or over 800 characters as pasted, so the send log is the only full record.
 - A line break in a segment is a bare newline. Any other control character is refused, because
   it would act as a key; a tab is accepted only in a `pasted` segment.
+- Enter is pressed once the input box shows the text, and the box is read afterwards. A box
+  that still holds text gets Enter a second time. A message is reported as sent only when the
+  box has emptied or a turn's own prompt has replaced it; otherwise the route answers 502
+  `not-submitted` and the text is left in the box, where Enter in the session's terminal
+  submits it.
 - A `send` whose first word Claude Code would run as a command, such as `/usage`, is refused;
   it goes to `slash`. A first word holding a second `/`, such as a file path, is an ordinary
   message.
@@ -609,7 +614,8 @@ A success is `{"ok": true, "session_id", "action", "at", "device", "segments", "
 A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
 `send-disabled` (also carrying `setting`), `no-token`, `unknown-token`, `revoked-token`,
 `no-send-permission`, `bad-request`, `message-is-a-command`, `no-pane`, `screen-not-ready`,
-`send-failed` (keys may have reached the pane), `settings-unreadable`, `tokens-unreadable` and
+`send-failed` (keys may have reached the pane), `not-submitted` (the message was typed and the
+screen did not show it submitted), `settings-unreadable`, `tokens-unreadable` and
 `send-log-unusable`.
 
 Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl`, private to your account: its time,
@@ -745,8 +751,10 @@ prompt, question, panel or unrecognised screen, which is left to you), `input-bo
 `revoked-token`, `no-send-permission`, `held-device-unknown`, `tokens-unreadable`,
 `settings-unreadable`, `send-log-unusable`, `pane-unreadable`. These are looked at again on
 every poll. `retrying: false` means it will not be tried again and you must retract it, since
-keys may have reached the pane: `send-failed`, and `delivery-interrupted` for a message the
-server was delivering when it stopped.
+keys may have reached the pane: `send-failed`, `not-submitted` for a message that was typed
+into the input box and not seen to be submitted, and `delivery-interrupted` for a message the
+server was delivering when it stopped. The Mac app's composer states such a message as not
+delivered, and states what a waiting message waits on.
 
 `DELETE` returns `id`, `automatic`, `segments` with their text, `notes` and `prompt`, and the
 message is not delivered. It waits for any delivery already in flight, so it either returns the text or is

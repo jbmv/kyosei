@@ -46,6 +46,18 @@ plain text with no marker, indistinguishable from typing. Clearing uses ``C-u``,
 deletes to the start of the line and at a line's start deletes the line break, so it
 repeats until the box reads empty. ``Escape`` is never used to clear, since it would
 interrupt a running turn; it is what :func:`send_interrupt` presses.
+
+SUBMITTING (KYO-810). ``Enter`` is a key like the others, and the screen is the only evidence
+that it submitted the message: a prompt was once found typed into the box and left there
+after a send that had reported success. So a message's ``Enter`` is pressed only once the
+box has drawn the text and stopped changing, and not at all on a box that never shows it,
+and the box is read afterwards. An empty box,
+or a prompt that only a running turn raises, is a submitted message. A box that still holds
+text gets ``Enter`` once more, which is what a person looking at it would press, and
+:class:`NotSubmitted` is raised when the box holds it after that too, or when the screen
+shows something that cannot be read as either. The text is then left where it is. The
+cause of the one observed failure was not reproduced (see the record), so this checks the
+outcome and assumes nothing about the cause.
 """
 
 from __future__ import annotations
@@ -114,6 +126,17 @@ _CODE_FENCE = re.compile(r"^```.*$", re.M)
 _CLEAR_ATTEMPTS = 64
 _CLEAR_PAUSE_SECONDS = 0.05
 _PASTE_PAUSE_SECONDS = 0.2
+
+#: How often the box is read while a message's text settles in it and while it is submitted.
+_SUBMIT_POLL_SECONDS = 0.05
+#: How long the typed text is given to be drawn, and to stop changing, before Enter.
+_SETTLE_SECONDS = 2.0
+#: How long one Enter is given to empty the box. A session with a long transcript redraws
+#: slowly, and a second Enter that arrived after a slow first one had submitted would find
+#: an empty box, where it does nothing.
+_SUBMIT_SECONDS = 2.0
+#: How many times Enter is pressed for one message before the send is reported unsubmitted.
+_SUBMIT_PRESSES = 2
 
 #: How many screens the unrecognised log keeps; the first of each screen is enough to catalogue.
 _UNRECOGNISED_LIMIT = 200
@@ -625,6 +648,10 @@ class PaneNotReady(KyoseiError):
     """The pane is on a screen that must not receive keys."""
 
 
+class NotSubmitted(KyoseiError):
+    """A message's keys were sent, and the screen does not show that it was submitted."""
+
+
 @dataclass(frozen=True)
 class Typed:
     """Text sent as keystrokes. A newline in it becomes ``M-Enter``."""
@@ -696,6 +723,76 @@ def _send_paste(tmux: _Tmux, pane_id: str, text: str) -> None:
     tmux.run("paste-buffer", "-p", "-d", "-b", name, "-t", pane_id)
 
 
+def _settle(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> bool:
+    """Wait until the box shows text and two readings a poll apart agree; whether it did.
+
+    Keys sent faster than the screen is drawn are still being taken when the last of them
+    is sent, and an Enter that overtook them would be pressed on an empty box.
+    """
+    previous: str | None = None
+    for _ in range(round(_SETTLE_SECONDS / _SUBMIT_POLL_SECONDS)):
+        screen = classify(capture(tmux, pane_id))
+        if screen.state not in (IDLE, WORKING):
+            return False
+        if screen.input_text and screen.input_text == previous:
+            return True
+        previous = screen.input_text
+        sleep(_SUBMIT_POLL_SECONDS)
+    return bool(previous)
+
+
+def _submitted(tmux: _Tmux, pane_id: str, sleep: Callable[[float], None]) -> Screen | None:
+    """Read the screen until it shows the message submitted; the last screen read if it never does.
+
+    Submitted is an empty input box, on an idle screen or a working one, or a prompt that
+    only a running turn raises. Returns None for it.
+    """
+    screen = Screen(UNRECOGNISED)
+    for _ in range(round(_SUBMIT_SECONDS / _SUBMIT_POLL_SECONDS)):
+        screen = classify(capture(tmux, pane_id))
+        if screen.state in (IDLE, WORKING) and not screen.input_text:
+            return None
+        if screen.state in (PERMISSION_PROMPT, ASK_USER_QUESTION):
+            return None
+        sleep(_SUBMIT_POLL_SECONDS)
+    return screen
+
+
+def submit(tmux: _Tmux, pane_id: str, *, sleep: Callable[[float], None] = time.sleep) -> None:
+    """Press Enter on the text in the input box and confirm from the screen that it was taken.
+
+    Raises :class:`NotSubmitted` when it was not; see SUBMITTING in this module's header.
+    """
+    if not _settle(tmux, pane_id, sleep):
+        raise NotSubmitted(
+            f"the message's keys were sent to pane {pane_id} and its input box did not show "
+            f"them within {_SETTLE_SECONDS:g} seconds, so Enter was not pressed; look at the "
+            "session's terminal, clear its input box if the text is there, and send the "
+            "message again"
+        )
+    left: Screen | None = None
+    for _ in range(_SUBMIT_PRESSES):
+        tmux.run("send-keys", "-t", pane_id, "Enter")
+        left = _submitted(tmux, pane_id, sleep)
+        if left is None:
+            return
+        if left.state not in (IDLE, WORKING):
+            break  # no input box to press Enter on, and a dialog must not be answered
+    assert left is not None
+    if left.state in (IDLE, WORKING):
+        raise NotSubmitted(
+            f"the message was typed into the input box of pane {pane_id} and Enter did not "
+            f"submit it: after {_SUBMIT_PRESSES} presses the box still holds text. It was "
+            "left there; press Enter in the session's terminal to submit it, or clear the "
+            "box and send the message again"
+        )
+    raise NotSubmitted(
+        f"the message was typed into pane {pane_id} and Enter was pressed, and the screen "
+        f"then showed {left.state} in place of the input box, so it cannot be told whether "
+        "the message was submitted; look at the session's terminal before sending it again"
+    )
+
+
 def send_message(
     tmux: _Tmux,
     pane_id: str,
@@ -704,10 +801,11 @@ def send_message(
     log_unrecognised_screen: Callable[[str], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Send a message: clear the input, send each segment in order, press Enter.
+    """Send a message: clear the input, send each segment in order, submit it.
 
     Refuses any screen other than idle or working, so that keys never reach a permission
-    prompt, a question or a dialog.
+    prompt, a question or a dialog. Raises :class:`NotSubmitted` when the keys were sent
+    and the screen does not show the message submitted (KYO-810).
     """
     _ready_screen(
         tmux, pane_id, allow=(IDLE, WORKING), log_unrecognised_screen=log_unrecognised_screen
@@ -719,7 +817,7 @@ def send_message(
         else:
             _send_paste(tmux, pane_id, segment.text)
             sleep(_PASTE_PAUSE_SECONDS)
-    tmux.run("send-keys", "-t", pane_id, "Enter")
+    submit(tmux, pane_id, sleep=sleep)
 
 
 def send_slash_command(

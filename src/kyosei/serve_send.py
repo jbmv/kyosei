@@ -34,7 +34,9 @@ this account and refused if it would lie inside a git repository. Claude Code ma
 long pastes in its transcript (KYO-688.d1), so this is the only record of which segments of
 a message were pasted. A row holds the time, the device, the project and session, each
 segment's kind, length in characters and digest, whether the send was automatic, and the
-outcome (``sent``, ``refused`` or ``failed``) with a reason code. It never holds a
+outcome (``sent``, ``refused`` or ``failed``) with a reason code. ``sent`` means the screen
+showed the message submitted; a message typed into the input box and not seen to be
+submitted is ``failed`` with the reason ``not-submitted`` (KYO-810). It never holds a
 segment's text. The file is opened before anything else, so a send that could not be
 recorded does not happen, and a refused attempt is logged like any other. A request whose
 token names no device has no device in its row, and a body is parsed only once its token has
@@ -91,6 +93,9 @@ PASTED = "pasted"
 COMMAND = "command"
 #: How the line the server writes above a held message is marked in the log (KYO-730).
 HELD_LINE = "held-line"
+
+#: The reason of a message whose keys were sent and whose submission the screen did not show.
+NOT_SUBMITTED = "not-submitted"
 
 #: The log stores a request's session id as given, and an unauthenticated request chooses it.
 _LOGGED_ID_LIMIT = 200
@@ -485,6 +490,8 @@ def _attempt(
         _deliver(live, action, segments)
     except session_layer.PaneNotReady as exc:
         raise Refusal(409, str(exc), reason="screen-not-ready") from exc
+    except session_layer.NotSubmitted as exc:
+        raise Refusal(502, f"session {session_id}: {exc}", reason=NOT_SUBMITTED) from exc
     except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
         raise Refusal(
             502,
@@ -524,7 +531,8 @@ def perform(
             body.drain()
             attempt.status = refusal.status
             attempt.reason = refusal.extra.get("reason", "session-route")
-            attempt.outcome = "failed" if attempt.reason == "send-failed" else "refused"
+            failed = attempt.reason in ("send-failed", NOT_SUBMITTED)
+            attempt.outcome = "failed" if failed else "refused"
             raise
         except BaseException:
             attempt.reason = "server-error"
@@ -565,7 +573,7 @@ class HeldOutcome:
     """What one attempt at a held message came to."""
 
     #: ``delivered``, ``waiting`` (tried again later) or ``failed`` (keys may have reached
-    #: the pane, so it is not tried again).
+    #: the pane, or did and were not seen to be submitted, so it is not tried again).
     outcome: str
     reason: str | None = None
     detail: str | None = None
@@ -696,6 +704,14 @@ def deliver_held(
             except session_layer.PaneNotReady as exc:
                 attempt.outcome, attempt.status, attempt.reason = "refused", 409, "screen-not-ready"
                 result = _waiting("screen-not-ready", str(exc))
+            except session_layer.NotSubmitted as exc:
+                attempt.outcome, attempt.status, attempt.reason = "failed", 502, NOT_SUBMITTED
+                result = HeldOutcome(
+                    "failed",
+                    NOT_SUBMITTED,
+                    f"{exc}. It is not tried again; take the message back to edit it or to "
+                    "send it again",
+                )
             except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
                 attempt.outcome, attempt.status, attempt.reason = "failed", 502, "send-failed"
                 result = HeldOutcome(
