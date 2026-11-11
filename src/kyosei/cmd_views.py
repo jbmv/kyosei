@@ -1164,6 +1164,16 @@ def _cmd_docs_settle(ctx: Context, args: Namespace) -> Output:
             "what an open obligation already is, and none for 'some of each' — a set "
             "carrying two answers is two acts"
         )
+    if not (args.method or "").strip():
+        # KYO-768: `--method` is free text and required (law 9); omitting it reached
+        # `single_line(None)` and ended in an AttributeError rather than a refusal.
+        raise UsageError(
+            "settling an obligation needs --method: how the verdict was reached, in one line "
+            "of your own words (for example --method \"re-read the section against the "
+            "diff\"). A verdict without its instrument is a claim whose weight cannot be "
+            "judged later. Re-run with `kyo docs settle <id> --verdict "
+            f"{verdict} --method <how>`"
+        )
     method = single_line(args.method, what="--method")
     why = _reason(args)
     if len(ids) > 1 and not why:
