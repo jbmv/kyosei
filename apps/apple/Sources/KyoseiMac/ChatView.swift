@@ -268,7 +268,31 @@ struct RunningAgentsLabel: View {
 /// The web view of the chat. Command-F reaches the page's own handler as a key press when the
 /// view is first responder, but a key equivalent is offered to the menu first, so the view
 /// takes it here and asks the page to open its search field (KYO-741).
+///
+/// Spelling (KYO-796). WebKit on macOS underlines misspelled words only when the app's
+/// `WebContinuousSpellCheckingEnabled` default is true, and a missing key reads as false. It
+/// asks the system's checker for corrections, which include the capital at the start of a
+/// sentence, when words are being marked and `WebAutomaticSpellingCorrectionEnabled` is true,
+/// and a missing key there reads as the system-wide setting. The page is therefore built over
+/// registered defaults that turn the underline on and the correction off. They are registered
+/// rather than set because the Spelling and Grammar menu stores the person's choice under the
+/// same keys, and a stored value is read before a registered one. They are registered before
+/// the first web view exists because WebKit reads the keys once in the life of the process.
 final class ChatPage: WKWebView {
+    static let spellingDefaults: [String: Any] = [
+        "WebContinuousSpellCheckingEnabled": true,
+        "WebAutomaticSpellingCorrectionEnabled": false,
+    ]
+
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        UserDefaults.standard.register(defaults: Self.spellingDefaults)
+        super.init(frame: frame, configuration: configuration)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("ChatPage is built in code")
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if flags == .command, event.charactersIgnoringModifiers == "f" {

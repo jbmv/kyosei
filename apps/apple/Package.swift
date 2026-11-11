@@ -17,5 +17,6 @@ let package = Package(
             resources: [.copy("Resources/renderer")]
         ),
         .testTarget(name: "KyoseiClientTests", dependencies: ["KyoseiClient"]),
+        .testTarget(name: "KyoseiMacTests", dependencies: ["KyoseiMac"]),
     ]
 )
