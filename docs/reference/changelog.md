@@ -623,6 +623,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## (no scope declared)
 
 - **2026-11-11** — `KYO-755` (task) — An anchor to one line of a file reads line N, not lines N-N
+- **2026-11-11** — `KYO-738` (task) — Mac app Files: home, back and forward as icons
 - **2026-11-11** — `KYO-737` (task) — Composer anchors to a part of a record and to a place in a file
 - **2026-11-11** — `KYO-736` (task) — Mac app: the Files view, and file paths in a reply as links
 - **2026-11-11** — `KYO-732` (task) — Mac app: a top bar of views, and the Records view
