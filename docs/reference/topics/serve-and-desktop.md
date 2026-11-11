@@ -222,7 +222,9 @@ table.
 Beside the store and file routes, `kyo serve` serves a project's Claude Code sessions,
 read-only. These routes answer only in a project that has opted in with
 `read_transcripts: true` in `kyosei/config.yml`; until then each refuses (403) and names
-that setting. A session is served only by the project whose `sessions.json` records it.
+that setting. A session is served only by a project that records it: in its
+`sessions.json`, which keeps the newest 32, in its turn index, or in its transcript archive
+(KYO-812), so that a session `sessions.json` has dropped can still be read.
 Every route stands behind the Host and Origin checks above, and answers `GET` only. None
 of these routes sends anything to a session.
 
@@ -249,7 +251,7 @@ request it can set headers on.
 | Routes | Token |
 |---|---|
 | `version`, `projects`, `cmd/...` (the records and everything else the CLI's `--json` reads), `docs/...`, `ideas/...`, `scratchpad`, the project's `events` | none |
-| The session routes in the table below | any token that has not been revoked |
+| The session routes in the table below, and `search` | any token that has not been revoked |
 | `sessions/<id>/send`, `slash`, `interrupt`; the draft, held-message and task-list routes; `attachments` | `send` |
 | `notes`, `tags`, `sessions/<id>/marks` and the routes that send notes | `notes`, and `send` where the notes are sent to a session |
 | `orchestrator/start` | `start` |
@@ -539,6 +541,85 @@ reads the session twice a second. Under the launchd
 agent, tmux is found on the installing shell's `PATH` or in the Homebrew locations, and the
 sockets are the machine's defaults, since no `TMUX_TMPDIR` is carried. Claude Code's
 directory is `~/.claude`; a `CLAUDE_CONFIG_DIR` set only in a shell does not reach the agent.
+
+### Searching what was said: the search route (KYO-812)
+
+`GET /v1/projects/<name>/search?q=<phrase>` searches the text of the person's prompts and of
+the assistant's replies across the project's sessions. It reads what the session routes
+read, so it asks for the same things: a device token of any permission, checked first, and
+a project that has opted in with `read_transcripts: true`, which is otherwise refused (403)
+with that setting named. `kyo transcripts search <phrase>` is the same search in a terminal.
+
+**What is searched.** The prompts and the main thread's replies that
+`sessions/<id>/turns` returns as `turns` and `replies`, in every session the project
+records: those in `sessions.json`, those the turn index names and those whose transcript
+the archive holds. A session's transcript is read where Claude Code keeps it and, once it
+is gone from there, from the archive's copy. Tool calls, tool results, thinking,
+slash-command output, messages delivered by anything other than the person, and subagent
+transcripts are not searched.
+
+**How a phrase matches.** As find in the chat does: the query is one phrase, case is
+ignored, a space matches any run of white space, and no character is an operator, so two
+words match only where they stand together in that order. A part of a word is found. The
+text matched is the transcript's, which for a reply is its markdown source; a phrase that
+spans a markdown mark is therefore found by find in the chat and not by this route.
+
+| Query key | Meaning |
+|---|---|
+| `q` | The phrase. Required; a blank one is refused (400). |
+| `limit` | How many results a page holds: 1 to 100, 20 when absent. |
+| `cursor` | The `cursor` of the previous response, to read the results after it. |
+
+Any other key is refused (400). The response:
+
+```json
+{
+  "ok": true,
+  "project": "kyosei",
+  "query": "history search",
+  "results": [
+    {
+      "project": "kyosei",
+      "session_id": "b1c6767d-...",
+      "message": "41c243d7-...",
+      "message_id": "msg_01...",
+      "role": "assistant",
+      "at": "2026-11-11T18:21:49.768Z",
+      "matches": 1,
+      "excerpt": [
+        {"text": "Now filing E6, the ", "match": false},
+        {"text": "history search", "match": true},
+        {"text": " engine.", "match": false}
+      ]
+    }
+  ],
+  "more": false,
+  "cursor": null,
+  "index": {"sessions": 32, "read": 0, "removed": 0, "problems": [], "messages": 2797}
+}
+```
+
+Results are ordered newest first by `at`. `role` is `person` or `assistant`. `message` is
+the transcript record the result is at: a turn's `id` for a prompt, and a reply's `uuid`
+for a reply, whose `message_id` is given beside it and is null for a prompt. These are the
+ids the objects of `sessions/<id>/turns` carry, so a client opens the session and shows the
+turn or reply with that id. `excerpt` is the text around the first match in the message, in
+pieces, each marked as matched or not; white space is drawn as one space and an ellipsis
+stands where the text is cut. `matches` counts the matches in the whole message. When
+`more` is true, `cursor` names the place the next page starts after; it stays valid when
+new messages arrive, since it names a message and not a count.
+
+**The index.** The search reads a local index, `kyosei/.transcript-search/index.db` beside
+the database. Its directory holds a `.gitignore` that ignores everything in it, and nothing
+of it is written to `kyosei/export/`. Every search first compares each session's transcript
+with what the index recorded and reads again only the sessions that changed, which `index`
+reports as `read`; `removed` counts sessions whose transcript no longer exists anywhere,
+and `problems` names transcripts that could not be read. The index is derived:
+`kyo transcripts rebuild` deletes it and writes it again from the transcripts and the
+archive, and deleting the directory by hand loses nothing. The server's request log records
+this route without its query string, so the phrase searched for is not logged.
+
+`kyo transcripts` is not served under `cmd/`, which asks for no token.
 
 ### Sending input: the send routes (KYO-699)
 

@@ -173,6 +173,10 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # writes nothing; and a row count, which argparse parses as a positive integer.
         "--fields",
         "--limit",
+        # KYO-812: the cursor a transcript search returned, passed back unchanged. It is
+        # decoded to the three ids it was made from and refused otherwise, and is stored
+        # nowhere.
+        "--cursor",
         # KYO-151.c2: a rule title, not prose about one. `kyo install-procedures
         # --adopt` is checked against the CLOSED set of titles the packaged ledger
         # ships — on exactly `--scope`'s terms — and a title matching none of them is

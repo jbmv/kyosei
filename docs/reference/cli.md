@@ -89,6 +89,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo statusline`](#kyo-statusline) | no | no | Claude Code's status line command: reads the session JSON on stdin, saves the account's usage limits to $KYOSEI_HOME/usage-limits.json and the session's prompt cache to $KYOSEI_HOME/prompt-cache.json for kyo serve, and prints the two windows as percentages for the status row; exits 0 and prints nothing on any error (KYO-714, KYO-715) |
 | [`kyo sweep`](#kyo-sweep) | yes | yes | flag stale touches and near-duplicate criteria; never edits (M6) |
 | [`kyo touch-drift`](#kyo-touch-drift) | yes | no | compare a dispatch's declared touches against what its branch actually changed (KYO-71) — reports, never refuses |
+| [`kyo transcripts`](#kyo-transcripts) | yes | no | search what the person and the assistant said in this project's sessions, in a project that opted in to reading transcripts; this searches no record (KYO-812) |
 | [`kyo turns`](#kyo-turns) | optional | no | the turn index: one line per prompt, with no text, in a project that opted in to reading transcripts (KYO-657) |
 | [`kyo ungate`](#kyo-ungate) | yes | yes | clear a gate by its own id; several ids, or every open gate with a tag, in one transaction (KYO-492) |
 | [`kyo unlink`](#kyo-unlink) | yes | yes | retract a typed edge by its own id; the edge and the reason stay in the events ledger |
@@ -1700,6 +1701,28 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 Text output prints the quoted short form in place of the full text after it, which is what it printed there before KYO-489. When it printed any, its last line is: explained in `kyo reference touch-drift`. `<name>` stands for a value of that run.
 
 - "reported, not refused" — This is REPORTED, not refused — a touches table is a prediction and is routinely, defensibly wrong. What it costs is a later dispatch colliding with a file nothing knew was claimed. (KYO-71)
+
+## `kyo transcripts`
+
+search what the person and the assistant said in this project's sessions, in a project that opted in to reading transcripts; this searches no record (KYO-812)
+
+Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo transcripts [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--limit N] [--cursor CURSOR] {search,rebuild} [PHRASE ...]`
+
+### Positional arguments
+
+- `{search,rebuild}` — **required**. search: list the prompts and replies holding the phrase, newest first, from live transcripts and archived ones; tool calls, tool results, thinking and subagents are not searched. rebuild: delete the local index (kyosei/.transcript-search/, ignored by git) and write it again from the transcripts; a search brings the index up to date itself, so this is for an index that is suspected wrong
+- `[PHRASE ...]` — optional. for search: the words to find, matched as one phrase as find in a browser matches them: case is ignored, a space matches any white space, and no character is an operator
+
+### Options
+
+- `--limit N` — optional. for search: how many results a page holds (default 20, at most 100)
+- `--cursor CURSOR` — optional. for search: the `cursor` of the previous page, to list the results after it
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
 ## `kyo turns`
 

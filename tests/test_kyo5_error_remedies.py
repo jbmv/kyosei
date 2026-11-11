@@ -4358,6 +4358,21 @@ UNREACHED: dict[str, str] = {
         "not build. Provoked, and its remedy run to exit 0, by "
         "tests/test_kyo_serve_send.py::test_revoking_what_is_not_there_names_the_listing"
     ),
+    # KYO-812: `kyo transcripts`' refusals of a malformed search.
+    "transcript_search.py:search#0": (
+        "not provoked by this walk: the refusal is reached only in a project that opted in "
+        "to reading transcripts, which its --root provocations do not build. Provoked, and "
+        "its remedy run to exit 0, by "
+        "tests/test_transcript_search.py::"
+        "test_a_blank_phrase_is_refused_and_giving_the_words_clears_it"
+    ),
+    "transcript_search.py:cmd_transcripts#0": (
+        "not provoked by this walk: the refusal is reached only in a project that opted in "
+        "to reading transcripts, which its --root provocations do not build. Provoked, and "
+        "its remedy run to exit 0, by "
+        "tests/test_transcript_search.py::"
+        "test_rebuild_takes_no_argument_and_the_bare_form_clears_it"
+    ),
     "device_tokens.py:cmd_devices#0": (
         "not provoked by this walk: `kyo devices` is PROJECT_NONE and its refusals "
         "are about $KYOSEI_HOME/device-tokens.json, which its --root provocations do "
@@ -4848,6 +4863,18 @@ RECORDED: dict[str, str] = {
     "cmd_notes.py:_message_anchors#3": (
         "giving the anchor by 'uuid' with 'digest' and 'role'; proved by "
         "test_a_span_by_message_with_nothing_to_read_is_cleared_by_giving_it_by_uuid"
+    ),
+    # KYO-812: the transcript search's opt-in refusal, with the same remedy as the session
+    # layer's below, and its refusal of a cursor it did not return.
+    "transcript_search.py:_require_opt_in#0": (
+        "setting `read_transcripts: true` in kyosei/config.yml; proved by "
+        "tests/test_transcript_search.py::"
+        "test_a_project_not_opted_in_is_refused_and_the_remedy_clears_it"
+    ),
+    "transcript_search.py:_cursor_key#0": (
+        "passing the cursor of the previous response unchanged, or none; proved by "
+        "tests/test_transcript_search.py::"
+        "test_a_cursor_the_search_did_not_return_is_refused_and_none_clears_it"
     ),
     # KYO-688: the session layer's opt-in refusal; its remedy is the project's own
     # `read_transcripts: true`, proved by clearing it in tests/test_session_layer.py.

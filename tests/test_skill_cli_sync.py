@@ -1030,6 +1030,10 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
         "the turn index a hook keeps (KYO-657); an orchestrator never runs it to do its "
         "work, and `kyo sessions` is its nearest sibling"
     ),
+    "transcripts": (
+        "the search of what was said in a project's sessions (KYO-812), built for the "
+        "person's history search in the app; no step of the orchestrator's workflow runs it"
+    ),
     "dossier": (
         "a page about one decision for a reader outside the project (KYO-659); the person "
         "asks for it by name, and no step of the workflow reaches for it"
