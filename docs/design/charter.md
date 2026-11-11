@@ -158,7 +158,7 @@ construction (wikilinks + optional frontmatter) — the human may edit here with
 
 ### Layer 2 — Structured store (SQLite + git-committed export)
 
-governs: src/kyosei/store.py, src/kyosei/export.py, src/kyosei/events_ledger.py, src/kyosei/ledgers.py, src/kyosei/ledger_scrub.py, src/kyosei/ledger_repair.py, src/kyosei/rebuild.py
+governs: src/kyosei/store.py, src/kyosei/export.py, src/kyosei/events_ledger.py, src/kyosei/ledgers.py, src/kyosei/ledger_scrub.py, src/kyosei/ledger_repair.py, src/kyosei/rebuild.py, src/kyosei/ids.py
 
 SQLite is authoritative: real transactions, transition-time contract enforcement, central ID
 allocation (no collisions under concurrent dispatch), cycle refusal, real queries. After every
@@ -926,7 +926,7 @@ governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_
 
 ## Claude Code integration (the enforcement surface)
 
-governs: src/kyosei/harness/claude-code/plugin/skills/kyosei/SKILL.md, src/kyosei/defaults/hooks/session-start.json, src/kyosei/defaults/hooks/pre-tool-use.json, src/kyosei/defaults/hooks/subagent-stop.json
+governs: src/kyosei/harness/claude-code/plugin/skills/kyosei/SKILL.md, src/kyosei/defaults/hooks/session-start.json, src/kyosei/defaults/hooks/pre-tool-use.json, src/kyosei/defaults/hooks/subagent-stop.json, src/kyosei/harness/claude-code/plugin/skills/kyosei/REFERENCE.md, src/kyosei/defaults/hooks/prompt-submit.json, src/kyosei/defaults/hooks/stop.json, src/kyosei/defaults/hooks/sessions.json
 
 Built-ins verified 2026-08: ultraplan is deprecated; ultracode is a per-session effort/orchestration
 mode with no persistence; native task tools are session-only. So `kyosei` owns cross-session state,

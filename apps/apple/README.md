@@ -43,6 +43,22 @@ how the app draws each and where its code is.
 
 ## Layout of the source
 
+<!-- governs:
+- apps/apple/Package.swift
+- apps/apple/Sources/KyoseiClient/ServeClient.swift
+- apps/apple/Sources/KyoseiMac/App.swift
+- apps/apple/web/build.mjs
+- apps/apple/web/static/chat.css
+- apps/apple/web/src/pipeline.ts
+- apps/apple/web/src/marks.ts
+- apps/apple/web/src/chipwords.ts
+- apps/apple/web/src/sending.ts
+- apps/apple/web/src/agents.ts
+- apps/apple/web/src/start.ts
+- apps/apple/web/src/terminal.ts
+- apps/apple/web/src/history.ts
+-->
+
 `Sources/KyoseiClient` holds the code that does not draw: requests to the server and the
 parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds the views.
 `web/` is the markdown renderer shown in a web view. It is adapted from
@@ -52,7 +68,41 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
 kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
 
+The files that the later sections do not name, with what each holds:
+
+| File | What it holds |
+|---|---|
+| `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
+| `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
+| `Sources/KyoseiMac/App.swift` | the application delegate, the one window, the File menu's Projects… item and the Settings scene |
+| `web/build.mjs` | the build of the page into the app's resources, which are not committed |
+| `web/static/chat.css` | the page's styles |
+| `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
+| `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
+| `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
+| `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
+| `web/src/agents.ts` | how a subagent is named in the status bar and the side panel |
+| `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
+| `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
+| `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
+
+`Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
+page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
+bar, and `web/src/chat.ts` is the page, which draws the chat, the composer and each view from
+the frames the app hands it. The sections below name the parts of these three that they
+describe.
+
 ## Projects
+
+<!-- governs:
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+- apps/apple/Sources/KyoseiMac/ChatView.swift
+- apps/apple/Sources/KyoseiClient/DraftSettlement.swift
+- apps/apple/web/src/chat.ts
+- apps/apple/web/src/projects.ts
+- apps/apple/web/src/drafts.ts
+- apps/apple/web/src/agenda.ts
+-->
 
 The window shows one project at a time. The bar above the top bar begins with a dropdown that
 names it and lists every project the server serves (`GET /v1/projects`); a project whose store
@@ -147,6 +197,15 @@ returns to the project the window was showing.
 
 ## Views
 
+<!-- governs:
+- apps/apple/web/src/chat.ts
+- apps/apple/web/static/chat.html
+- apps/apple/web/src/search.ts
+- apps/apple/web/src/records.ts
+- apps/apple/web/src/files.ts
+- apps/apple/web/src/searchhistory.ts
+-->
+
 After the dropdown and the links, the bar lists the views, and choosing one replaces the pane
 under it. The
 chat stays drawn beneath the others and keeps following its session, so returning to it
@@ -195,7 +254,23 @@ when one follows the path after a colon. The words asked about are absolute path
 they are. The logic is in `web/src/files.ts`. All of this needs the device token to hold the
 `files` permission. Without it the view shows the server's refusal and no path is a link.
 
+History searches what was said in the project's sessions (KYO-825). It has a search field and
+two chips, You and Claude, which choose whose messages are searched. A query of two characters
+or more is sent to the server's `search` route, and each result names who wrote the message,
+when, and the session's title, above an excerpt with the match marked. A click opens that
+session's chat at the message, reports the result to the server's `history/recent` route, and
+leaves a Results button in the top bar that returns to the list. The side bar lists the
+results opened most recently as the server keeps them, so that every device shows the same
+list. Command-Shift-F opens the view. It needs a device token of any permission and a project
+that has opted in to reading transcripts. The logic is in `web/src/searchhistory.ts`, and the
+app's part is `SessionFeed.history(body:)`.
+
 ### Files outside the served roots
+
+<!-- governs:
+- apps/apple/web/src/files.ts#localPath
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift
+-->
 
 `kyo serve` serves no file outside those roots, so a path that lies elsewhere on the server's
 machine cannot be opened in Files. Such a path is drawn as a dotted link when it reads as a
@@ -215,6 +290,11 @@ route, is left to whoever needs it. The mapping is in `localPath` in `web/src/fi
 the check and the reveal are in `SessionFeed.files(body:)`.
 
 ## Running it
+
+<!-- governs:
+- apps/apple/package.sh
+- apps/apple/Sources/KyoseiMac/SettingsView.swift
+-->
 
 ```
 cd web && npm ci && npm run build && cd ..

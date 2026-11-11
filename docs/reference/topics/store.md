@@ -4,7 +4,7 @@ Where the store lives, what `kyo init` creates, the store's database and export,
 
 ## Where the store lives
 
-governs: src/kyosei/config.py, src/kyosei/scaffold.py, src/kyosei/install_prose.py
+governs: src/kyosei/config.py, src/kyosei/scaffold.py, src/kyosei/install_prose.py, src/kyosei/currency.py
 
 `kyo init` has one question that is hard to reverse later: **is this project's
 store committed to the same git repository as its code?** In a folder with no store,
@@ -248,7 +248,7 @@ ships with git and the assertion must not depend on what is installed.)
 
 ### Before your first push: `kyo check-push`
 
-governs: src/kyosei/cmd_publish.py
+governs: src/kyosei/cmd_publish.py, src/kyosei/private_terms.py
 
 The layout decision is made once, at `kyo init`, usually before anything private has
 been written into the store. Its consequence arrives at a later `git push`, when the
@@ -390,7 +390,7 @@ suite guard's (`$( … )` bodies, shell keywords, `sudo`, `bash -c`, scripts).
 
 ## What `kyo init` creates
 
-governs: src/kyosei/scaffold.py
+governs: src/kyosei/scaffold.py, src/kyosei/commands.py#cmd_init, src/kyosei/install_gitignore.py, src/kyosei/transcript_archive.py
 
 Under the default (split) layout, `<store>` is `~/kyosei/<project>/` and the code
 repository holds only `.kyosei`; under `--in-repo`, `<store>` *is* the project
@@ -552,7 +552,7 @@ the maintainer already added is left alone.
 
 ## The store
 
-governs: src/kyosei/schema.py
+governs: src/kyosei/schema.py, src/kyosei/links.py, src/kyosei/cmd_redact.py
 
 | Table | Holds |
 | --- | --- |
@@ -670,7 +670,7 @@ what a credit is for.
 
 ## Reading the store
 
-governs: src/kyosei/cmd_views.py
+governs: src/kyosei/cmd_views.py, src/kyosei/render.py, src/kyosei/credits.py, src/kyosei/cmd_dossier.py, src/kyosei/cmd_turns.py, src/kyosei/cmd_sessions.py
 
 There is no generated copy of the board to read: every view reads the store
 directly. History: an earlier build shipped `kyo html`, which regenerated a self-contained

@@ -4,7 +4,7 @@ Dispatching work to workers, ingesting their reports, and the sweep, next and br
 
 ## The dispatch loop
 
-governs: src/kyosei/cmd_dispatch.py, src/kyosei/cmd_worktrees.py, src/kyosei/dispatch_close.py, src/kyosei/dispatch_docs.py, src/kyosei/report_ingest.py, src/kyosei/stop_audit.py, src/kyosei/stop_target.py, src/kyosei/touch_drift.py, src/kyosei/worker_tokens.py, templates/brief-template.md
+governs: src/kyosei/cmd_dispatch.py, src/kyosei/cmd_worktrees.py, src/kyosei/dispatch_close.py, src/kyosei/dispatch_docs.py, src/kyosei/report_ingest.py, src/kyosei/stop_audit.py, src/kyosei/stop_target.py, src/kyosei/touch_drift.py, src/kyosei/worker_tokens.py, templates/brief-template.md, src/kyosei/cmd_accept.py, src/kyosei/cmd_confirm.py, src/kyosei/cmd_evidence.py, src/kyosei/report_schema.py, src/kyosei/git_queries.py, src/kyosei/commands.py#touch_cooccurrence, src/kyosei/commands.py#touch_test_history
 
 A **dispatch** is its own dimension from record status — dispatching a record
 never moves it. `kyo dispatch <record>` refuses (exit 2, naming the colliding
