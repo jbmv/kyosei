@@ -458,6 +458,8 @@ body.terminal-open #jump-bottom { display: none; }
 
 #terminal-toggle:hover, #menu:hover #menu-icon { background: var(--panel); }
 body.terminal-open #terminal-toggle { background: var(--line); }
+/* The terminal belongs to the chat: the other views do not show its button (2026-11-11). */
+body.view-records #terminal-toggle, body.view-files #terminal-toggle, body.view-history #terminal-toggle { display: none; }
 
 /* The terminal is dark in both colour schemes, as the program in it was drawn for. */
 #terminal {
