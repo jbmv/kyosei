@@ -92,8 +92,14 @@ ROLE_ASSISTANT = "assistant"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 
-#: How many characters of the message an excerpt keeps on each side of the first match.
+#: The two values of a result's ``role`` as the index stores them (KYO-826): the person's
+#: prompts, and the assistant's replies on the main thread.
+ROLES = (ROLE_PERSON, ROLE_ASSISTANT)
+
+#: How many characters of the message an excerpt keeps on each side of the first match, and
+#: the most a caller may ask for (KYO-826).
 EXCERPT_CONTEXT = 80
+MAX_CONTEXT = 400
 
 #: The shortest run of characters the trigram tokenizer can look up.
 _TRIGRAM = 3
@@ -157,15 +163,15 @@ def _one_line(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def excerpt(text: str, spans: list[tuple[int, int]]) -> list[dict]:
+def excerpt(text: str, spans: list[tuple[int, int]], context: int = EXCERPT_CONTEXT) -> list[dict]:
     """The text around the first match, as pieces each marked as matched or not.
 
     Pieces rather than offsets, so that no client counts characters the way Python does. A
     run of white space is drawn as one space, and an ellipsis stands where the text is cut.
     """
     first_start, first_end = spans[0]
-    start = max(0, first_start - EXCERPT_CONTEXT)
-    end = min(len(text), first_end + EXCERPT_CONTEXT)
+    start = max(0, first_start - context)
+    end = min(len(text), first_end + context)
     pieces: list[dict] = []
     at = start
     for span_start, span_end in spans:
@@ -444,7 +450,10 @@ def _cursor_key(cursor: str | None) -> tuple[str, str, str] | None:
 
 
 def _candidates(
-    conn: sqlite3.Connection, parts: list[str], after: tuple[str, str, str] | None
+    conn: sqlite3.Connection,
+    parts: list[str],
+    after: tuple[str, str, str] | None,
+    role: str | None = None,
 ) -> Iterator[tuple]:
     """Rows that may hold the phrase, newest first, past the cursor's place."""
     where: list[str] = []
@@ -454,6 +463,9 @@ def _candidates(
         where.append("messages MATCH ?")
         quoted = " AND ".join('"' + part.replace('"', '""') + '"' for part in long_parts)
         values.append(f"text : ({quoted})")
+    if role is not None:
+        where.append("role = ?")
+        values.append(role)
     if after is not None:
         where.append("(at, message, session_id) < (?, ?, ?)")
         values.extend(after)
@@ -473,13 +485,30 @@ def search(
     *,
     limit: int = DEFAULT_LIMIT,
     cursor: str | None = None,
+    role: str | None = None,
+    context: int = EXCERPT_CONTEXT,
     environ: Mapping[str, str] | None = None,
 ) -> dict:
     """One page of the messages holding ``query`` as a phrase, newest first.
 
-    Refuses in a project that has not opted in (KYO-656), before any transcript is opened.
+    ``role`` keeps only the messages that party wrote (``person`` or ``assistant``);
+    ``context`` is how many characters an excerpt keeps on each side of the first match
+    (KYO-826). Refuses in a project that has not opted in (KYO-656), before any transcript
+    is opened.
     """
     _require_opt_in(config)
+    if role is not None and role not in ROLES:
+        raise UsageError(
+            f"{role!r} is not a role a transcript search takes; ask for `{ROLE_PERSON}` "
+            f"(what the person wrote) or `{ROLE_ASSISTANT}` (what the assistant wrote), or "
+            "give no role for both"
+        )
+    if not 0 <= context <= MAX_CONTEXT:
+        raise UsageError(
+            f"an excerpt keeps between 0 and {MAX_CONTEXT} characters on each side of the "
+            f"match, not {context}; ask for a number in that range (the default is "
+            f"{EXCERPT_CONTEXT})"
+        )
     parts = phrase_parts(query)
     if not parts:
         raise UsageError(
@@ -499,7 +528,9 @@ def search(
         synced = _sync(conn, config, store_root, environ)
         results: list[dict] = []
         more = False
-        for session_id, message, message_id, role, at, text in _candidates(conn, parts, after):
+        for session_id, message, message_id, wrote, at, text in _candidates(
+            conn, parts, after, role
+        ):
             spans = find_spans(text, pattern)
             if not spans:
                 continue
@@ -512,10 +543,10 @@ def search(
                     "session_id": session_id,
                     "message": message,
                     "message_id": message_id,
-                    "role": role,
+                    "role": wrote,
                     "at": at,
                     "matches": len(spans),
-                    "excerpt": excerpt(text, spans),
+                    "excerpt": excerpt(text, spans, context),
                 }
             )
         messages = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
@@ -550,11 +581,12 @@ def _config_of(ctx: Context) -> Config:
 
 
 def cmd_transcripts(ctx: Context, args: Namespace) -> Output:
-    """``kyo transcripts search PHRASE [--limit N] [--cursor C]``, ``kyo transcripts rebuild``."""
+    """``kyo transcripts search PHRASE [--limit N] [--cursor C] [--role R] [--context N]``, and
+    ``kyo transcripts rebuild``."""
     config = _config_of(ctx)
     phrase = " ".join(args.phrase)
     if args.action == "rebuild":
-        if phrase or args.cursor or args.limit is not None:
+        if phrase or args.cursor or args.limit is not None or args.role or args.context is not None:
             raise UsageError(
                 "kyo transcripts rebuild takes no argument; run `kyo transcripts rebuild`"
             )
@@ -577,6 +609,8 @@ def cmd_transcripts(ctx: Context, args: Namespace) -> Output:
         phrase,
         limit=DEFAULT_LIMIT if args.limit is None else args.limit,
         cursor=args.cursor,
+        role=args.role,
+        context=EXCERPT_CONTEXT if args.context is None else args.context,
         environ=ctx.environ,
     )
     results = found["results"]

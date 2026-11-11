@@ -325,7 +325,10 @@ _PATH_ROUTES = ("ideas", "docs")
 SEARCH_ROUTE = "search"
 
 #: The query keys the search route takes.
-_SEARCH_QUERY_KEYS = ("q", "limit", "cursor")
+_SEARCH_QUERY_KEYS = ("q", "limit", "cursor", "role", "context")
+
+#: KYO-826: ``projects/{project}/history/recent``, the search results opened in the app.
+HISTORY_ROUTE = "history"
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
 SESSION_ROUTES = ("turns", "events", "screen", "changes")
@@ -847,6 +850,10 @@ class ServeHandler(BaseHTTPRequestHandler):
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
             allowed = ("POST",)
+        elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == HISTORY_ROUTE:
+            if rest[3:] != ["recent"]:
+                raise _no_route(method, split.path)
+            allowed = ("GET", "POST")
         elif rest[:1] == ["projects"] and rest[2:] == [PROJECT_FILES_ROUTE, "recent"]:
             # KYO-814: the files opened in the app; the one files route that is written.
             allowed = ("GET", "POST")
@@ -932,6 +939,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._project_files(method, rest[1], rest[3:], split.query)
         if rest[2] == SEARCH_ROUTE:
             return self._search(rest[1], split.query)
+        if rest[2] == HISTORY_ROUTE:
+            return self._history(method, rest[1], split.query)
         if rest[2] == PROJECT_DRAFT_ROUTE:
             return self._session_composer(method, rest[1], None, "draft", split.query)
         if rest[2] == NOTES_ROUTE:
@@ -1115,13 +1124,39 @@ class ServeHandler(BaseHTTPRequestHandler):
                 raise Refusal(
                     400,
                     f"?{key} is not a query the search route takes; it takes ?q, the phrase "
-                    "to find, ?limit, how many results a page holds, and ?cursor, the cursor "
-                    "of an earlier response",
+                    "to find, ?limit, how many results a page holds, ?cursor, the cursor "
+                    "of an earlier response, ?role (person or assistant) and ?context, the "
+                    "characters an excerpt keeps on each side of the match",
                 )
             given[key] = value
         return 200, _json_bytes(
-            project.search(name, given.get("q", ""), given.get("limit"), given.get("cursor"))
+            project.search(
+                name,
+                given.get("q", ""),
+                given.get("limit"),
+                given.get("cursor"),
+                given.get("role"),
+                given.get("context"),
+            )
         )
+
+    def _history(self, method: str, name: str, query: str) -> tuple:
+        """The search results opened in the app (KYO-826): a session read route in who may
+        call it, so the device token is checked first and the project's opt-in next."""
+        from . import serve_send, serve_sessions
+
+        serve_send.require_reader(self.server.environ, self.headers.get("Authorization"))
+        if query:
+            raise Refusal(
+                400,
+                f"{HISTORY_ROUTE}/recent takes no query string; send the token as "
+                "`Authorization: Bearer <token>` and a POST's fields in the JSON body",
+            )
+        root = self.server.project(name).root
+        project = serve_sessions.ProjectSessions(root, self.server.environ)
+        if method == "POST":
+            return 200, _json_bytes(project.record_history(name, self._json_body()))
+        return 200, _json_bytes(project.history_recent(name))
 
     def _session_send(self, name: str, session_id: str, action: str, query: str) -> tuple:
         """One send route. Everything it decides is :mod:`kyosei.serve_send`'s."""
@@ -1674,7 +1709,7 @@ def _no_route(method: str, path: str) -> Refusal:
         f"POST {project}/orchestrator/start, and GET {project}/files, "
         f"{project}/files/{{root}}/tree[/{{relpath}}], {project}/files/{{root}}/blob/{{relpath}}, "
         f"{project}/files/resolve?path= and {project}/files/search?q=, and GET/POST "
-        f"{project}/files/recent",
+        f"{project}/files/recent, and GET/POST {project}/history/recent",
     )
 
 

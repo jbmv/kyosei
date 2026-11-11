@@ -483,3 +483,65 @@ def test_a_project_not_opted_in_is_refused_and_the_remedy_clears_it(
     cleared = invoke(["--root", str(project), "transcripts", "search", "heron", "--json"])
     assert cleared.code == 0, cleared
     assert [r["role"] for r in json.loads(cleared.out)["results"]] == ["assistant", "person"]
+
+
+# ------------------------------------------------ KYO-826: the role and the excerpt's context
+
+
+def test_the_roles_are_the_two_the_index_stores_and_each_keeps_only_that_partys_messages(
+    world: World,
+) -> None:
+    assert transcript_search.ROLES == ("person", "assistant")
+    everyone = world.found("heron")
+    assert {role for _, role in everyone} == {"person", "assistant"}
+    assert world.found("heron", role="person") == [r for r in everyone if r[1] == "person"]
+    assert world.found("heron", role="assistant") == [r for r in everyone if r[1] == "assistant"]
+    assert world.found("heron", role="person") != world.found("heron", role="assistant")
+
+    # The command takes the same filter, and its document says whose each result is.
+    as_json = run(world, "search", "heron", "--role", "person", "--json")
+    assert {r["role"] for r in json.loads(as_json.out)["results"]} == {"person"}
+
+
+def test_an_unknown_role_is_refused_naming_the_two_and_one_of_them_clears_it(
+    world: World,
+) -> None:
+    refused = run(world, "search", "heron", "--role", "user")
+    assert refused.code != 0, refused
+    assert "`person`" in refused.err and "`assistant`" in refused.err
+    assert run(world, "search", "heron", "--role", "person").code == 0  # the remedy
+
+
+def test_a_page_of_one_role_pages_by_the_same_cursor(world: World) -> None:
+    first = world.search("heron", role="assistant", limit=1)
+    assert first["more"] is True
+    second = world.search("heron", role="assistant", limit=1, cursor=first["cursor"])
+    assert [r["role"] for r in first["results"] + second["results"]] == ["assistant"] * 2
+    assert first["results"] != second["results"]
+
+
+def _kept(result: dict) -> str:
+    return "".join(piece["text"] for piece in result["excerpt"] if piece["text"] != "…")
+
+
+def test_context_sets_how_much_each_side_of_the_match_an_excerpt_keeps(world: World) -> None:
+    default = world.search("shallow water")["results"][0]
+    assert _kept(default) == f"I looked: {REPLY_WORDS}."  # the whole short reply
+    narrow = world.search("shallow water", context=5)["results"][0]
+    marked = [p for p in narrow["excerpt"] if p["match"]]
+    assert marked == [{"text": "shallow water", "match": True}]
+    assert len(_kept(narrow)) == len("shallow water") + 5 + 1  # five before, one after
+    assert narrow["excerpt"][0] == {"text": "…", "match": False}
+    wide = world.search("shallow water", context=transcript_search.MAX_CONTEXT)["results"][0]
+    assert _kept(wide) == f"I looked: {REPLY_WORDS}." and "…" not in str(wide["excerpt"])
+    zero = world.search("shallow water", context=0)["results"][0]
+    assert _kept(zero) == "shallow water"
+
+
+def test_a_context_over_the_limit_is_refused_naming_it_and_the_limit_clears_it(
+    world: World,
+) -> None:
+    for context in ("401", "-1"):
+        refused = run(world, "search", "heron", "--context", context)
+        assert refused.code != 0 and "between 0 and 400" in refused.err, refused
+    assert run(world, "search", "heron", "--context", "400").code == 0  # the remedy

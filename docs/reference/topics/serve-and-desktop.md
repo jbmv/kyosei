@@ -251,7 +251,7 @@ request it can set headers on.
 | Routes | Token |
 |---|---|
 | `version`, `projects`, `cmd/...` (the records and everything else the CLI's `--json` reads), `docs/...`, `ideas/...`, `scratchpad`, the project's `events` | none |
-| The session routes in the table below, and `search` | any token that has not been revoked |
+| The session routes in the table below, `search` and `history/recent` | any token that has not been revoked |
 | `sessions/<id>/send`, `slash`, `interrupt`; the draft, held-message and task-list routes; `attachments` | `send` |
 | `notes`, `tags`, `sessions/<id>/marks` and the routes that send notes | `notes`, and `send` where the notes are sent to a session |
 | `orchestrator/start` | `start` |
@@ -622,7 +622,36 @@ left to read, and `problems` names transcripts that could not be read. The index
 archive, and deleting the directory by hand loses nothing. The server's request log records
 this route without its query string, so the phrase searched for is not logged.
 
+**Which party, and how much context (KYO-826).** `role=person` or `role=assistant` keeps
+only the messages that party wrote, as the index stores the role of each (`person` for a
+prompt, `assistant` for a reply on the main thread); `kyo transcripts search --role` is the
+same filter. Any other value is refused (400) naming the two. `context=<n>` is the number of
+characters an excerpt keeps on each side of the first match, 80 when it is absent and at most
+400; a larger number is refused (400) with that limit named, and `kyo transcripts search
+--context` is the same parameter. `context` changes only how much of the message the
+`excerpt` keeps, and the marks are placed as before.
+
 `kyo transcripts` is not served under `cmd/`, which asks for no token.
+
+### The results opened in the app: the history routes (KYO-826)
+
+`history/recent` keeps, per project and on the server, the search results a client reports
+having opened, so that devices share one list as they share the recently opened files. It
+needs a device token of any permission, checked first, and a project that has opted in with
+`read_transcripts: true`, as the session read routes do, and it takes no query string.
+
+`GET /v1/projects/<name>/history/recent` returns `entries`, newest first, each `{session,
+message, words, opened_at}`, with `limit` (50), the number kept, and `words_limit` (200), the
+longest `words` kept. `POST` takes `{"session", "message", "words"}`: `session` and `message`
+are the `session_id` and `message` of a search result, and `words` is the short text the
+client shows for it. The entry goes to the top of the list, so a result opened again moves
+there and each message appears once; past `limit` the oldest is dropped. A `words` longer than
+`words_limit` is cut to it and not refused. A `session` that the project does not record, in
+`sessions.json`, its turn index or its transcript archive, is refused (404) as the session
+read routes refuse one, and a body without the three fields as text is refused (400).
+
+The list is one JSON file per project under `$KYOSEI_HOME/composer/recent-history/`, beside
+the recently opened files, outside every repository and readable by this account alone.
 
 ### Sending input: the send routes (KYO-699)
 
