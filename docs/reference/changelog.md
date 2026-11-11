@@ -642,6 +642,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-794` (task) — The README, llms.txt and AGENTS.md name the Mac app, and the app's README describes what it adds
 - **2026-11-11** — `KYO-793` (task) — The charter and the dispatch, governance, store and registry references match the CLI
 - **2026-11-11** — `KYO-792` (task) — The guide and the operating reference match the CLI: quick start, hooks, methods and config keys
+- **2026-11-11** — `KYO-791` (bug) — kyo serve's session read routes require a device token
 - **2026-11-11** — `KYO-790` (investigation) — Audit of the public documents against the CLI as built on 2026-11-11
 - **2026-11-11** — `KYO-786` (task) — A decision records who proposed each option and the work it produced, for the dossier
 - **2026-11-11** — `KYO-785` (task) — The Records list filters by kind, with a dropdown of checkboxes and a kind: prefix
