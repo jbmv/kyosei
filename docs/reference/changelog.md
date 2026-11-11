@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-808` (task) — The public documents are reworded where they sell, sloganise or narrate their own history
 - **2026-11-11** — `KYO-805` (investigation) — How often a not-affected docs verdict is contradicted by its own diff
 - **2026-11-11** — `KYO-803` (task) — The Quick start and the getting-started walkthrough run as a test
 - **2026-11-11** — `KYO-802` (task) — The session-start brief asks for the docs coverage decision until it is made
