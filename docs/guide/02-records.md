@@ -37,7 +37,8 @@ Each criterion is one testable sentence, such as "a cold start no longer rebuild
 cache". Its state is never set by hand. It moves when someone records a verification,
 which names a verdict and the method used:
 
-- `machine-checked`: a test or command said so;
+- `machine-checked`: a test, script or query said so, and its result is the verdict;
+- `agent-observed`: an agent looked at the running system and judged the result;
 - `human-observed`: a person looked;
 - `reasoned-about`: it was argued, not observed.
 

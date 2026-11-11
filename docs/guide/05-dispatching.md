@@ -16,7 +16,11 @@ test suites and deploys.
    is wrong or disagrees with.
 3. The orchestrator ingests the report with `kyo report`, reads the disagreements first,
    checks the work, records verifications with `kyo verify`, merges the branch, and moves
-   the record with `kyo move`.
+   the record with `kyo move`. `kyo accept <dispatch-id>` applies a report's verdicts,
+   its documentation verdicts and its touches correction in one act. After a wave's
+   branches are merged and the suite has passed, `kyo close-wave <record>...` moves each
+   record to done and commits the store. Both are described in
+   [the dispatch reference](../reference/topics/dispatch.md).
 
 A brief is frozen on purpose. If the record changes while the worker runs, the worker's
 instructions do not, and the report is judged against what the worker was actually told.
@@ -89,7 +93,7 @@ prints them. Empty by default; the setup agent proposes them from your Makefile 
 
 **Commands only the orchestrator runs.**
 ([D5](setup-decisions.md#d5-commands-only-the-orchestrator-runs)) List the
-whole-suite commands (`make test`, `npm run check`) in `controller_only_commands`, and a
+whole-suite commands (`make test`, `npm run check`) in `orchestrator_only_commands`, and a
 hook refuses them inside a worker's worktree, naming what to run instead and how to
 override. Empty by default, which turns the check off.
 

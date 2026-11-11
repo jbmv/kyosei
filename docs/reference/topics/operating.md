@@ -22,11 +22,15 @@ something acted on and checked off. A *dispatched worker* only ever sees what
 its frozen brief grants it (`write_scope`, and the files/symbols in
 `touches`); it reports back structurally and never writes to the store.
 
-**Setup, once:** `kyo init` scaffolds `ideas/` and `kyosei/` — by default
+**Setup, once:** `kyo onboard` prints the guided setup, and `kyo init` with a layout
+(`--defaults`, `--in-repo` or `--store DIR`) and `--read-transcripts yes` or `no`
+scaffolds `ideas/` and `kyosei/` — by default
 *outside* the code repository, at `~/kyosei/<project>/` (see "Where the store
-lives" in [store.md](store.md), and decide that before you have a hundred records); Kyosei's
+lives" in [store.md](store.md), and decide that before you have a hundred records). Bare
+`kyo init` in a project with no store writes nothing and names those routes (KYO-558).
+Kyosei's
 Claude Code plugin (`kyo harness install claude-code`, the default), or on the copies `kyo
-install-hooks`, wires `SessionStart`/`Stop`/`SessionEnd`/`SubagentStop` so
+install-hooks`, wires `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`Stop`/`SessionEnd`/`SubagentStop` so
 briefing and closeout happen automatically instead of by discipline (see
 `templates/hooks/README.md` for exactly what each hook does and why, and
 [install.md](install.md) for the two routes).
@@ -191,9 +195,16 @@ touches nothing is exactly what lets you see the situation.
    `kyo move <id> <status>` enforces its transition contract at the moment of
    the move, naming the unmet item if it fails. A report's verdicts are never
    auto-applied — that stays a reviewed, deliberate act.
-6. **Close out with hooks, not a checklist**: `Stop`/`SessionEnd` already run
+6. **Close out with hooks, not a checklist**: `Stop` already runs
    `kyo sweep --hook` (staleness flags — touch-changed, touch-missing, near-duplicate
-   criteria), then `kyo doctor --hook` (invariant checks). The order is load-bearing
+   criteria), then `kyo doctor --hook` (invariant checks). `SessionEnd` runs neither
+   (KYO-774). `Stop` also runs `kyo turns --hook`, which in a project that reads
+   transcripts confirms the turn index and archives the transcript (KYO-657, KYO-683);
+   `kyo discuss check --hook`, which there asks the orchestrator, for one more turn, to
+   open a discussion with `kyo discuss open` or to record with `kyo discuss skip` why
+   the turn is not one (KYO-662); and `kyo sessions --hook`, which shows the person the
+   unchecked items of the session's task list (KYO-770). `SessionEnd` runs
+   `kyo turns --hook` and `kyo sessions --hook` only. The order of sweep and doctor is load-bearing
    (KYO-31): the healing step runs before the check that would otherwise
    short-circuit it. `--hook` changes what is PRINTED (KYO-362): a failure
    writes its whole report to `kyosei/doctor-report.txt` beside `kyosei.db` and puts
@@ -226,9 +237,22 @@ touches nothing is exactly what lets you see the situation.
    covers the judgment a store can't derive, and the next `kyo brief`
    surfaces it.
 7. **Browse**: the desktop app under `apps/desktop/` is the viewer — board,
-   record pages, kind map, link graph — read live from the store. Without it,
+   record pages, kind map, link graph — read live from the store. A second client of
+   `kyo serve`, a native Mac app under `apps/apple/`, is built for the maintainer's own
+   devices and is described only in its own README. Without either,
    `kyo show`, `kyo list`, `kyo map` and `kyo brief` answer the same questions
    from the terminal. See ["Reading the store"](store.md#reading-the-store).
+
+**Two `kyo doctor` checks apply only to a project that reads transcripts**
+(`read_transcripts: true` in `kyosei/config.yml`). `transcript_retention` is a notice,
+printed when Claude Code's `cleanupPeriodDays` is unset (Claude Code then deletes
+transcripts after 30 days) or under 365: a credit cannot be checked against a
+transcript older than that period, unless the archive holds a copy. Setting the key to
+365 or more in Claude Code's `settings.json` clears it (KYO-657).
+`transcript_archive_location` is a problem, reported when the transcript archive,
+`$KYOSEI_HOME/transcript-archive/`, lies inside a git repository, where a transcript
+could be committed; pointing `$KYOSEI_HOME` at a directory outside every git repository
+clears it (KYO-683).
 
 **Two more checks worth knowing about, both mechanical:** `kyo docs check`
 fails the build if any document section's `governs:` targets — one line or a
@@ -305,22 +329,22 @@ loses to a contradiction inside its own brief needs a mechanism.
 **The config key.** In `kyosei/config.yml`, a list of command lines:
 
 ```yaml
-controller_only_commands:
+orchestrator_only_commands:
   - make test
   - npm run check
 ```
 
-The same key is also spelled `orchestrator_only_commands` (KYO-519), and the two
+The key's earlier spelling is `controller_only_commands` (KYO-519), and the two
 spellings mean the same thing; a file giving both with different commands is refused by
-name. Keep `controller_only_commands` until every `kyo` that reads the store, including
+name. Use `controller_only_commands` until every `kyo` that reads the store, including
 the one on PATH that the hooks run, is at least KYO-519: an older build refuses the new
 spelling and every hook goes blind. `kyo doctor` prints a notice for the old spelling
 that names this precondition; renaming the key by hand afterwards, then checking that
 `kyo doctor` shows no `path_build_lag` problem, finishes the rename. Keeping the old
 spelling is also valid.
 
-A freshly written `config.yml` carries this commented out, with the same
-explanation, so nobody has to know the key exists to find it. Absent or empty
+A freshly written `config.yml` carries the key commented out, under its earlier
+spelling and with the same explanation, so nobody has to know the key exists to find it. Absent or empty
 means *nothing is refused*, which is the opt-out, not a degraded mode.
 
 **The hook.** The hooks (the plugin, or `kyo install-hooks` on the copies) wire
@@ -700,11 +724,11 @@ which connection it chose (KYO-463). New Window from a remote window opens anoth
 window on the same server, and a server's project remembers its own layout, apart from
 a local project at the same path.
 
-**What is different in a remote project.** There is no terminal pane: terminals are
-local, and the tab says so where the pane would be. The claude tab resolves against the
-remote store's sessions (`kyo sessions --json` there). A document's text is not served
-(kyo serve serves the docs tree, not files outside `ideas/`), so the docs tab lists a
-remote project's documents and says where to read one. A server that stops answering is
+**What is different in a remote project.** This app has no terminal pane there: its
+terminals are local, and the tab says so where the pane would be. The claude tab resolves against the
+remote store's sessions (`kyo sessions --json` there). A document's text is read through
+the server's read-only `docs/` route (KYO-467), which serves the files `kyo docs check`
+lists and no other. A server that stops answering is
 said where each list is, naming its address, and the lists read again when it is back.
 
 **The connection is remembered like a project choice**, in `remotes.json` in the app's
@@ -743,8 +767,9 @@ kyo init --defaults --read-transcripts no  # scaffold the store at ~/kyosei/<pro
                                             # (creating a store needs yes or no, KYO-686)
 kyo init --in-repo --read-transcripts no   # ...or scaffold ideas/ and kyosei/ in this
                                             # repository, committed alongside the code
-kyo init --store ~/kyosei/other            # ...or somewhere you name (adopts an
-                                            # existing store at that path)
+kyo init --store ~/kyosei/other --read-transcripts no   # ...or somewhere you name;
+                                            # without --read-transcripts it only adopts a
+                                            # store that already exists at that path
 kyo projects list                          # the projects this machine serves (kyo serve,
                                             # kyo orchestrator), by name; every kyo init adds
                                             # its project, and `kyo projects add|remove DIR`
@@ -771,30 +796,55 @@ kyo new task --from record.md              # the whole record from one file inst
                                            # idea's own text when it actually differs
 kyo new task --from record.md --check      # validate record.md -- kind, scope, touches
                                            # against the repo -- and file nothing
-kyo new decision --title "Use SQLite" \
-            --evidence-file words.md      # a decision made in conversation, the operator's
-                                           # words stored as evidence in the same act;
-                                           # refused without it (KYO-521)
 kyo discuss open --title "Which store"     # a discussion, stamped at the person's turn
                                            # from the turn index; a decision spawned from
                                            # it closes it (KYO-658)
+kyo new decision --title "Use SQLite" \
+            --evidence-file words.md      # a decision made in conversation, the operator's
+                                           # words stored as evidence in the same act;
+                                           # refused without it (KYO-521). This form files
+                                           # it where `people:` in kyosei/config.yml
+                                           # declares nobody, and is refused where it
+                                           # declares someone
+kyo new decision --title "Use SQLite" --evidence-file words.md \
+            --quote-file words.md --decision-file decision.md \
+            --discussion KYO-3            # the form for a project that declares someone,
+                                           # refused where nobody is declared: the decision
+                                           # carries a credit (the person's words, and in
+                                           # decision.md what was recommended and the
+                                           # outcome) and names the discussion it came
+                                           # from, which the filing closes. --opened-late
+                                           # replaces --discussion when none was opened,
+                                           # and --source-other WHERE says where the words
+                                           # were said outside a Claude Code session
+                                           # (KYO-644, KYO-658)
 kyo discuss skip --why "a question about a log line"   # the Stop check asked about a turn
                                            # that is not a discussion; the reason is kept
                                            # on the turn's index line (KYO-662)
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
                                            # date; the brief shows its age (KYO-497)
 kyo show KYO-1
-kyo dossier KYO-1                          # a decision as a Markdown page for a reader outside
+kyo dossier KYO-4                          # a decision as a Markdown page for a reader outside
                                            # the project: eight parts, each naming its source
                                            # in the store; reads no transcript (KYO-659)
 kyo move KYO-1 working                     # contracts are checked here
 kyo gate KYO-1 awaiting:human-run --do "run the staging migration, then reload the dashboard" \
                                   --tag ui-review   # tags from kyosei/gate-tags.yml;
                                                     # --do stays the exact thing to run
-kyo ungate KYO-1.g1 --why "ran it; output attached"
+kyo ungate KYO-1.g1 --why "ran it; output attached"   # clears it where `people:`
+                                           # declares nobody
+kyo ungate KYO-1.g1 --quote-file q.txt     # where `people:` declares someone, a gate that
+                                           # waits on a person is cleared with that person's
+                                           # words, stored as a credit (with --source-other
+                                           # WHERE outside a Claude Code session);
+                                           # --withdrawn --why clears one whose wait no
+                                           # longer applies (KYO-644). Each form is refused
+                                           # in the other kind of project
 kyo confirm KYO-1 --quote-file q.txt     # the maintainer looked and approves: verify met
                                            # (human-observed, their words as evidence), clear
-                                           # the answered human gate, move to done
+                                           # the answered human gate, move to done; where
+                                           # `people:` declares someone the words are also
+                                           # stored as a credit
 kyo link KYO-1 blocks KYO-2                # cycles refused at write time
 kyo verify KYO-1.c1 --verdict met --method machine-checked \
                      --evidence-file capture.txt   # criterion state is derived from this
@@ -851,7 +901,11 @@ kyo base run open-work --json              # run one, read-only: rows, applied c
 kyo map                                    # the kind registry as a circles-and-arrows graph
 kyo promote ideas/widget.md --kind chore \
             --criteria-file criteria.txt \
-            --touches-file touches.txt     # one 'path', 'path#symbol', 'path#+', 'dir/'
+            --touches-file touches.txt     # the idea's file, which must lie under the
+                                           # project's ideas/ directory: in the split
+                                           # layout that directory is in the store, not in
+                                           # the code repository. Touches are
+                                           # one 'path', 'path#symbol', 'path#+', 'dir/'
                                            # or '+path' per line -- a trailing slash declares
                                            # a tree this work creates and a leading '+' one
                                            # file it creates, both accepted before they exist
@@ -882,7 +936,7 @@ kyo edit KYO-1 --criterion KYO-1.c2 \
 kyo restate KYO-1.c2 --text-file new.txt    # void it and add the replacement in one transaction;
                                            # the old one reads `superseded by KYO-1.c5` everywhere
                                            # and keeps its verdicts attached to its own text
-kyo unlink KYO-l3 --why "filed backwards" # retract a typed edge; the edge and the reason
+kyo unlink KYO-L1 --why "filed backwards" # retract a typed edge; the edge and the reason
                                            # stay in the events ledger
 kyo export --migrate-events                # one run: rewrite a monolithic _events.jsonl as
                                            # bounded shards under _events/ and drop the old
@@ -1018,8 +1072,8 @@ kyo doctor                                 # the tool's own invariant checks, in
                                             # separately and every check's own tier
 kyo doctor --hook                          # every check, but ONE line on stderr and the
                                             # report written to kyosei/doctor-report.txt;
-                                            # how the Stop and SessionEnd hooks run it, so a
-                                            # failing check does not fill the terminal
+                                            # how the Stop hook runs it, so a failing
+                                            # check does not fill the terminal
                                             # (KYO-362). export_roundtrip re-verifies only
                                             # what changed since its last pass (cached /
                                             # appends-verified / documents-rebuilt / full,
@@ -1142,7 +1196,9 @@ kyo rules add --title "<imperative title>" \
 kyo export --refresh                       # rewrite every drifted export document from the db,
                                             # and re-append ledger rows the db holds and the
                                             # export lacks (KYO-404)
-kyo rebuild                                # reconstruct kyosei.db from kyosei/export/ alone
+kyo rebuild                                # reconstruct kyosei.db from kyosei/export/ alone;
+                                            # refused over an existing kyosei.db without
+                                            # --force
 kyo install-hooks [--print] [--copies]     # merge Claude Code hook templates into
                                             # .claude/settings.json; idempotent
 ```

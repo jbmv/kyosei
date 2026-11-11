@@ -53,7 +53,11 @@ change to it is a diff you can review.
 Where a project declares its people ([D13](setup-decisions.md#d13-people-credited)), a verdict,
 gate or decision that rests on a person's judgement carries a credit: their words, checked
 against the session's transcript if the project allows Kyosei to read transcripts
-([D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts)).
+([D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts)). The commands
+that record such a judgement (`kyo confirm`, `kyo ungate`, `kyo new decision`) write the
+credit in the same act, and `kyo credit` adds, corrects or withdraws one afterwards.
+`kyo dossier <id>` prints a decision with its credit as a page for a reader outside the
+project.
 
 ## Standing rules
 
@@ -81,14 +85,16 @@ own. Outside a Kyosei project every one of them exits silently.
 | A session starts | `kyo sessions --hook` | Records which Claude Code sessions belong to this project. |
 | You send a prompt | `kyo check-build --hook` | Says so, in one line, when the installed `kyo` changed mid-session. Prints the unchecked items of the session's task list, when there are any. |
 | You send a prompt | `kyo turns --hook` | Where [D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts) is yes, adds the prompt to the turn index, with a commitment to its text but no text, and no output. |
-| An agent runs a shell command | `kyo check-push --pre-tool-use` | Refuses a `git push` that would publish a store kept inside the code repository, until someone accepts that. |
+| An agent runs a shell command | `kyo check-push --pre-tool-use` | Refuses a `git push` that would publish a store kept inside the code repository, until someone accepts that. Refuses one that sends a commit whose message or author name carries a private term or a home path. |
 | An agent runs a shell command | `kyo check-command --pre-tool-use` | Refuses a whole-suite command inside a worker's worktree, if the project lists such commands. |
 | A worker stops | `kyo check-clean --subagent-stop` | Refuses to let a worker stop with uncommitted work. |
 | A worker stops | `kyo check-branch --subagent-stop --against main` | Refuses a worker branch that changed anything under `kyosei/` or `ideas/`. `main` here means the project's trunk, whatever it is called. |
-| The session stops | `kyo sweep`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. |
-| The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the items of yours still unchecked on the session's task list, without holding the session open. |
+| The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. |
+| The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the session's task list (`kyo agenda`) when items of yours are still unchecked on it, or when dispatches are running and the orchestrator has listed nothing of its own, without holding the session open. |
 | The session stops | `kyo turns --hook` | Where D14 is yes, confirms the turn index from the transcript, commits the agent's final reply to it, and copies the transcript and its subagent transcripts to the local archive. Silent. |
 | The session stops | `kyo discuss check --hook` | Where D14 is yes, and the turn put a choice to you while no discussion was open, asks the orchestrator to open one or to record why it is not one. The orchestrator takes one more turn to do so; you are not asked anything. |
+| The session ends | `kyo turns --hook` | Where D14 is yes, the same confirmation and archiving as at a stop. Silent. |
+| The session ends | `kyo sessions --hook` | Records that the session ended. Silent. |
 
 The two worker checks block a worker's first attempt to stop and name the remedy. If the
 worker stops again without fixing it, they report the finding without blocking, and the
