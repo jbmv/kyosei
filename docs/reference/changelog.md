@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-11** — `KYO-468` (bug) — setTypeOfService EINVAL uncaught in the new app: its kyo serve client uses undici fetch, which the old code avoided in this Electron
 - **2026-11-11** — `KYO-449` (task) — Desktop app: check the PATH kyo against KYO_ACCEPTS and show the four compatibility states
 - **2026-10-13** — `KYO-623` (task) — Prepare apps/desktop for publication as the maintainer's working viewer
 - **2026-10-12** — `KYO-587` (task) — kyo serve and the desktop app mark a recx search artifact as stranger-written before showing it
