@@ -629,7 +629,7 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 Text output prints the quoted short form in place of the full text after it, which is what it printed there before KYO-489. When it printed any, its last line is: explained in `kyo reference docs`. `<name>` stands for a value of that run.
 
-- "narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets only" — raises a section only when the diff touches that symbol's own lines, where the section is about a symbol rather than the file. That narrowing holds for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets and is offered for no others: a `#symbol` on any other suffix is accepted and still raises like the whole file (KYO-199.c2, KYO-351)
+- "narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css` targets only" — raises a section only when the diff touches that symbol's own lines, where the section is about a symbol rather than the file. That narrowing holds for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css` targets and is offered for no others: a `#symbol` on any other suffix is accepted and still raises like the whole file (KYO-199.c2, KYO-351)
 - "none blocks completion" — nothing here blocks its completion status any longer (KYO-137)
 
 ## `kyo doctor`
@@ -1400,7 +1400,7 @@ Text output prints the quoted short form in place of the full text after it, whi
 
 - "verdicts above are NOT applied; apply them via" — note: verdicts above are NOT applied to any criterion; applying them is a orchestrator act via (KYO-7.c4)
 - "each needs a verdict before completion" — this record cannot reach its completion status until each carries a verdict, and a document counts as updated when you say so, not when its timestamp moves (KYO-137.c2)
-- "narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets only" — raises a section only when the diff touches that symbol's own lines, where the section is about a symbol rather than the file. That narrowing holds for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.json`, `.yml`, `.yaml`, `.css` targets and is offered for no others: a `#symbol` on any other suffix is accepted and still raises like the whole file (KYO-199.c2, KYO-351)
+- "narrows to a symbol's own lines, for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css` targets only" — raises a section only when the diff touches that symbol's own lines, where the section is about a symbol rather than the file. That narrowing holds for `.py`, `.md`, `.ts`, `.tsx`, `.js`, `.mjs`, `.swift`, `.json`, `.yml`, `.yaml`, `.css` targets and is offered for no others: a `#symbol` on any other suffix is accepted and still raises like the whole file (KYO-199.c2, KYO-351)
 - "the diff of <branch>" — read from the diff of <branch> (`git diff <against>...<branch>`) (KYO-211.c1)
 - "reported, not refused" — This is REPORTED, not refused — a touches table is a prediction and is routinely, defensibly wrong. What it costs is a later dispatch colliding with a file nothing knew was claimed. (KYO-71)
 
