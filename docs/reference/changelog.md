@@ -635,6 +635,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-11** — `KYO-803` (task) — The Quick start and the getting-started walkthrough run as a test
 - **2026-11-11** — `KYO-802` (task) — The session-start brief asks for the docs coverage decision until it is made
 - **2026-11-11** — `KYO-801` (task) — kyo docs coverage, and the docs_coverage doctor check
+- **2026-11-11** — `KYO-798` (task) — A draft changed on one device appears in the composer on another without reopening
 - **2026-11-11** — `KYO-797` (proposal) — Documents govern the code they describe, and Kyosei says when they do not
 - **2026-11-11** — `KYO-795` (task) — The kyo serve documents describe the server as built: writes, tokens and session access
 - **2026-11-11** — `KYO-794` (task) — The README, llms.txt and AGENTS.md name the Mac app, and the app's README describes what it adds
