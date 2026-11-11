@@ -32,7 +32,7 @@ included.
 `~/kyosei/` is the machine's Kyosei home: the list of projects (`projects.json`), machine
 settings (`settings.yml`), the split stores, and each store's worker worktrees.
 
-The usual trap is PATH. `~/.local/bin` is on PATH in a login shell, but not in a plain
+The most common problem is PATH. `~/.local/bin` is on PATH in a login shell, but not in a plain
 `ssh host kyo ...`, nor in anything started at login without help. Run remote commands
 through a login shell: `ssh host "zsh -lc 'kyo ...'"`.
 

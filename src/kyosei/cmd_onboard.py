@@ -331,7 +331,8 @@ def _remote_item(layout) -> Item:
         "store remote",
         "missing",
         "none: the store exists on this disk only. That is the default (setup decision B2); "
-        "a private remote is a backup and any remote is a publication",
+        "a private remote serves as a backup, and pushing to any remote makes the store's "
+        "contents available to whoever can read that remote",
         f"`git -C {shlex.quote(str(repo))} remote add origin <private-url> && "
         f"git -C {shlex.quote(str(repo))} push -u origin HEAD`",
     )
