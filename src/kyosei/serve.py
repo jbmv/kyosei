@@ -24,14 +24,14 @@ above it. What may run at all is :data:`SERVED_COMMANDS`; every other command in
 ``cli.COMMAND_TABLE`` is on :data:`NOT_SERVED` with its reason, and
 ``tests/test_kyo_serve.py`` fails when a command is on neither.
 
-THE NETWORK STANCE. It binds a loopback address and nothing else — there is no
-override, because with no TLS, and with the project routes open to any caller, a LAN
-bind makes every device on the LAN a reader of every project. Loopback is not a boundary
-against a web page in the same browser, so three mechanical checks stand in front of every route: the ``Host``
-must be a loopback name or one given with ``--allow-host`` (DNS rebinding), an
-``Origin``, when sent, must be one given with ``--allow-origin`` (a cross-site
-``fetch``), and a ``POST`` must carry ``Content-Type: application/json`` (a
-cross-site form cannot send it without a preflight nobody answers).
+THE NETWORK STANCE. It binds a loopback address and nothing else — there is no override,
+because with no TLS, and with the project routes open to any caller, a LAN bind makes every
+device on the LAN a reader of every project. Loopback is not a boundary against a web page
+in the same browser, so three mechanical checks stand in front of every route: the ``Host``
+must be a loopback name or one given with ``--allow-host`` (DNS rebinding), an ``Origin``,
+when sent, must be one given with ``--allow-origin`` (a cross-site ``fetch``), and a
+``POST`` must carry ``Content-Type: application/json`` (a cross-site form cannot send it
+without a preflight nobody answers).
 
 THE FILE ROUTES AND THE EVENTS (KYO-456). Under
 ``/v1/projects/{project}/``: ``ideas/`` (GET, the tree), ``ideas/{relpath}`` (GET, PUT,
