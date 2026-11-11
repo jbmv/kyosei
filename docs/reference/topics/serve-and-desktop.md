@@ -727,7 +727,10 @@ can fail its own command over the list.
   1 dispatch(es) are running or unaccepted and the session list holds no item of the orchestrator's (kyo agenda add --text "...")
   ```
 
-  The two sentences are printed as one hook `systemMessage`, which Claude Code shows to the
+  The first sentence is said at every stop while an item is unchecked. The second is said
+  once per session, and again only when the number in flight has risen since it was last
+  said; the count last said is kept in a small file beside the session's list, never in the
+  store. The sentences are printed as one hook `systemMessage`, which Claude Code shows to the
   person. It does not block the stop and does not reach the agent: at `Stop`, text that
   reaches the agent makes it take another turn. The agent reads the same items on the next
   prompt. A dispatch counts as in flight while it is running, or when it was created in this

@@ -560,9 +560,58 @@ def test_the_stop_hook_says_when_dispatches_run_and_the_list_holds_nothing_of_th
     said = json.loads(_stop_hook(kyo).out)["systemMessage"]
     assert said.startswith("1 dispatch(es) are running or unaccepted")
     assert 'kyo agenda add --text "..."' in said
+    assert _stop_hook(kyo).out == "", "said once for this count (KYO-775)"
 
     assert kyo("agenda", "add", "--text", "watch the dispatch").code == 0  # what it names
     assert _stop_hook(kyo).out == ""
+
+
+def test_the_in_flight_sentence_is_said_once_per_count_and_the_person_s_items_every_stop(
+    kyo, git_project: Path, in_session: str, store_home: Path
+) -> None:
+    first = new_record(kyo, criteria=["it works"])
+    second = new_record(kyo, criteria=["it works too"])
+    sentence = "dispatch(es) are running or unaccepted"
+    said_file = store_home / "composer" / "agenda-said" / f"{SESSION}.json"
+    assert not said_file.exists()
+
+    assert kyo("dispatch", first, "--no-create-worktree").code == 0
+    assert sentence in json.loads(_stop_hook(kyo).out)["systemMessage"]  # no list file yet
+    assert _stop_hook(kyo).out == ""
+    assert _stop_hook(kyo).out == ""
+
+    assert kyo("dispatch", second, "--no-create-worktree", "--force").code == 0
+    assert json.loads(_stop_hook(kyo).out)["systemMessage"].startswith("2 dispatch(es)")
+    assert _stop_hook(kyo).out == ""
+
+    # The person's items keep their announcement at every stop, beside the limited sentence.
+    listed = agenda_file(store_home, SESSION)
+    listed.parent.mkdir(parents=True, exist_ok=True)
+    listed.write_text(
+        json.dumps({"items": [{"id": "1", "text": "push", "author": "person",
+                               "checked": False, "added_at": "2026-01-01T00:00:00Z",
+                               "changed_at": "2026-01-01T00:00:00Z"}]}),
+        encoding="utf-8",
+    )
+    for _ in range(2):
+        assert json.loads(_stop_hook(kyo).out)["systemMessage"] == (
+            "Unchecked on the session list, yours (1): push"
+        )
+    assert json.loads(said_file.read_text())["in_flight"] == 2
+
+
+def test_a_falling_then_rising_count_says_the_sentence_again(
+    kyo, git_project: Path, in_session: str, store_home: Path
+) -> None:
+    record = new_record(kyo, criteria=["it works"])
+    assert kyo("dispatch", record, "--no-create-worktree").code == 0
+    assert "dispatch(es)" in json.loads(_stop_hook(kyo).out)["systemMessage"]
+    said_file = store_home / "composer" / "agenda-said" / f"{SESSION}.json"
+    said_file.write_text('{"in_flight": 3}\n', encoding="utf-8")  # three were said before
+    assert _stop_hook(kyo).out == "", "one in flight is fewer than said, so nothing"
+    assert json.loads(said_file.read_text())["in_flight"] == 1, "the fall is remembered"
+    said_file.write_text('{"in_flight": 0}\n', encoding="utf-8")
+    assert "1 dispatch(es)" in json.loads(_stop_hook(kyo).out)["systemMessage"]
 
 
 def test_a_reported_dispatch_counts_until_it_is_accepted(
