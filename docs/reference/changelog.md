@@ -631,6 +631,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-837` (task) — kyo serve: the project's starred files
+- **2026-11-11** — `KYO-832` (task) — Symbol targets: Swift files are narrowed, five chat.ts functions are found, and symbol-only coverage is reported
 - **2026-11-11** — `KYO-830` (task) — The desktop app's README describes the app as built, now that it governs the sources
 - **2026-11-11** — `KYO-829` (task) — Split the documents' oversized governing sections so an obligation names what to read
 - **2026-11-11** — `KYO-828` (bug) — A governs target naming Makefile or LICENSE is read as a bare symbol and governs every file containing the word
