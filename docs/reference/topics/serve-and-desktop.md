@@ -1625,7 +1625,7 @@ the answer is passed as `--read-transcripts`. Without the app it
   `--in-repo`), `kyo orchestrator start`. macOS needs Remote Login enabled on the machine the commands go to.
 - **To open a record a message names, click it in the claude tab** (KYO-263). What is
   clickable is a record id written as a **markdown link with a `kyosei://` target** —
-  `[KYO-261](kyosei://KYO/KYO-261)`, which is the form the `/kyosei` skill tells a
+  `[KYO-261](kyosei://KYO/KYO-261)`, which is the form the `/kyosei` skill tells an
   orchestrator to write. claude.ai renders that as an anchor and **strips the
   non-http(s) `href`**, so what reaches you is link-styled text with no target;
   the app handles the click and opens the record here, in the same tab,
