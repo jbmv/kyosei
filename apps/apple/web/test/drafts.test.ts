@@ -85,3 +85,19 @@ test("a new box id is not one already given", () => {
   const ids = new Set(Array.from({ length: 50 }, () => boxId()));
   assert.equal(ids.size, 50);
 });
+
+test("a prompt typed elsewhere takes the place of this window's empty box, not a box beside it", () => {
+  // The maintainer, 2026-11-11: a prompt typed on the laptop appeared on the Studio above an
+  // empty box; with no other prompt it should simply be the one box.
+  const local = [box("blank", "")];
+  const remote = [box("p", "typed on the laptop")];
+  const merged = mergeDraft(agreedOn([], []), local, remote, mint);
+  assert.deepEqual(texts(merged.boxes), ["typed on the laptop"]);
+  assert.equal(merged.unsaved, false);
+  assert.equal(mergeNote(merged), "");
+  // With nothing on the server the empty box stays, so there is somewhere to type.
+  assert.deepEqual(texts(mergeDraft(agreedOn([], []), local, [], mint).boxes), [""]);
+  // A box with words in it is kept beside the incoming prompt, as before.
+  const typed = mergeDraft(agreedOn([], []), [box("mine", "half a thought")], remote, mint);
+  assert.deepEqual(texts(typed.boxes).sort(), ["half a thought", "typed on the laptop"]);
+});

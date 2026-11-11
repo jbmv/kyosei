@@ -80,10 +80,15 @@ export interface Merged<T extends DraftBox> {
  * is placed after the box it follows in the server's draft.
  */
 export function mergeDraft<T extends DraftBox>(
-  agreed: Agreed, local: T[], remote: T[], mint: () => string = boxId,
+  agreed: Agreed, shown: T[], remote: T[], mint: () => string = boxId,
 ): Merged<T> {
+  // An empty box the server never held carries nothing typed: it is the composer's place to
+  // type, not an edit. When the server's draft holds a prompt, that prompt takes its place,
+  // rather than standing above an empty box beside it.
+  const placeholder = (box: T) => boxSignature(box) === boxSignature({ text: "" }) && !agreed.server.has(box.id);
+  const local = remote.length ? shown.filter((box) => !placeholder(box)) : shown;
   const theirs = new Map(remote.map((box) => [box.id, box]));
-  const here = new Set(local.map((box) => box.id));
+  const here = new Set(shown.map((box) => box.id));
   const edited = (box: T) => agreed.local.get(box.id) !== boxSignature(box);
   const unsaved = local.some(edited) || [...agreed.local.keys()].some((id) => !here.has(id));
   if (!unsaved) {
