@@ -415,7 +415,7 @@ Stories: `${CLAUDE_SKILL_DIR}/REFERENCE.md`, "6. Notes".
 
 ## 7. Closeout is a hook, not a checklist
 
-`Stop`/`SessionEnd` hooks run `kyo sweep --hook` (staleness flags -- `touch-changed`,
+`Stop` hook runs `kyo sweep --hook` (staleness flags -- `touch-changed`,
 `touch-missing`, `near-duplicate-criteria`, `description-predates-claim`), then
 `kyo doctor --hook` (invariant checks) -- in that order, because a check naming a remedy must
 not run ahead of that remedy in the same `&&` chain (KYO-31). A failing `--hook` prints one

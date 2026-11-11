@@ -29,11 +29,11 @@ it on the way in, since Claude Code's settings schema has no such key.
 the brief instead of on state re-derived from files. That run is recorded as this session's
 anchor, so the shift note written for you is not consumed by whichever brief ran first (KYO-94).
 
-`Stop` and `SessionEnd` run `kyo sweep --hook && kyo doctor --hook`, in that order, because a
+`Stop` runs `kyo sweep --hook && kyo doctor --hook`, in that order, because a
 check that names a remedy must not run ahead of it (KYO-31). `--hook` is what keeps a failing
 doctor to one line of stderr and a path to the full report, instead of the whole report filling
 the terminal on every stop (KYO-362); `kyo doctor` prints the same findings when you want them.
-On every hook it also means silence, exit 0, where no Kyosei project resolves (KYO-591).
+`SessionEnd` no longer carries the chain: Claude Code cancelled it on exit ("Hook cancelled") even with a `timeout`, and the last `Stop` has already run it; `kyo install-hooks` removes an installed copy (KYO-774). On every hook it also means silence, exit 0, where no Kyosei project resolves (KYO-591).
 
 `SubagentStop` runs `kyo check-clean --subagent-stop`, then
 `kyo check-branch --subagent-stop --against main`: a dispatched worker may not stop with

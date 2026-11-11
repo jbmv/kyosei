@@ -148,7 +148,7 @@ briefing that never forces a full-file read to answer a status question
 (`docs/design/charter.md`, "User stories": "My context is the scarcest resource in the
 system").
 
-### `Stop` / `SessionEnd` → `kyo sweep --hook && kyo doctor --hook`
+### `Stop` → `kyo sweep --hook && kyo doctor --hook`
 
 Runs the flag-only staleness sweep (git diff since last sweep × touches, moved-but-inverse /
 moved-but-not-merged flags, aging asserted claims, doc-stale `governs:` sections, near-duplicate
@@ -532,7 +532,7 @@ warning.
 All in `src/kyosei/defaults/hooks/`:
 
 - `session-start.json` — `SessionStart` → `kyo brief --compact --session-start`
-- `stop.json` — `Stop` and `SessionEnd` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group
+- `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`
 - `subagent-stop.json` — `SubagentStop` → `kyo check-clean --subagent-stop`, then `kyo check-branch --subagent-stop --against main`
 - `sessions.json` — `SessionStart`, `Stop` and `SessionEnd` → `kyo sessions --hook`
 - `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`
