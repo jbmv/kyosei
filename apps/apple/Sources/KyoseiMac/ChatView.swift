@@ -41,7 +41,13 @@ struct ChatView: View {
                 RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 Spacer()
                 // With no project chosen there is no session to be live or not.
-                if !feed.project.isEmpty { FeedStateLabel(state: feed.state) }
+                if let needed = feed.tokenNeeded {
+                    // Said whichever project the window shows, the list of projects included:
+                    // without a token the server lists no session at all (KYO-791).
+                    TokenNeededLabel(reason: needed)
+                } else if !feed.project.isEmpty {
+                    FeedStateLabel(state: feed.state)
+                }
                 if let remote = feed.remote {
                     HStack(spacing: 4) {
                         Text(remote)
@@ -108,6 +114,32 @@ struct FeedStateLabel: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(10)
             }
+        }
+    }
+}
+
+/// Says that the server shows this device no session until it holds a device token it accepts
+/// (KYO-791). The words are always shown, and pressing or hovering gives the sentence that
+/// says what is wrong with the token and how one is issued.
+struct TokenNeededLabel: View {
+    let reason: String
+    @State private var shown = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "key.fill")
+            Text("Device token needed")
+        }
+        .foregroundStyle(.orange)
+        .contentShape(Rectangle())
+        .onHover { shown = $0 }
+        .onTapGesture { shown.toggle() }
+        .popover(isPresented: $shown, arrowEdge: .top) {
+            Text(reason)
+                .font(.system(size: 12))
+                .frame(maxWidth: 320, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
         }
     }
 }

@@ -156,8 +156,11 @@ swift run KyoseiMac
 
 The app reads `kyo serve` at `http://127.0.0.1:47370` unless its Settings name another server,
 which `KYOSEI_SERVE_URL` overrides. The project is chosen in the window, and `KYOSEI_PROJECT`
-names the one a launch opens on. Sending needs a device
-token from `kyo devices issue`, entered in Settings and kept in the Keychain. A project with
+names the one a launch opens on. Reading a session needs a device
+token from `kyo devices issue`, entered in Settings and kept in the Keychain; a token of any
+permission reads, and the app sends it on every session read. With no token, or one the
+server refuses, the chat says that a token is needed and how to issue one. Sending needs the
+token to hold the `send` permission. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
 permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
 the `terminal` permission; without it the drawer shows the pane's text and the server's reason.

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Where this device's `kyo serve` is, and the token it uses. Read-only views need no token.
+/// Where this device's `kyo serve` is, and the token it uses. Records, documents and ideas
+/// are read without a token; a session is read, and anything is sent, with one (KYO-791).
 /// The project is chosen from the dropdown in the window's top bar and is not a setting
 /// (KYO-761): saving here keeps the project the window shows, and when the server named
 /// does not serve it the window shows that server's list of projects.
