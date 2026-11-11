@@ -27,7 +27,7 @@ import {
   type ProjectsFrame, choices, keepBoxes, keptBoxes, listNote, sessionLinks, typedChoice,
 } from "./projects";
 import { SendGate } from "./sending";
-import { findSpans, fold, queryTerms, step, tally } from "./search";
+import { findSpans, fold, queryTerms, scrollBy, step, tally } from "./search";
 import { type StartFrame, startView } from "./start";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -2113,7 +2113,7 @@ function drawnOf(block: HTMLElement): Drawn {
   const nodes: Drawn["nodes"] = [];
   let text = "";
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.parentElement?.closest(".thinking")) continue;
+    if (node.parentElement?.closest(".thinking, .file-gutter")) continue;
     nodes.push({ node: node as Text, from: text.length });
     text += node.nodeValue ?? "";
   }
@@ -2450,7 +2450,10 @@ let hits: Hit[] = [];
 let currentHit = -1;
 let searchTimer: number | undefined;
 
+/** What the view showing is searched over: the chat's replies, the open record or the open file. */
 function searchable(): HTMLElement[] {
+  if (currentView === "records") return openRecordDoc && !recordArticle.hidden ? [recordArticle] : [];
+  if (currentView === "files") return openFile?.text != null && !fileArticle.hidden ? [fileArticle] : [];
   return Array.from(chat.children).filter((node): node is HTMLElement => {
     const key = (node as HTMLElement).dataset?.key;
     return !!key && (key.startsWith("t:") || key.startsWith("r:"));
@@ -2458,6 +2461,13 @@ function searchable(): HTMLElement[] {
 }
 
 function indexed(element: HTMLElement) {
+  // A record's page or a file is drawn over again whole, so its text is read each time.
+  if (element === recordArticle || element === fileArticle) {
+    // The text of a fold not yet opened is searched too, and so is drawn, shut, before it is read.
+    element.querySelectorAll("details").forEach((fold) => unfilled.get(fold)?.());
+    const drawn = drawnOf(element);
+    return { drawn, folded: fold(drawn.text) };
+  }
   let entry = searchIndex.get(element);
   if (!entry) {
     const drawn = drawnOf(element);
@@ -2487,12 +2497,12 @@ function runSearch(keep?: { key: string; from: number }): void {
       const { drawn, folded } = indexed(element);
       for (const [from, to] of findSpans(drawn.text, terms, folded)) {
         const range = drawnRange(drawn, from, to);
-        if (range) found.push({ key: element.dataset.key!, from, range });
+        if (range) found.push({ key: element.dataset.key ?? element.id, from, range });
       }
     }
   }
-  // Newest first: the last hit of the page is the first.
-  hits = found.reverse();
+  // In the chat the newest is first: the last hit of the page is the first.
+  hits = currentView === "chat" ? found.reverse() : found;
   const kept = keep ? hits.findIndex((hit) => hit.key === keep.key && hit.from === keep.from) : -1;
   currentHit = kept >= 0 ? kept : hits.length ? Math.min(Math.max(currentHit, 0), hits.length - 1) : -1;
   if (keep && kept < 0 && hits.length) currentHit = 0;
@@ -2540,16 +2550,25 @@ function moveToHit(forward: boolean): void {
 function showHit(): void {
   const hit = hits[currentHit];
   if (!hit) return;
+  // A hit inside a fold the page keeps shut opens it, so that it is seen (KYO-754).
+  for (let node: Node | null = hit.range.startContainer; node; node = node.parentNode) {
+    if (node instanceof HTMLDetailsElement && !node.open) node.open = true;
+  }
   const rect = hit.range.getBoundingClientRect();
   const top = (document.getElementById("top")?.getBoundingClientRect().bottom ?? 0) + 24;
   const bottom = window.innerHeight - 24;
-  if (rect.top < top || rect.bottom > bottom) {
-    scroller.scrollTop += rect.top - (top + bottom) / 2 + rect.height / 2;
-  }
+  const pane = currentView === "records" ? recordsPane : currentView === "files" ? filesPane : scroller;
+  pane.scrollTop += scrollBy(rect.top, rect.bottom, top, bottom);
 }
 
+const FIND_PLACEHOLDERS: Record<string, string> = {
+  chat: "Search this chat", records: "Search this record", files: "Search this file",
+};
+
 function openSearch(): void {
-  if (currentView !== "chat") return;
+  if (currentView === "records" ? recordArticle.hidden : currentView === "files" ? fileArticle.hidden : false) return;
+  findField.placeholder = FIND_PLACEHOLDERS[currentView] ?? "Search";
+  findField.setAttribute("aria-label", findField.placeholder);
   findBar.hidden = false;
   findField.focus();
   findField.select();
@@ -2593,11 +2612,10 @@ findField.addEventListener("keydown", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "f" && event.metaKey && !event.ctrlKey && !event.altKey) {
-    if (currentView !== "chat") return;
     if (event.target instanceof Node && terminalPane.contains(event.target)) return;
     event.preventDefault();
     openSearch();
-  } else if (event.key === "Escape" && !findBar.hidden && currentView === "chat") {
+  } else if (event.key === "Escape" && !findBar.hidden) {
     closeSearch();
   }
 });
@@ -3183,6 +3201,7 @@ function showView(id: string): void {
   if (id === currentView) return;
   if (currentView === "chat") chatPlace = { top: scroller.scrollTop, following: atBottom() };
   for (const view of VIEWS) document.body.classList.toggle(`view-${view.id}`, view.id === id);
+  closeSearch();
   currentView = id;
   document.querySelectorAll<HTMLElement>("[data-view]").forEach((element) => {
     element.hidden = element.dataset.view !== id;
@@ -3632,8 +3651,12 @@ function recordItem(section: string, item: Item): HTMLElement {
     summary.textContent = folded.label;
     details.append(summary);
     // A brief is long, so it is drawn when it is first opened.
+    const fill = () => {
+      if (details.childElementCount === 1) details.append(prose(folded.text));
+    };
+    unfilled.set(details, fill);
     const draw = () => {
-      if (details.open && details.childElementCount === 1) details.append(prose(folded.text));
+      if (details.open) fill();
       if (details.open) openFolds.add(key);
       else openFolds.delete(key);
     };
@@ -3648,6 +3671,9 @@ function recordItem(section: string, item: Item): HTMLElement {
   linkQuietly(element);
   return element;
 }
+
+/** A fold whose body is drawn when it is first opened, with what draws it; a search draws it unopened (KYO-754). */
+const unfilled = new WeakMap<Element, () => void>();
 
 function drawRecord(): void {
   recordsLanding.hidden = openRecordId !== null;
@@ -3698,6 +3724,7 @@ function drawRecord(): void {
   }
   recordArticle.replaceChildren(...parts);
   recordsPane.scrollTop = place;
+  refreshSearch();
   if (revealRef) {
     const target = [...recordArticle.querySelectorAll<HTMLElement>("[data-ref]")]
       .find((element) => element.dataset.ref === revealRef);
@@ -4510,6 +4537,7 @@ function drawFile(): void {
   const code = fileArticle.querySelector(".file-code");
   if (code) code.scrollLeft = left;
   showFileLine(file);
+  refreshSearch();
 }
 
 /**

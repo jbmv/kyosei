@@ -64,3 +64,12 @@ export function tally(current: number, count: number, asked: boolean): string {
   if (!asked) return "";
   return count ? `${current + 1} of ${count}` : "No results";
 }
+
+/**
+ * How far a scroll must move to bring a hit into the band of the window between `top` and
+ * `bottom` (KYO-754): none when it is within, and otherwise what puts its middle at the band's.
+ */
+export function scrollBy(rectTop: number, rectBottom: number, top: number, bottom: number): number {
+  if (rectTop >= top && rectBottom <= bottom) return 0;
+  return rectTop - (top + bottom) / 2 + (rectBottom - rectTop) / 2;
+}

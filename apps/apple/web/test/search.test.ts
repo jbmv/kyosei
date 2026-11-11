@@ -1,7 +1,7 @@
 // Run with `npm test`. Search in the chat matches the drawn words, in any case, all terms at once.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findSpans, fold, queryTerms, step, tally } from "../src/search.ts";
+import { findSpans, fold, queryTerms, scrollBy, step, tally } from "../src/search.ts";
 
 const spansIn = (text: string, query: string) => findSpans(text, queryTerms(query));
 
@@ -52,4 +52,10 @@ test("the tally names the current hit and the count", () => {
   assert.equal(tally(1, 4, true), "2 of 4");
   assert.equal(tally(-1, 0, true), "No results");
   assert.equal(tally(-1, 0, false), "");
+});
+
+test("a hit within the band of the window needs no scroll, and one outside is brought to its middle", () => {
+  assert.equal(scrollBy(100, 120, 50, 500), 0);
+  assert.equal(scrollBy(600, 620, 50, 500), 600 - 275 + 10);
+  assert.equal(scrollBy(-200, -180, 50, 500), -200 - 275 + 10);
 });
