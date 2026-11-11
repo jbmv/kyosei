@@ -1272,6 +1272,8 @@ ERROR_CLASS_NAMES = frozenset(
         # command, by `tests/test_atomic_writes.py`.
         "ExportFileUnreadable",
         "PaneNotReady",
+        # KYO-810: a message whose keys were sent and whose submission the screen did not show.
+        "NotSubmitted",
         # KYO-719: `start`'s refusal of a session already running, a class of its own so
         # that kyo serve's start route answers it as a conflict.
         "AlreadyRunning",

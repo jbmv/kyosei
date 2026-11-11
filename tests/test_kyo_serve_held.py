@@ -571,6 +571,30 @@ def test_a_delivery_that_fails_midway_stays_held_is_not_retried_and_retracting_c
     assert held_now(bed, on) is None
 
 
+def test_a_message_typed_and_not_submitted_says_so_is_not_retried_and_retracting_clears_it(
+    bed: Bed, store_home: Path, monkeypatch: pytest.MonkeyPatch, on: str
+) -> None:
+    # KYO-810: a prompt was typed into the box, left there, and announced as delivered.
+    monkeypatch.setattr(session_layer.pane, "_SUBMIT_SECONDS", 0.2)
+    (bed.tmux_log.parent / "enter-ignored").touch()
+    held = hold(bed, on)
+    bed.show(IDLE)
+
+    found = waits_with(bed, on, "not-submitted")
+    assert found["retrying"] is False and found["state"] == "held"
+    assert "Enter did not submit it" in found["detail"]
+    assert "take the message back" in found["detail"]
+    rows = [row for row in log_rows(store_home) if row["action"] == "held-delivery"]
+    assert [(row["outcome"], row["reason"]) for row in rows] == [("failed", "not-submitted")]
+
+    # It is not typed a second time.
+    wait_until(lambda: bed.server.held_messages._thread is None)
+    assert len([r for r in log_rows(store_home) if r["action"] == "held-delivery"]) == 1
+
+    status, back = retract_of(bed, on, held)
+    assert status == 200 and held_now(bed, on) is None, back
+
+
 def test_a_screen_that_will_not_take_the_keys_keeps_it_held(
     bed: Bed, monkeypatch: pytest.MonkeyPatch, store_home: Path, on: str
 ) -> None:

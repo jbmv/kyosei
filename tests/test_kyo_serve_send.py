@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ import yaml
 
 import kyosei
 from kyosei import device_tokens, home_settings, serve_send
+from kyosei.harness import claude_code_pane
 
 from .conftest import invoke
 from .test_kyo_serve import body_json
@@ -432,6 +434,31 @@ def test_a_message_goes_as_ordered_typed_and_pasted_segments(bed: Bed, on: str) 
         "send-keys -t %1 -l -- more",
         "send-keys -t %1 Enter",
     ]
+
+
+def test_a_message_left_in_the_box_is_answered_as_not_submitted_and_enter_there_clears_it(
+    bed: Bed, store_home: Path, monkeypatch: pytest.MonkeyPatch, on: str
+) -> None:
+    # KYO-810: the route answered 200 for a prompt that sat typed in the box, unsubmitted.
+    monkeypatch.setattr(claude_code_pane, "_SUBMIT_SECONDS", 0.2)
+    ignored = bed.tmux_log.parent / "enter-ignored"
+    ignored.touch()
+
+    status, refused = post(bed, SEND, MESSAGE, on)
+
+    assert status == 502 and refused["reason"] == "not-submitted", refused
+    assert "press Enter in the session's terminal" in refused["error"]
+    assert [line.split(" ", 2)[2] for line in keys_sent(bed)][-2:] == ["send-keys -t %1 Enter"] * 2
+    (row,) = log_rows(store_home)
+    assert (row["outcome"], row["status"], row["reason"]) == ("failed", 502, "not-submitted")
+
+    # The remedy the answer names: Enter, pressed in the terminal, takes what was left.
+    ignored.unlink()
+    fake = bed.tmux_log.parent / "bin" / "tmux"
+    subprocess.run([str(fake), "-L", "default", "send-keys", "-t", "%1", "Enter"], check=True)
+    status, sent = post(bed, SEND, MESSAGE, on)
+    assert status == 200, sent
+    assert log_rows(store_home)[-1]["outcome"] == "sent"
 
 
 def test_a_message_is_sent_to_a_working_screen(bed: Bed, on: str) -> None:

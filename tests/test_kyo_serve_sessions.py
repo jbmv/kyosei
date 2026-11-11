@@ -164,12 +164,25 @@ def bed(project: Path, store_home: Path, tmp_path: Path, running) -> Bed:
     bin_dir.mkdir()
     fake = bin_dir / "tmux"
     pane_row = f"%%1\\t{os.getpid()}\\tfake\\n"
+    # The box holds a message's text from its keys until an Enter takes it (KYO-810): the
+    # layer reads the screen for both. `enter-ignored` is a pane whose Enter does not take.
+    # The box is kept in a statement of its own, since tests rewrite the `case "$*"` below.
+    holds = tmp_path / "box-holds-text"
+    (tmp_path / "typed.txt").write_text(
+        "─" * 100 + "\n❯ the message's text\n" + "─" * 100 + "\n  footer\n", encoding="utf-8"
+    )
     fake.write_text(
         "#!/bin/sh\n"
         f'printf "%s\\n" "$*" >> "{tmp_path / "tmux.log"}"\n'
+        'called="$*"\n'
+        'case "$called" in\n'
+        f'  *"send-keys -t"*" -l -- "*|*paste-buffer*) : > "{holds}" ;;\n'
+        f'  *"send-keys -t"*" Enter") [ -e "{tmp_path / "enter-ignored"}" ] || rm -f "{holds}" ;;\n'
+        "esac\n"
         'case "$*" in\n'
         f'  *list-panes*) printf "{pane_row}" ;;\n'
-        f'  *capture-pane*) cat "{tmp_path / "screen.txt"}" ;;\n'
+        f'  *capture-pane*) if [ -e "{holds}" ]; then cat "{tmp_path / "typed.txt"}"; '
+        f'else cat "{tmp_path / "screen.txt"}"; fi ;;\n'
         "esac\n",
         encoding="utf-8",
     )

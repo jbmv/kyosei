@@ -17,8 +17,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -617,22 +621,56 @@ def test_idle_screen_has_no_reply_in_progress() -> None:
 
 
 class FakeTmux:
-    """Answers ``capture-pane`` from a list of screens and records every command."""
+    """Answers ``capture-pane`` from a list of screens and records every command.
 
-    def __init__(self, screens: list[str]) -> None:
+    Once a message's text has been sent the box holds it, whatever the list says, until an
+    Enter takes it. ``enters_ignored`` Enters do not; ``draws_text=False`` is a box that
+    never shows what was sent; ``after_enter`` is the screen an Enter leaves in place of the box.
+    """
+
+    def __init__(
+        self,
+        screens: list[str],
+        *,
+        enters_ignored: int = 0,
+        draws_text: bool = True,
+        after_enter: str | None = None,
+    ) -> None:
         self.screens = list(screens)
         self.commands: list[tuple[tuple[str, ...], str | None]] = []
+        self.enters_ignored = enters_ignored
+        self.draws_text = draws_text
+        self.after_enter = after_enter
+        self.holds_text = False
+        self.entered = False
 
     def run(self, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
         if args[0] == "capture-pane":
-            shown = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
+            if self.entered and self.after_enter is not None:
+                shown = self.after_enter
+            elif self.holds_text and self.draws_text:
+                shown = SENT_BOX
+            else:
+                shown = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
             return subprocess.CompletedProcess(args, 0, shown, "")
         self.commands.append((args, input))
+        if args[0] == "paste-buffer" or (args[0] == "send-keys" and "-l" in args):
+            self.holds_text = True
+        elif args[0] == "send-keys" and args[-1] == "Enter":
+            self.entered = True
+            if self.enters_ignored:
+                self.enters_ignored -= 1
+            else:
+                self.holds_text = False
         return subprocess.CompletedProcess(args, 0, "", "")
+
+    def enters(self) -> int:
+        return sum(1 for c, _ in self.commands if c[0] == "send-keys" and c[-1] == "Enter")
 
 
 EMPTY_BOX = "─" * 100 + "\n❯ \n" + "─" * 100 + "\n  footer\n"
 FULL_BOX = "─" * 100 + "\n❯ leftover text\n" + "─" * 100 + "\n  footer\n"
+SENT_BOX = "─" * 100 + "\n❯ the message\n  its second line\n" + "─" * 100 + "\n  footer\n"
 
 
 def _no_sleep(_: float) -> None:
@@ -697,6 +735,187 @@ def test_clearing_gives_up_rather_than_sending() -> None:
     with pytest.raises(pane.PaneNotReady, match="would not clear"):
         pane.send_message(tmux, "%3", [pane.Typed("x")], sleep=_no_sleep)
     assert not any("-l" in c for c, _ in tmux.commands)
+
+
+def test_enter_is_pressed_again_on_a_box_that_still_holds_the_message() -> None:
+    # KYO-810: the keys were sent, the route answered 200, and the text sat in the box.
+    tmux = FakeTmux([EMPTY_BOX], enters_ignored=1)
+    pane.send_message(tmux, "%3", [pane.Typed("the message\nits second line")], sleep=_no_sleep)
+    assert tmux.enters() == 2 and not tmux.holds_text
+
+
+def test_a_message_submitted_at_once_gets_one_enter() -> None:
+    tmux = FakeTmux([EMPTY_BOX])
+    pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
+    assert tmux.enters() == 1
+
+
+def test_a_message_the_box_keeps_is_reported_and_left_there() -> None:
+    tmux = FakeTmux([EMPTY_BOX], enters_ignored=99)
+    with pytest.raises(pane.NotSubmitted, match="press Enter in the session's terminal"):
+        pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
+    assert tmux.enters() == 2
+    assert [c for c, _ in tmux.commands][-1] == ("send-keys", "-t", "%3", "Enter")  # not cleared
+
+
+def test_enter_is_not_pressed_on_a_box_that_never_shows_the_message() -> None:
+    # An Enter on an empty box submits nothing, and submits a suggestion when one is offered.
+    tmux = FakeTmux([EMPTY_BOX], draws_text=False)
+    with pytest.raises(pane.NotSubmitted, match="Enter was not pressed"):
+        pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
+    assert tmux.enters() == 0
+
+
+def test_a_prompt_only_a_turn_raises_is_a_submitted_message() -> None:
+    tmux = FakeTmux([EMPTY_BOX], after_enter=screen("permission-bash.txt"))
+    pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
+    assert tmux.enters() == 1
+
+
+def test_a_screen_that_replaces_the_box_is_reported_and_not_answered() -> None:
+    tmux = FakeTmux([EMPTY_BOX], after_enter=screen("usage.txt"))
+    with pytest.raises(pane.NotSubmitted, match="usage-panel"):
+        pane.send_message(tmux, "%3", [pane.Typed("the message")], sleep=_no_sleep)
+    assert tmux.enters() == 1
+
+
+# A stand-in for Claude Code's input box, run in a real tmux pane: the two rules, the ``❯``
+# line, ``M-Enter`` for a line break, ``C-u`` to clear, and an Enter that writes the box to a
+# file and empties it. Its first argument is how many Enters it ignores. It models what was
+# observed in KYO-810, an Enter that did not submit; the cause in Claude Code was not found.
+SCRIPTED_PANE = r"""
+import os, sys, termios, tty
+ignored, out = int(sys.argv[1]), sys.argv[2]
+tty.setraw(0)
+text = ""
+def draw():
+    lines = text.split("\n")
+    body = "\r\n".join(("❯ " if i == 0 else "  ") + line for i, line in enumerate(lines))
+    rule = "─" * 80 + "\r\n"
+    sys.stdout.write("\x1b[2J\x1b[H" + rule + body + "\r\n" + rule + "  footer\r\n")
+    sys.stdout.flush()
+draw()
+pending = b""
+while True:
+    pending += os.read(0, 4096)
+    keys = pending.decode("utf-8", "ignore")
+    pending = b""
+    i = 0
+    while i < len(keys):
+        key = keys[i]
+        if key == "\x1b" and keys[i + 1 : i + 2] == "\r":
+            text += "\n"
+            i += 1
+        elif key == "\r":
+            if ignored:
+                ignored -= 1
+            else:
+                with open(out, "a", encoding="utf-8") as handle:
+                    handle.write(text + "\x00")
+                text = ""
+        elif key == "\x15":
+            text = ""
+        elif key >= " ":
+            text += key
+        i += 1
+    draw()
+"""
+
+#: The prompt of KYO-810 in shape: an attachment line, two paragraphs, a blank line between.
+UNSUBMITTED_SHAPE = (
+    "attached /tmp/composer/attachments/project/0a1b2c3d-0000-4000-8000-000000000000/"
+    + "e9" * 32
+    + ".png\nWait, it should only be one item, I checked off the list, hopefully that shows "
+    "on your end and it’s not telling you about old items\n\nWe will be doing more too, "
+    "either next from the plan or the outstanding items, so I’ll do that  if you agree?"
+)
+
+
+class ScriptedPane:
+    """A private tmux server whose one pane runs :data:`SCRIPTED_PANE`."""
+
+    def __init__(self, directory: Path, *, enters_ignored: int) -> None:
+        binary = shutil.which("tmux")
+        assert binary is not None
+        env = {k: v for k, v in os.environ.items() if not k.startswith("TMUX")}
+        self.tmux = cmd_controller.Tmux(
+            binary, ("-S", str(directory / "sock"), "-f", "/dev/null"), {**env, "TERM": "xterm"}
+        )
+        self.submitted = directory / "submitted"
+        program = directory / "pane.py"
+        program.write_text(SCRIPTED_PANE, encoding="utf-8")
+        command = shlex.join(
+            [sys.executable, str(program), str(enters_ignored), str(self.submitted)]
+        )
+        started = self.tmux.run("new-session", "-d", "-s", "box", "-x", "100", "-y", "30", command)
+        assert started.returncode == 0, started.stderr
+        self.pane_id = self.tmux.run("list-panes", "-t", "=box:", "-F", "#{pane_id}").stdout.strip()
+        for _ in range(100):
+            if pane.classify(pane.capture(self.tmux, self.pane_id)).state == pane.IDLE:
+                return
+            time.sleep(0.05)
+        raise AssertionError(pane.capture(self.tmux, self.pane_id))
+
+    def messages(self) -> list[str]:
+        if not self.submitted.exists():
+            return []
+        return self.submitted.read_text(encoding="utf-8").split("\x00")[:-1]
+
+    def close(self) -> None:
+        self.tmux.run("kill-server")
+
+
+@pytest.fixture
+def scripted_pane(tmp_path: Path):
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+    opened: list[ScriptedPane] = []
+
+    def start(enters_ignored: int) -> ScriptedPane:
+        # A socket's path is short, and pytest's directories are not.
+        directory = Path(tempfile.mkdtemp(prefix="kyo-pane-", dir="/tmp"))
+        opened.append(ScriptedPane(directory, enters_ignored=enters_ignored))
+        return opened[-1]
+
+    yield start
+    for one in opened:
+        one.close()
+        shutil.rmtree(one.submitted.parent, ignore_errors=True)
+
+
+def test_the_unsubmitted_prompt_is_submitted_to_a_pane_whose_enter_did_not_take(
+    scripted_pane,
+) -> None:
+    # KYO-810.c2. Before the fix one Enter was pressed and nothing read the screen after it:
+    # the text stayed in the box, as it was found, and the send reported success.
+    box = scripted_pane(1)
+    pane.send_message(box.tmux, box.pane_id, [pane.Typed(UNSUBMITTED_SHAPE)])
+    assert box.messages() == [UNSUBMITTED_SHAPE]
+    assert pane.classify(pane.capture(box.tmux, box.pane_id)).input_text == ""
+
+
+def test_a_prompt_is_submitted_once_to_a_pane_that_takes_enter(scripted_pane) -> None:
+    box = scripted_pane(0)
+    message = [pane.Typed("first\nsecond "), pane.Pasted("pasted"), pane.Typed(" tail")]
+    pane.send_message(box.tmux, box.pane_id, message)
+    assert box.messages() == ["first\nsecond pasted tail"]
+
+
+def test_a_pane_that_never_takes_enter_is_reported_and_enter_there_submits(
+    scripted_pane,
+) -> None:
+    # KYO-810.c3, and the message's own remedy: Enter in the terminal submits what was left.
+    box = scripted_pane(2)
+    with pytest.raises(pane.NotSubmitted, match="press Enter in the session's terminal"):
+        pane.send_message(box.tmux, box.pane_id, [pane.Typed("left in the box")])
+    assert box.messages() == []
+    assert pane.classify(pane.capture(box.tmux, box.pane_id)).input_text == "left in the box"
+    box.tmux.run("send-keys", "-t", box.pane_id, "Enter")
+    for _ in range(100):
+        if box.messages():
+            break
+        time.sleep(0.05)
+    assert box.messages() == ["left in the box"]
 
 
 def test_slash_commands_are_sent_only_on_an_idle_screen() -> None:
