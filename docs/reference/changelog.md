@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-11** — `KYO-820` (task) — Mac app: a path in a reminder is a link to Files
 - **2026-11-11** — `KYO-819` (task) — Files search: names before contents across roots, documents first, one row per file
 - **2026-11-11** — `KYO-816` (task) — Mac app: search in Files over both roots, and the recently opened files
 - **2026-11-11** — `KYO-815` (task) — Mac app: the chat's side bar lists the chat's links, and the open view's name in the top bar goes home
