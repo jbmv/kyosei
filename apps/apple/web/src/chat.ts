@@ -119,8 +119,22 @@ function drawEnded(): void {
   sessionEnded = !!row && !row.live;
   endedAt = sessionEnded ? row?.ended_at ?? row?.last_seen ?? "" : null;
   document.body.classList.toggle("ended", sessionEnded);
+  drawEmptyChat();
   if (sessionEnded) document.getElementById("interrupt")!.hidden = true;
   drawWorking();
+}
+
+/** True once a batch of the followed session's turns has been drawn, even an empty one. */
+let turnsLoaded = false;
+
+/**
+ * KYO-752: a live session whose chat has no turns says it is waiting for its first prompt,
+ * so the empty window does not read as one that failed to load. It is not shown while the
+ * turns are still loading or for a session that has ended.
+ */
+function drawEmptyChat(): void {
+  const waiting = turnsLoaded && !sessionEnded && !!menu?.current && elements.size === 0 && !chat.childElementCount;
+  document.getElementById("empty-chat")!.hidden = !waiting;
 }
 
 /** What the last press of Start orchestrator came to, until a session is live again. */
@@ -1391,6 +1405,8 @@ function drawCommandOutput(output: CommandOutput): HTMLElement {
 
 const kyo = {
   clear(): void {
+    turnsLoaded = false;
+    drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();
     elements.clear();
@@ -1536,6 +1552,8 @@ const kyo = {
     for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.command_outputs]) {
       for (const item of list ?? []) if (item.at > latestAt) latestAt = item.at;
     }
+    turnsLoaded = true;
+    drawEmptyChat();
     drawWorking();
     log(`items ${elements.size}`);
   },
