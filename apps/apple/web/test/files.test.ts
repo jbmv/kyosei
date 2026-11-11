@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  HEAD_CHARS, NONE_STANDS_MS, answerOf, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
-  headOf, hrefPath, inOrder, languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned,
+  HEAD_CHARS, NONE_STANDS_MS, addressLink, answerOf, entriesOf, entryOf, fileKind, folderOf, foldersAbove, isPerSession,
+  headOf, hrefPath, inOrder, languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, webAddresses, withLink,
   pathSpans, rootLabel, rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
   withoutLine,
 } from "../src/files.ts";
@@ -407,4 +407,40 @@ test("a served file's path on the server's machine is its root's path and its ow
   assert.equal(serverPath(roots, "store", "docs/proposals/a.md"), "/work/store/docs/proposals/a.md");
   assert.equal(serverPath(roots, "code", ""), "/work/demo");
   assert.equal(serverPath(roots, "scratch", "a.md"), null);
+});
+
+// ---------------------------------------------------------------------- linked in this chat
+
+test("a record's link and a web address are links of the chat, each once and newest first", () => {
+  const record = addressLink("kyosei://KYO/KYO-810", "KYO-810", "2026-11-11T10:00:00Z", "KYO-810");
+  assert.deepEqual(record, {
+    key: "record:KYO-810", kind: "record", name: "KYO-810", place: "Record", at: "2026-11-11T10:00:00Z",
+    href: "kyosei://KYO/KYO-810",
+  });
+  const web = addressLink("https://example.org/a/b", "https://example.org/a/b", "2026-11-11T11:00:00Z", null);
+  assert.equal(web?.kind, "url");
+  assert.equal(web?.name, "example.org/a/b");
+  assert.equal(web?.place, "example.org");
+  const named = addressLink("https://example.org/", "the docs", "2026-11-11T11:00:00Z", null);
+  assert.equal(named?.name, "the docs");
+  let list = withLink([], record!);
+  list = withLink(list, web!);
+  list = withLink(list, { ...record!, at: "2026-11-11T12:00:00Z" });
+  assert.deepEqual(list.map((item) => item.key), ["record:KYO-810", "url:https://example.org/a/b"]);
+  list = withLink(list, { ...web!, at: "2026-11-11T09:00:00Z" });
+  assert.equal(list.find((item) => item.kind === "url")?.at, "2026-11-11T11:00:00Z", "an older link keeps the newer place");
+});
+
+test("a bare file name the renderer made an address of, and a link naming no record, are not links", () => {
+  assert.equal(addressLink("http://README.md", "README.md", "t", null), null);
+  assert.equal(addressLink("kyosei://KYO/nothing", "nothing", "t", null), null);
+  assert.equal(addressLink("mailto:a@b.c", "a@b.c", "t", null), null);
+  assert.notEqual(addressLink("http://example.org/x", "example.org/x", "t", null), null);
+});
+
+test("a prompt's web addresses are found without the punctuation around them", () => {
+  assert.deepEqual(
+    webAddresses("See https://example.org/notes, then (https://a.example/x) and http://b.example/w_(c)."),
+    ["https://example.org/notes", "https://a.example/x", "http://b.example/w_(c)"]);
+  assert.deepEqual(webAddresses("no address here, nor example.org"), []);
 });

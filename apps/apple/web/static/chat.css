@@ -1028,10 +1028,11 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 .mention-row:hover { background: var(--panel); }
 .mention-name, .mention-place { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-place { color: var(--muted); font-size: 12px; }
-#side #side-mentioned .mention-row, #side #side-mentioned .rec-empty { margin: 0 -10px; }
-#side #side-mentioned .rec-empty { padding: 0 10px; color: var(--muted); font-size: 14px; }
-#side-mentioned-more { color: var(--muted); }
-#side-mentioned-more[hidden] { display: none; }
+#side #side-linked .mention-row, #side #side-linked .rec-empty { margin: 0 -10px; }
+a.side-link, a.side-link:hover { display: block; color: inherit; text-decoration: none; }
+#side #side-linked .rec-empty { padding: 0 10px; color: var(--muted); font-size: 14px; }
+#side-linked-more { color: var(--muted); }
+#side-linked-more[hidden] { display: none; }
 
 /* The pane. Prose keeps the transcript's measure; a source file takes the pane's width. */
 .files-inner { padding: 22px 28px 40px; }

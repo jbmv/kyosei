@@ -8,9 +8,9 @@ import {
   sourceSpan, spanPlace,
 } from "./marks";
 import {
-  type Answer, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
-  answerOf, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
-  languageOf, lineCount, linkPlace, localPath, looksOutside, mentioned, nameOf, pathSpans, rootLabel,
+  type Answer, type ChatLink, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
+  addressLink, answerOf, dirKey, entriesOf, entryOf, fileKind, folderOf, foldersAbove, headOf, hrefPath, isDotfile, isPerSession,
+  languageOf, lineCount, linkPlace, localPath, looksOutside, webAddresses, withLink, mentioned, nameOf, pathSpans, rootLabel,
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
 import { highlight, render } from "./pipeline";
@@ -257,13 +257,17 @@ function icon(kind: keyof typeof ICONS): SVGElement {
  * Fills the three bare icons of a view's top bar, once, and wires them to what each does.
  * `can` says whether Back and Forward have somewhere to go, so the others are dimmed.
  */
+/** Each view's Home button, which a press on the view's own name in the top bar also presses. */
+const homeButtons = new Map<string, HTMLButtonElement>();
+
 function navIcons(prefix: string, steps: { home: () => void; back: () => void; forward: () => void }): void {
   for (const kind of ["home", "back", "forward"] as const) {
-    const button = document.getElementById(`${prefix}-${kind}`)!;
+    const button = document.getElementById(`${prefix}-${kind}`)! as HTMLButtonElement;
     button.replaceChildren(icon(kind));
     button.addEventListener("click", () => {
-      if (!(button as HTMLButtonElement).disabled) steps[kind]();
+      if (!button.disabled) steps[kind]();
     });
+    if (kind === "home") homeButtons.set(prefix, button);
   }
 }
 
@@ -1445,6 +1449,7 @@ const kyo = {
     lastMainActivity = "";
     chat.replaceChildren();
     elements.clear();
+    drawChatLinksSoon();
     rendered.clear();
     calls.clear();
     diffs.clear();
@@ -1577,6 +1582,7 @@ const kyo = {
       }
       for (const agent of batch.subagents ?? []) subagents.set(agent.agent_id, agent);
       arrange();
+      drawChatLinksSoon();
       paintAnchors();
       refreshSearch();
     });
@@ -3995,7 +4001,11 @@ function drawViews(): void {
     item.className = "view-item";
     if (view.id === currentView) item.setAttribute("aria-current", "page");
     item.append(icon(view.icon), view.name);
-    item.addEventListener("click", () => showView(view.id));
+    // The open view's own name goes to its home, as its Home button does (2026-11-11).
+    item.addEventListener("click", () => {
+      if (view.id === currentView) homeButtons.get(view.id)?.click();
+      else showView(view.id);
+    });
     return item;
   }));
 }
@@ -4823,8 +4833,9 @@ const pathContext = new WeakMap<HTMLElement, { mention: boolean }>();
 const relinkWaiting = new Set<HTMLElement>();
 let relinkTimer: number | undefined;
 let mentions: Mention[] = [];
-let allMentions = false;
-const MENTIONS_SHOWN = 6;
+let chatLinks: ChatLink[] = [];
+let allLinks = false;
+const LINKS_SHOWN = 6;
 const PATH_SKIPPED = "a, button, pre, summary, textarea, .katex, .thinking";
 
 function knownPath(given: string): Answer | null {
@@ -4962,7 +4973,10 @@ function relinkSoon(holders: Iterable<HTMLElement>): void {
       inChat ||= chat.contains(holder);
     }
     // A link splits the text it is made in, which the painted anchors were measured against.
-    if (inChat) paintAnchors();
+    if (inChat) {
+      paintAnchors();
+      drawChatLinksSoon();
+    }
   }, 0);
 }
 
@@ -5157,18 +5171,97 @@ function mentionRow(item: Mention, index: number): HTMLElement {
   return row;
 }
 
-/** The files mentioned in the session, newest first, in the chat's side bar and in Files'. */
+/** The files mentioned in the session, newest first, in Files' side bar. */
 function drawMentions(): void {
   const rows = mentions.map(mentionRow);
   fill(
     document.getElementById("files-mentioned")!,
     rows.length ? rows : [emptyRow("No file has been mentioned.")]);
-  const short = allMentions ? mentions : mentions.slice(0, MENTIONS_SHOWN);
-  document.getElementById("side-mentioned")!.replaceChildren(
-    ...(short.length ? short.map(mentionRow) : [emptyRow("None yet.")]));
-  const more = document.getElementById("side-mentioned-more")!;
-  more.hidden = mentions.length <= MENTIONS_SHOWN;
-  more.textContent = allMentions ? "Show fewer" : `See all ${mentions.length}`;
+}
+
+/**
+ * The link an anchor of a prompt or a reply is, when it is one the side bar lists: a path the
+ * server has placed, a record or a web address. A path still unanswered is not yet a link.
+ */
+function anchorLink(anchor: HTMLAnchorElement, at: string): ChatLink | null {
+  if (anchor.classList.contains("path-link")) {
+    const given = anchor.dataset.given ?? "";
+    const answer = given ? pathAnswers.get(given)?.answer : null;
+    if (answer?.kind === "file" && answer.type !== "dir") {
+      const folder = folderOf(answer.path);
+      return {
+        key: `file:${answer.root}:${answer.path}`, kind: "file",
+        name: `${nameOf(answer.path)}${answer.line ? `:${answer.line}` : ""}`,
+        place: `${rootLabel(answer.root)}${folder ? ` · ${folder}` : ""}`, at, href: "#", given,
+      };
+    }
+    if (answer?.kind === "outside") {
+      return {
+        key: `outside:${answer.path}`, kind: "outside", name: nameOf(answer.path),
+        place: "Outside the served folders", at, href: "#", given,
+      };
+    }
+    return null;
+  }
+  if (anchor.dataset.local !== undefined) return null;
+  const href = anchor.getAttribute("href") ?? "";
+  return addressLink(href, anchor.textContent ?? "", at, parseLink(href)?.ref ?? null);
+}
+
+/**
+ * The links in the chat's own words (2026-11-11): the person's prompts and the assistant's
+ * replies as drawn, not a subagent's hand-back, a command's output or a reply's thinking.
+ */
+function readChatLinks(): ChatLink[] {
+  let list: ChatLink[] = [];
+  for (const [key, element] of elements) {
+    if (!(key.startsWith("t:") || key.startsWith("r:")) || !element.isConnected) continue;
+    const at = element.dataset.at ?? "";
+    for (const anchor of Array.from(element.querySelectorAll<HTMLAnchorElement>("a[href]"))) {
+      if (anchor.closest(".thinking")) continue;
+      const item = anchorLink(anchor, at);
+      if (item) list = withLink(list, item);
+    }
+    // A prompt is drawn as plain text, so an address the person wrote out is no anchor.
+    if (key.startsWith("t:")) {
+      for (const address of webAddresses(sources.get(key) ?? "")) {
+        const item = addressLink(address, address, at, null);
+        if (item) list = withLink(list, item);
+      }
+    }
+  }
+  return list;
+}
+
+function linkRow(item: ChatLink): HTMLElement {
+  const row = document.createElement("a");
+  row.className = item.given ? "mention-row side-link path-link" : "mention-row side-link";
+  row.setAttribute("href", item.href);
+  if (item.given) row.dataset.given = item.given;
+  row.dataset.kind = item.kind;
+  row.title = item.kind === "url" ? item.href : item.place;
+  row.append(span("mention-name", item.name), span("mention-place", item.place));
+  return row;
+}
+
+/** The chat's links, newest first, in the chat's side bar. */
+function drawChatLinks(): void {
+  chatLinks = readChatLinks();
+  const short = allLinks ? chatLinks : chatLinks.slice(0, LINKS_SHOWN);
+  document.getElementById("side-linked")!.replaceChildren(
+    ...(short.length ? short.map(linkRow) : [emptyRow("None yet.")]));
+  const more = document.getElementById("side-linked-more")!;
+  more.hidden = chatLinks.length <= LINKS_SHOWN;
+  more.textContent = allLinks ? "Show fewer" : `See all ${chatLinks.length}`;
+}
+
+let linksTimer: number | undefined;
+function drawChatLinksSoon(): void {
+  if (linksTimer !== undefined) return;
+  linksTimer = window.setTimeout(() => {
+    linksTimer = undefined;
+    drawChatLinks();
+  }, 250);
 }
 
 let mentionsTimer: number | undefined;
@@ -5855,9 +5948,9 @@ fileArticle.addEventListener("contextmenu", (event) => {
     kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}),
   });
 });
-document.getElementById("side-mentioned-more")!.addEventListener("click", () => {
-  allMentions = !allMentions;
-  drawMentions();
+document.getElementById("side-linked-more")!.addEventListener("click", () => {
+  allLinks = !allLinks;
+  drawChatLinks();
 });
 
 drawViews();
@@ -5866,5 +5959,6 @@ drawRecordLists();
 drawFilesSide();
 drawFile();
 drawMentions();
+drawChatLinks();
 
 (window as any).kyo = Object.assign(kyo, recordFrames, fileFrames);

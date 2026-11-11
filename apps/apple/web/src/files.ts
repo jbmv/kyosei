@@ -433,6 +433,85 @@ export function mentioned(list: Mention[], item: Mention): Mention[] {
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
+// ------------------------------------------------------------------ linked in this chat
+
+/**
+ * A link in a prompt or a reply of the chat, as the chat's side bar lists it (2026-11-11):
+ * a served file, a path outside the served folders, a record or a web address. Unlike
+ * `Mention`, which Files lists, it counts only what the chat shows as the person's and the
+ * assistant's words, never a subagent's hand-back or a command's output.
+ */
+export interface ChatLink {
+  /** What makes two links one: the file's root and path, the outside path, the record, the address. */
+  key: string;
+  kind: "file" | "outside" | "record" | "url";
+  name: string;
+  place: string;
+  /** When the message holding it was written. */
+  at: string;
+  /** The address the row follows: `#` for a path, which is followed by `given`. */
+  href: string;
+  /** For a path, the words the chat gave it, by which the server's answer is found. */
+  given?: string;
+}
+
+/** The list after one more link: each once, under its latest message, newest message first. */
+export function withLink(list: ChatLink[], item: ChatLink): ChatLink[] {
+  const before = list.find((other) => other.key === item.key);
+  const kept = before && before.at > item.at ? before : item;
+  // A later link of the same message goes after the earlier, so a message reads in order.
+  return [...list.filter((other) => other.key !== item.key), kept]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+/**
+ * The link an anchor of the chat is, when it is a record or a web address. A file's link is
+ * made from the server's answer instead. The renderer makes a web address of a bare file name
+ * such as `README.md`, since `.md` is also a country's domain; such an address is no link
+ * the writer meant and gives null. `record` is the record id the address names, if any.
+ */
+export function addressLink(
+  href: string, text: string, at: string, record: string | null,
+): ChatLink | null {
+  if (/^\s*kyosei:/i.test(href)) {
+    return record
+      ? { key: `record:${record}`, kind: "record", name: text.trim() || record, place: "Record", at, href }
+      : null;
+  }
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const shown = text.trim();
+  if (href === `http://${shown}` && !shown.includes("/")) return null;
+  const bare = `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
+  const name = shown && shown !== href ? shown : bare;
+  return { key: `url:${url.href}`, kind: "url", name, place: url.host, at, href };
+}
+
+/**
+ * The web addresses written out in a prompt's text, which the chat draws as plain text: each
+ * `http://` or `https://` run up to a space, without the punctuation that ends a sentence.
+ */
+export function webAddresses(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(/\bhttps?:\/\/[^\s<>"'`]+/g)) {
+    let address = match[0].replace(/[.,;:!?]+$/, "");
+    // A closing bracket belongs to the address only when it opened one.
+    while (/[)\]]$/.test(address)) {
+      const close = address.endsWith(")") ? ")" : "]";
+      const open = close === ")" ? "(" : "[";
+      if (address.split(open).length >= address.split(close).length) break;
+      address = address.slice(0, -1).replace(/[.,;:!?]+$/, "");
+    }
+    found.push(address);
+  }
+  return found;
+}
+
 // ------------------------------------------------------------- a path on this machine
 
 /** A prefix of a path on the server's machine, and what it stands for on this one. */
