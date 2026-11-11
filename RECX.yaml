@@ -48,7 +48,7 @@ modules:
         - "kyo report DISPATCH_ID --file FILE [--check]"
         - "kyo accept DISPATCH_ID [--reviewed] [--close]"
         - "kyo verify CRITERION_ID --verdict VERDICT --method METHOD --evidence-file FILE"
-        - "kyo docs {assemble,check,index,obligations,preview,settle,suggest}"
+        - "kyo docs {assemble,check,coverage,index,obligations,preview,settle,suggest}"
         - "kyo brief"
         - "kyo sweep [--hook]"
         - "kyo doctor [--hook]"
