@@ -262,9 +262,10 @@ def per_project_upgrade_step(root: Path) -> str:
     return (
         f"{PER_PROJECT_UPGRADE_COMMANDS} -- except in this checkout, which is the "
         f"SOURCE of what those commands install ({scaffold.PACKAGED_ASSET_SOURCE_DIR} "
-        "is here). Two of the three would write an older build's copies over the newer "
-        "text in this repository, and refuse to; `kyo doctor` says which files have "
-        "moved apart and how to bring them together (KYO-309, KYO-318)"
+        "is here). Each of the three would write an older build's copy over the newer "
+        "text in this repository, and refuses to while its copy is behind; `kyo doctor` "
+        "says which files have moved apart and how to bring them together (KYO-309, "
+        "KYO-318)"
     )
 
 

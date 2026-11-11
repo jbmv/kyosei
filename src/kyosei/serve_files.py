@@ -1,11 +1,16 @@
 """``kyo serve``'s write boundary: every file it touches, in one module (KYO-456).
 
 Ported once from the desktop app's ``assertWritable`` (``apps/desktop/README.md``, "The one
-write path"). Law 12: the structured store is read-only from every viewer, and the
-ideas layer is writable from anywhere -- so the server, where every remote viewer's
-writes land, is where that line has to hold.
+write path"). Law 12: no viewer changes a record, and the ideas layer is writable from
+anywhere -- so the server, where every remote viewer's writes land, is where that line
+has to hold. The law's one exception is not in this module: a person's notes are filed
+in the structured store by the note routes (:mod:`kyosei.serve_notes`, KYO-706), through
+the transaction ``kyo notes`` uses and for a device token holding the ``notes``
+permission. That is a store write and no file write, so every file the server writes
+still goes through here, and every other served command runs on a store opened
+read-only.
 
-WHAT IS WRITABLE. Exactly two things per project:
+WHAT IS WRITABLE AS A FILE. Exactly two things per project:
 
 - files under the project's ``ideas/`` (the store root's, which is the project root
   under the in-repo layout and the store directory under the split one -- the same

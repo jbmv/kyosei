@@ -40,7 +40,7 @@ Kyosei never answers it and never pre-trusts a folder by writing `~/.claude.json
 start still says the session has not registered with Remote Control yet and where to
 look.
 
-**The command is a machine setting: `controller_command` in
+**The command is a machine setting: `orchestrator_command` in
 `$KYOSEI_HOME/settings.yml`** (`~/kyosei/settings.yml` by default; KYO-462). It is
 a list of arguments, and the literal `{prefix}` in any of them is replaced by the
 project's prefix. With no file, or no key, the command is `claude` with no
@@ -49,25 +49,25 @@ give it Chrome, write:
 
 ```yaml
 # ~/kyosei/settings.yml
-controller_command: ["claude", "--chrome", "--remote-control", "{prefix}"]
+orchestrator_command: ["claude", "--chrome", "--remote-control", "{prefix}"]
 ```
 
-Since KYO-519 the key is also spelled `orchestrator_command`, and this build reads
-either; both with different values is refused by name. Rename it by hand on a machine
-only once that machine's `kyo` is at least KYO-519, because an older one refuses the new
-spelling and `kyo orchestrator start` fails there. Nothing writes this file.
+Before KYO-519 the key was spelled `controller_command`, and that spelling is still read;
+both with different values is refused by name. A `kyo` older than KYO-519 refuses
+`orchestrator_command`, and `kyo orchestrator start` fails there, so a machine running one
+keeps the older spelling until it is upgraded. Nothing writes this file.
 
 The setting belongs to the machine, so it is never read from or written to a
 project's `kyosei/config.yml`. An unknown key there is refused by an older
 installed build, which blinds every hook in that project (KYO-335). A malformed
 `settings.yml` is refused by name, with the value that works. That covers a file
-that is not YAML, a `controller_command` that is not a non-empty list of strings,
+that is not YAML, an `orchestrator_command` that is not a non-empty list of strings,
 and a key this build does not know. Fix the file, or remove it to run `claude`
 alone. A session already running keeps the command it was started with. The new
 value applies from the next `start`.
 
 Every session lives on one dedicated tmux server, `tmux -L kyosei`, and the
-program is `zsh -lc 'exec <controller_command>'`. Both choices come from measurement on
+program is `zsh -lc 'exec <orchestrator_command>'`. Both choices come from measurement on
 macOS (KYO-458.m1). A process started directly in an SSH login cannot read the
 login keychain, where claude keeps its credentials. A session created over SSH
 inside a server that was already running from the desktop login can read it,
@@ -103,23 +103,43 @@ which ends its server and every orchestrator session in it, and removes the file
 `kyo serve` serves every project this machine knows to any viewer, over plain HTTP
 on loopback. The projects are the ones `kyo projects list` shows
 (`$KYOSEI_HOME/projects.json`), read afresh on every request. `kyo init` adds the
-project it creates, and `kyo projects add|remove` edits the list. A viewer can read
-everything the CLI's `--json` reads. It can write exactly two things in each project:
-files under its `ideas/`, and its session scratchpad. Nothing else is writable: no
-record, no promotion, no export. One
-module holds that line, `src/kyosei/serve_files.py`. The exception is sending input to a live
-session, which is off by default (see "Sending input" below). The server starts one kind of
-process and no other: a project's orchestrator session, for a device whose token allows it
-(see "Starting an orchestrator session" below, KYO-718). Beside the command reads, it serves
-one more thing read-only: a governed document's text, at
-`/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
-(KYO-467) -- a source file, `kyosei/` or a `..` is refused. A project that has opted in to
-reading transcripts also has its sessions served, read-only, to a device that presents a
-device token (see "Reading sessions" below).
+project it creates, and `kyo projects add|remove` edits the list.
 
-A device whose token holds the `files` permission can also read the files of a project's code
-and store repositories, as git shows them (see "Reading a project's files" below, KYO-735).
-Without that token the server reads no file but the ones named above.
+What a request may do depends on whether it carries a device token, which `kyo devices`
+issues on the machine itself.
+
+**Without a token**, a viewer can read everything the CLI's `--json` reads, each command
+run on a store opened read-only, and a governed document's text, at
+`/v1/projects/<name>/docs/<path>`, for a file `kyo docs check` lists and no other
+(KYO-467) -- a source file, `kyosei/` or a `..` is refused. It can write two things in each
+project: files under its `ideas/`, and its session scratchpad. One module,
+`src/kyosei/serve_files.py`, writes every file the server writes.
+
+**With a token**, a device can also do the following, each by a permission its token holds
+(see "Which routes need a device token" below):
+
+- read a project's Claude Code sessions, where the project has opted in to reading
+  transcripts; a token of any permission, or of none, is enough (see "Reading sessions");
+- send input to a live session, which is off until the machine's `serve_send` setting turns
+  it on (see "Sending input"), and keep the composer's drafts, held messages, attachments
+  and a session's task list in files under `$KYOSEI_HOME/composer/`;
+- file a person's notes in the store, change their tags and record that a note was sent,
+  which are the only writes the server makes to a store (see "Notes");
+- start a project's orchestrator session, which is the only process the server starts (see
+  "Starting an orchestrator session", KYO-718);
+- draw a session's terminal and type into it (see "A terminal on a session's pane");
+- read the files of a project's code and store repositories, as git shows them (see
+  "Reading a project's files", KYO-735). Without that permission the server reads no file
+  but the ones named above.
+
+No route changes a record. A record's status, criteria, verdicts, gates and links are
+written by the CLI alone, and no route promotes an idea.
+
+Two clients of these routes are in this repository. The desktop app described at the end
+of this page sends no token and uses only the routes that need none. The native Mac app
+under [`apps/apple/`](../../../apps/apple/README.md) uses the session, send, note, terminal
+and file routes with a device token; it is built for the maintainer's own devices and is
+not distributed.
 
 **In the foreground**, for a session or a trial:
 
@@ -167,9 +187,11 @@ kyo serve --restart       # the installed agent
 ```
 
 **Loopback only, with no override.** `kyo serve` binds `127.0.0.1` (or `::1` with
-`--bind ::1`) and refuses any other address. It has no TLS, no password and no token,
-so a LAN bind would make every device on the LAN a reader of every project and a writer
-of every `ideas/`. Loopback does not stop a web page in your own browser, so three
+`--bind ::1`) and refuses any other address. It has no TLS, and the routes that read
+records and documents and that read and write `ideas/` and the scratchpad ask for no
+password and no token, so a LAN bind would make every device on the LAN a reader of every
+project and a writer of every `ideas/`. Loopback does not stop a web page in your own
+browser, so three
 checks stand in front of every route:
 
 - **Host.** A request whose `Host` is not `127.0.0.1`, `localhost`, `[::1]` or a name
@@ -186,11 +208,14 @@ checks stand in front of every route:
 
 **Other accounts on this machine can reach it.** A loopback port is open to every
 user logged in to the machine, not only to you. Any process under another account can
-read every project you serve and write every `ideas/` and scratchpad, and those writes
-run as you. On a single-user Mac that is nobody else. On a machine other people log in
-to, it is them too. Kyosei states this rather than engineering around it. The routes that
-need a device token are the exception: another account reads no session, sends nothing and
-reads no source file without one (see "Which routes need a device token" below).
+read the records and governed documents of every project you serve and write every
+`ideas/` and scratchpad, and those writes run as you. On a single-user Mac that is nobody
+else. On a machine other people log in to, it is them too. Kyosei states this rather than
+engineering around it. The routes that need a device token are the exception: without one,
+another account reads no session turn, screen or image, sends nothing, files no note,
+starts no session and reads no source file (see "Which routes need a device token" below).
+The command route `cmd/sessions` is not one of those routes, and is described under that
+table.
 
 ### Reading sessions: the session routes (KYO-689)
 
@@ -232,7 +257,18 @@ request it can set headers on.
 | `files/...` | `files` |
 
 The routes in the first row answer any request that passes the Host and Origin checks, as
-they did before the session routes asked for a token.
+they did before the session routes asked for a token. The send and terminal routes also need
+`serve_send: true` in the machine's settings.
+
+**One command route describes sessions without a token.** `cmd/sessions` is
+`kyo sessions --json`, a served command like any other in the first row. It prints the
+project's `sessions.json`: for each recorded session its id, state, working directory,
+process id and host, the times it was first and last seen, its claude.ai Remote Control
+URL when it has one, and the paths of its transcript and scratchpad directory. It prints no
+turn, no pane text and no image, and it answers whether or not the project has opted in to
+reading transcripts. Whether this route should ask for a token is left to the security
+audit of `kyo serve` (KYO-697). Until then, a reader admitted to the server can list a
+project's sessions by this route.
 
 A client reads Kyosei's own objects: a Claude Code transcript row is never in a response,
 because that format is not a published interface and changes between releases.
@@ -475,7 +511,7 @@ the route that holds the message, so neither shows that the session is still bei
 
 | Frame | `data` |
 |---|---|
-| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`: the state when the stream opened |
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`, `held`, `agenda`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` is `{"etag": ...}` |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
 | `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, or new usage limits saved by any session change them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
@@ -485,6 +521,8 @@ the route that holds the message, so neither shows that the session is still bei
 | `event: reset` | `session_id`: the transcript does not match the stream's position; read `/turns` again |
 | `event: error` | `error`: a pass over the session failed. Sent once for a failure that repeats, and after `ready` to a client that connects while it lasts. Reading goes on, and rows read before the failure are sent by the pass that next succeeds. With `stopped: true` the session's reader has ended or has been stuck for 30 seconds: the stream then ends, and the next connection starts a new reader |
 | `event: resumed` | `session_id`: a pass has succeeded after an `error` frame; sent before that pass's own frames |
+| `event: held` | `outcome` (`held`, `delivered`, `retracted`), `id` and the held message's description, without its text (see "Saved drafts and held messages") |
+| `event: agenda` | `session_id`, `etag`: the session's task list was saved; no item is carried (see "A session's task list") |
 
 A `transcript` frame carries the id of its `cursor`, so a client that reconnects with
 `Last-Event-ID`, or that passes `?cursor=`, is sent what it missed first; objects sent twice
@@ -525,7 +563,22 @@ kyo devices revoke my-ipad                    # refused from the next request on
 The file `$KYOSEI_HOME/device-tokens.json` holds each token's SHA-256 digest and never the
 token. A token is sent as `Authorization: Bearer <token>`; a route refuses a query string, so
 that a token cannot reach the server's request log. A token applies to every project this
-server serves. Revoking and issuing again is how a permission is changed.
+server serves.
+
+A live token's permissions are changed in place, and the token itself stays the same, so
+nothing is entered again on the device (KYO-747):
+
+```
+kyo devices grant my-ipad --permission notes    # add one permission
+kyo devices revoke my-ipad --permission send    # remove one; the token stays live
+kyo devices issue my-mac --token-only | pbcopy   # a new device; prints the token alone
+```
+
+`grant` and `revoke` take the device's name or an id from `kyo devices list`, and a change
+applies from the next request. Each permission added or removed in this way is appended to
+`$KYOSEI_HOME/device-log.jsonl`, with the time, the device, the permissions changed and the
+permissions it then holds, and never a token or a digest. A token that was revoked whole is
+not changed again; a new one is issued.
 
 Each route is a POST with a JSON body, under `/v1/projects/<name>/sessions/<id>/`. The project
 must have opted in to reading transcripts and must record the session, as for the read routes.
@@ -590,6 +643,10 @@ a writer holding an older etag is refused with 412 and the current etag, so one 
 overwrite another's newer draft. The etag covers the stored file, including the time of the
 write. A box may carry keys beside `text`; the server keeps them unread. Sending need not be
 switched on, since a draft does not touch a session.
+
+A draft, a held message or a task list whose file cannot be read or written is refused with
+500 and the `reason` `composer-state-unusable`; the message names the file or the directory
+and nothing is stored.
 
 **The project's draft** (KYO-763) holds the boxes written while no session of the project is
 live, so that a prompt written between sessions on one device is found on another. It is
@@ -674,7 +731,9 @@ server was delivering when it stopped.
 message is not delivered. It waits for any delivery already in flight, so it either returns the text or is
 refused with 404 `not-held`, never both; `not-held` also answers a message already delivered
 or taken back. `If-Match` is required and must name the held message (428 without it, 412 if it
-names another), so a device cannot take back a newer message it has not seen. Retracting
+names another, each with the `reason` `wrong-held-id` and the held message's id as
+`held_id`), so a device cannot take back a newer message it has not seen. Send now refuses
+in the same way. Retracting
 works while sending is off.
 
 The send log records holds, retractions and deliveries with the actions `hold`, `retract` and
@@ -912,8 +971,8 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 **A record and a served file (KYO-737).** A record's line carries the id of the record or of
 the element, and the first six words the element holds when the message is made: a record's
 title, a criterion's or a note's text, a claim's statement, a gate's detail. A dispatch has no
-words of its own and its line is the id alone. `kyo show` reads a record's id and a dispatch's;
-a criterion, gate, note or claim is printed by `kyo show` of the record its id begins with. An
+words of its own and its line is the id alone. `kyo show` reads each of these ids itself: a
+record's, a dispatch's, and a criterion's, gate's, note's or claim's (KYO-739). An
 id the store does not hold is refused when the message is held, naming the command that lists
 the ids.
 
@@ -1099,7 +1158,8 @@ Both routes only read, and open the store read-only as `GET notes` does.
 Refusals carry a `reason`: `no-token`, `unknown-token`, `revoked-token`, `no-notes-permission`,
 `bad-request`, `not-found`, `store-locked`, `store-refused`, and on `send-notes` also
 `note-redacted` and `note-unsendable` (a control character in a filed note), on
-`send-prompt` `no-send-permission`, plus those of the held route.
+`send-prompt` `no-send-permission`, plus those of the held route. An anchor to lines of a
+served file that is not text is refused with 415 and `not-text`.
 
 ### Starting an orchestrator session: the start route (KYO-719)
 
@@ -1127,8 +1187,8 @@ kyo devices issue my-ipad --permission start --permission send --permission note
 ```
 
 `start` is a permission of its own, so a token issued to type into a session or to file notes
-does not start a process. A token is changed by revoking it and issuing another. The route
-does not ask for the `serve_send` setting, which governs keys sent to a session.
+does not start a process. `kyo devices grant <name> --permission start` adds it to a token
+already issued. The route does not ask for the `serve_send` setting, which governs keys sent to a session.
 
 Nothing else is served under `orchestrator/`. No route stops a session, attaches to one or
 lists them, and the `orchestrator` command is refused by name on the command route. A session
@@ -1173,8 +1233,9 @@ permission of their own:
 kyo devices issue my-mac --permission terminal --permission send --permission notes
 ```
 
-A token holding only `send` is refused with `no-terminal-permission`. A token is changed by
-revoking it and issuing another. The routes also need `serve_send: true` in
+A token holding only `send` is refused with `no-terminal-permission`;
+`kyo devices grant <name> --permission terminal` adds the permission to a token already
+issued. The routes also need `serve_send: true` in
 `$KYOSEI_HOME/settings.yml`, since a connection types, and the project's opt-in to reading
 transcripts, as the read routes do. The token is sent as `Authorization: Bearer <token>`; the
 stream's query string takes only the size of the client's view.
@@ -1245,7 +1306,8 @@ kyo devices issue my-ipad --permission files --permission send
 ```
 
 `files` is a permission of its own, so a token issued to type into a session or to file notes
-does not read source. A token is changed by revoking it and issuing another. The token is
+does not read source. `kyo devices grant <name> --permission files` adds it to a token
+already issued. The token is
 checked before the path, so a request without the permission learns nothing about any path.
 The routes do not ask for the `serve_send` setting, and they write nothing.
 
@@ -1381,12 +1443,18 @@ curl https://<devbox>.<tailnet>.ts.net/v1/projects
 ```
 
 **Never run `tailscale funnel` on this port. Funnel publishes it to the whole internet,
-and `kyo serve` has no password.** Serve reaches your tailnet only. Funnel is the one
-command that turns this recipe into a public, unauthenticated reader of every project.
+and the routes that read records ask for no password.** Serve reaches your tailnet only.
+With Funnel, anyone on the internet could read every project's records and governed
+documents and write every `ideas/` and scratchpad; the routes that need a device token
+would still refuse a request without one.
 
 **Restrict it to yourself with an access rule.** With Serve on, anyone the tailnet's
-policy lets reach `<devbox>`'s port 443 can read every served project and write every
-`ideas/` and scratchpad. Nothing more: no store write, and no process started. On a
+policy lets reach `<devbox>`'s port 443 can read the records and governed documents of
+every served project, list a project's sessions through `cmd/sessions`, and write every
+`ideas/` and scratchpad. Without a device token that is all: such a reader sees no session
+turn, screen or image, sends nothing to a session, files no note, starts no process and
+reads no source file (see "Which routes need a device token" above). A device you issued
+a token to can do what its permissions allow from anywhere on the tailnet. On a
 tailnet only you are in, that is your own devices. On a tailnet shared with anyone
 else, give only yourself the ports. In the admin console's **Access controls**, name
 the machine by its tailnet address (`tailscale ip -4` on `<devbox>`) and write a grant:

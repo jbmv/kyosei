@@ -308,8 +308,9 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # KYO-453: the loopback HTTP server over this table's own read
     # commands. PROJECT_NONE: one server answers for every project in the machine's
     # registry, named per request, so no project is resolved at start. Not in
-    # MUTATING_COMMANDS: it opens every store read-only and runs only
-    # `serve.SERVED_COMMANDS`.
+    # MUTATING_COMMANDS: it runs only `serve.SERVED_COMMANDS`, each on a store opened
+    # read-only. Its note routes do write a store, through `serve_notes` and a connection
+    # of their own, which is what REFERENCE_WRITE_EXCEPTIONS says in the reference.
     "serve": (serve_module.cmd_serve, PROJECT_NONE),
     # KYO-458: the app's controller launcher (KYO-383), as a command that can
     # arrive over SSH. PROJECT_NONE: its PROJECT is a positional naming an entry in the
@@ -2261,8 +2262,12 @@ def build_parser() -> KyoseiParser:
     p_serve = sub.add_parser(
         "serve",
         parents=[common],
-        help="serve this machine's projects to any viewer over loopback HTTP: the read "
-        "commands' own --json, each store opened read-only (KYO-453)",
+        help="serve this machine's projects to a viewer over loopback HTTP: the read "
+        "commands' own --json, each run on a store opened read-only, and a project's ideas "
+        "files and scratchpad, which a viewer may also write. A device holding a token "
+        "from `kyo devices` can also read a project's sessions and files, send input to a "
+        "session, start an orchestrator session, and file a person's notes, which are the "
+        "one write the server makes to a store (KYO-453)",
     )
     p_serve.add_argument(
         "--port",
@@ -2276,8 +2281,9 @@ def build_parser() -> KyoseiParser:
         default=serve_module.DEFAULT_BIND,
         metavar="ADDR",
         help="the loopback address to listen on (default 127.0.0.1, or ::1). Any other "
-        "address is refused, with no override: the server has no password and no TLS, "
-        "and another machine reaches it through Tailscale Serve",
+        "address is refused, with no override: the server has no TLS and its record, "
+        "document, ideas and scratchpad routes ask for no credential, and another machine "
+        "reaches it through Tailscale Serve",
     )
     p_serve.add_argument(
         "--allow-host",
@@ -3917,6 +3923,20 @@ def _json_id_lines(prog: str, name: str) -> list[str]:
     ]
 
 
+#: Commands outside :data:`MUTATING_COMMANDS` whose reference entry cannot say "this
+#: command only reads". `kyo serve` opens no write transaction itself and runs every
+#: served command on a read-only store, but its note routes file a person's notes
+#: (charter law 12), so its entry says both (KYO-795).
+REFERENCE_WRITE_EXCEPTIONS: dict[str, str] = {
+    "serve": (
+        "Writes to the store: **no**, with one exception — every served command runs on a "
+        "store opened read-only, and the note routes file a person's notes, change their "
+        "tags and record that a note was sent, for a device token holding the `notes` "
+        "permission."
+    ),
+}
+
+
 def _command_section(
     prog: str,
     name: str,
@@ -3947,7 +3967,9 @@ def _command_section(
         writes = (
             "Writes to the store: **yes** — an events row and a fresh export."
             if name in MUTATING_COMMANDS
-            else "Writes to the store: **no** — this command only reads."
+            else REFERENCE_WRITE_EXCEPTIONS.get(
+                name, "Writes to the store: **no** — this command only reads."
+            )
         )
         out.extend([writes, ""])
         out.extend(_json_id_lines(prog, name))

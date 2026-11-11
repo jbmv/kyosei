@@ -523,3 +523,13 @@ def test_output_with_a_command_is_refused_rather_than_silently_narrowed(
     cleared = invoke(["reference", "--output", str(destination)])
     assert cleared.code == 0, cleared
     assert destination.read_text(encoding="utf-8") == reference_markdown(build_parser())
+
+
+def test_kyo_serve_states_the_one_store_write_its_note_routes_make(rendered: str) -> None:
+    """KYO-795: `kyo serve` is not in `MUTATING_COMMANDS`, since every served command runs
+    on a read-only store, but its note routes file a person's notes (charter law 12). Its
+    entry therefore cannot carry the sentence every other non-mutating command carries."""
+    section = rendered.split("## `kyo serve`", 1)[-1].split("\n## ", 1)[0]
+    assert "this command only reads" not in section
+    assert "note routes" in section
+    assert "`notes` permission" in section

@@ -80,7 +80,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo restate`](#kyo-restate) | yes | yes | void a criterion and add its replacement atomically, back-linked (KYO-58) |
 | [`kyo retag`](#kyo-retag) | yes | yes | replace the tags on an existing gate, by its own id; not a clearing (KYO-130) |
 | [`kyo rules`](#kyo-rules) | optional | no | print the standing rules in full — one by title, or the list; the text a dispatch brief carries one line of (KYO-327); `kyo rules add` writes a project rule into kyosei/procedures.md (KYO-565) |
-| [`kyo serve`](#kyo-serve) | no | no | serve this machine's projects to any viewer over loopback HTTP: the read commands' own --json, each store opened read-only (KYO-453) |
+| [`kyo serve`](#kyo-serve) | no | no | serve this machine's projects to a viewer over loopback HTTP: the read commands' own --json, each run on a store opened read-only, and a project's ideas files and scratchpad, which a viewer may also write. A device holding a token from `kyo devices` can also read a project's sessions and files, send input to a session, start an orchestrator session, and file a person's notes, which are the one write the server makes to a store (KYO-453) |
 | [`kyo sessions`](#kyo-sessions) | optional | no | the Claude Code sessions this project has, and each one's claude.ai Remote Control page (KYO-186) |
 | [`kyo shift-notes`](#kyo-shift-notes) | yes | no | list the shift log newest first, each note marked with the session-start brief it handed off to; read-only (KYO-454) |
 | [`kyo show`](#kyo-show) | yes | no | print a record, a criterion, an evidence artifact, a flag, a dispatch or a shift note, by the id that names it |
@@ -1486,18 +1486,18 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 ## `kyo serve`
 
-serve this machine's projects to any viewer over loopback HTTP: the read commands' own --json, each store opened read-only (KYO-453)
+serve this machine's projects to a viewer over loopback HTTP: the read commands' own --json, each run on a store opened read-only, and a project's ideas files and scratchpad, which a viewer may also write. A device holding a token from `kyo devices` can also read a project's sessions and files, send input to a session, start an orchestrator session, and file a person's notes, which are the one write the server makes to a store (KYO-453)
 
 Needs a Kyosei project: **no** — it never searches for one.
 
-Writes to the store: **no** — this command only reads.
+Writes to the store: **no**, with one exception — every served command runs on a store opened read-only, and the note routes file a person's notes, change their tags and record that a note was sent, for a device token holding the `notes` permission.
 
 Usage: `kyo serve [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--port N] [--bind ADDR] [--allow-host NAME] [--allow-origin ORIGIN] [--install] [--uninstall] [--status] [--restart] [--apply]`
 
 ### Options
 
 - `--port N` — optional. the port to listen on (default 47370; 0 picks a free one)
-- `--bind ADDR` — optional. the loopback address to listen on (default 127.0.0.1, or ::1). Any other address is refused, with no override: the server has no password and no TLS, and another machine reaches it through Tailscale Serve
+- `--bind ADDR` — optional. the loopback address to listen on (default 127.0.0.1, or ::1). Any other address is refused, with no override: the server has no TLS and its record, document, ideas and scratchpad routes ask for no credential, and another machine reaches it through Tailscale Serve
 - `--allow-host NAME` — optional. also answer requests whose Host is NAME (repeatable), such as the <machine>.<tailnet>.ts.net name Tailscale Serve forwards; every other non-loopback Host is refused as possible DNS rebinding
 - `--allow-origin ORIGIN` — optional. answer a browser page from ORIGIN (repeatable, e.g. http://localhost:5173); a request carrying any other Origin is refused
 - `--install` — optional. print the per-user agent that runs this kyo serve from login (launchd dev.kyosei.serve on macOS, the systemd user unit kyosei-serve.service on Linux), with this command's --port, --bind, --allow-host and --allow-origin; with --apply, write it and start it (KYO-457)
