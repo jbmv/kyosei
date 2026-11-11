@@ -2553,7 +2553,7 @@ document.addEventListener("keydown", (event) => {
 // chat, an open record or an open file anchors it to that paragraph, as a right-click would.
 
 let anchorMode: { area: HTMLTextAreaElement; id: number } | null = null;
-let anchorLit: Element | null = null;
+let anchorLit: Element[] = [];
 /** Set by a press made in the mode, whose click must not also act on what it fell on. */
 let anchorSwallow = false;
 let anchorHoverFrame = 0;
@@ -2582,8 +2582,8 @@ function startAnchorMode(area: HTMLTextAreaElement, id: number): void {
 
 function clearAnchorHover(): void {
   showRanges("anchor-preview", []);
-  anchorLit?.classList.remove("anchor-lit");
-  anchorLit = null;
+  for (const element of anchorLit) element.classList.remove("anchor-lit");
+  anchorLit = [];
   document.body.classList.remove("anchor-off");
 }
 
@@ -2601,7 +2601,7 @@ function endAnchorMode(): void {
  */
 function anchorPlaceAt(
   target: Element, point: { x: number; y: number }, own: boolean,
-): { item: AnchorItem | Place; range: Range | null; element: Element | null } | null {
+): { item: AnchorItem | Place; range: Range | null; elements: Element[] } | null {
   const holder = target.closest<HTMLElement>("#chat > [data-key]");
   if (holder && chat.contains(holder)) {
     const key = holder.dataset.key;
@@ -2614,7 +2614,9 @@ function anchorPlaceAt(
     if (!span) return null;
     const item: AnchorItem = { kind: "anchor", key, session, ...span };
     const range = wordsRange(item);
-    return { item, range, element: range ? null : holder };
+    // Where the words are not drawn as they are written, the blocks they lie in are lit,
+    // as a sent anchor's are: never more than the press would take.
+    return { item, range, elements: range ? [] : anchoredBlocks(item) };
   }
   if (recordArticle.contains(target)) {
     // A press outside the record's parts, on its metadata or summary, takes the whole record.
@@ -2626,13 +2628,13 @@ function anchorPlaceAt(
     if (!part) {
       const title = recordArticle.querySelector("h1")?.textContent ?? "";
       const words = title.trim() ? `${id} ${firstWords(title, ANCHOR_WORDS)}` : id;
-      return { item: { kind: "record", id, words }, range: null, element: recordArticle };
+      return { item: { kind: "record", id, words }, range: null, elements: [recordArticle] };
     }
     const text = element.classList.contains("record-head")
       ? recordArticle.querySelector("h1")?.textContent ?? ""
       : element.querySelector(".rec-text")?.textContent ?? "";
     const words = text.trim() ? `${id} ${firstWords(text, ANCHOR_WORDS)}` : id;
-    return { item: { kind: "record", id, words }, range: null, element };
+    return { item: { kind: "record", id, words }, range: null, elements: [element] };
   }
   const file = openFile;
   if (file && fileArticle.contains(target)) {
@@ -2643,7 +2645,7 @@ function anchorPlaceAt(
       ?? target;
     return {
       item: { kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}) },
-      range: null, element,
+      range: null, elements: [element],
     };
   }
   return null;
@@ -2659,9 +2661,9 @@ document.addEventListener("mousemove", (event) => {
     const found = anchorPlaceAt(target, point, false);
     clearAnchorHover();
     if (found?.range) showRanges("anchor-preview", [found.range], 2);
-    else if (found?.element) {
-      anchorLit = found.element;
-      anchorLit.classList.add("anchor-lit");
+    else if (found?.elements.length) {
+      anchorLit = found.elements;
+      for (const element of anchorLit) element.classList.add("anchor-lit");
     } else if (!found) {
       document.body.classList.add("anchor-off");
     }

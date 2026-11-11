@@ -199,3 +199,34 @@ test("in Records a press on the record's metadata anchors the whole record", asy
   await press(opened, point!);
   assert.deepEqual((await state(opened)).anchors, ["anchor: KYO-9 A record to anchor"]);
 });
+
+test("after a paragraph's last sentence, what is lit is what a press anchors, not the whole reply", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  await opened.run(`document.querySelector(".mark-panel .mark-anchor-mode").click()`);
+  // A point in the blank space to the right of the first paragraph's text.
+  const point = await opened.run<{ x: number; y: number }>(`(() => {
+    const block = document.querySelector("#chat .reply [data-source-line]");
+    const text = document.createRange();
+    text.selectNodeContents(block);
+    const line = [...text.getClientRects()].pop();
+    const box = block.getBoundingClientRect();
+    return { x: Math.min(line.right + 60, box.right - 4), y: line.top + line.height / 2 };
+  })()`);
+  await move(opened, point);
+  await wait(50);
+  const lit = await opened.run<{ words: string[]; wholeReply: boolean }>(`(() => ({
+    words: [
+      ...[...(CSS.highlights.get("anchor-preview") ?? [])].map((range) => range.toString()),
+      ...[...document.querySelectorAll(".anchor-lit")].map((element) => element.textContent),
+    ],
+    wholeReply: !!document.querySelector("#chat .reply.anchor-lit, #chat > .anchor-lit"),
+  }))()`);
+  assert.equal(lit.wholeReply, false, "the whole reply is not lit");
+  assert.equal(lit.words.length > 0, true, "something in the paragraph is lit");
+  assert.equal(lit.words.every((words) => !words.includes("A second paragraph")), true);
+  await press(opened, point);
+  const [anchored] = (await state(opened)).anchors;
+  const said = anchored.replace(/^anchor: /, "").replace(/…$/, "");
+  assert.equal(lit.words.some((words) => words.includes(said)), true, `lit ${JSON.stringify(lit.words)}, anchored ${anchored}`);
+});
