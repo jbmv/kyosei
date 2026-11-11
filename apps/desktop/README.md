@@ -86,52 +86,47 @@ was made.
 
 ## The design in brief
 
-**The renderer is v3 (KYO-227, KYO-232), reworked after use (KYO-245).** One window
-shell: a left nav rail, a collapsible sidebar whose content the rail selects, and one
-or two columns of tabs. No modes, no pane workspace, no bottom dock, no graph, no
-bubbles, no properties or outline panes — v2's renderer was deleted rather than
-adapted, and the stylesheet was rewritten rather than trimmed. Everything openable is a
-TAB: the scratchpad, an idea, a record, a brief, a doc, the terminal, the claude
-session, the activity view, and the home page a new tab opens on. "Move to a new
-window" opens a whole shell window on the same project holding that tab (KYO-246); the
-claude.ai window is the one exception, and belongs to no project window.
+The renderer is one window shell: a left rail, a collapsible sidebar whose content the
+rail selects, and one or two columns of tabs. Everything openable is a tab: the
+scratchpad or an idea file (the `compose` kind), a record, the views (records, awaiting
+you, a brief, a shift note, one document), the terminal, the claude session and the home
+page a new tab opens on. "Move to a new window" opens a whole shell window on the same
+project holding that tab (KYO-246); the claude.ai window is the one exception, and
+belongs to no project window. Records mode, ideas mode and the constant shell of the
+earlier renderer were deleted by KYO-232 rather than adapted.
 
-What the records below built, and where it stands after v3 stage 2:
+The sections below describe each part as built:
 
-- the **live seams** (KYO-111): how the app invokes `kyo`, how it reads the store, how
-  it reports the store's currency, and the terminal's shell. Unchanged, all of it.
+- the **live seams** (KYO-111, KYO-459): how the app invokes `kyo`, how it reaches every
+  project through `kyo serve`, how it reports the store's currency, and the terminal's
+  shell.
 - the **terminal as a window onto the orchestrator's session** (KYO-115, KYO-229,
   KYO-293, KYO-474): opening the tab lands in the project's orchestrator session on
   `kyo controller`'s own tmux server (`tmux -L kyosei`) — on this machine through a pty
   whose process is the tmux client itself, on a dev box through a pty running `ssh -t
   <host> zsh -lc 'kyo controller attach <prefix>'`. It creates no session; with none
   running it says so and offers Start orchestrator. A bare login shell is one click
-  away on this machine, on a second pty of its own. It is a TAB now, opened from the
-  rail.
+  away on this machine, on a second pty of its own.
 - the **claude.ai pane** (KYO-186, KYO-190, KYO-191): a `WebContentsView` on a
-  persistent partition. A TAB now, on the same terms.
+  persistent partition.
 - **packaging** (KYO-176): `npm run pack`, a bundle that carries no Python (KYO-450).
   See "Packaging" below.
-- the **v3 read model** (KYO-231) and **`kyosei://` deep links** (KYO-230): what the
-  tabs render, and how a link reaches one. See their sections below.
-- the **constant window shell** (KYO-110), **records mode** (KYO-112, KYO-113) and
-  **ideas mode** (KYO-114): their renderers are GONE. Their sections below are kept as
-  the design record of what was built and why it was replaced — the reasoning in them
-  about the store, the seams and the read-only boundary still holds; the surfaces they
-  describe do not exist. Stage 3 (KYO-233..KYO-236) fills the placeholder tabs.
+- the **read model** (KYO-231, KYO-454) and **`kyosei://` deep links** (KYO-230): what
+  the tabs render, and how a link reaches one. See their sections below.
+- the **compose tab** (KYO-234): the editor for the scratchpad and for idea files, and
+  the app's only writes.
 
-**The app still writes exactly two things of yours, and never your store**: the session
-scratchpad and files under `ideas/`. In stage 2 even those are read-only in the app —
-the compose tab is a placeholder and KYO-234 makes it an editor. See "The one write
-path" below.
+**The app writes exactly two things of yours, and never your store**: the session
+scratchpad and files under `ideas/`. Both are written by asking the project's `kyo
+serve` (KYO-459). See "The compose tab" below.
 
 **The app never creates a record (KYO-439).** Turning an idea into a record means
 deciding its kind, title, criteria and touches, and that is the orchestrator's act, not
-the app's: the app has no basis on which to write a record. What the app offers is the scratchpad's "Promote to
-idea" (KYO-252, below), which writes an idea FILE; the orchestrator promotes from there.
-`kyo.ts`'s `runKyo`, the one subprocess the app starts for the CLI, refuses `kyo
-promote` by name (`assertAppMayRun`), and `tests/seams.spec.ts` fails if that refusal
-is removed.
+the app's: the app has no basis on which to write a record. What the app offers is the
+scratchpad's "Promote to idea" (KYO-252, below), which writes an idea FILE; the
+orchestrator promotes from there. `kyo.ts`'s `runKyo`, the one subprocess the app starts
+for the CLI, refuses `kyo promote` by name (`assertAppMayRun`), and
+`tests/seams.spec.ts` fails if that refusal is removed.
 
 ## Checks
 
@@ -147,91 +142,62 @@ Every check runs from the **repository root**, with `npm --prefix`:
 
 First run needs `npm --prefix apps/desktop ci`.
 
-One check is opt-in and skipped by a normal run: the pty quit soak (KYO-124), which
-measures a crash *rate* rather than asserting a pass, by process exit signal over many
-launches. `.ips` crash reports are useless as a count here — macOS throttles them, as
-KYO-119's record establishes.
+The specs in `tests/` run under one Playwright runner (`playwright.config.ts`: one
+worker, `retries: 0`) and are of two kinds:
 
-```
-KYOSEI_PTY_SOAK=25 npx playwright test -g "two ptys in play"   # from apps/desktop
-KYOSEI_PTY_SOAK_PTYS=4                                    # ptys per launch (default 2)
-```
+- Most launch the real Electron app and drive it (`shell.spec.ts`, `compose.spec.ts`,
+  `record.spec.ts`, `views.spec.ts`, `links.spec.ts`, `activity.spec.ts`,
+  `controller.spec.ts`, `claude-pane.spec.ts`, `docs.spec.ts`, `project-switch.spec.ts`,
+  `remote.spec.ts`, `remote-terminal.spec.ts`, `serve-down.spec.ts`, `tmux-owner.spec.ts`,
+  `user-data.spec.ts` and others). `tmux-owner.spec.ts` carries no `KYOSEI_TMUX`; see "The
+  app owns the session, and never ends it".
+- `seams.spec.ts` launches nothing. The resolver, the argv guard, the currency mapping,
+  the login-shell capture, the earlier build's CLI cleanup and the ports of the CLI's
+  rules are in Electron-free modules on purpose, so they are driven directly and fail
+  with a line number rather than a screenshot. `kyoserve.spec.ts`,
+  `controller-trust.spec.ts`, `remotes-file.spec.ts`, `styles.spec.ts`, `tabdrag.spec.ts`
+  and `fixture-teardown.spec.ts` have the same shape, and `claude-pane.spec.ts` mixes both.
 
-It is opt-in because it deliberately crashes Electron when the defect is present, and
-because it takes as long as the launch count says it will.
+Both kinds build their fixtures with the real `kyo`, in temp directories **whose paths
+contain a space** — this repository's own checkout does (KYO-89), and a fixture in a
+spaceless directory would let a quoting defect pass here and fail where the project
+actually lives (`tests/fixture.ts`).
 
-Two kinds of suite run under the one Playwright runner:
+These are the app's *own* checks. `make test` at the repo root is the Python suite and
+knows nothing about this directory — that separation is deliberate (KYO-110).
 
-- `tests/smoke.spec.ts` launches the real Electron app and asserts the window.
-  `tests/tmux-owner.spec.ts` and `tests/docs.spec.ts` do too, each for one subject
-  whose launches need an environment the smoke file's do not — see "The app owns the
-  session, and never ends it" for why the tmux one carries no `KYOSEI_TMUX`.
-- `tests/seams.spec.ts` launches nothing. The resolver, the argv guard, the
-  read-only database read, the currency mapping, the login-shell capture and the
-  earlier build's CLI cleanup are all in Electron-free modules on purpose, so they are driven directly and
-  fail with a line number rather than a screenshot. `tests/claude-pane.spec.ts` is the
-  same shape for the Remote Control resolution.
-
-Both build their fixtures with the real `kyo`, in temp directories **whose paths
-contain a space** — this repository's own checkout does (KYO-89), and a fixture in
-a spaceless directory would let a quoting defect pass here and fail where the
-project actually lives.
-
-These are the app's *own* checks. `make test` at the repo root is the Python suite
-and knows nothing about this directory — that separation is deliberate (KYO-110).
-
-To see the app: `npm --prefix apps/desktop run start`. To build one that runs
-without a checkout: `npm --prefix apps/desktop run pack` — see "Packaging" below.
+To see the app: `npm --prefix apps/desktop run start`. To build one that runs without a
+checkout: `npm --prefix apps/desktop run pack` — see "Packaging" below.
 
 ### Which environment this suite was written for (KYO-183)
 
-`npm --prefix apps/desktop run check` used to say nothing about where it ran, and
-there are two places that behave differently:
+There are two places the suite runs that behave differently:
 
-- **a fresh dispatch worktree**, where everything gitignored is absent — this
-  project's own `kyosei/kyosei.db` included — and where usually nothing else is
-  running;
-- **a full clone that has been worked in**, where that database exists and is large,
-  and where the packaged app, a second Electron project and other workers' suites may
-  be running at the same time.
+- **a fresh dispatch worktree**, where everything gitignored is absent — this project's
+  own `kyosei/kyosei.db` included — and where usually nothing else is running;
+- **a full clone that has been worked in**, where that database exists and is large, and
+  where the packaged app, a second Electron project and other workers' suites may be
+  running at the same time.
 
-It says so now. `the run says which checkout it ran in, and no check is allowed to
-depend on it` (`tests/smoke.spec.ts`) prints the checkout the app would fall back to
-and whether it carries a built store, so a run written to a file carries its own
-environment. Which of the two you are in is the *only* difference between them that
-this suite can see.
+**No assertion may depend on which one it is.** No check may depend on a file being absent
+merely because it is gitignored, or on this project's own `ideas/` being small. Every
+launch in every spec points the app at a `mkdtemp` fixture through `KYOSEI_PROJECT_ROOT`,
+and a check that needs a particular store state builds that state itself. The rule was
+paid for: a check that asserted the starting project's database was absent passed in
+every worktree and failed in the clone where the app is used.
 
-**No assertion here may depend on which one it is, and that is a rule rather than an
-accident.** No check may depend on a file being absent merely because it is
-gitignored, or on this project's own `ideas/` being small. Every launch in every spec
-points the app at a `mkdtemp` fixture through `KYOSEI_PROJECT_ROOT`, and a check that
-needs a particular store state builds that state itself: `a project whose database is
-missing says so instead of showing a count` deletes the fixture's own database rather
-than borrowing a worktree's absence.
+A check that needs the launch project to have a particular shape supplies its own
+checkout rather than asserting about the machine's (KYO-218): the difference between the
+two environments also reaches a check as a *duration*, since a `kyo` command about a
+real store takes longer than one about a refusing worktree, and a scan of the source
+cannot see that. `launchUnpinned` in `tests/project-switch.spec.ts` is the one route by
+which a check launches the app without pinning a project.
 
-The rule was paid for. An earlier draft of `a human changes the project from inside
-the app, with no variable and no restart` asserted `data-store="unavailable"` for the
-app's starting project, "whose database is gitignored and therefore absent here".
-True in a worktree; false in the clone, where the file is there and the app reads it.
-It passed in every dispatch worktree and failed in the full clone where the app is
-actually used. That assertion is gone, and the second half of the check named above is what
-stops it coming back: `launchUnpinned` is the one route by which any check here can be
-about the checkout at all, and the scan holds every window between an unpinned launch
-and that check opening a project of its own to asserting nothing about the store.
-
-**So what a green in a fresh worktree does and does not cover.** It covers every
-assertion both suites make — they are all made against fixtures, and none of them is
-weaker in one place than the other. It does not cover *timing*. Several checks here
-are load-dependent races by construction, and KYO-146's `a file opened while the
-machine is busy is never written at all` provokes load on purpose and refuses to pass
-without it. A quiet worktree is the easy environment for all of them, so a green there
-is evidence that the suite's claims hold and weak evidence about the suite's stability
-on a machine somebody is working on.
-
-Nothing in a single run can catch a check whose result depends on timing. Repeated
-runs can, and this is the recipe — it is what produced the measurements in the table
-below, and it is the thing to run in a full clone with the app open before believing
-a repair:
+**What a green in a fresh worktree covers.** Every assertion both kinds of spec make is
+made against fixtures, so none is weaker in one place than the other. It does not cover
+*timing*: several checks are load-dependent races by construction, and a quiet worktree
+is the easy environment for all of them. A single run cannot catch a check whose result
+depends on timing; repeated runs can, and this is the recipe:
 
 ```
 for i in 1 2 3 4 5; do
@@ -244,223 +210,91 @@ grep -h '✘' /tmp/desktop-*.log | sort | uniq -c
 Never pipe a suite through `tail`: `tail`'s exit status is not the suite's, and an
 interrupted run leaves no log to read.
 
-#### The difference is also a duration, and a check can build the other side (KYO-218)
-
-The paragraphs above read the difference between the two environments as one of
-*contents*: a file is there or it is not, and an assertion about what it holds is what
-goes wrong. KYO-218 was the same difference reaching a check through *duration*
-instead, and no scan of this suite's source can see that shape.
-
-`a switch detaches from the previous project's tmux session without killing it` passed
-in every dispatch worktree and failed three times out of three in a worked-in
-clone, reporting `data-terminal-session="kyosei-kyosei"` — the project the app had just
-been switched *away* from — beside a `data-terminal-cwd` naming the project it had been
-switched *to*. One pane, two projects. Nothing in the check mentions the checkout. What
-made it environment-dependent is that the fallback launch project in the clone has a
-store the CLI can open, so `kyo worktrees --json` about it does real work and takes long
-enough for the switch to land while the pane is still opening; in a worktree the same
-command refuses immediately and the pane is open before the switch arrives. The defect
-was in the app either way (`askedAboutOneProject`, `src/main/terminal.ts`); only its
-visibility was environmental.
-
-So the guard has a third half, and it is not another scan. **A check that needs the
-launch project to have a particular shape supplies its own checkout rather than
-asserting about the machine's.** `fakeCheckout` in `tests/smoke.spec.ts` builds the
-three things that make a directory the one the app decides it was loaded from —
-`src/kyosei/__main__.py`, a `.venv/bin/python`, and an `apps/desktop` with a
-`package.json` — around a CLI script that delays exactly one question about exactly
-that project, and `launchUnpinned`'s second argument points the launch at it. `a switch
-away from a launch project whose home is still being asked lands in the new project's
-session` is the check built on it, and it constructs that clone's condition on any
-machine, a fresh worktree included.
-
-Two things about that check are deliberate and easy to undo on the next edit. The delay
-is the *condition under test*, not a timeout and not a retry — nothing there waits
-longer for a failure to become a pass. And it asserts, before it switches, that the pane
-has not opened yet: without that, a machine fast enough to open the pane inside the
-delay would turn it into a check that cannot fail. If that assertion ever fires, widen
-`SLOW_HOME_MS` rather than deleting it.
-
-The two clauses added to `the run says which checkout it ran in` keep the seam and its
-one caller from disappearing quietly. Both are written as regexes, like the scan above,
-because that test reads its own source: a plain substring needle is satisfied by the
-copy of itself inside the assertion that names it, and the check can then never fail.
-
 ### The known-intermittent checks (KYO-183, KYO-205)
 
-**This table is the list, and it is what a brief should cite.** A failure in this
-suite that is not named here is not a known flake: report it rather than re-running
-until it passes. A brief that says "one known intermittent failure exists" is what
-KYO-205 was filed about — a worker told there is one either blames itself for the
-second or learns to wave any single failure through.
+**This table is the list, and it is what a brief should cite.** A failure in this suite
+that is not named here is not a known flake: report it rather than re-running until it
+passes. A brief that says "one known intermittent failure exists" is what KYO-205 was
+filed about — a worker told there is one either blames itself for the second or learns to
+wave any single failure through.
 
-Every row is **cause found and removed**, not suppressed and not retried
-(`playwright.config.ts` sets `retries: 0`, and no check here re-runs itself). No fix
-widens a timeout: KYO-183's record establishes that the failing runs exhaust a
-30-second wait where the passing ones take 8–21 seconds, so a longer wait would turn
-them green without repairing anything — and KYO-217's third row is the same shape one
-level down, a wait that was pointed at the wrong page and would therefore never have
-ended however long it was given.
+Every row is **cause found and removed**, not suppressed and not retried. No fix widens a
+timeout: the failing runs exhaust a 30-second wait where the passing ones take 8–21
+seconds, so a longer wait would turn them green without repairing anything. The one
+retry in the suite is not a check: `removeTree` in `tests/fixture.ts` retries a `rmdir`
+**syscall** in teardown (`{maxRetries: 10, retryDelay: 100}`), because a recursive
+`rmSync` is a walk and a file created between its `readdir` and its `rmdir` makes the
+`rmdir` fail with `ENOTEMPTY`. Its only two answers are "the directory is empty now" and
+"not yet", and after the last attempt the error is thrown as before. Measured for
+KYO-254.d1 over 40 teardowns per arm against a process writing into the tree: 26
+failures with the writer running throughout and 16 with it stopping after 0.4 s, and 0
+in both arms with the retries. `tests/fixture-teardown.spec.ts` holds this against real
+writing processes, and requires that at least one of twenty bare removes still loses, so
+the check cannot pass vacuously on a machine that has stopped racing.
 
-KYO-238's first row is the one place something is retried, and it is not a check:
-`removeTree` retries a `rmdir` **syscall**, in teardown, against a directory another
-process is writing into. The distinction the paragraph above is making still holds
-there. A retried check re-asks a question whose answer might change for reasons the
-check cannot see, and turns green on the second answer without anyone learning which
-one was true. A retried `rmdir` re-asks a question whose only possible answers are
-"the directory is empty now" and "it is not yet", and the first is the outcome being
-asked for. Nothing about the app is being re-examined, and nothing is swallowed:
-after the last attempt the error is thrown exactly as before.
-
-**The table has one row that is not closed, and being closed is not the same as "the
-suite has no intermittents".** It is the list of the ones that have been *measured*:
-run in isolation on an idle machine and again under deliberate load, with the counts
-recorded. A failure you see that is not here is still a failure to report. The one
-open row is the last — `the title bar's identity line`, whose check and whose subject
-were both deleted before anyone measured it, so there is nothing left to run. It is
-open because saying so is truer than leaving a reader to infer that a row in a table
-of fixed things has been fixed.
-
-**Where the checks named below live.** The first three, and the first two of
-KYO-238's, were in `tests/smoke.spec.ts`, which KYO-232 deleted along with the v2
-renderer — for the last two, shortly after KYO-238 was filed about them. A row
-whose check is gone says so, and says where the *mechanism* went, because a deleted
-check is not a fixed defect: `removeFixture` outlived the check that caught it and is
-called by every spec file in this directory.
+The checks that exhibited the other failures, each since repaired or removed, were:
 
 | check | what was seen | cause, and what was done about it |
 |---|---|---|
-| `a file opened while the machine is busy is never written at all` | roughly two failures in five full runs in a worked-in clone, reliably green in a dispatch worktree (0 in 5 measured here), always `locator.click: Timeout 30000ms exceeded` waiting for `[data-open-idea="opened under load.md"]` | It raced the app's **startup** read of the ideas tree, not the mode's. `DEFAULT_SHELL_MODE` is `ideas`, so `ideas.start()` — and the one `loadTree()` a session makes — is already in flight when `body[data-ready="true"]` appears, and `data-ready` is set after `getFacts()`, a *different* `kyo` subprocess. Whichever of the two resolved first decided whether the victim file, written the instant the shell reported ready, was in the tree that got rendered. The check now writes the victim **before the app is launched** and relaunches onto it, so the startup read cannot miss it. |
-| `the scratchpad's entries keep their own place, separately from the ideas tree` | one failure in five full runs measured here, and one in three by KYO-203.d1's worker; `expect(received).toBeGreaterThanOrEqual(expected)` on a measured scrollbar overflow that came back `0` | The check measured a pane the app rebuilds on its own — `renderLeft` runs on every `loadTree()` and every scratchpad save that returns — through `locator.evaluate`, which resolves the element in one round trip and runs the callback in the next. A rebuild landing between the two leaves the callback holding a **detached** element, whose `scrollHeight` and `clientHeight` are both `0`; that subtracts to an overflow of `0`, which reads exactly like "this list cannot scroll". Every scroll measurement in the file now goes through `scrollGeometry`, which looks the element up *inside* the page in the same task as the measurement. `a pane measurement survives the rebuild it is racing` asserts both halves: that a replaced element really does report `0`, and that `scrollGeometry` does not. |
-| `closing a popped-out claude window re-fetches the docked pane, same URL and all` | two failures in five full runs (KYO-183.d1), `page.waitForSelector: Timeout 30000ms exceeded` waiting for `body[data-ready="true"]` in the window the pop-out opened. Measured in isolation for KYO-217, `npx playwright test tests/smoke.spec.ts -g "closing a popped-out claude window re-fetches" --repeat-each=10`: **0 failures in 10** with the machine idle (one-minute load 3.9–9.3 during the run), **5 failures in 10** under deliberate load (8 CPU spinners plus a `make test`; one-minute load 8.1 rising to 50 across the run), every one of them that same 30-second `body[data-ready="true"]` wait. The failures are bimodal — the passes took 3.0–11.7s, no run took 15–25s — which is what says it is a wrong answer rather than a slow one. | It was waiting on **the wrong page**. Playwright reports a `WebContentsView`'s contents as a window of its own, so with the claude pane open this app has a claude.ai page in `app.windows()`, and `app.waitForEvent("window")` returns whichever of the two registers first: the popped window's renderer starting, or that remote navigation committing. Measured idle: the caption names the resolved session at +0.25s and the claude.ai page arrives as a window at +1.45s, so the pop-out click falls inside the gap and only the machine decides the order. Losing handed the check a page that can never have `body[data-ready]`. The suite already had `poppedPaneWindow` for exactly this — written for the three older claude pop-out checks — and KYO-190's check simply did not use it; it does now, and picks its window by ORIGIN (`file:` is this app's own renderer, `https:` is the view's page) instead of by arrival. `the claude pane's own page is reported as a window too, so a pop-out is chosen by origin` holds the filter in place: it asserts that the pane's page really is reported as a window, and that the pop-out wait refuses it. |
-| `a store older than the build shows decision 5's instruction, and nothing that writes` — **the check is gone**, the mechanism was not | one failure (KYO-238), on a memory-starved full run after KYO-229.d1: `ENOTEMPTY, Directory not empty` out of `removeFixture`'s `rmSync(fixture.base, {recursive: true})`. Passed 3 of 3 alone immediately afterwards. Reproduced deliberately for KYO-254.d1, node v24.18.0, 40 teardowns per arm against a process creating files inside the tree: **26 failures in 40** with the writer running for the whole window, **16 in 40** with it stopping after 0.4s, every one `ENOTEMPTY`. So it is not load-specific — load only widens the window. | A recursive `rmSync` is a **walk**: readdir, unlink each name, `rmdir`. A file created between the readdir and the `rmdir` makes the `rmdir` fail with `ENOTEMPTY`, and plenty still writes into a fixture at the moment it is removed — a `kyo` subprocess the app spawned that nobody awaits, SQLite's `-wal` and `-shm` beside a database being closed, KYO-229's git poll, the pane's shell whose cwd is the fixture root. `closeReadyApp` awaits the Electron and *cannot* await the Electron's children. `removeTree` in `tests/fixture.ts` is the one definition with `{maxRetries: 10, retryDelay: 100}` on it, and `removeFixture` and the login shell's `remove()` both go through it: **0 failures in 40 in both arms**. `tests/fixture-teardown.spec.ts` holds it in place against real writing processes — one check requires ten consecutive wins (a single win proves nothing at a bare rate near one in three), and a second requires that at least one of twenty *bare* removes still loses, so the first cannot pass vacuously on a machine that has stopped racing. Measured with the retries emptied: 3 of 3 repeats red. |
-| `after a switch the terminal pane is in the new project, not the previous one` — **the check is gone**; the mechanism is KYO-254's | one failure (KYO-238), same run: `error connecting to .../kyosei switch sockets .../tmux-502/default (No such file or directory)`. Passed 3 of 3 alone immediately afterwards. | **Cause found, by the path in the message.** `kyosei switch sockets ` was a `mkdtemp` prefix in exactly one place in this repository's history — the sibling check `a switch detaches from the previous project's tmux session without killing it`, in the same deleted file — and that check removed the directory in its own teardown. The failing check set no `TMUX_TMPDIR` at all, so the one it used came from `process.env`: **a socket directory this suite created, escaping the run that created it, and reaching a later one after it had been deleted.** That is KYO-254 in the inbound direction, and `suiteEnv` closes it: no launch environment in this directory carries an inherited `TMUX`, `TMUX_PANE` or `TMUX_TMPDIR` any more, and `the pane's server is the orchestrator's, whatever TMUX_TMPDIR the app inherited` in `tests/tmux-owner.spec.ts` fails if that changes. **The outbound leg closed with KYO-474**: the app no longer starts or seeds any tmux server -- it attaches to the orchestrator's, which `kyo controller` starts -- so a suite-launched app has no server of its own to leave a fixture's environment in. |
-| `a typed [[id]] is Mod-clickable and opens the record through followLink` — in `tests/compose.spec.ts` | Reported independently by KYO-283.d1 (on the UI branch) and KYO-266.d1 (on `main`), both saying the same thing: it fails when the whole file runs and passes alone. Measured: **3 failures in 3** with `npx playwright test tests/compose.spec.ts --repeat-each=3`, and **0 in 3** with the same repeat on the check alone (`-g "Mod-clickable"`). Every failure the identical 10-second `toHaveCount` wait for `[data-tab-kind="record"][data-tab-arg="FIX-1"]`, resolving 0 elements on all 23 polls. **It is not load and it is not intermittent**: three of three in the file, none of three alone, on a machine where the passing runs took 6.7–13.0s. | **Order inside the file, and not the pixel it clicked.** The scratchpad is ONE file for the whole spec — `KYOSEI_HOME` is the fixture's and `beforeAll` makes one fixture — so this check opened on whatever the check before it left there, and `` `[[` offers real records, `#` offers real tags, and `[[<id>.` offers only that record's real children `` leaves `[[FIX-1.`: a half-typed child-id trigger with no closing brackets, the last intermediate state that got 600ms of quiet (`SAVE_DEBOUNCE_MS`) before `afterEach` closed the app. Printed from the running check rather than reasoned about: on entry `"[[FIX-1."`, and after typing `"[[FIX-1.see [[FIX-1]] for context"`. **Both halves then read the wrong thing.** `text.indexOf(recordId)` found the id in the *leftover* at offset 2, so `coordsAtPos` aimed the click at that token; and `linkAt`'s `/\[\[([^\]\n]+)\]\]/` matched from the leftover's `[[` all the way to the TYPED link's `]]`, capturing `FIX-1.see [[FIX-1` — so a click anywhere in *either* token resolved to an id no record has, and `followLink` opened nothing. Which is why the click point was never the thing to fix: the editor followed the link it was asked for, and the check asked for the wrong one. The check now clears the editor and asserts the document is exactly the line it typed, so the carry-over cannot come back unannounced; the click point is the midpoint between `coordsAtPos` for the two ends of the id rather than two pixels off one end; and that point is put back through `posAtCoords` — the same call the editor's own `click` handler makes — so a point that could not have followed the link is named on the spot instead of clicked and waited on for ten seconds. No timeout was widened. After: **0 failures in 27** (the whole file, `--repeat-each=3`) with this repo's own `make test` running beside it, one-minute load 15.5–18.7; and **0 in 27** again under deliberate load, 8 CPU spinners on 8 logical cores, one-minute load 6.2 rising to 38.2. A third arm — the spinners stacked on top of an already-running `make test`, one-minute load reaching **162.9** — is the one place anything went red, and it is the shape the paragraphs below already account for rather than this check's: two 60-second `afterEach` timeouts inside `closeReadyApp` with no assertion reached, one of them this check and one of them `a whole idea file promotes to a chosen kind`, in a run where Playwright's own 60-second worker teardown also timed out. |
-| `the title bar's identity line is the store's own, read from its database` — **the check is gone, and so is what it checked** | one failure reported by KYO-229.d1's worker, `database is locked`; **0 of 5** on repeat, by that worker, immediately afterwards | Nothing measured, and nothing measurable: the v2 title bar and its identity line went with the v2 renderer in KYO-232, so there is no check to run under load and no code path to look at. Recorded here rather than dropped, because "the check was deleted" is a different thing from "the defect was fixed" and a reader deserves to be told which one this is. What is known is only what the original report says: one failure, `database is locked`, and five clean repeats. If a `database is locked` ever surfaces again in this suite, this row is the prior observation to cite — it is not evidence that there is no such defect. |
-| `a sidebar list renders no rows after launch` — seen three times, as `rowsFor(page, "records")` in `a context menu closes on Escape` and as the Records and Notes rows in `every tab's CSS is installed by the one helper` (both `tests/shell.spec.ts`) and `a criterion id embedded in a ledger command is a link` (`tests/views.spec.ts`) | Three failures in one day, each a different check and a different list — Records twice, Notes once — each a 30-second wait for a `[data-region="sidebar-row"]` that never came, each passing alone within seconds afterwards. The first two happened while other desktop checks were running and were read as contention; **the third had nothing else on the machine**, which is what ruled that out. Roughly one launch in 250. Reproduced here with a launch harness built from `shell.spec.ts`'s own pattern (one shared records fixture, a fresh display signature per launch, the Records and Notes lists opened on every launch): **2 empty lists in 400 launches**, both the Records list, both showing the bare text `database is locked` where its rows belong. | **`node:sqlite` defaults its busy timeout to zero, and this app's reads are not alone at the database.** Every `kyo` subprocess the app spawns opens the store's WAL database and closes it — `where`, `base`, `next` and the status bar's currency read, several per sidebar load — and closing the last connection to a WAL database checkpoints it and removes `-wal`/`-shm` under the exclusive lock. A read-only open landing in that window got `SQLITE_BUSY` on its first and only attempt; `readRecordsList` and `readShiftNotes` turned it into `ok: false`, and the sidebar drew that bare SQLite sentence with no rows under it — which is why both lists could fail the same way and why neither could be slow instead of wrong. Isolated by arm against a WAL store two processes were opening and closing the way `src/kyosei/store.py`'s `connect` does, 8 seconds per arm: **0 failures in 26,220 read-only opens** when the writer only opens and closes, **74 in 79,875** when it also runs a SELECT, **298 in 83,010** when it also runs `PRAGMA journal_mode = WAL` on connect, as `kyo` does. The remedy is the busy timeout SQLite has for exactly this: `openReadOnly` in `src/main/store.ts` is now the ONE place this app opens the store — the missing timeout survived because three call sites each built their own connection and only one was ever looked at — and it opens with `READ_BUSY_TIMEOUT_MS`. Same harness, timeout set: **0 failures in 17,656 opens**, and **0 empty lists in 400 launches** through the app. **No wait was widened**, and the distinction is the one this table already draws for `removeTree`'s retried `rmdir`: a busy timeout's only two answers are "the lock is free now" and "it is not yet", the first is the outcome being asked for, and after it expires `SQLITE_BUSY` is raised exactly as before. Two seconds rather than more because `DatabaseSync` is synchronous and a read that waits blocks the main process — stated in the constant's own comment. `a read waits for the store's lock instead of failing on the first try` (`tests/seams.spec.ts`) holds it: a child process takes the lock and gives it back, an open built the old way is REQUIRED to lose on it so the check cannot pass vacuously, and the production path is required to wait and answer. Measured with the timeout removed: red. What made all three failures unreadable is closed separately, because a fixed cause is not an observable one: the sidebar names the list in front of the tool's sentence (`the records list could not be read: database is locked`), states an empty result instead of drawing a heading that reads `Records (0)` and nothing else, replaces a spinner that has not answered in 15 seconds with a line saying so, and stamps `data-load` on itself — `loading`, `rows:<n>`, `stated`, `silent-empty` — from one `MutationObserver`, so a kept page snapshot says what the list was holding. `a sidebar list never just goes blank` in `tests/views.spec.ts` asserts the stamp and the sentence. Since KYO-459 the app opens no SQLite at all -- every list is a `kyo serve` read -- so this cause cannot recur in it; the lock-wait check went with `store.ts`'s reads. |
-
-**How much the first two rows (`a file opened while the machine is busy`, `the scratchpad's entries keep their own place`) are worth.** Five consecutive full runs before the
-fixes and five after, in a dispatch worktree with three other workers on the machine:
-one failure of the scratchpad check before, none of either check after. Five green
-runs is not proof at a two-in-five rate — the record says as much — which is why the
-claim being made here is that the *mechanism* is gone rather than that the runs came
-back clean, and why each row says what the mechanism was and what would bring it
-back.
-
-**How much the third row (`closing a popped-out claude window re-fetches`) is worth.** The same command that produced 5 failures in 10
-under load produced **0 in 10 after the fix, under a heavier load than the one that
-broke it** (one-minute load 27–72 across that run, against 8–50 for the failing one).
-That is a stronger claim than the runs alone would carry, because the mechanism is
-not statistical: with the window chosen by origin there is no longer an event to lose,
-and the check that holds the filter in place goes red in about a second when it is
-deleted.
-
-**A claude-pane check that is NOT in this table, and why.** KYO-184.d1 reported that
-`the claude pane carries a reload, and using it re-resolves the pane` failed once in
-three full runs, at the assertion that a pane nobody has told anything still shows the
-OLD session — the pane had already moved to the new one. KYO-217 measured it the same
-way as the row above, `-g "the claude pane carries a reload" --repeat-each=10`: **0
-failures in 10 idle** and **0 of that kind in 10 under load**. The one loaded failure
-was a bare `Test timeout of 60000ms exceeded` with no assertion reached, at a
-one-minute load average around 65 — the whole 60-second budget spent, which is the
-machine and not this check. So the reported signature did not reproduce and there is
-nothing measured to put in a row. It is written down here rather than dropped: an
-observation that did not reproduce is a different thing from one nobody looked at.
+| `closing a popped-out claude window re-fetches the docked pane` (KYO-183.d1, KYO-217) — the check is gone, and the rule it established is kept in `tests/links.spec.ts` | two failures in five full runs, `page.waitForSelector: Timeout 30000ms exceeded` waiting for `body[data-ready="true"]`; in isolation 0 failures in 10 on an idle machine and 5 in 10 under deliberate load | It waited on **the wrong page**. Playwright reports a `WebContentsView`'s contents as a window of its own, so `app.waitForEvent("window")` returns whichever of the popped window's renderer and the claude.ai navigation registers first. A check that needs the claude view chooses its contents by origin (`file:` is this app's renderer, anything else the view's page), as the claude check in `tests/links.spec.ts` does. |
+| a terminal pane check that failed on `error connecting to .../tmux-502/default` (KYO-238) — the check is gone, the mechanism is KYO-254's | one failure, passed 3 of 3 alone | A socket directory the suite had created escaped the run that created it through `process.env` and reached a later run after it was deleted. `suiteEnv` in `tests/fixture.ts` carries no inherited `TMUX`, `TMUX_PANE` or `TMUX_TMPDIR`, and `the pane's server is the controller's, whatever TMUX_TMPDIR the app inherited` in `tests/tmux-owner.spec.ts` fails if that changes. The app no longer starts any tmux server of its own (KYO-474). |
+| `a typed [[id]] is Mod-clickable and opens the record through followLink` — `tests/compose.spec.ts` (KYO-283.d1, KYO-266.d1) | failed 3 of 3 when the whole file ran, 0 of 3 alone; not load-dependent | **Order inside the file.** The scratchpad is one file for the whole spec, so the check opened on the half-typed `[[FIX-1.` an earlier check left there, and the editor's link matcher captured text from that leftover's `[[` to the typed link's `]]`. The check now clears the editor and asserts the document is exactly the line it typed, and the click point is tested through `posAtCoords`, the call the editor's own handler makes. |
+| a sidebar list that rendered no rows after launch (seen three times, about one launch in 250) — closed by KYO-459 | a 30-second wait for a `[data-region="sidebar-row"]` that never came, each showing the bare text `database is locked` | `node:sqlite` defaults its busy timeout to zero and every `kyo` subprocess the app spawned opened and closed the WAL database, so a read-only open could land in the checkpoint and receive `SQLITE_BUSY`. The app opens no SQLite since KYO-459: every list is a `kyo serve` read, so the cause cannot recur in it. What made the failures unreadable was also closed: the sidebar names the list in front of the tool's sentence, states an empty result, replaces a spinner that has not answered in 15 seconds with a line saying so, and stamps `data-load` on itself; `a sidebar list never just goes blank` in `tests/views.spec.ts` asserts the stamp and the sentence. |
 
 **The start-up budget under load, measured — and CPU load is not the variable
-(KYO-238).** Four of this suite's occurrences are the
-same shape and none is in the table: a wait budget exhausted, the check passing alone
-straight afterwards, no wrong answer anywhere. The fourth was four checks on a merged
-tree at one-minute load average 68 (`gate-payload.spec.ts:172`, `shell.spec.ts:1821`,
-`:1871`, `:2101`), every one a 30-second `page.waitForSelector` or the 60-second test
-timeout followed by KYO-118's *first window never reported ready*, all four passing in
-1.4 minutes alone. The record proposed a hypothesis with it: *the fixture's start-up
-budget is fixed while the machine's headroom is not.*
-
-Measured for KYO-254.d1, ten launches per arm timed from
-`_electron.launch()` to `body[data-ready="true"]` with no cap, so the distribution is
-visible rather than censored:
+(KYO-238).** Four occurrences were the same shape and none is in the table: a wait
+budget exhausted, the check passing alone straight afterwards, no wrong answer anywhere.
+The hypothesis filed with them was that the fixture's start-up budget is fixed while the
+machine's headroom is not. Measured for KYO-254.d1, ten launches per arm timed from
+`_electron.launch()` to `body[data-ready="true"]` with no cap:
 
 | arm | one-minute load | start-up |
 |---|---|---|
 | idle | 6.5–8.4 | 1.17–1.70s, median **1.27s** |
 | twelve CPU spinners | 9.6 rising to **67.6** | 1.79–2.36s, median **1.91s**, none over 30s |
 
-So the hypothesis is **not supported as stated**. At the very load average the fourth
-occurrence recorded, start-up keeps about fifteen times the 30-second budget in hand,
-and the loaded distribution is a 50% stretch rather than a cliff. CPU contention is not
-what exhausts these waits, and widening the budget would answer nothing — it would only
-move the number that gets exceeded.
-
-What every failing run had and this arm did not is **memory pressure and disk
-contention**: one was a run on which background jobs had already been killed for low
-free memory, and another had two Python suites in other worktrees and a device simulator
-starting beside it. That is the variable to instrument next, and it is named here so the
-next person measures the right one. A later full run is a fifth data point of the same
-shape: one failure,
-`shell.spec.ts:1284` with `locator.click: Timeout 30000ms exceeded`, at one-minute load
-around 34 — 3 of 3 in isolation immediately afterwards, at 2.1–2.8s each.
+The hypothesis is therefore not supported as stated: at the load average the fourth
+occurrence recorded, start-up keeps about fifteen times the 30-second budget in hand, and
+the loaded distribution is a 50% stretch rather than a cliff. What every failing run had
+and this arm did not was **memory pressure and disk contention** — background jobs killed
+for low free memory, or two Python suites and a device simulator starting beside it. That
+is the variable to instrument next.
 
 ### The suite opens no windows (KYO-122)
 
-`npm --prefix apps/desktop run smoke` launches the real Electron app dozens of
-times. Until KYO-122 each of those launches put a real window on screen and took
-the keyboard, so the machine running the suite was unusable for the length of the
-run — you could not read the terminal the suite was printing into. It no longer
-does: **the suite's windows are never shown at all.** They are created, loaded, laid
-out and driven over CDP, and nothing appears on your screen or in your dock.
+`npm --prefix apps/desktop run smoke` launches the real Electron app dozens of times.
+Until KYO-122 each launch put a real window on screen, ordered front across a full-screen
+app in its own macOS Space, so the machine running the suite was unusable for the length
+of the run. **The suite's windows are never shown at all.** They are created, loaded,
+laid out and driven over CDP, and nothing appears on the screen or in the dock.
 
-Focus was the obvious reading of "the machine is unusable while it runs" and it was
-the wrong one — you could type into another app throughout a run. What the windows
-were doing was *painting*: ordered front, across a full-screen app in its own macOS
-Space. An inactive window still does that, so `showInactive()` does not buy the
-relief it looks like it buys.
-
-The switch is a launch argument, `--kyosei-window-show=<focus|inactive|hidden>`,
-parsed by `parseWindowShow` in `src/shared/protocol.ts` and applied in
-`src/main/main.ts`:
+The switch is a launch argument, `--kyosei-window-show=<focus|inactive|hidden>`, parsed
+by `parseWindowShow` in `src/shared/protocol.ts` and applied in `src/main/main.ts`:
 
 | value | what a window does |
 |---|---|
-| `focus` | appears and takes focus (`show()`). **The default** — this is what `npm run start` gets, and what you get if you pass nothing or misspell the value. |
-| `inactive` | appears without activating the app (`showInactive()`): on screen and compositing, but your keyboard stays where it was. Still paints over what you are looking at, which is why it is not what the suite uses. |
+| `focus` | appears and takes focus (`show()`). **The default** — what `npm run start` gets, and what you get if you pass nothing or misspell the value. |
+| `inactive` | appears without activating the app (`showInactive()`): on screen and compositing, but the keyboard stays where it was. It still paints over what you are looking at, which is why the suite does not use it. |
 | `hidden` | never shown at all. **What the suite passes.** |
 
-On macOS the app also drops its dock icon (`app.dock.hide()`) for anything but
-`focus`, **before the first window is created**. That makes the process an accessory:
-it never activates itself, so it never pulls itself onto the Space you are working in.
+On macOS the app also drops its dock icon (`app.dock.hide()`) for anything but `focus`,
+before the first window is created. That makes the process an accessory: it never
+activates itself, so it never pulls itself onto the Space in use.
 
-**What makes `hidden` safe, rather than merely quiet.** Chromium treats a never-shown
-window as occluded and throttles it — timers to about 1Hz, the renderer
-deprioritised, frames starved — and a suite running in a regime the product never
-runs in is a suite that can pass vacuously (KYO-120 found exactly that failure mode
-in this file). So the throttling is turned off by name rather than routed around:
-`prepareApp` in `src/main/main.ts` appends `disable-background-timer-throttling`,
+Chromium treats a never-shown window as occluded and throttles it, and a suite running in
+a regime the product never runs in can pass vacuously. So the throttling is turned off by
+name: `prepareApp` in `src/main/main.ts` appends `disable-background-timer-throttling`,
 `disable-renderer-backgrounding` and `disable-backgrounding-occluded-windows` before
-`ready`, and every window carries `backgroundThrottling: false`.
+`ready`, and every window carries `backgroundThrottling: false`. No check measures this
+now; the check that did, in the deleted `smoke.spec.ts`, counted animation frames and
+timers inside an unshown window.
 
-That is measured, not assumed. `an unshown window is not a throttled one` in
-`smoke.spec.ts` counts animation frames and chained zero-delay timers *inside* a live
-unshown window. Under those switches it reports `document.visibilityState ===
-"visible"` and delivers frames at full rate — so there is no observable difference for
-page code at all. Remove any one switch and that check fails.
-
-The suite's own answer is `SUITE_WINDOW_SHOW` in `tests/fixture.ts`, and it is
-`hidden`. **A check that genuinely needs another policy opts in for itself** —
-`launchArgs("focus")` or `launchArgs("inactive")` in `smoke.spec.ts`, or
-`windowShowArg(…)` appended to any other launch's arguments, with the reason at the
-call site. There is deliberately no environment variable and no way to turn the
-whole suite loud: quiet is what the suite *is*, and anything else is a per-launch
-exception. No check needs one today; the parameter exists so the first one that does
-costs one argument instead of everybody's afternoon.
-
-To watch the suite drive a real window, pass `launchArgs("inactive")` or
-`launchArgs("focus")` temporarily; to run the app yourself, `npm run start`. Both
-`parseWindowShow` (in `tests/seams.spec.ts`) and the suite's actual
-quietness (in `tests/smoke.spec.ts`, asserted against a live Electron's
-`isFocused()` and `app.dock.isVisible()`, and against `isVisible()` for whichever
-policy the suite currently declares) are checked, so pointing the suite back at
-`focus` fails a test rather than merely being annoying.
+The suite's own policy is `SUITE_WINDOW_SHOW` in `tests/fixture.ts`, and it is `hidden`.
+A check that needs another policy opts in for itself, with `launchArgs("focus")` or
+`launchArgs("inactive")` (`shell.spec.ts`, `compose.spec.ts`, `activity.spec.ts`) or
+`windowShowArg(…)` appended to a launch's arguments, with the reason at the call site.
+There is deliberately no environment variable and no way to turn the whole suite loud.
+`parseWindowShow` is checked in `tests/seams.spec.ts`.
 
 ## The shell (KYO-232)
 
@@ -474,15 +308,14 @@ policy the suite currently declares) are checked, so pointing the suite back at
 
 Three regions and nothing else: the **rail**, the **sidebar**, and the **columns**.
 
-**The rail** is nine things in a narrow column — scratchpad, ideas, records, briefs,
-docs, activity, terminal, claude, and the project switcher at the foot. Five of them
-are the shell's own and select a sidebar LIST; the rest are contributed by tab kinds
-that declare a `rail` entry in their own directory, so the rail is not a second
-registry of what a tab may be. Two carry a live badge: records shows how many gates
-wait on a person, activity how many dispatches are running. Both numbers come from the
-read model and are pushed by the main process when they move — a badge read once at
-window start would go on saying `3` through a session in which the orchestrator cleared
-every gate.
+**The rail** is six sidebar lists in a narrow column — ideas, records, awaiting you,
+notes, docs and activity — and the project switcher at the foot. Each list item selects a
+sidebar list; a tab kind may also declare a `rail` entry in its own directory, which is
+merged in, so the rail is not a second registry of what a tab may be (no kind declares one
+today). Two carry a live badge: awaiting you shows how many gates wait on a person,
+activity how many dispatches are running. Both numbers come from the read model and are
+pushed by the main process when they move — a badge read once at window start would go on
+saying `3` through a session in which the orchestrator cleared every gate.
 
 **The sidebar** holds the lists and is never a popover: it is a region of the layout,
 it pushes the columns rather than floating over them, and clicking the rail icon that
@@ -606,8 +439,8 @@ observe -- the latest commit's subject, whether the report file has appeared, wh
 the worktree is gone -- and says nothing when it cannot. Beneath each dispatch,
 indented, the record it was for and every record it also covered (`covers_json`),
 each a row that opens the record. The list is live while it shows: the per-project
-activity poll repaints it. A layout saved with the old `activity` tab opens the
-build's own "no tab kind called activity" placeholder, which is what law 6 asks for
+activity poll repaints it. A layout saved with the retired `activity` tab opens
+the build's own "no tab kind called activity" placeholder, which is what law 6 asks for
 rather than a broken table.
 
 **Every list sorts and filters, and ideas is a folder tree (KYO-250).** Each sidebar
@@ -668,9 +501,9 @@ delete; a file's menu offers rename, move to any other folder, and delete; a row
 dragged onto a folder header moves there; the toolbar's folder button makes a new one
 at the root. Names and confirmations come through the app's own prompt (a native
 dialog cannot be driven by a check). The four writes -- `mkdirIdeas`, `renameIdea`,
-`moveIdea`, `deleteIdea` in `main/ideas.ts` -- resolve their target through the same
-`assertWritable` guard `saveIdea` and `createIdea` use, so anything outside `ideas/`
-is refused with a sentence naming the path.
+`moveIdea`, `deleteIdea` in `main/ideas.ts` -- are requests to the project's `kyo serve`,
+which refuses a target outside `ideas/` with a sentence naming the path (see "The compose
+tab").
 
 **The rail holds lists only (KYO-248).** Ideas, Records, Awaiting you, Notes, Docs,
 then the project switcher; every item selects a sidebar list and nothing on the rail
@@ -679,8 +512,7 @@ person, the gate type on the row -- rather than a group pinned atop the records 
 Notes replaces Briefs: every shift note, newest first, with the HANDOFF badged (the
 note standing when a session-start brief ran, the one `kyo brief` re-surfaces to the
 next session) and the latest brief kept at the top; a click shows that note by id
-(`getShiftNotes`, read straight out of the ledger, because no read-only command lists
-them). Scratchpad, terminal, claude and activity are on the home page and in the View
+(`getShiftNotes`, which asks `kyo shift-notes` of the project's `kyo serve`). Scratchpad, terminal, claude and activity are on the home page and in the View
 menu (`open-*` shell commands).
 
 **The home page** (`src/renderer/shell/home.ts`) is what a new tab, an empty column and
@@ -730,7 +562,7 @@ registration mechanism: `build.mjs` enumerates the directories into
 came from and refuses a mismatch by name.
 
 **`src/renderer/tabs/kind.ts` is the interface, and it is documented there rather than
-here.** A stage 3 worker reads that one file and can write a tab. The four members are
+here.** A reader of that one file can write a tab. The four members are
 `open`, `title`, `render`, `close`; a tab identifies itself by `{kind, arg}` everywhere
 — in a saved layout, in an `openTab` call, in the singleton rule, in a pop-out — and
 the shell never reaches into a tab's state.
@@ -740,9 +572,8 @@ A generated module rather than an esbuild plugin resolving a virtual import, bec
 resolver: a virtual module would typecheck as missing. `npm run typecheck` regenerates
 it first (`pretypecheck`).
 
-Stage 2 ships placeholders for `record`, `compose`, `views` and `activity`, each
-rendering the read model's own data raw — one directory per stage 3 dispatch, so each
-of those replaces one directory and edits no file anybody else is in.
+The tab kinds built are `claude`, `compose`, `home`, `record`, `terminal` and `views`.
+`docs/` holds the document renderer the `views` kind uses and is not itself a kind.
 
 ## Layout memory, per display configuration (KYO-232.c3)
 
@@ -788,8 +619,8 @@ screen, and then saving it there.
 The main process (`src/main/main.ts`) holds the only shared state: which windows exist,
 and which tab each pane window is showing. Two window kinds:
 
-- **shell windows** — the full window. They appear in the title bar's window cluster;
-  the `+` chip opens another, and clicking a chip focuses that window. A shell window
+- **shell windows** — the full window. They appear as the window chips in the
+  status bar; the `+` chip opens another, and clicking a chip focuses that window. A shell window
   opened by "Move to a new window" or by a tab dropped outside every window is
   **transient** (KYO-246): it opens on a layout seeded with that one tab, never writes
   its layout to disk, and hands whatever it holds back to the window it came from when
@@ -875,7 +706,7 @@ is an address (`127.0.0.1:47370` for this machine, or `KYOSEI_SERVE_URL`; anothe
 machine's Tailscale Serve name over HTTPS), a project is (server, registry name), and a
 `ServedProject` is what every store module takes -- `json(args)` for a served command,
 the file routes for `ideas/` and the scratchpad, and `subscribe` for the events stream.
-The app opens no store database: the title bar's record count is `kyo list`'s total,
+The app opens no store database: the status bar's record count is `kyo list`'s total,
 the schema is the one `kyo where` opened the store under, and briefs, shift notes,
 gates and activity are `kyo briefs`, `kyo shift-notes`, `kyo gates` and `kyo activity`
 (KYO-454). `store.ts` keeps only the layout's file names. One reader of the schema, the
@@ -934,9 +765,9 @@ becomes `unrecognised`, and a CLI that could not be run becomes `unavailable`;
 neither is folded into `cannot-tell`, which is the CLI's own verdict about the
 store and not a place to put the app's failures.
 
-`kyo list --json` is the surface because it exists here today: this store saves no
-Bases and has no `kyosei/bases.yml`, so a `kyo base run --json` poll would need a
-config file written into a store this app must not write to.
+`kyo list --json` is the surface because it answers on every project: a `kyo base run`
+read would need a base declared in `kyosei/bases.yml`, a file in a store this app must not
+write to.
 
 ### 4. The terminal is a real shell — `src/main/terminal.ts`
 
@@ -1354,19 +1185,6 @@ sits above the screen instead, and every word in it is composed in the main proc
 the renderer cannot see a `PATH`, a tmux binary or a session, so a sentence composed
 there would be a guess about a world it has no access to.
 
-### Where the rails went (KYO-122)
-
-Nine icons in two columns. Sorted by what each was actually doing:
-
-| was | is | why |
-|---|---|---|
-| records mode's `bubbles` / `graph` | nothing — deleted | Redundant outright: they focused a centre-pane view that the centre pane's own pill row already sets, in the pane it changes. Two controls for one setting, and the mode carried an `onViewChange` callback purely so the rail could not go stale against the pills. |
-| records mode's `folder` / `calendar` | pills in the **left pane's own header**, above the listings | A real job — which tool window fills the left pane — moved to the pane it changes. |
-| ideas mode's `calendar` / `folder` | the same | The rail's only non-redundant entries. |
-| the right rail's `properties` / `list` | pills in the **right pane's own header** | Two view modes, and now they sit on the pane whose mode they are. |
-| the terminal toggle | a button in the **status bar** | The strip it toggles is anchored to the bottom of the window, and so is this. |
-| docs mode's four icons | nothing — deleted | They selected nothing: docs mode is still KYO-110's placeholder and those clicks were ignored. Law 6 — a button that silently does nothing states the opposite of an absence stating itself. |
-
 ### The terminal toggle hides the pane; nothing kills the session
 
 The status bar's terminal button shows and hides the pane, PyCharm-style, and the
@@ -1405,14 +1223,9 @@ shell with the right sentence, and that quitting leaves the session and everythi
 it alive with the screen painted on the next launch. It runs wherever a tmux binary is
 on `PATH` and **skips with its reason where there is none**.
 
-The one-project rule above has two checks, at the two altitudes it needs. `an answer
-about a project that moved while it was being asked is asked again` (`seams.spec.ts`)
-drives `askedAboutOneProject` directly, moving the project mid-await, with no Electron
-and no timing; `a switch away from a launch project whose home is still being asked
-lands in the new project's session` (`smoke.spec.ts`) builds the whole condition in a
-real app — its own launch checkout, its own slow CLI — and asserts the pane's cwd and
-its session name name one project. Both go red when the loop in `askedAboutOneProject`
-is replaced by a single ask.
+The one-project rule above is checked by `an answer about a project that moved while it
+was being asked is asked again` (`seams.spec.ts`), which drives `askedAboutOneProject`
+directly, moving the project mid-await, with no Electron and no timing.
 
 ## The claude.ai pane (KYO-186)
 
@@ -1466,8 +1279,10 @@ window goes to the real browser instead.
 
 **The session writes its own Remote Control information into the store, from a
 session hook.** `kyo sessions --hook` runs on `SessionStart`, `Stop` and
-`SessionEnd` and maintains `kyosei/sessions.json` beside `kyosei.db`; this app reads
-that file directly, the same way it reads the database directly.
+`SessionEnd` and maintains `kyosei/sessions.json` beside `kyosei.db`. The app reads
+the entries with `kyo sessions --json`, asked of the project's `kyo serve` (KYO-459),
+so the CLI parses the file and owns its schema and its problems. Until KYO-459 the app
+read the file off disk itself, which a viewer of another machine's project cannot do.
 
 The alternative — having the app scan `~/.claude/projects/<path-slug>/` for the
 harness's `bridge-session` records — works and was measured, and is the wrong shape
@@ -1476,32 +1291,25 @@ second consumer. It cannot tell a *running* session from a finished one, because
 nothing holds a transcript open and a running `claude` does not name its session on
 its command line. And, the one that decides it, **it cannot cross hosts.**
 
-### The file is written by whichever machine runs Claude Code, and read from the store
-
-This is the arrangement the feature exists for, so it is worth stating plainly.
+### The file is written by whichever machine runs Claude Code, and read from the server
 
 `kyosei/sessions.json` is written by **whichever machine actually runs Claude
-Code**, from that session's own hooks, and is read by whichever machine runs this
-app, from the project's store. The two need not be the same machine. The motivating
-case is a dedicated dev box: the project lives there, it is remote-mounted on a
-laptop with no IDE, and the work is driven through web Remote Control. The box's
-session hook writes the file; the app on the laptop opens the mounted project, finds
-the store through `kyo`, reads the file across the mount, and the pane lands on the
-session running on the box. **A scan of `~/.claude` would look at the laptop and
-find nothing.**
+Code**, from that session's own hooks, and is read through the `kyo serve` of the machine
+that holds the project. The two need not be the same machine as the one running this app.
+The motivating case is a dedicated dev box: the project lives there, and the work is driven
+through web Remote Control. The box's session hook writes the file; its `kyo serve` returns
+the entries to the app on the laptop, and the pane lands on the session running on the box.
+**A scan of `~/.claude` on the laptop would find nothing.**
 
-It goes beside `kyosei.db` rather than "in the project directory", and those are the
-same place only under the in-repo layout. Under the split layout the store is its
-own repository elsewhere, and this app never assumes where that is — it asks `kyo`,
-and reads `sessions.json` from whatever store root comes back. So one path is
-correct under both layouts, and the rule is simply: **whatever arrangement lets this
-app read a project's records lets it read that project's session file.**
+The file goes beside `kyosei.db` rather than "in the project directory", and those are the
+same place only under the in-repo layout. Under the split layout the store is its own
+repository elsewhere, and this app never assumes where that is: `kyo serve` resolves it.
 
-**A project this app cannot see on disk falls back rather than failing.** If the
-store is unreachable, has no session file, or has one this build cannot parse, the
-pane opens `https://claude.ai/code` — which lists the account's own sessions. That
-is not a consolation prize: on a machine where Claude Code runs somewhere else, it is
-what the feature *is*, and it is most of what KYO-170's "bubbles" wanted.
+**A project whose entries cannot be read falls back rather than failing.** If the server
+reports no store, no session file, or a file this build cannot parse, the pane opens
+`https://claude.ai/code` — which lists the account's own sessions. That is not a
+consolation prize: on a machine where Claude Code runs somewhere else, it is what the
+feature *is*.
 
 ### Resolution order, and what it says out loud
 
@@ -1567,8 +1375,8 @@ drift apart while both stayed green — and, for KYO-382, launches the app once 
 assert that a `SessionStart` fired while the pane is open moves it (its pushed state
 and the view's `loadURL`) and that a `Stop` which leaves the answer alone does not,
 plus an Electron-free check that a dev box's server pushes the `sessions` change to a
-connected laptop. `smoke.spec.ts` covers the pane in the real
-app: that it opens beside the terminal and hides without destroying its page, that
+connected laptop. The pane in the real app is covered by `shell.spec.ts` and
+`links.spec.ts`: that it opens beside the terminal and hides without destroying its page, that
 the view is on a persistent on-disk partition under this app's profile, that the
 caption names the outcome, and that it pops out through the same mechanism the
 editor and terminal use.
@@ -1624,119 +1432,99 @@ built and run; `controller.ts` and `main.ts`'s New project handlers call it.
   when the box is ticked, `kyo controller start`, then says what was made and offers to
   open it in a new window.
 
-Checked in `tests/orchestrator.spec.ts`, which never reaches a real host: `KYOSEI_SSH`
+Checked in `tests/controller.spec.ts`, which never reaches a real host: `KYOSEI_SSH`
 names the ssh program, and the checks hand in a stand-in that records its argv and runs
 the far end's command under a HOME, ZDOTDIR and PATH of the run's own. `suiteEnv` sets
 `KYOSEI_SSH=/usr/bin/false` for every other launch, and `KYOSEI_CONTROLLER_SOCKET` to a
 socket nothing listens on, so no suite app reaches ssh or the machine's real
 `tmux -L kyosei` server.
 
-## The v3 read model (KYO-231)
+## The read model (KYO-231, KYO-454, KYO-459)
 
 <!-- governs:
 - apps/desktop/src/main/records.ts
 - apps/desktop/src/main/activity.ts
 -->
 
-Everything the v3 tabs render, produced in the main process so that **no tab derives
-anything**. Four queries and a push, all reads, none of which can mutate a store.
+Everything the tabs and lists render is produced in the main process, so that **no tab
+derives anything**. Every one of these is a read, asked of the project's `kyo serve`
+(`ServedProject.json`), and none can mutate a store. Since KYO-459 the app opens no
+database and runs no `git` of its own: the CLI commands introduced for it in KYO-454
+return the joined facts, and this app renames them into its own casing.
 
-| query | what it answers | where its facts come from |
+| query | what it answers | the command it asks |
 | --- | --- | --- |
 | `getRecordDocument(id)` | every child object of one record, in id order, with the description and links | `kyo show <id> --json` |
-| `getAwaitingHuman()` | every open gate waiting on a person, across every record status, plus the count for the rail badge | direct SQLite |
-| `getRecordsList({query, base})` | the records list, searched by id or title, or run through a saved base | `kyo base run` when a base is named, direct SQLite otherwise |
-| `getActivity({finished})` | running dispatches and the most recent finished ones | direct SQLite for the store half, `gitfacts.ts` for git's, `kyo worktrees --json` for the unaudited-stop count |
-| `getLatestBrief()` | the latest session brief as structured sections, every id intact | direct SQLite |
+| `getAwaitingHuman()` | every open gate waiting on a person, across every record status, plus the count for the rail badge | `kyo gates --type …` |
+| `getRecordsList({query, base})` | the records list, searched by id or title, or run through a saved base | `kyo base run <name>` when a base is named, `kyo list --json` otherwise; each row is stamped with its class from `kyo next --json` |
+| `getActivity({finished})` | running dispatches and the most recent finished ones | `kyo activity --finished <n> --against <ref>` |
+| `getLatestBrief()` | the latest session brief as structured sections, every id intact | `kyo briefs --latest` |
+
+The same module also reads one past brief (`kyo briefs <id>`), the briefs and shift notes
+lists (`kyo briefs`, `kyo shift-notes`), the saved bases (`kyo base list`) and the board
+classes (`kyo next`).
 
 ### Why each one asks what it asks
 
 **The record document is `kyo show --json` and nothing else.** That envelope already
-carries every child object *and* the obligation collapse, so reading it is **reuse** of
-`docs_check.collapse_obligations` rather than a port of it — there is no second
-implementation in this app to drift from the CLI's. A direct SQLite read would have
-been a dozen SELECTs plus TypeScript re-derivations of the collapse and of the role
-word, which is two rules with two implementations (law 3).
+carries every child object *and* the obligation collapse, so reading it reuses
+`docs_check.collapse_obligations` rather than porting it: there is no second
+implementation in this app to drift from the CLI's (law 3). A test compares the
+document's groups to `kyo show --json`'s `docs_obligation_groups`, group for group and id
+for id, and asserts that no other file in `src/` groups an obligation of its own.
 
-That is checked by name and against the record the criterion names: `the obligation
-collapse is the CLI's own, on this store's KYO-215` compares the document's groups to
-`kyo show KYO-215 --json`'s `docs_obligation_groups`, group for group and id for id,
-and then asserts that no other file in `src/` groups an obligation of its own. It skips
-with its reason in a checkout with no built `kyosei/kyosei.db` — the ordinary state of
-a dispatch worktree, where it is gitignored.
+**Awaiting-human matches on gate type.** `awaiting:human-run` and `awaiting:human-review`
+are members of `contracts.GATE_TYPES`, and `tags_json` holds the *other* axis, the
+per-project vocabulary in `kyosei/gate-tags.yml`, where the type says what kind of
+waiting this is and the tag says which thing is being waited on (KYO-102, KYO-46). The
+types are passed to `kyo gates` as `--type` arguments, so the app writes no query.
+*Across every record status* is the point of the query rather than a detail of it: a gate
+on a `working` record and one on an `open` record are the same claim on a person's
+attention.
 
-**Awaiting-human is a direct read, and it matches on gate TYPE.** KYO-231's own
-description calls `awaiting:human-run` and `awaiting:human-review` "tags"; the store
-disagrees, and the correction matters. Both are members of `contracts.GATE_TYPES`, and
-`tags_json` holds the *other* axis — the per-project vocabulary in
-`kyosei/gate-tags.yml` (`ui-review`, `deploy-risk`), where the type says what KIND of
-waiting this is and the tag says which thing is being waited on (KYO-102 / KYO-46).
-Matching on tags would have returned nothing.
+**The brief is read with `kyo briefs`, never `kyo brief`.** Running `kyo brief` inserts a
+row in `brief_runs`, so the command whose subject is briefs is the one this app must not
+call, and `KYO_WRITING_COMMANDS` names it with that reasoning. `assertRecordsRead` refuses
+any subcommand not on `RECORDS_READ_COMMANDS` at the one place arguments are assembled,
+an allowlist, so a command the CLI grows later is refused until someone adds it on
+purpose. What the store keeps of a past brief is a marker plus two ledger positions; the
+sections are the shift notes and ledger entries standing in that window, ids intact so a
+renderer can link each row (the resolver of KYO-230 takes `FIX-S1` and `FIX-E12` without
+being told what they are). Nothing regenerates the prose: the store never kept it, and
+rendering a freshly computed board under an earlier date would invent a document.
 
-*Across every record status* is the point of the query rather than a detail of it: a
-gate on a `working` record and a gate on an `open` one are the same claim on a person's
-attention, and a view that only looked at open work would hide half of them. No
-read-only command asks this — `kyo base run` with a gate filter (KYO-203) comes closest
-and needs a base declared in `kyosei/bases.yml`, a file in a store this app must not
-write to.
+**The records list carries the CLI's classes.** Each row is stamped by `readRecordsList`
+from `readBoardClasses` (`kyo next --json`), never derived here, because a browser that
+re-derived "dispatchable" from status and criteria would be a second board disagreeing
+with the first. The Readiness filter of KYO-290 in the sidebar draws from that stamp.
 
-**The brief is read out of the store because `kyo brief` writes.** Every run of it
-INSERTs a row in `brief_runs`, so the one command whose subject is briefs is the one
-this app must never call (`KYO_WRITING_COMMANDS`). What the store keeps about a past
-brief is a marker plus two ledger positions; the sections are the shift notes and the
-ledger entries standing in that window, ids intact so a renderer can link each row
-(KYO-230's resolver takes `FIX-S1` and `FIX-E12` without being told what they are).
-Nothing regenerates the prose — the store never kept it, and rendering a freshly
-computed board under a date three days ago would be inventing a document and dating it.
+### Activity
 
-### The git half, and the poll
+`activity.ts` renames `kyo activity --json` (KYO-454) into this codebase's casing and
+derives nothing: the dispatch rows come with their record, the current report's verdict
+counts, the record's open gates and classes, the worker's tokens and end time, the
+unaudited stops, and what git says about each worktree now, read on the machine that holds
+the project. `finished-but-not-moved`, `gated` and `terminated-no-report` are the CLI's
+classes, and a row can be in more than one: a running dispatch on a gated record is not a
+worker who has gone quiet.
 
-`src/main/gitfacts.ts` reads one worktree at a time: presence, dirtiness, branch,
-commits past the dispatch's own base sha, the last commit's sha and subject, whether
-that branch is contained in `main`, and whether a `.kyosei-report.json` is sitting
-there. **A missing directory is a fact, never an error** — it is the ordinary end state
-of a finished dispatch, because `kyo worktrees` removes them — so every path ends in a
-named outcome (`read`, `no-worktree-declared`, `directory-gone`, `not-a-git-worktree`)
-carrying a sentence, and nothing throws.
+**A missing worktree directory is a fact, never an error.** It is the ordinary end state of
+a finished dispatch, so each row's git facts end in a named outcome (`read`,
+`no-worktree-declared`, `directory-gone`, `not-a-git-worktree`) carrying a sentence.
 
-The git half is **polled**, and it has to be: a worker's `git commit` happens in
-another process in another directory and fires no event this app could subscribe to.
-The poll is armed by the first `getActivity`, so an app whose reader never opens the
-activity tab never runs a `git` in anger; it stops on the tick that finds nothing
-running; and it refuses to overlap itself, because a tick still reading when the next
-is due is what turns a five-second interval into an unbounded pile of `git` processes.
+The git half is **polled** by the main process, because a worker's `git commit` fires no
+event a viewer could subscribe to. The poll (`ACTIVITY_POLL_MS`, 5 s, one per project)
+is armed by the first `getActivity`, so an app whose reader never opens the list asks for
+nothing; it stops on the tick that finds nothing running; it refuses to overlap itself; and
+it pushes only a change in the rows' shape (KYO-264).
 
-`gitfacts.ts` is the third file allowed `node:child_process`. Routing these through
-`kyo` was the alternative and does not answer: `kyo worktrees --json` reports presence,
-branch and merged-state for every worktree the store has ever had plus a full stop
-audit, and reports neither dirtiness, nor commits past base, nor the last commit
-message. It *is* used for the one number it owns — the unaudited-stop count, whose
-attribution is a real rule that reads the harness's own spawn sidecar (KYO-154) and
-whose meaning is stated at length in that command's output (KYO-163). Measured at 0.24s
-against this store's 144 dispatches, and it only reads: `--prune` is what removes
-anything, because listing is the dry run (law 11).
+`ACTIVITY_FINISHED_DEFAULT` (12) is the number of finished dispatches shown by default. It
+was measured, not picked: on 2026-09-11 the store held 139 reported and 5 terminated
+dispatches, of which 11 closed in the previous fourteen days, and about a dozen is roughly
+the fortnight an orchestrator coming back to a session reads.
 
-### The classes are the brief's
-
-`finished-but-not-moved`, `gated` and `terminated-no-report` are read off the store's
-own columns exactly as `cmd_review` derives them — a dispatch that reported while its
-record stayed `open` (KYO-87), a record with an open gate, a dispatch that ended with no
-report. Nothing here invents a fourth or softens one, and a row can be in more than one:
-a running dispatch on a gated record is not a worker who has gone quiet.
-
-`ACTIVITY_FINISHED_DEFAULT` is **measured, not picked**: on 2026-09-11 this store held
-139 reported and 5 terminated dispatches, of which 11 closed in the previous fourteen
-days. A dozen is roughly the last fortnight of this project's work, which is the window
-an orchestrator coming back to a session reads; 144 rows is not a view of anything.
-
-### What is not delivered, and what is
-
-`ActivityRow.recordStanding` is the empty string: the role word is not a column in the
-`records` table, and a direct read will not invent one. The record document carries it
-for the page that needs it. Everything else the record's own description lists is
-there — worktree path and presence and dirtiness, branch and commits past base and
-latest commit message and merged-into-main state, report-file presence, ingest state,
-verdict counts, the unaudited stop count, and the derived classes.
+`ActivityRow.recordStanding` is the empty string: the role word is a property of the record
+document, which carries it for the page that needs it.
 
 ## `kyosei://<project>/<id>` — deep links (KYO-230)
 
@@ -1810,15 +1598,14 @@ A refusal crosses the bridge too (`LinkDelivery`), and that is the decision: a
 `kyosei://` link was unambiguously meant for this app, so "nothing happened" is the one
 response it may not get (law 6).
 
-### What ships here, and what is a placeholder
+### What ships here
 
-The main-process half is complete: the scheme, the interception, the resolver, and a
-typed `OpenRequest` on `CHANNEL.openTarget` carrying the target, the anchor, the anchor's
-kind, the project root, the source and the column asked for. The renderer half — the
-record page's anchors, the highlight, the "you were sent here" strip — is KYO-233.
-Until it exists, `deliverLink` narrates each link on the app's own stdout, which is
-what a human debugging a link that went nowhere would look at first and what the checks
-read.
+The main process holds the scheme, the interception, the resolver, and a typed
+`OpenRequest` on `CHANNEL.openTarget` carrying the target, the anchor, the anchor's kind,
+the project root, the source and the column asked for. The renderer draws it (KYO-233):
+the record page's anchors, the highlight and the "you were sent here" strip. `deliverLink`
+also writes one line per link to the app's own stdout, which is what a person debugging a
+link that went nowhere would look at first.
 
 `tests/links.spec.ts` drives both Chromium paths inside the **real** claude view: it
 loads a `data:` page into that view over CDP — no production seam takes a URL — and
@@ -1898,175 +1685,20 @@ Enumerating Remote Control sessions across machines. KYO-171 established there i
 external API for it and nothing here changes that: the store file works because the
 project directory is shared, not because sessions became enumerable.
 
-## Records mode (KYO-112, KYO-113) — the v2 renderer, deleted by KYO-232
+## The compose tab: the scratchpad and idea files (KYO-234)
 
-**This surface no longer exists.** The three modes went with the v2 renderer; what
-replaced this one is the records list in the sidebar, the `record` tab, and the `views`
-tab (KYO-227). The section is kept because the reasoning in it is still the design
-record — why the tree delegates grouping to the engine, why the status pill groups by
-`standing`, why every read is a read — and KYO-233 and KYO-235 build against it.
+<!-- governs:
+- apps/desktop/src/shared/ideafile.ts
+-->
 
-The first mode whose panes hold the store rather than a sketch of it. Each pane
-carries its own selector — the mode pills stay the only mode switcher. The left
-pane's header offers its two tool windows (`Folder · Calendar`); the centre pane has
-four static view pills, `Editor · Base · Bubbles · Graph`, and all four are surfaces;
-the right pane's header offers its two (`Properties · Outline`).
+The `compose` tab kind edits the two things this app writes: the session scratchpad and
+the files under a project's `ideas/`. The editor is CodeMirror 6 over the markdown source
+(`tabs/compose/editor.ts`), chosen over a `<textarea>` or a rich-text editor because the
+text must round-trip to a file `kyo` parses and git diffs, byte for byte.
 
-Choosing a centre view leaves the left pane exactly as it was — the folder tree stays
-put, because it is this mode's click-target list and a rendering that replaced it
-would take the names away exactly when a reader wants to compare a dot against one.
-One of each is current at a time, and since KYO-122 that is automatic rather than
-arranged: the two settings are marked in the two panes that own them, where the one
-rail that displayed both had to encode a `role` to stop one un-marking the other.
+### The write path
 
-**Nothing in this mode writes.** That is a property of the wiring, not of the buttons
-drawn: `main.ts` exposes six records handlers and all six are reads, so the renderer
-has no method that could mutate the store. Underneath them, `assertRecordsRead`
-refuses any `kyo` subcommand not on `RECORDS_READ_COMMANDS` (`base`, `show`, `next`)
-at the one place arguments are assembled — an allowlist, so a command the CLI grows
-tomorrow is refused until somebody adds it on purpose.
-
-### `kyo brief` writes, so records mode never calls it
-
-Worth its own heading, because it is the trap. `kyo brief` reads like a report and is
-offered to orchestrators as the surface to read *instead of* the records — and every
-run of it INSERTs a row into `brief_runs`. It is therefore the obvious command to
-build a session-brief calendar on and the one command a read-only mode most needs to
-avoid. It is named in `KYO_WRITING_COMMANDS` with that reasoning, and a check runs it
-against a fixture and proves the row appears, so the day it stops writing this
-decision becomes reviewable again.
-
-Two consequences:
-
-- The board classes come from `kyo next --json`, which shares `_ready_records` with
-  `cmd_brief` — the same computation, including KYO-87's `settled_not_moved` and
-  KYO-570's `blocked` — and
-  writes nothing.
-- Past briefs are `kyo briefs <id> --json` (KYO-454), asked of kyo serve; until KYO-459
-  they were read out of `brief_runs`, `shift_notes` and `events` by SQL. What the editor shows is what the store *kept* of a brief: the run,
-  the ledger position it closed over, and the shift notes standing at the time,
-  verbatim. Not the prose it printed, which was never stored — rendering a
-  freshly-computed board under a three-day-old date would be inventing a document.
-
-### The Base engine answers the query
-
-The folder tree and the Base view are two renderings of one query (KYO-45), and both
-run `kyo base run <name> --json`. The app selects no rows and applies no filter rule
-of its own. On top of a base the reader refines — search, `column:value` filter,
-click-to-sort — computed in the renderer over the engine's own rows, labelled as
-theirs, and saved nowhere: writing a refinement back into `bases.yml` is past the
-seam and is a later record. A base the CLI refuses renders the refusal **verbatim**,
-beside the currency, never as an empty table; the refusal names the declared bases
-and the entry that would make the query legal, and a paraphrase would throw that away.
-
-**The one rule implemented twice, and why.** `kyo base run` takes no `--group-by`
-override, so a ribbon offering kind/status/scope over one saved base cannot ask the
-engine for two of its three answers. `groupRows` is a port of `bases.grouping()` that
-keeps every one of its decisions — group order follows row order, a list-valued field
-is refused rather than bucketed, a null value is its own group and not the empty
-string. It is not trusted: `tests/seams.spec.ts` declares a fixture base per grouping
-and compares the port against the engine's own output for all three. The folder tool
-also *states* which produced its groups (`data-grouped-by="engine"|"app"`), because a
-surface implying the engine had answered would be claiming a provenance it lacks. The
-fix is a flag on the CLI; see this record's report.
-
-### Bubbles and the graph: two more renderings of the one Base (KYO-113)
-
-Neither runs a query. Both take the `BaseResult` the centre pane already holds and
-draw it, which is KYO-45 in as many words — "the renderings differ only in how they
-draw the answer" — and is why choosing a base moves all four views at once.
-
-**Bubbles.** Three bindings over the clusters: `group`, `color`, `size`.
-
-- **Color defaults to `match group`** — one neutral hue per cluster, so color says
-  exactly what position already says. That is the point: it makes choosing
-  kind/status/scope the act of *adding* a dimension. The alternative (default to a
-  field, warn when it duplicates the grouping) designs the redundancy in and then
-  apologises for it.
-- **Size is three buckets and never continuous.** Dot area is nonlinear in the
-  radius — twice the radius is four times the ink — so no reader recovers a number
-  from a continuous scale. The split is across the *distinct values present*, in
-  thirds: a range split puts everything in "small" the moment one record has forty
-  open gates, and a rank split puts two thirds of a hundred identical zeroes into
-  "medium" and "large". `size: uniform` exists so the human can switch size off and
-  see whether it was telling them anything, and a field every row agrees on says so
-  in the legend rather than being drawn as a field of equal dots.
-- **Grouping is the folder tree's grouping**, literally: `groupRows` lives in
-  `src/shared/grouping.ts` and both processes import it. A check fails if that
-  function is ever defined anywhere else.
-
-**The graph.** Typed edges with an explicit edge-type filter, and the drawn types are
-always **stated** in words rather than left to be inferred from the picture. Filtered
-to `blocks` it is a dependency graph — the drawn subgraph is acyclic, so the nodes are
-layered and a blocker sits above what it blocks; set to `all` it has a cycle in it, no
-direction to read, and becomes the hairball the filtering exists to avoid. Which one
-you are looking at is on the screen either way.
-
-Three things it refuses to do quietly:
-
-- The edges come off **the same base run**. `query._attach_links` puts a `links` array
-  on every row for exactly this consumer, so there is no per-node query — its own
-  comment says a graph that re-queried would be the second query path KYO-108.c4
-  exists to prevent.
-- The filter's options are the types the **drawn rows carry**. This app keeps no list
-  of link types: `contracts.LINK_TYPES` is the CLI's registry and a copy here would be
-  a second answer to what an edge may be.
-- An edge whose other end is **outside the query** is counted and stated, never
-  dropped. Concluding "this record blocks nothing" from a missing line would be wrong,
-  and a narrower base (`open-work`) produces exactly that case.
-
-Whether the drawn subgraph is acyclic is computed from the subgraph, not from a copy
-of `contracts.ACYCLIC_LINK_TYPES` — same law, one dimension over.
-
-Hovering a dot or a node shows a preview of the row the query answered with; clicking
-opens that record in the Editor view. The pills are **static, not transient**: the
-bindings and the edge filter live on the mode, so the round trip through the Editor
-and back returns the reader to the picture they left.
-
-### The record editor
-
-Read-only, and gates lead the properties. That ordering is a claim about
-simultaneity, not taste: a record can be working AND blocked, and a panel showing
-`status: open` with the gates elsewhere lets a reader see one without the other.
-Under each **open** gate go all of the record's claims, one line each — a
-transcription of `render.claims_beside_gate`, decisions included: never truncated
-(the claim a cap hides is the one the rendering exists to surface), never matched
-(nothing here decides a claim answers a gate; that judgment silently unblocks work
-when wrong), and a record with no claims says so rather than rendering an empty block
-that reads as "compared and found nothing".
-
-A dispatch renders the report its own `report_id` names, with any superseded ones
-named and counted (KYO-90) — picking the newest instead would be this app deciding
-which account of a dispatch is authoritative when the store already has.
-
-Finished-but-not-moved (KYO-87) is its own class, carrying the CLI's own remedy
-verbatim, and is never folded into `ready` or read as `done`.
-
-### Currency, on every surface
-
-Every records payload carries a `CurrencyFacts` and every surface paints it. A table
-of rows is exactly as convincing when the database is behind its export, so the
-status bar answering on their behalf is not enough (KYO-74). `currencyFrom` maps one
-`db_export_currency` envelope for all of them, so four renderings cannot disagree
-about what the CLI said; where a command carries no envelope (`kyo show`), the
-verdict is asked for separately rather than omitted.
-
-## Ideas mode (KYO-114) — the v2 renderer, deleted by KYO-232
-
-**This surface no longer exists.** What replaced it is the ideas list in the sidebar
-and the `compose` tab, which in stage 2 is a read-only placeholder; KYO-234 makes it an
-editor again. The section is kept because "The one write path" below is still the law,
-and because the frontmatter and autocomplete reasoning is what KYO-234 builds against.
-
-The mode the human writes in. Its left pane offers two tools in its own header — the
-**scratchpad** (calendar slot) and **`ideas/` as a file tree** (folder slot) — and its
-right pane offers the same two as records mode: the open file's frontmatter, and its
-headings.
-
-### The one write path
-
-Everything else in this app reads. Ideas mode writes, and the boundary is
-mechanical rather than described:
+Everything else in this app reads. The writes, and the boundary around them, are:
 
 | what | where | who else can see it |
 |---|---|---|
@@ -2074,180 +1706,89 @@ mechanical rather than described:
 | an idea file | under the project's `ideas/` | `kyo promote`, `kyo sweep`, any ideas Base |
 | **anything under `kyosei/`** | **never** | — |
 
-**The boundary is `kyo serve`'s: `src/kyosei/serve_files.py`** (KYO-456). Since KYO-459 the app writes no project file itself --
-every write is a request to the project's kyo serve, this machine's or another's -- so
-the one module that decides what may be written is that one, for every viewer. It
-allows files under a project's `ideas/` and the project's session scratchpad, each
-resolved to its real path first (a symlink under `ideas/` aimed at `kyosei/` is refused,
-and `tests/seams.spec.ts` plants exactly that), and nothing else. The app's old
-TypeScript copy of the rule, `assertWritable`, is gone with the app's own write path.
+**The boundary is `kyo serve`'s: `src/kyosei/serve_files.py`** (KYO-456). Since KYO-459 the
+app writes no project file itself: every write is a request to the project's `kyo serve`,
+this machine's or another's, through its file routes (`ideas/`, `ideas-move`,
+`ideas-mkdir`, `scratchpad`). The module that decides what may be written is therefore the
+same for every viewer. It allows files under a project's `ideas/` and the project's session
+scratchpad, each resolved to its real path first (a symlink under `ideas/` aimed at
+`kyosei/` is refused, and `tests/seams.spec.ts` plants exactly that), and nothing else.
 
-Two things still hold on the app's side:
+Two properties hold on the app's side:
 
-- **The bridge has no vocabulary for it.** `saveScratchpad` takes text and no path;
-  `saveIdea` and `createIdea` take a path *relative to `ideas/`*. No method on
-  `window.kyosei` accepts an absolute path, so the renderer cannot ask.
-- **No write replaces a copy it did not read.** Each goes with the ETag it read (or
-  `If-None-Match: *` for a new file), so a file another viewer changed in between is
-  refused with kyo serve's sentence rather than overwritten.
+- **The bridge has no vocabulary for an absolute path.** `saveScratchpad` takes text and
+  no path; `saveIdea`, `createIdea` and the organising calls (`mkdirIdeas`, `renameIdea`,
+  `moveIdea`, `deleteIdea`, KYO-250) take a path *relative to `ideas/`*.
+- **No write replaces a copy it did not read** (KYO-575). Each tab keeps the text and the
+  version (kyo serve's ETag) it loaded or last saved, and every save names them, with
+  `If-None-Match: *` for a new file. When the server refuses a stale save, `main` reads
+  the current file, merges the tab's edit and the file's change three ways
+  (`shared/merge3.ts`, a line-based merge) and writes the merge against the version it was
+  merged with. A tab with no unsaved edits follows its file instead: when the events
+  stream says it changed, the tab re-reads it and puts it on screen as the app, which arms
+  no save.
 
-Ideas mode's own `kyo` allowlist is two commands: `base` and `worktrees`. Both are
-reads. `worktrees` earns its place below; `promote` is refused by name, and it is
-the one this mode is nearest to. Since KYO-439 no route in the app runs it at all:
-`runKyo` refuses it (`assertAppMayRun`).
-
-### The daily sheet's split view (KYO-122)
-
-The scratchpad is where a person plans the next session, and the orchestrator's shift
-note is the other half of that plan, so the two are worth reading side by side.
-
-A **split view** pill sits beside the pop-out button, on the scratchpad only, and
-splits the editor in half: the writer's own sheet on the left, the orchestrator's most
-recent shift note on the right, read-only. Read-only is a property of the wiring, not
-of the styling — there is no handler in this app that writes a shift note.
-
-The note comes from `readLatestShiftNote`, which reads the newest row of
-`shift_notes` directly rather than out of a brief's window. That distinction is the
-point: `readBrief` returns the notes standing *at* a brief, so the handoff from the
-session that has just ended — which is exactly the one this view is for — appears in
-none of them. Three answers, because they are three facts: the note, a store holding
-none yet, and a store that could not be read. It is asked for on the first split and
-not before.
+The app's `kyo` allowlist for this tab is `base` and `worktrees`, both reads, and `promote`
+is refused by name (`assertAppMayRun`).
 
 ### The scratchpad is deliberately not an idea
 
-It lives at `~/kyosei/<project>/scratchpad.md` — KYO-56's per-project home — so
-**promotion and sweep cannot see it by construction** rather than by a rule
-somebody has to remember. It is the human's own surface: to-do lists, draft
-prompts, session notes, none of it swept, counted or required to have any field.
-The pane states its full path, because it is the one file this app edits outside
-the project directory and a human should be able to open it in any other editor.
+It lives at `~/kyosei/<project>/scratchpad.md` (KYO-56's per-project home), so **promotion
+and sweep cannot see it by construction** rather than by a rule somebody has to remember.
+It is the person's own surface: to-do lists, draft prompts, session notes, none of it
+swept, counted or required to have any field. The pane states its full path.
 
-Its ribbon is context-dependent (KYO-S56) — these three buttons belong to the
-scratchpad, not to the editor, and an idea file has no ribbon at all:
+**Where the home is, is asked of `kyo`.** `config.store_home()` and `project_home_name()`
+are a real rule (`$KYOSEI_HOME` or `~/kyosei`, then the store root's directory name under
+the split layout and the code root's under in-repo), and a TypeScript copy would be a
+second implementation of where a project's files live. `kyo worktrees --json` reports
+`home` as `<per-project home>/dispatch worktrees`, and its parent is the home; taking a
+parent directory is a path operation, not a re-derivation. `worktrees` removes nothing
+without `--prune` (law 11), so it is a read. The checks set `KYOSEI_HOME`, which `kyo`
+honours, so the scratchpad lands inside the fixture: the seam the tests use is the seam the
+consumer uses.
 
-1. **Session notes** — a `## Session Notes — <today>` heading at the **very top**,
-   pushing everything below down, so the newest entry is the first thing in the
-   file. The calendar tool lists those headings, which is what makes the pane's
-   calendar slot a calendar.
-2. **Clear** — only through an explicit confirmation modal, which says how many
-   lines are about to go. There is no undo, and nothing else holds a copy.
-3. **Idea** — the current selection becomes a new file under `ideas/`, via a modal
-   asking a name and a destination folder. It writes a markdown file and nothing
-   else: no record, no stamp, no ledger entry. Promotion is `kyo promote`'s, and a
-   human's, later. An existing file is never overwritten.
+The editor's ribbon is context-dependent. The scratchpad's has one button, enabled when
+text is selected, which opens the promote-to-idea dialog (`tabs/compose/idea-dialog.ts`,
+KYO-252): the selection becomes a new file under `ideas/`, via a name suggested from the
+selection's first line and a folder chosen from the vault's own. It writes a markdown file
+and nothing else — no record, no stamp, no ledger entry — and never overwrites an existing
+file. The new file's path relative to the project root goes on the clipboard, because the
+usual next step is to paste it to the orchestrator. An idea file's own tab has no ribbon
+(KYO-439).
 
-**Where the home is, is asked of `kyo`** — the same weak point `facts.ts`
-documents for the store locator, one directory over. `config.store_home()` +
-`project_home_name()` is a real rule (`$KYOSEI_HOME` or `~/kyosei`, then the store
-root's directory name under the split layout and the code root's under in-repo),
-and a TypeScript copy would be a second implementation of where a project's files
-live. So the app asks: `kyo worktrees --json` reports `home` as
-`<per-project home>/dispatch worktrees`, and its parent is the home. Taking a
-parent directory is a path operation, not a re-derivation — none of the three
-things that could drift is decided here. `worktrees` removes nothing without
-`--prune` (law 11), so it is a read.
+### `[[`, `#` and `[[<id>.` offer closed sets
 
-That also gives the checks their seam: they set `KYOSEI_HOME`, `kyo` honours it,
-and the scratchpad lands inside the fixture. **The seam the tests use is the seam
-the consumer uses** — there is no app-only override and no test-only branch.
+`[[` offers only records that exist in the store, matching id and title (id matches
+first). `#` offers only tags that already appear across `ideas/` (frontmatter `tags:` and
+body `#tag`s; there is no tag registry, and `kyosei/gate-tags.yml` is a different
+vocabulary on a different object). `[[<id>.` offers that record's own child ids
+(KYO-234.c5). A dangling reference is not offered, so drift is prevented at the input
+rather than flagged by a sweep later. A reader can still type `[[whatever]]` by hand, and
+when a trigger matches nothing the popup says so rather than closing.
 
-### The tree is the vault; the engine decorates it
+A typed `[[id]]` is followed with Mod-click (an ordinary click still places the caret).
+The editor hands the bracketed text verbatim to `followLink`, which is where the id
+grammar lives.
 
-Membership comes from a directory scan, always, and that is deliberate: a folder
-holding nothing, an image, a `.base` file, and a file some base's filter excluded
-are all things an Obsidian-like file view must show, so **no base's filter can make
-a file disappear from the tree**. Every base whose `source` is `ideas` is then run
-and its rows *decorate* what the scan found — the promotion stamp above all. The
-tool states which happened. `scratchpad.md` is skipped at any depth, because
-`ideas.idea_files` skips it: a consumer's leftover in-vault scratchpad is not an
-idea, and listing it as one would disagree with every `kyo` command.
-
-### Frontmatter is hidden in the editor and lives in the right pane
-
-Two halves of one decision. The editor pane shows the body; the properties tool
-renders and edits the frontmatter, and it remains **ordinary frontmatter in the
-`.md` file** — nothing moves it anywhere, and Obsidian's own properties pane shows
-the same block.
-
-`promoted` and `promoted_at` render and never edit. They are `kyo promote`'s record
-of what happened, and a text box over them would be this app offering to assert a
-promotion that never occurred. The row says so rather than being greyed out with no
-reason.
-
-Saving **splices**; it does not re-render a file from a parse. A key the properties
-tool does not model — a comment, a nested mapping, a quoting style — survives an
-edit to the key beside it byte for byte, and a check proves it by editing one key of
-a file that has all three.
-
-A promoted section renders as **a stub, not a lock**: the two-line blockquote
-`kyo promote` wrote is ordinary editable text, and the outline marks which heading
-it belongs to.
-
-### `[[` and `#` are closed sets (KYO-55)
-
-`[[` offers only records that exist in the store, matching **id and title** (id
-matches first). `#` offers only tags that already appear across `ideas/`. **A
-dangling reference is not typeable by accident** — drift is prevented at the input
-rather than flagged by a sweep a session later, when the writer has stopped thinking
-about it.
-
-A reader can still type `[[whatever]]` by hand; this is a text editor and pretending
-otherwise would be a lock. What is guaranteed is that nothing the app *offers* can
-produce a reference to something that is not there — and when a trigger matches
-nothing, the popup **says so** rather than closing, so the reader learns the
-reference does not exist while still typing it.
-
-There is **no tag registry** in v1. `kyosei/gate-tags.yml` is the registry for gate
-tags, a different vocabulary on a different object, and borrowing it here would offer
-a set unrelated to what is written in these files. The tag set is the vault's own —
-frontmatter `tags:` plus body `#tag`s — and the UI says that in as many words.
-
-Records come over the read seams records mode already built (`readRecordTree`). This
-mode adds no second route to a record.
+A save is armed only by the person's own edit — a keystroke, a paste, an undo, or a ribbon
+button that rewrites text on their behalf — and never by the app putting text on screen
+(KYO-150). Text reaches the disk by a debounce after the last keystroke, a save on blur,
+and ⌘S, and the header states which of `no changes / unsaved / saving / saved / NOT saved`
+is true.
 
 ### `ideas.py`, ported once, and not trusted
 
-<!-- governs:
-- apps/desktop/src/shared/ideafile.ts
--->
+`shared/ideafile.ts` implements the frontmatter and section readers of `kyosei.ideas` for
+the buffer the person is editing and for the vault's tags and promotion stubs. The Base
+engine answers for files **on disk**; nothing answers for the text being edited, and
+shelling out per keystroke to a process that reads the last saved bytes would answer a
+question nobody asked.
 
-`shared/ideafile.ts` is the second rule in this app implemented twice, after
-`grouping.ts`, and it is there for a forced reason: the Base engine answers
-beautifully for files **on disk**, and nothing answers for the buffer the human is
-**editing** — the properties tool has to know that a `- item` line just made `tags` a
-list, and the outline has to show a heading typed a second ago. Shelling out per
-keystroke to a process that reads the last saved bytes would answer a question nobody
-asked.
-
-So it is checked rather than believed: `tests/seams.spec.ts` runs the CLI's own ideas
-base over a fixture vault and compares the port against the engine **file by file**
-for properties, sections and stub ids. The stub the app recognises is likewise
-produced by a real `kyo promote` rather than compared against a copied template, so
-the day `ideas.promotion_stub` changes shape, this fails here.
-
-### No editor dependency
-
-A `<textarea>`. Held to the same standard as the node-pty note set: CodeMirror or
-ProseMirror would be several hundred kilobytes and a plugin graph, configured back
-down into "a plain markdown box with a completion popup". What a code editor buys —
-highlighting, folding, multiple cursors — is not in this record; what this record
-needs is a selection the Idea button can read, a caret offset the popup can anchor
-to, and text that round-trips to a file byte for byte, and a textarea gives all
-three. The one thing it does not give is where the caret is *on screen*, which is
-measured from the element's own font rather than a hard-coded metric.
-
-### The pane is live from the moment it is on screen
-
-Two defects the smoke suite caught, both the same shape, both worth knowing about
-before touching this code: an editor that took focus when its first read landed stole
-keystrokes from the terminal, and a startup read that finished late overwrote text a
-human had already typed. **Anything that lands asynchronously must not assume the
-editor is still empty, and must not assume nobody is typing somewhere else.**
-
-Text reaches the disk by three routes — a debounce after the last keystroke, a save
-on blur, and ⌘S — and the header states which of `no changes / unsaved / saving /
-saved / NOT saved` is true. A failed write is never silent and never reads as saved.
+It is therefore checked rather than believed: `tests/seams.spec.ts` runs the CLI's own
+ideas base over a fixture vault and compares the port against the engine file by file for
+properties, sections and stub ids. The stub the app recognises is likewise produced by a
+real `kyo promote`, so the day `ideas.promotion_stub` changes shape the check fails.
 
 ## Layout
 
@@ -2355,32 +1896,6 @@ tests/shell.spec.ts           launches the real app and drives the v3 shell
 tests/seams.spec.ts      drives the seams directly, with no app
 tests/kyoserve.spec.ts   drives the transport against a real kyo serve on an ephemeral port
 tests/remote.spec.ts     the app against two kyo serves: this machine's, and a "dev box"
-```
-
-The v2 renderer's records mode, deleted by KYO-232, was a directory rather than a file,
-one module per surface:
-
-```
-src/renderer/records/fragments.ts  currency line, refusal block, empty state, chips
-src/renderer/records/tools.ts      the folder tree and the session-brief calendar
-src/renderer/records/base.ts       the Base table and the reader's refinement
-src/renderer/records/bubbles.ts    the clusters, and the three bindings over them
-src/renderer/records/graph.ts      the typed edges, the type filter, the layout
-src/renderer/records/record.ts     one record read-only: gates, properties, document
-src/renderer/records/brief.ts      one past session brief, as the store kept it
-src/renderer/records/mode.ts       the three panes and the state behind them
-```
-
-Its ideas mode, deleted with it, had the same shape, and reused records mode's
-`fragments.ts` rather than growing a second currency line and a second empty state:
-
-```
-src/renderer/ideas/complete.ts    the `[[` / `#` triggers, matching and insertion
-src/renderer/ideas/editor.ts      the textarea, the ribbon, the completion popup
-src/renderer/ideas/modals.ts      the clear confirmation and the new-idea form
-src/renderer/ideas/panels.ts      the editable properties block, the nested outline
-src/renderer/ideas/tools.ts       the scratchpad tool and `ideas/` as a file tree
-src/renderer/ideas/mode.ts        the three panes, the open document, the saving
 ```
 
 The files under `src/shared/` sit beside the protocol for the same reason: both
@@ -2594,21 +2109,18 @@ Two things changed, and the sharing decision is not one of them:
 
 ## Tooling, and why
 
-- **No UI framework.** The shell's whole state is a mode and a window list. A
-  framework would be dependency weight with nothing to pay for it.
+- **No UI framework.** The shell's state is a window list and, per window, columns of
+  tabs. A framework would be dependency weight with nothing to pay for it.
 - **esbuild** (`build.mjs`) rather than Vite/electron-vite: no dev server, no HMR,
   no plugin graph is wanted here, so a bundler needing no config file is the whole
-  requirement. Four bundles (main, the shell's preload, the claude view's preload,
-  renderer) plus three copied assets.
+  requirement. Five bundles plus three copied assets (`build.mjs`).
 - **TypeScript** with `tsc --noEmit` as the typecheck — esbuild strips types without
   checking them, so the typecheck is a separate command on purpose.
 - **Biome** rather than ESLint: one binary, lint *and* format, no plugin graph to
   assemble for TypeScript.
-- **Playwright** (`_electron.launch`) for the smoke test: it launches the real
+- **Playwright** (`_electron.launch`) for the checks: it launches the real
   Electron binary and drives the real renderer, and its `waitForEvent("window")`
   is what the multi-window and pop-out assertions need. No browsers are downloaded.
-- **`node:sqlite`** for the read path: a stable built-in of the Node inside Electron
-  44, so no dependency and no native rebuild.
 - **`@lydell/node-pty`** rather than `node-pty` itself. Both are Node-API addons, so
   neither needs an Electron ABI rebuild; what separates them is how the binary
   arrives. `node-pty@1.1.0` ships its prebuilds inside its own tarball with the
@@ -2628,4 +2140,4 @@ Auto-update belongs to a later record, and so does anything about giving this bu
 to another person — see "Packaging" above for what is deliberately absent from it.
 
 Terminal *context* — the pane knowing which record its neighbours are showing
-(KYO-79) — is not here either. This is the shell, not the wiring to the modes.
+(KYO-79) — is not here either; the terminal and the record tabs do not know about each other.
