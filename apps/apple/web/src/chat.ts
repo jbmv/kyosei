@@ -3631,8 +3631,9 @@ function drawRecordLists(): void {
 function recordLine(line: Line, wide: boolean): HTMLElement {
   const row = document.createElement("div");
   row.className = wide ? "rec-line wide" : "rec-line";
-  // A verdict in a report is anchored by its criterion's id, as the criterion is (KYO-740).
-  if (line.ref) row.dataset.recordRef = line.ref;
+  // An entry of a report is anchored by its own id, as a criterion is (KYO-757), and is
+  // found by that id when a link or a chip names it.
+  if (line.ref) row.dataset.recordRef = row.dataset.ref = line.ref;
   const label = span("rec-label", "");
   label.append(linked(line.label));
   const text = span(line.ref ? "rec-line-text rec-text" : "rec-line-text", "");
@@ -3778,6 +3779,9 @@ function drawRecord(): void {
       .find((element) => element.dataset.ref === revealRef);
     revealRef = null;
     if (target) {
+      // A line of a superseded report is inside its fold, which is opened to show it.
+      const fold = target.closest("details");
+      if (fold) fold.open = true;
       target.scrollIntoView({ block: "center" });
       target.classList.add("revealed");
       setTimeout(() => target.classList.remove("revealed"), REVEAL_MS);
