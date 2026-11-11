@@ -34,17 +34,21 @@ struct SpellingTests {
         #expect(defaults.object(forKey: Self.correction) as? Bool == false)
     }
 
-    @Test func aChoiceStoredByTheMenuIsReadBeforeTheRegisteredValue() throws {
-        let name = "kyosei-tests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
-        defaults.register(defaults: ChatPage.spellingDefaults)
-        // The menu's items store the person's choice under the same keys.
-        defaults.set(false, forKey: Self.underline)
-        defaults.set(true, forKey: Self.correction)
-        defaults.register(defaults: ChatPage.spellingDefaults)
-        #expect(!defaults.bool(forKey: Self.underline))
-        #expect(defaults.bool(forKey: Self.correction))
+    @Test func theValuesAreRegisteredAndNotStored() {
+        _ = page()
+        // The Spelling and Grammar menu stores the person's choice under the same keys, and a
+        // stored value is read before a registered one. A value the app stored itself would
+        // replace that choice at every launch, so the app stores nothing: the keys are in the
+        // registration domain and not in the process's own.
+        let registered = UserDefaults.standard.volatileDomain(
+            forName: UserDefaults.registrationDomain)
+        for key in [Self.underline, Self.correction] {
+            #expect(registered[key] != nil)
+            #expect(
+                CFPreferencesCopyValue(
+                    key as CFString, kCFPreferencesCurrentApplication,
+                    kCFPreferencesCurrentUser, kCFPreferencesAnyHost) == nil)
+        }
     }
 
     @Test func typingInThePageLeavesTheWordsAsTyped() async throws {
