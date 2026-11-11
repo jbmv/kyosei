@@ -625,6 +625,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 ## (no scope declared)
 
 - **2026-11-11** — `KYO-773` (task) — A dispatch's brief says each thing once: touches by path, and its length by section
+- **2026-11-11** — `KYO-772` (bug) — Mac app: the search bar cannot be closed by a press and crowds the header
 - **2026-11-11** — `KYO-770` (task) — A session's task list, kept by kyo serve and edited by the person and the orchestrator
 - **2026-11-11** — `KYO-768` (bug) — kyo docs settle without --method crashes where it should refuse
 - **2026-11-11** — `KYO-764` (bug) — The remedy ledger does not see an error raised through a helper that returns it
