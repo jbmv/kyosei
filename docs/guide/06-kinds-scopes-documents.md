@@ -6,7 +6,7 @@ you might change.
 
 ## Kinds
 
-([D6](setup-decisions.md#d6-kinds)) Every record has a kind. A kind is not a label: it
+([D6](setup-decisions.md#d6-kinds)) Every record has a kind. A kind
 declares what a record must carry, what it may lead to, whether it counts as work on the
 board, and how it is dispatched. That is what stops a question from being closed as if it
 were a build, or a design from being treated as approved because someone wrote it down.
@@ -75,8 +75,8 @@ scopes in `kyosei/scopes.yml`. A record's scope says which component it belongs 
 
 ## Documents
 
-([D8](setup-decisions.md#d8-documents)) Documentation drifts for the same reason plans do:
-the code moves and nobody tells the prose. Kyosei can keep the two connected, for the
+([D8](setup-decisions.md#d8-documents)) Documentation falls out of step with the code when
+the code changes and the prose describing it is not revised. Kyosei can keep the two connected, for the
 documents you declare in `kyosei/documents.yml`. None are declared by default;
 `kyo docs suggest` drafts a declaration from the repository and writes nothing.
 
@@ -127,7 +127,7 @@ refusals.
 ## What must never enter the store
 
 ([D11](setup-decisions.md#d11-what-must-never-enter-the-store)) Kyosei stores evidence
-verbatim and filters nothing, because a trimmed log is a less trustworthy log. If the
+verbatim and filters nothing, because trimming a log makes it less trustworthy as evidence. If the
 project handles customer data, credentials or anything regulated, add a project rule to
 `kyosei/procedures.md`, so every brief carries the restriction. `kyo redact` removes text
 after the fact.
