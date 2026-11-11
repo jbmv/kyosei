@@ -43,6 +43,19 @@ from the session the anchor names. Its chip in the composer is drawn dimmed with
 outline and takes no press, because the chat on screen has no place for it to open. The choice
 of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
+Placing an anchor is a step of its own in a prompt's undo (KYO-780): Command-Z directly after
+it takes the anchor back and leaves the text as it was, and Shift-Command-Z puts it back. The
+text area's own history holds edits of the text only, so the page keeps the placings beside it
+and steps through whichever was made last. What an unsent prompt is anchored to is highlighted
+in the chat, and the highlight goes when the anchor does, unless another prompt holds an anchor
+on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
+cannot be highlighted, so the chip above that paragraph in the sent prompt reads "place lost"
+and its title names the paragraph.
+
+The page's tests are in `web/test/` and run with `npm test` in `web/`. Those in
+`anchors.test.ts` need a web view: they build the page, open it in a headless Chrome and feed
+it the frames the app would send, and are skipped on a machine with no Chrome.
+
 A live session's task list (KYO-770, KYO-771) is drawn above the composer's prompts, in a
 slightly dimmed bubble that is the first thing in the prompts' own scrolling column: it rises
 as the prompts grow and scrolls out of view with them when they need the room. The person

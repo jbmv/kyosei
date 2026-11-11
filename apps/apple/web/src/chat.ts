@@ -454,6 +454,8 @@ function drawTurn(turn: Turn): HTMLElement {
     chip.className = "turn-anchor";
     chip.append(icon("anchor"), ...(words ? drawChipWords(words) : ["words unavailable"]));
     chip.title = line;
+    // The record the line names, by which a stale anchor finds its chip (KYO-712).
+    chip.dataset.anchor = anchor[1];
     chip.addEventListener("click", () => revealRecord(anchor[1], words));
     element.append(chip);
   }
@@ -1634,6 +1636,7 @@ const kyo = {
     sendGate.end()?.remove();
     drawSending();
     if (!textAreas().length) addBox();
+    paintAnchors();
     remember();
     switchWhenFree();
   },
@@ -1930,7 +1933,18 @@ interface FileItem { kind: "file"; id: string; name: string; path?: string; thum
 type Item = TagItem | AnchorItem | FileItem | Place;
 interface SavedBox { text: string; marks?: { line: number; items: Item[] }[] }
 
+/**
+ * One placing of an anchor in a box (KYO-780). The box's own undo history holds edits of its
+ * text and nothing else, so the placings are kept here and stepped through by the same keys.
+ * `text` is the box's text when the anchor was placed, and `buried` says that an edit of the
+ * text stands between this step and the key: the box's own history is then stepped first.
+ */
+interface Placed { line: number; item: AnchorItem | Place; text: string; buried: boolean }
+
 interface Marks {
+  /** The placings Command-Z takes back, oldest first, and those Shift-Command-Z puts back. */
+  undo: Placed[];
+  redo: Placed[];
   /** The text the ids were last matched to. */
   text: string;
   /** One id for each line of the text. */
@@ -1985,6 +1999,57 @@ function trackEdit(area: HTMLTextAreaElement): void {
   });
   marks.ids = shift.ids;
   marks.text = area.value;
+}
+
+/**
+ * Keeps the placings in step with the box's own undo history, from the kind of each edit of
+ * the text (KYO-780). A new edit stands after every placing and ends what could be put back.
+ * An undo or a redo of an edit that brings the text back to what it was when an anchor was
+ * placed, or taken back, makes that step the next one again. The box's history cannot be
+ * read, so the text is what is compared: an edit that happens to restore the same text
+ * earlier than the history does makes the step the next one too soon, by that edit.
+ */
+function trackHistory(area: HTMLTextAreaElement, inputType: string | undefined): void {
+  const marks = marksOf.get(area)!;
+  const bury = (steps: Placed[]) => { for (const step of steps) step.buried = true; };
+  const meet = (steps: Placed[]) => {
+    const next = steps[steps.length - 1];
+    if (next && next.text === area.value) next.buried = false;
+  };
+  if (inputType === "historyUndo") {
+    bury(marks.redo);
+    meet(marks.undo);
+  } else if (inputType === "historyRedo") {
+    bury(marks.undo);
+    meet(marks.redo);
+  } else {
+    bury(marks.undo);
+    marks.redo = [];
+  }
+}
+
+/**
+ * Takes back the last placing of an anchor, or puts back the last one taken, when that is
+ * the step the key is for. It answers false when the step is an edit of the text, which is
+ * the box's own to undo.
+ */
+function stepPlacing(area: HTMLTextAreaElement, redo: boolean): boolean {
+  const marks = marksOf.get(area)!;
+  const steps = redo ? marks.redo : marks.undo;
+  const step = steps[steps.length - 1];
+  if (!step || step.buried) return false;
+  steps.pop();
+  const id = marks.ids[step.line];
+  const held = marks.items.get(id) ?? [];
+  // A placing whose anchor was since removed by its chip has nothing left to take back.
+  if (step.text !== area.value || id === undefined || (!redo && !held.includes(step.item))) return false;
+  const now = redo ? [...held, step.item] : held.filter((item) => item !== step.item);
+  if (now.length) marks.items.set(id, now);
+  else marks.items.delete(id);
+  (redo ? marks.undo : marks.redo).push(step);
+  remember();
+  drawMarks(area);
+  return true;
 }
 
 /** Where a line sits beside the text, read from a hidden copy that wraps as the text does. */
@@ -2298,16 +2363,23 @@ function spanAt(
 /**
  * Puts an anchor on a paragraph of a prompt: the one named, or the one the caret was in when
  * the box was left, which a text area keeps while the focus is elsewhere. The text is not
- * changed, so an empty paragraph takes the anchor as it is.
+ * changed, so an empty paragraph takes the anchor as it is, and the placing is a step of its
+ * own in the box's undo (`stepPlacing`).
  */
 function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem | Place): void {
   const marks = marksOf.get(area)!;
-  const id = marks.ids[line ?? caretLine(area)];
+  const at = line ?? caretLine(area);
+  const id = marks.ids[at];
   const held = marks.items.get(id) ?? [];
   const same = (other: Item) => (item.kind === "anchor"
     ? other.kind === "anchor" && other.key === item.key && other.start === item.start && other.end === item.end
     : (other.kind === "record" || other.kind === "path") && samePlace(other, item));
-  if (!held.some(same)) marks.items.set(id, [...held, item]);
+  if (!held.some(same)) {
+    marks.items.set(id, [...held, item]);
+    // KYO-780: the placing is the last thing done, so it is what Command-Z takes back first.
+    marks.undo.push({ line: at, item, text: area.value, buried: false });
+    marks.redo = [];
+  }
   // Typing goes on where it was.
   area.focus();
   remember();
@@ -2474,6 +2546,49 @@ function paintStalePlaces(): void {
     const line = (chip.title ?? "").replace(/\n\(stale:.*$/s, "");
     chip.title = gone ? `${line}\n(stale: this place no longer holds what was anchored)` : line;
   }
+  paintStaleAnchors();
+}
+
+/** The paragraph a sent prompt's chip stands above: the text after it, up to the next line's end. */
+function paragraphUnder(chip: HTMLElement): string {
+  for (let node = chip.nextSibling; node; node = node.nextSibling) {
+    if (node instanceof Text && node.data.trim()) return node.data.trim().split("\n")[0];
+  }
+  return "";
+}
+
+const STALE_WORDS = 8;
+
+/**
+ * KYO-712: a sent paragraph whose anchor to a reply or a prompt the server gives as stale has
+ * lost its place: the record is no longer in the transcript, or no longer holds the words. No
+ * highlight can be drawn for it, so the chip above the paragraph in the sent prompt says so
+ * in words, and its title names the paragraph. The words are the stylesheet's, so that they
+ * are no part of the prompt's text, which anchors and the search measure. A paragraph sent to
+ * another session has no chip in this chat and is not shown here.
+ */
+function paintStaleAnchors(): void {
+  const stale = new Map<string, SentMark[]>();
+  for (const mark of sentMarks_) {
+    for (const anchor of mark.anchors) {
+      if (anchor.kind || !anchor.stale || !anchor.uuid) continue;
+      stale.set(anchor.uuid, [...(stale.get(anchor.uuid) ?? []), mark]);
+    }
+  }
+  for (const chip of Array.from(chat.querySelectorAll<HTMLElement>(".turn-anchor[data-anchor]"))) {
+    const marks = stale.get(chip.dataset.anchor ?? "");
+    const line = (chip.title ?? "").replace(/\n\(stale:.*$/s, "");
+    chip.classList.toggle("stale", Boolean(marks));
+    if (!marks) {
+      chip.title = line;
+      continue;
+    }
+    // Several paragraphs can be anchored to one record: the one under this chip is named.
+    const under = paragraphUnder(chip);
+    const mark = marks.find((held) => under && held.text?.split("\n")[0].trim() === under) ?? marks[0];
+    const paragraph = firstWords(under || mark.text || "", STALE_WORDS);
+    chip.title = `${line}\n(stale: the place${paragraph ? ` "${paragraph}" was anchored to` : " anchored"} is no longer in the transcript as it was)`;
+  }
 }
 
 /** Opens the record at the element, or the file at the lines, that a place names. */
@@ -2509,12 +2624,30 @@ function paintAnchors(): void {
     if (range) ranges.push(range);
     else for (const block of anchoredBlocks(item)) block.classList.add("anchored");
   }
+  showRanges("anchored", ranges);
+  showRanges("anchored-sent", sentRanges);
+}
+
+const paintedRanges = new Map<string, any>();
+
+/**
+ * Gives a named highlight these ranges and no others. Each name keeps one highlight, and
+ * the ranges are taken out of it and put into it (KYO-780), so that the engine is told of
+ * every range that goes. A removed anchor was reported to stay highlighted in the app's web
+ * view; Chrome does not show that, and replacing the registry's entry, as was done before,
+ * is a suspected cause that has not been confirmed.
+ */
+function showRanges(name: string, ranges: Range[]): void {
   const highlights = (CSS as any).highlights;
   if (!highlights) return;
-  if (ranges.length) highlights.set("anchored", new (window as any).Highlight(...ranges));
-  else highlights.delete("anchored");
-  if (sentRanges.length) highlights.set("anchored-sent", new (window as any).Highlight(...sentRanges));
-  else highlights.delete("anchored-sent");
+  let highlight = paintedRanges.get(name);
+  if (!highlight) {
+    highlight = new (window as any).Highlight();
+    paintedRanges.set(name, highlight);
+  }
+  highlight.clear();
+  for (const range of ranges) highlight.add(range);
+  if (highlights.get(name) !== highlight) highlights.set(name, highlight);
 }
 
 // ------------------------------------------------------------ search in the chat (KYO-741)
@@ -2768,7 +2901,7 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
   ghost.title = "Attach to this paragraph";
   const ids = text.split("\n").map(() => nextLine++);
   const marks: Marks = {
-    text, ids, gutter, mirror, ghost, lost: new Map(),
+    text, ids, gutter, mirror, ghost, lost: new Map(), undo: [], redo: [],
     items: new Map(saved.filter((mark) => mark.line < ids.length && mark.items.length)
       .map((mark) => [ids[mark.line], mark.items])),
   };
@@ -2817,7 +2950,20 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
     area.focus();
     for (const file of files) attachFile(area, file);
   });
-  area.addEventListener("input", () => {
+  // KYO-780: Command-Z and Shift-Command-Z step through the placings of anchors as they do
+  // through the edits of the text. A key that is not for a placing is left to the box. An
+  // undo or redo asked for another way, as by a menu item, reaches the page as the edit it
+  // is about to make, and only when the box's own history has one to make.
+  area.addEventListener("keydown", (event) => {
+    if (event.key.toLowerCase() !== "z" || !event.metaKey || event.ctrlKey || event.altKey) return;
+    if (stepPlacing(area, event.shiftKey)) event.preventDefault();
+  });
+  area.addEventListener("beforeinput", (event) => {
+    if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo") return;
+    if (stepPlacing(area, event.inputType === "historyRedo")) event.preventDefault();
+  });
+  area.addEventListener("input", (event) => {
+    trackHistory(area, (event as InputEvent).inputType);
     fitBox(area);
     trackEdit(area);
     drawMarks(area);
@@ -2842,6 +2988,8 @@ function addBox(text = "", saved: SavedBox["marks"] = []): HTMLTextAreaElement {
     disarm();
     box.remove();
     if (!textAreas().length) addBox().focus();
+    // KYO-780: what the box was anchored to is no longer anchored.
+    paintAnchors();
     remember();
   });
   // Bare text in the accent colour, then the keys that do the same.
