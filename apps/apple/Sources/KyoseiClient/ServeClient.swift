@@ -53,6 +53,70 @@ public struct SessionRow: Decodable, Sendable {
     public let live: Bool
     public let has_pane: Bool
     public let cwd: String?
+    /// The title the session's transcript holds, or none.
+    public let title: String?
+
+    public init(
+        session_id: String, live: Bool, has_pane: Bool, cwd: String? = nil, title: String? = nil
+    ) {
+        self.session_id = session_id
+        self.live = live
+        self.has_pane = has_pane
+        self.cwd = cwd
+        self.title = title
+    }
+}
+
+/// One project of the server's registry, as `GET /v1/projects` lists it (KYO-761).
+public struct ProjectRow: Decodable, Equatable, Sendable {
+    public let name: String
+    /// Whether the project's store can be opened; `problem` says why when it cannot.
+    public let can_open: Bool
+    public let problem: String?
+
+    public init(name: String, can_open: Bool, problem: String? = nil) {
+        self.name = name
+        self.can_open = can_open
+        self.problem = problem
+    }
+}
+
+private struct ProjectList: Decodable {
+    let projects: [ProjectRow]
+}
+
+/// What the page's project dropdown and session links are drawn from (KYO-761): the window's
+/// project, the server's projects, and each project's live sessions.
+public enum ProjectsFrame {
+    /// The frame as JSON, with its keys in order so that an unchanged frame is the same text.
+    /// `projects` is nil before the server's list has been read, and `problem` says why a
+    /// read failed. `live` holds, for each project whose sessions were read, the sessions a
+    /// process is running on, in the server's order; a session the server shows no pane for
+    /// is carried with `has_pane` false, and the page decides which one a link follows.
+    public static func json(
+        project: String, projects: [ProjectRow]?, problem: String?, live: [String: [SessionRow]]
+    ) -> String {
+        var frame: [String: Any] = [
+            "project": project,
+            "problem": problem ?? NSNull(),
+            "projects": NSNull(),
+            "live": live.mapValues { rows in
+                rows.filter(\.live).map { row -> [String: Any] in
+                    [
+                        "session_id": row.session_id, "title": row.title ?? NSNull(),
+                        "has_pane": row.has_pane,
+                    ]
+                }
+            },
+        ]
+        if let projects {
+            frame["projects"] = projects.map { row -> [String: Any] in
+                ["name": row.name, "can_open": row.can_open, "problem": row.problem ?? NSNull()]
+            }
+        }
+        let data = try? JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "null"
+    }
 }
 
 /// The session as of its latest reply, which the status strip shows.
@@ -140,6 +204,15 @@ public struct ServeClient: Sendable {
             throw ServeError.status(code, String(decoding: data, as: UTF8.self))
         }
         return data
+    }
+
+    /// The projects the server serves, in its registry's order (KYO-761).
+    public func projects() async throws -> [ProjectRow] {
+        try Self.projects(in: await get("v1/projects"))
+    }
+
+    static func projects(in data: Data) throws -> [ProjectRow] {
+        try JSONDecoder().decode(ProjectList.self, from: data).projects
     }
 
     public func sessions(project: String) async throws -> [SessionRow] {

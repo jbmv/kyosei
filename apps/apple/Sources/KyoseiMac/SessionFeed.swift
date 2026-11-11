@@ -45,6 +45,10 @@ enum FeedState: Equatable {
 @Observable
 final class SessionFeed {
     private static let menuRefresh = Duration.seconds(5)
+    /// The server's list of projects is read once in this many rounds of the session links'
+    /// refresh, and whenever the dropdown is opened: it costs the server one `kyo where` for
+    /// each project, and changes only when a project is registered or removed (KYO-761).
+    private static let projectsEvery = 6
 
     private var client: ServeClient
     private var selected: String?
@@ -54,8 +58,22 @@ final class SessionFeed {
     /// Follows the project's change events for the Records view (KYO-732).
     private var recordsTask: Task<Void, Never>?
     @ObservationIgnored weak var webView: WKWebView?
+    /// Whether the page has been told its project and the tasks that follow it are running.
+    private var started = false
 
+    /// The window's project, or the empty string while none is chosen: on a first run, and
+    /// when the project last shown is no longer served (KYO-761).
     private(set) var project: String
+    /// Reads the server's projects and each one's live sessions, whatever project is shown.
+    private var projectsTask: Task<Void, Never>?
+    /// The server's projects as last read, or nil before a read has succeeded.
+    private var served: [ProjectRow]?
+    private var servedProblem: String?
+    private var liveSessions: [String: [SessionRow]] = [:]
+    /// Whether the window's project has been looked for in this server's list.
+    private var projectVerified = false
+    /// The last projects frame the page was sent, so that an unchanged one is not sent again.
+    private var projectsFrame = ""
     private(set) var state = FeedState.connecting
     /// The waits between attempts to read the session while they keep failing.
     private var retry = Backoff()
@@ -66,7 +84,9 @@ final class SessionFeed {
     var runningSubagents = 0
     var runningAgents: [RunningAgent] = []
     private var draftSession: String?
-    private var draftEtag: String?
+    /// The draft's etag for each session opened. A save still on its way when the window
+    /// turns to another session answers for its own session and not the one shown (KYO-761).
+    private var draftEtags: [String: String] = [:]
     private var draftTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     /// Whether the terminal drawer is open, and the size of its view once the page has
@@ -101,9 +121,9 @@ final class SessionFeed {
             ?? localServer
     }
 
+    /// The project the app last showed, or the empty string on a first run.
     static var savedProject: String {
-        environment["KYOSEI_PROJECT"] ?? UserDefaults.standard.string(forKey: projectKey)
-            ?? "kyosei"
+        environment["KYOSEI_PROJECT"] ?? UserDefaults.standard.string(forKey: projectKey) ?? ""
     }
 
     static func fromEnvironment() -> SessionFeed {
@@ -113,7 +133,28 @@ final class SessionFeed {
     /// Points this window at another server or project, and reads it afresh.
     func configure(server: URL, project: String) {
         UserDefaults.standard.set(server.absoluteString, forKey: Self.serverKey)
-        UserDefaults.standard.set(project, forKey: Self.projectKey)
+        open(server: server, project: project, session: nil, save: true)
+    }
+
+    /// What the page's dropdown and session links ask (KYO-761): another project, with the
+    /// session to follow when a link names one. A link to the window's own project turns
+    /// the chat to that session.
+    func choose(project name: String, session: String?) {
+        guard !name.isEmpty else { return }
+        if name == project {
+            if let session, session != current { select(session: session) }
+            return
+        }
+        open(server: client.base, project: name, session: session, save: true)
+    }
+
+    /// Turns the window to `project` on `server`, the empty string being no project. Every
+    /// task that reads the project left is cancelled, and each of them checks that it was
+    /// not cancelled before it changes anything or hands the page a frame, so nothing of
+    /// that project is drawn afterwards. `save` is false when the app leaves a project the
+    /// server no longer lists, which stays the saved one in case it is served again.
+    private func open(server: URL, project: String, session: String?, save: Bool) {
+        if save { UserDefaults.standard.set(project, forKey: Self.projectKey) }
         task?.cancel()
         menuTask?.cancel()
         recordsTask?.cancel()
@@ -124,19 +165,30 @@ final class SessionFeed {
         startWatch = nil
         closeTerminal()
         terminalSession = nil
-        client = ServeClient(base: server)
+        if server != client.base {
+            // Another server's projects are not this one's.
+            projectsTask?.cancel()
+            projectsTask = nil
+            served = nil
+            servedProblem = nil
+            liveSessions = [:]
+            projectVerified = false
+            client = ServeClient(base: server)
+        }
         self.project = project
-        selected = nil
+        selected = session
         current = nil
         currentLive = false
         draftSession = nil
-        draftEtag = nil
         facts = nil
         remote = nil
         ahead = nil
+        runningSubagents = 0
+        runningAgents = []
         state = .connecting
         retry.reset()
         send("clear", "null")
+        started = false
         start()
     }
 
@@ -165,7 +217,17 @@ final class SessionFeed {
     }
 
     func start() {
-        guard task == nil else { return }
+        guard !started else { return }
+        started = true
+        // The page is told its project before any frame of it, and keeps the composer's
+        // unsent prompts under the server and project they were written for.
+        let scope = "\(client.base.absoluteString) \(project)"
+        send("project", #"{"project": \#(quoted(project)), "scope": \#(quoted(scope))}"#)
+        projectsFrame = ""
+        sendProjects()
+        if projectsTask == nil { projectsTask = Task { await followProjects() } }
+        // With no project there is nothing to follow, and the page shows the list of them.
+        guard !project.isEmpty else { return }
         task = Task { await run() }
         menuTask = Task {
             while !Task.isCancelled {
@@ -176,6 +238,78 @@ final class SessionFeed {
         sendRecordsStart()
         sendFilesStart()
         recordsTask = Task { await followProject() }
+    }
+
+    // MARK: The project dropdown and the session links (KYO-761)
+
+    /// Hands the page the projects and their live sessions, when they differ from what it has.
+    private func sendProjects() {
+        let frame = ProjectsFrame.json(
+            project: project, projects: served, problem: servedProblem, live: liveSessions)
+        guard frame != projectsFrame else { return }
+        projectsFrame = frame
+        send("projects", frame)
+    }
+
+    /// What the page asks when its dropdown opens: the server's list, read again.
+    func projects(body: [String: Any]) {
+        guard body["want"] as? String == "list" else { return }
+        Task { await readProjects(list: true) }
+    }
+
+    /// Reads the server's projects when `list` is set or none has been read, then the
+    /// sessions of every project that can be opened, all at once, and tells the page.
+    /// `kyo serve` has no route that lists live sessions across projects, so each project's
+    /// own list is asked for; a project that refuses its list has no link.
+    private func readProjects(list: Bool) async {
+        let client = client
+        if list || served == nil {
+            do {
+                let rows = try await client.projects()
+                guard !Task.isCancelled, client.base == self.client.base else { return }
+                served = rows
+                servedProblem = nil
+                verifyProject()
+            } catch {
+                guard !Task.isCancelled, client.base == self.client.base else { return }
+                servedProblem = ServeClient.describe(error)
+            }
+        }
+        if let served {
+            let names = served.filter(\.can_open).map(\.name)
+            let found = await withTaskGroup(of: (String, [SessionRow]?).self) { group in
+                for name in names {
+                    group.addTask { (name, try? await client.sessions(project: name)) }
+                }
+                var found: [String: [SessionRow]] = [:]
+                for await (name, rows) in group {
+                    if let rows { found[name] = rows.filter(\.live) }
+                }
+                return found
+            }
+            guard !Task.isCancelled, client.base == self.client.base else { return }
+            liveSessions = found
+        }
+        sendProjects()
+    }
+
+    private func followProjects() async {
+        var round = 0
+        while !Task.isCancelled {
+            await readProjects(list: round % Self.projectsEvery == 0)
+            round += 1
+            try? await Task.sleep(for: Self.menuRefresh)
+        }
+    }
+
+    /// Leaves a project the server does not list, once for each server: the app then shows
+    /// the list of projects in place of the chat. A project chosen from the dropdown or a
+    /// link is in the list it was chosen from.
+    private func verifyProject() {
+        guard !projectVerified, let served else { return }
+        projectVerified = true
+        guard !project.isEmpty, !served.contains(where: { $0.name == project }) else { return }
+        open(server: client.base, project: "", session: nil, save: false)
     }
 
     /// Show another session of this window's project. A window stays on one project, so that
@@ -227,12 +361,14 @@ final class SessionFeed {
             send("sent", #"{"error": "No session or device token to send with."}"#)
             return
         }
+        let client = client
+        let path = sessionPath(session, marked ? "send-prompt" : "held")
         Task {
-            guard
-                let reply = try? await client.authorised(
-                    "POST", sessionPath(session, marked ? "send-prompt" : "held"), token: token,
-                    body: data)
-            else {
+            let reply = try? await client.authorised("POST", path, token: token, body: data)
+            // The answer is for the composer of the session that sent; the page waits for
+            // it before it leaves a project, so another session here is the app's own turn.
+            guard session == current else { return }
+            guard let reply else {
                 send("sent", #"{"error": "The server could not be reached."}"#)
                 return
             }
@@ -254,13 +390,17 @@ final class SessionFeed {
         Task {
             try? await Task.sleep(for: delay)
             guard session == current else { return }
+            let project = project
             if let reply = try? await client.authorised(
-                "GET", sessionPath(session, "marks"), token: token), reply.status == 200
+                "GET", sessionPath(session, "marks"), token: token), reply.status == 200,
+                session == current
             {
                 send("marks", String(decoding: reply.data, as: UTF8.self))
             }
+            guard session == current else { return }
             if let reply = try? await client.authorised(
-                "GET", "v1/projects/\(project)/tags", token: token), reply.status == 200
+                "GET", "v1/projects/\(project)/tags", token: token), reply.status == 200,
+                session == current
             {
                 send("tags", String(decoding: reply.data, as: UTF8.self))
             }
@@ -271,15 +411,19 @@ final class SessionFeed {
     private func loadDraft(session: String) {
         guard draftSession != session, let token = Self.deviceToken() else { return }
         draftSession = session
-        draftEtag = nil
         loadMarks(session: session)
+        let client = client
+        let path = sessionPath(session, "draft")
+        // A save of this session's draft still on its way is read after it has landed, as it
+        // is when the window left the session a moment ago and has come back (KYO-761).
+        let saving = draftTask
         Task {
+            await saving?.value
             guard
-                let reply = try? await client.authorised(
-                    "GET", sessionPath(session, "draft"), token: token),
+                let reply = try? await client.authorised("GET", path, token: token),
                 reply.status == 200, session == current
             else { return }
-            draftEtag = etag(in: reply.data)
+            draftEtags[session] = etag(in: reply.data)
             send("draft", String(decoding: reply.data, as: UTF8.self))
         }
     }
@@ -294,19 +438,25 @@ final class SessionFeed {
             let data = try? JSONSerialization.data(withJSONObject: body)
         else { return }
         let previous = draftTask
+        // The server, the session and its project are those of the moment the page asked.
+        // The page asks just before it leaves a project, and the save is then made after
+        // the window has turned to the next one (KYO-761).
+        let client = client
+        let path = sessionPath(session, "draft")
         draftTask = Task {
             await previous?.value
-            let etag = draftEtag
+            let etag = draftEtags[session]
             guard
                 let reply = try? await client.authorised(
-                    "PUT", sessionPath(session, "draft"), token: token, body: data, ifMatch: etag,
+                    "PUT", path, token: token, body: data, ifMatch: etag,
                     ifNoneMatch: etag == nil ? "*" : nil)
             else { return }
             if reply.status == 200 || reply.status == 201 {
-                draftEtag = self.etag(in: reply.data)
+                draftEtags[session] = self.etag(in: reply.data)
             } else if reply.status == 412 {
                 // Another device saved first. Keep this text, and let the next edit replace it.
-                draftEtag = self.etag(in: reply.data)
+                draftEtags[session] = self.etag(in: reply.data)
+                guard session == current else { return }
                 send("note", #"{"text": "This draft also changed on another device."}"#)
             }
         }
@@ -346,7 +496,9 @@ final class SessionFeed {
     /// composer the id and path the server gave it.
     func attach(body: [String: Any]) {
         let ref = body["ref"] as? String ?? ""
+        let asked = current
         func fail(_ why: String) {
+            guard asked == current else { return }
             send("attached", #"{"ref": \#(quoted(ref)), "error": \#(quoted(why))}"#)
         }
         guard let session = current, let token = Self.deviceToken() else {
@@ -366,17 +518,19 @@ final class SessionFeed {
             data = jpeg
             type = "image/jpeg"
         }
+        let client = client
+        let path = sessionPath(session, "attachments")
         Task {
             guard
                 let reply = try? await client.authorised(
-                    "POST", sessionPath(session, "attachments"), token: token, body: data,
-                    contentType: type)
+                    "POST", path, token: token, body: data, contentType: type)
             else { return fail("The server could not be reached.") }
             let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
             let file = object?["attachment"] as? [String: Any] ?? object
             guard reply.status == 200 || reply.status == 201, let id = file?["id"] as? String else {
                 return fail(refusal(reply.data))
             }
+            guard session == current else { return }
             send(
                 "attached",
                 #"{"ref": \#(quoted(ref)), "id": \#(quoted(id)), "path": \#(quoted(file?["path"] as? String))}"#)
@@ -386,15 +540,21 @@ final class SessionFeed {
     /// Takes a held message back, returning its text to the composer.
     func retract(id: String) {
         guard let session = current, let token = Self.deviceToken() else { return }
+        let client = client
+        let path = sessionPath(session, "held")
         Task {
             guard
                 let reply = try? await client.authorised(
-                    "DELETE", sessionPath(session, "held"), token: token, ifMatch: id),
+                    "DELETE", path, token: token, ifMatch: id),
                 reply.status == 200
             else {
+                guard session == current else { return }
                 send("note", #"{"text": "It could not be taken back; it may have been sent."}"#)
                 return
             }
+            // The page waits for this answer before it leaves a project, as it does for a
+            // send's, so the text returns to the composer it was taken from.
+            guard session == current else { return }
             let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
             let held = object?["held"] as? [String: Any] ?? object ?? [:]
             // A prompt sent with marks was delivered with lines added above its paragraphs,
@@ -411,12 +571,13 @@ final class SessionFeed {
     /// refusal is said in words and the message stays held.
     func sendNow(id: String) {
         guard let session = current, let token = Self.deviceToken() else { return }
+        let client = client
+        let path = sessionPath(session, "held-now")
         Task {
-            guard
-                let reply = try? await client.authorised(
-                    "POST", sessionPath(session, "held-now"), token: token,
-                    body: Data("{}".utf8), ifMatch: id)
-            else {
+            let reply = try? await client.authorised(
+                "POST", path, token: token, body: Data("{}".utf8), ifMatch: id)
+            guard session == current else { return }
+            guard let reply else {
                 send("note", #"{"text": "The server could not be reached."}"#)
                 return
             }
@@ -428,15 +589,13 @@ final class SessionFeed {
 
     func interrupt() {
         guard let session = current, let token = Self.deviceToken() else { return }
+        let client = client
+        let path = sessionPath(session, "interrupt")
         Task {
-            guard
-                let reply = try? await client.authorised(
-                    "POST", sessionPath(session, "interrupt"), token: token, body: Data("{}".utf8)),
-                reply.status == 200
-            else {
-                send("note", #"{"text": "The interrupt was refused."}"#)
-                return
-            }
+            let reply = try? await client.authorised(
+                "POST", path, token: token, body: Data("{}".utf8))
+            guard reply?.status != 200, session == current else { return }
+            send("note", #"{"text": "The interrupt was refused."}"#)
         }
     }
 
@@ -518,6 +677,8 @@ final class SessionFeed {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             do {
                 for try await event in Self.terminalEvents(request) {
+                    // A stream that was cancelled still yields what it had buffered.
+                    if Task.isCancelled { return }
                     if event.name == "ready" {
                         let object =
                             try? JSONSerialization.jsonObject(with: Data(event.data.utf8))
@@ -531,6 +692,7 @@ final class SessionFeed {
                     }
                 }
             } catch ServeError.status(_, let body) {
+                if Task.isCancelled { return }
                 // A refusal is the server's own sentence, which names the remedy. It is not
                 // asked again until the drawer is opened again.
                 terminalConnection = nil
@@ -539,8 +701,8 @@ final class SessionFeed {
             } catch {
                 if Task.isCancelled { return }
             }
-            terminalConnection = nil
             guard !Task.isCancelled else { return }
+            terminalConnection = nil
             terminalFrame(
                 "note", #"{"text": "The terminal's connection was lost. Connecting again."}"#)
             try? await Task.sleep(for: .seconds(1))
@@ -648,6 +810,7 @@ final class SessionFeed {
                     "POST", "v1/projects/\(project)/orchestrator/start", token: token,
                     body: Data("{}".utf8))
             else {
+                guard project == self.project else { return }
                 send("start", #"{"phase": "failed", "text": "The server could not be reached."}"#)
                 return
             }
@@ -715,7 +878,9 @@ final class SessionFeed {
                     "GET", sessionPath(session, "attachments/\(id)"), token: token),
                 reply.status == 200
             else {
-                send("image", #"{"key": \#(quoted("a:" + id)), "data": null}"#)
+                if session == current {
+                    send("image", #"{"key": \#(quoted("a:" + id)), "data": null}"#)
+                }
                 return
             }
             guard session == current else { return }
@@ -836,11 +1001,14 @@ final class SessionFeed {
         let project = project
         var retry = Backoff()
         var lost = false
+        let client = client
         while !Task.isCancelled {
             if lost { send("recordsChanged", #"{"kind": "store"}"#) }
             do {
                 for try await event in client.projectEvents(project: project)
                 where event.name == "changed" {
+                    // A stream that was cancelled still yields what it had buffered.
+                    if Task.isCancelled { return }
                     retry.reset()
                     send("recordsChanged", event.data)
                 }
@@ -1012,10 +1180,20 @@ final class SessionFeed {
         return String(decoding: data, as: UTF8.self)
     }
 
+    /// The project's sessions and the followed session's changes, for the side panel. It is
+    /// awaited by tasks the switch to another project cancels, and a task cancelled while
+    /// its request was out may still be handed the answer, so it is dropped here.
     private func sendMenu() async {
-        guard let sessions = try? await client.sessionsData(project: project) else { return }
+        let project = project
+        let client = client
+        guard let sessions = try? await client.sessionsData(project: project),
+            !Task.isCancelled
+        else { return }
         var changes: Data?
-        if let current { changes = try? await client.changes(project: project, session: current) }
+        if let current {
+            changes = try? await client.changes(project: project, session: current)
+            guard !Task.isCancelled else { return }
+        }
         takeRemote(from: changes)
         let json =
             #"{"project": \#(quoted(project)), "current": \#(quoted(current)), "changes": "#
@@ -1071,6 +1249,9 @@ final class SessionFeed {
         while !Task.isCancelled {
             do {
                 let sessions = try await client.sessions(project: project)
+                // A request that answered as the task was cancelled does not throw, and
+                // what follows would clear the chat of the project the window turned to.
+                try Task.checkCancellation()
                 guard
                     let row = sessions.first(where: { $0.session_id == selected })
                         ?? sessions.first(where: { $0.live && $0.has_pane }) ?? sessions.first
@@ -1094,6 +1275,7 @@ final class SessionFeed {
                 takeFacts(from: turns)
                 loadDraft(session: row.session_id)
                 await sendMenu()
+                try Task.checkCancellation()
                 guard row.live else {
                     // An ended session has nothing to follow, and the chat holds all of it.
                     becomeLive()
@@ -1124,6 +1306,8 @@ final class SessionFeed {
             (try? JSONSerialization.jsonObject(with: turns) as? [String: Any])?["cursor"] as? String
         let follower = SessionFollower(client: client, project: project, session: session)
         for await update in follower.updates(cursor: cursor) {
+            // A stream that was cancelled still yields what it had buffered.
+            if Task.isCancelled { return }
             switch update {
             case .live:
                 becomeLive()

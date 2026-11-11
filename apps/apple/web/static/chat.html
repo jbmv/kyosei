@@ -14,8 +14,31 @@
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
-    <!-- The views, each of which replaces the pane below; chat.ts fills this from its list. -->
-    <nav id="views"></nav>
+    <!-- The bar above the top bar (KYO-761): the dropdown of the server's projects, a link
+         for each project with a live orchestrator session, a divider, and the views, each
+         of which replaces the pane below. chat.ts fills the lists. -->
+    <nav id="views">
+      <div id="project-switch">
+        <button id="project-button" aria-haspopup="listbox" aria-expanded="false" title="Switch project">
+          <span id="project-name"></span>
+          <svg width="9" height="6" viewBox="0 0 9 6" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 1l3.5 3.5L8 1" /></svg>
+        </button>
+        <div id="project-popup" class="project-rows" role="listbox" aria-label="Projects" hidden></div>
+      </div>
+      <div id="session-links"></div>
+      <span id="views-divider" aria-hidden="true"></span>
+      <div id="view-items"></div>
+    </nav>
+
+    <!-- Shown in place of everything under the bar while the window has no project: on a
+         first run, and when the project last shown is no longer served (KYO-761). -->
+    <section id="projects-pane">
+      <div class="projects-inner">
+        <h2>Projects</h2>
+        <p>Choose the project this window shows.</p>
+        <div id="projects-list" class="project-rows" role="listbox" aria-label="Projects"></div>
+      </div>
+    </section>
 
     <!-- An element with data-view is shown only while that view is the current one. -->
     <header id="top">

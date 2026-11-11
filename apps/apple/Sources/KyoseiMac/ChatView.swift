@@ -11,7 +11,8 @@ struct ChatView: View {
             ChatWebView(feed: feed)
             Divider()
             HStack(spacing: 14) {
-                Text(feed.project).fontWeight(.semibold).foregroundStyle(.primary)
+                Text(feed.project.isEmpty ? "No project" : feed.project)
+                    .fontWeight(.semibold).foregroundStyle(.primary)
                 if let percent = feed.facts?.context?.percent {
                     ContextMeter(percent: percent)
                 }
@@ -39,7 +40,8 @@ struct ChatView: View {
                 }
                 RunningAgentsLabel(agents: feed.runningAgents, count: feed.runningSubagents)
                 Spacer()
-                FeedStateLabel(state: feed.state)
+                // With no project chosen there is no session to be live or not.
+                if !feed.project.isEmpty { FeedStateLabel(state: feed.state) }
                 if let remote = feed.remote {
                     HStack(spacing: 4) {
                         Text(remote)
@@ -263,7 +265,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
             "send", "retract", "interrupt", "saveDraft", "attach", "start", "sendNow", "copy",
-            "terminal", "records", "files",
+            "terminal", "records", "files", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
@@ -364,6 +366,16 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "start" {
                 feed.startOrchestrator()
+                return
+            }
+            if message.name == "project", let body = message.body as? [String: Any],
+                let name = body["name"] as? String
+            {
+                feed.choose(project: name, session: body["session"] as? String)
+                return
+            }
+            if message.name == "projects", let body = message.body as? [String: Any] {
+                feed.projects(body: body)
                 return
             }
             if message.name == "strip", let body = message.body as? [String: Any],

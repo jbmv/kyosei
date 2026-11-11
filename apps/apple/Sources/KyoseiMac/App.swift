@@ -26,10 +26,12 @@ struct KyoseiMacApp: App {
         // over a chat that no longer updates (KYO-725's report). Another machine's copy of
         // the app is its own process with its own stream, and is unaffected.
         // The window's title, and with it its entry in the Window menu, is the project's.
+        // The one window is turned to another project from the dropdown at the start of its
+        // top bar, which the page draws (KYO-761); with no project chosen it is the app's.
         Window("Kyosei", id: "main") {
             ChatView(feed: feed)
                 .frame(minWidth: 560, minHeight: 400)
-                .navigationTitle(feed.project)
+                .navigationTitle(feed.project.isEmpty ? "Kyosei" : feed.project)
         }
         .defaultSize(width: 980, height: 860)
 
