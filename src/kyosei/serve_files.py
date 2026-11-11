@@ -655,6 +655,8 @@ DRAFTS = "drafts"
 HELD = "held"
 #: KYO-763: a project's draft, kept between its sessions, named by the project.
 PROJECT_DRAFTS = "project-drafts"
+#: KYO-814: the files opened in the app for a project, named by the project.
+PROJECT_RECENT = "recent-files"
 #: KYO-709: a delivered message whose notes could not be filed yet, named by the message's id.
 UNFILED = "unfiled"
 
@@ -718,6 +720,18 @@ def project_draft_path(environ: dict[str, str], project: str, *, create: bool = 
     if create:
         composer_directory(environ, PROJECT_DRAFTS)
     return composer_kind_directory(environ, PROJECT_DRAFTS) / f"{project}.json"
+
+
+def project_recent_path(environ: dict[str, str], project: str, *, create: bool = False) -> Path:
+    """The one file holding ``project``'s recently opened files (KYO-814).
+
+    It lies beside the project's draft: under ``$KYOSEI_HOME/composer``, outside every
+    repository, in a private directory that ``create`` makes.
+    """
+    _check_segment(project, "project name")
+    if create:
+        composer_directory(environ, PROJECT_RECENT)
+    return composer_kind_directory(environ, PROJECT_RECENT) / f"{project}.json"
 
 
 def _composer_refusal(directory: Path, why: str) -> Refusal:

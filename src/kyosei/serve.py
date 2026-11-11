@@ -95,11 +95,13 @@ and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
 
 THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
 directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
-``files/resolve?path=`` (a path as an agent writes one), all GET. They read the code repository
+``files/resolve?path=`` (a path as an agent writes one), all GET, with ``files/search?q=``
+(KYO-814) and ``files/recent`` (GET, and POST to record an open). They read the code repository
 and the store repository as git shows them, and a session's scratchpad directory
 (``files/scratch/{session}/tree`` and ``.../blob/{relpath}``) only as that session reported it
 with ``kyo sessions scratch``; nothing outside these is read. They need a device token
-holding the ``files`` permission, and write nothing; :mod:`kyosei.serve_tree` holds that.
+holding the ``files`` permission, and write nothing but the list of recent opens, which goes
+through :mod:`kyosei.serve_files`; :mod:`kyosei.serve_tree` holds the rest.
 
 AT LOGIN (KYO-457). ``--install``, ``--uninstall``, ``--status`` and
 ``--restart`` are :mod:`kyosei.serve_install`; this module only hands them over. Before
@@ -845,6 +847,9 @@ class ServeHandler(BaseHTTPRequestHandler):
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
             allowed = ("POST",)
+        elif rest[:1] == ["projects"] and rest[2:] == [PROJECT_FILES_ROUTE, "recent"]:
+            # KYO-814: the files opened in the app; the one files route that is written.
+            allowed = ("GET", "POST")
         elif (
             len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE
         ) or (len(rest) == 3 and rest[0] == "projects" and rest[2] == SEARCH_ROUTE):
@@ -924,7 +929,7 @@ class ServeHandler(BaseHTTPRequestHandler):
         if rest[2] == ORCHESTRATOR_ROUTE:
             return self._orchestrator_start(rest[1], split.query)
         if rest[2] == PROJECT_FILES_ROUTE:
-            return self._project_files(rest[1], rest[3:], split.query)
+            return self._project_files(method, rest[1], rest[3:], split.query)
         if rest[2] == SEARCH_ROUTE:
             return self._search(rest[1], split.query)
         if rest[2] == PROJECT_DRAFT_ROUTE:
@@ -1230,7 +1235,9 @@ class ServeHandler(BaseHTTPRequestHandler):
             held.retract(root_of, session_id, authorization, self.headers.get("If-Match"))
         )
 
-    def _project_files(self, name: str, rest: list[str], query: str) -> tuple:
+    def _project_files(
+        self, method: str, name: str, rest: list[str], query: str
+    ) -> tuple:
         """A project's files, read-only. :mod:`kyosei.serve_tree` decides everything."""
         from . import serve_tree
 
@@ -1241,6 +1248,9 @@ class ServeHandler(BaseHTTPRequestHandler):
             rest,
             _query_pairs(query),
             self.headers.get("If-None-Match"),
+            method=method,
+            project=name,
+            read_body=self._json_body,
         )
         if content_type is None:
             return status, _json_bytes(payload)
@@ -1662,8 +1672,9 @@ def _no_route(method: str, path: str) -> Refusal:
         f"GET {project}/tags, GET {project}/sessions/{{id}}/marks, GET "
         f"{project}/sessions/{{id}}/terminal, POST .../terminal/input or .../terminal/resize, "
         f"POST {project}/orchestrator/start, and GET {project}/files, "
-        f"{project}/files/{{root}}/tree[/{{relpath}}], {project}/files/{{root}}/blob/{{relpath}} "
-        f"or {project}/files/resolve?path=",
+        f"{project}/files/{{root}}/tree[/{{relpath}}], {project}/files/{{root}}/blob/{{relpath}}, "
+        f"{project}/files/resolve?path= and {project}/files/search?q=, and GET/POST "
+        f"{project}/files/recent",
     )
 
 

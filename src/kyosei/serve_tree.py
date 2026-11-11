@@ -9,7 +9,11 @@ Under ``/v1/projects/{project}/``, all GET and all read-only:
   ``If-None-Match`` naming that tag is answered 304 with no body;
 - ``files/resolve?path=<text>`` -- a path as an agent writes one, absolute or relative to
   either repository and with or without a ``:line`` suffix, resolved to the root and relative
-  path that hold it, or the answer that no root does.
+  path that hold it, or the answer that no root does;
+- ``files/search?q=<text>[&root=<root>]`` -- the files of ``code`` and ``store`` whose path
+  holds the text and the lines of them that do (KYO-814);
+- ``files/recent`` -- GET lists, and POST ``{"root", "path"}`` records, the files opened in
+  the app for the project, kept on the server (KYO-814).
 
 THE PERMISSION. Every one of them needs a device token holding the ``files`` permission
 (:mod:`kyosei.device_tokens`), checked before a path is looked at. It is a permission of its
@@ -55,12 +59,15 @@ this machine, which could read the file itself (:mod:`kyosei.serve_files` says t
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 import re
 import stat
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +82,22 @@ ROUTE = "files"
 #: What follows ``files/{root}/``.
 TREE = "tree"
 BLOB = "blob"
+
+#: KYO-814: the routes under ``files/`` that are no root's.
+SEARCH = "search"
+RECENT = "recent"
+
+#: The search's results: how many one response holds, and the longest text it takes.
+SEARCH_LIMIT = 200
+MAX_QUERY_CHARS = 256
+#: A matching line is returned up to this many characters.
+MAX_LINE_CHARS = 400
+#: How much of a file is looked at for a NUL byte before it is called binary.
+_BINARY_SNIFF = 8192
+
+#: How many opened files a project's recent list keeps; the oldest is dropped.
+RECENT_LIMIT = 50
+_RECENT_LOCK = threading.Lock()
 
 #: What follows ``files/`` on the route that resolves a path as text; never a root's name.
 RESOLVE = "resolve"
@@ -766,6 +789,197 @@ def resolve(paths: serve_files.ProjectPaths, given: str) -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------------------------------ the search
+
+
+def _regular_file(root: Root, relpath: str, shown: set[str]) -> Path | None:
+    """The real path of ``relpath`` when the blob route would serve it, else None.
+
+    The tree's own set is ``shown`` (one git call per root), so the check is the blob
+    route's without a git process per file: a path of no forbidden text, whose real path
+    lies inside the root and, when it is another path, is shown too.
+    """
+    try:
+        segments = serve_files.check_relpath(relpath, _where(root))
+    except Refusal:
+        return None
+    if any(segment.lower() == ".git" for segment in segments):
+        return None
+    real = Path(os.path.realpath(root.path.joinpath(*segments)))
+    if real != root.real and not serve_files._within(root.real, real):
+        return None
+    real_rel = real.relative_to(root.real).as_posix()
+    if real_rel != relpath and real_rel not in shown:
+        return None
+    return real
+
+
+def _lines_holding(real: Path, needle: str) -> list[tuple[int, str]]:
+    """The ``(line number, line)`` pairs of a text file holding ``needle``, lower-cased.
+
+    A file over :data:`MAX_FILE_BYTES`, an unreadable one and one with a NUL byte near its
+    start (binary) are read for nothing.
+    """
+    try:
+        info = real.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
+            return []
+        data = real.read_bytes()
+    except OSError:
+        return []
+    if b"\0" in data[:_BINARY_SNIFF]:
+        return []
+    found = []
+    for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+        if needle in line.lower():
+            found.append((number, line[:MAX_LINE_CHARS]))
+    return found
+
+
+def search(paths: serve_files.ProjectPaths, text: str, only_root: str | None) -> dict[str, Any]:
+    """Files whose path or whose lines hold ``text``, case-insensitively, as one phrase.
+
+    The files searched are the ones the tree serves (git's listing, per root). The contents
+    are read directly rather than by ``git grep``, which would not see an untracked file and
+    would read what the size limit forbids. Results are in root order, and within a root the
+    files whose name matches come before the matching lines; the first
+    :data:`SEARCH_LIMIT` are returned and ``more`` says whether another was found.
+    """
+    if not text.strip():
+        raise Refusal(
+            400,
+            f"name the text to find: GET {ROUTE}/{SEARCH}?q=<text>",
+            reason="bad-request",
+        )
+    if len(text) > MAX_QUERY_CHARS:
+        raise Refusal(
+            400,
+            f"the search text is {len(text)} characters, and kyo serve takes at most "
+            f"{MAX_QUERY_CHARS}",
+            reason="bad-request",
+        )
+    roots = [_root(paths, only_root)] if only_root else served_roots(paths)
+    needle = text.lower()
+    results: list[dict[str, Any]] = []
+    more = False
+    for root in roots:
+        shown = [item for item in _git_shows(root, "") if not item.endswith("/")]
+        shown_set = set(shown)
+        by_name = [item for item in shown if needle in item.lower()]
+        by_contents: list[tuple[str, int, str]] = []
+        found = [
+            {"root": root.name, "path": item, "match": "name"} for item in by_name
+        ]
+        for item in shown:
+            real = _regular_file(root, item, shown_set)
+            if real is None:
+                continue
+            for number, line in _lines_holding(real, needle):
+                by_contents.append((item, number, line))
+                if len(results) + len(found) + len(by_contents) > SEARCH_LIMIT:
+                    break
+            if len(results) + len(found) + len(by_contents) > SEARCH_LIMIT:
+                break
+        found += [
+            {"root": root.name, "path": item, "match": "contents", "line": number, "text": line}
+            for item, number, line in by_contents
+        ]
+        room = SEARCH_LIMIT - len(results)
+        results += found[:room]
+        if len(found) > room:
+            more = True
+            break
+    return {
+        "ok": True,
+        "query": text,
+        "roots": [root.name for root in roots],
+        "limit": SEARCH_LIMIT,
+        "more": more,
+        "results": results,
+    }
+
+
+# ------------------------------------------------------------------ the recent list
+
+
+def _recent_entries(environ: dict[str, str], project: str) -> list[dict[str, Any]]:
+    """The saved list, newest first; one that is absent or unreadable is an empty one."""
+    try:
+        document = json.loads(
+            serve_files.project_recent_path(environ, project).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and isinstance(entry.get("root"), str)
+        and isinstance(entry.get("path"), str)
+    ]
+
+
+def _recent_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"ok": True, "limit": RECENT_LIMIT, "entries": entries}
+
+
+def recent(environ: dict[str, str], project: str) -> dict[str, Any]:
+    """The files opened in the app for ``project``, newest first."""
+    return _recent_document(_recent_entries(environ, project)[:RECENT_LIMIT])
+
+
+def record_recent(
+    environ: dict[str, str],
+    paths: serve_files.ProjectPaths,
+    project: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Put one opened file at the top of the list; a path the blob route refuses is refused."""
+    root_name, relpath = body.get("root"), body.get("path")
+    if not isinstance(root_name, str) or not isinstance(relpath, str):
+        raise Refusal(
+            400,
+            f'the JSON body needs "root" (`{ROOT_CODE}` or `{ROOT_STORE}`) and "path" (a '
+            "path relative to that root), both text",
+            reason="bad-request",
+        )
+    root = _root(paths, root_name)
+    target = _file_target(root, relpath)
+    try:
+        regular = stat.S_ISREG(target.stat().st_mode)
+    except OSError as exc:
+        raise _not_shown(root, relpath, "file") from exc
+    if not regular:
+        raise Refusal(
+            409,
+            f"{relpath} in {_where(root)} is not a regular file, and only a file is listed "
+            "as opened",
+            reason="not-a-file",
+            root=root.name,
+            path=relpath,
+        )
+    entry = {
+        "root": root.name,
+        "path": relpath,
+        "opened_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    }
+    with _RECENT_LOCK:
+        kept = [
+            item
+            for item in _recent_entries(environ, project)
+            if (item["root"], item["path"]) != (root.name, relpath)
+        ]
+        entries = ([entry] + kept)[:RECENT_LIMIT]
+        file = serve_files.project_recent_path(environ, project, create=True)
+        serve_files.write_private(
+            file, json.dumps({"entries": entries}, indent=1).encode("utf-8")
+        )
+    return _recent_document(entries)
+
+
 # ------------------------------------------------------------------------ the route
 
 
@@ -786,7 +1000,8 @@ def not_served(rest: list[str]) -> Refusal:
         f"`{ROUTE}/{'/'.join(rest)}` is not a route; kyo serve answers GET {ROUTE} (the "
         f"roots), GET {ROUTE}/{{root}}/{TREE}[/{{relpath}}] (a directory), GET "
         f"{ROUTE}/{{root}}/{BLOB}/{{relpath}} (a file's bytes) and GET "
-        f"{ROUTE}/{RESOLVE}?path=<text>, {{root}} being `{ROOT_CODE}` or `{ROOT_STORE}`; "
+        f"{ROUTE}/{RESOLVE}?path=<text>, GET {ROUTE}/{SEARCH}?q=<text>, GET and POST "
+        f"{ROUTE}/{RECENT}, {{root}} being `{ROOT_CODE}` or `{ROOT_STORE}`; "
         f"a session's scratchpad is {ROUTE}/{ROOT_SCRATCH}/{{session}}/{TREE} and "
         f"{ROUTE}/{ROOT_SCRATCH}/{{session}}/{BLOB}/{{relpath}}",
         reason="not-served",
@@ -800,6 +1015,10 @@ def respond(
     rest: list[str],
     query_pairs: list[tuple[str, str, bool]],
     if_none_match: str | None,
+    *,
+    method: str = "GET",
+    project: str = "",
+    read_body: Callable[[], dict[str, Any]] | None = None,
 ) -> tuple[int, dict[str, Any] | bytes, str | None, dict[str, str]]:
     """Answer one request under :data:`ROUTE`: ``(status, document or bytes, type, headers)``.
 
@@ -807,6 +1026,36 @@ def respond(
     token is checked first, so a request without the permission learns nothing of a path.
     """
     serve_send.require_device(environ, authorization, device_tokens.PERMISSION_FILES)
+    if rest and rest[0] == RECENT:
+        if len(rest) != 1:
+            raise not_served(rest)
+        _no_query(query_pairs, f"`{ROUTE}/{RECENT}`")
+        if method == "POST":
+            assert read_body is not None
+            paths = serve_files.project_paths(root_of(), environ)
+            return 200, record_recent(environ, paths, project, read_body()), None, {}
+        return 200, recent(environ, project), None, {}
+    if method != "GET":
+        raise Refusal(
+            405, f"{method} is not served under {ROUTE}; only {ROUTE}/{RECENT} is written",
+            reason="bad-request",
+        )
+    if rest and rest[0] == SEARCH:
+        if len(rest) != 1:
+            raise not_served(rest)
+        keys = [key for key, _value, _bare in query_pairs]
+        if keys.count("q") != 1 or any(key not in ("q", "root") for key in keys) or keys.count(
+            "root"
+        ) > 1:
+            raise Refusal(
+                400,
+                f"the search route takes ?q=<text> and optionally &root=<root>: GET "
+                f"{ROUTE}/{SEARCH}?q=widget",
+                reason="bad-request",
+            )
+        values = {key: value for key, value, _bare in query_pairs}
+        paths = serve_files.project_paths(root_of(), environ)
+        return 200, search(paths, values["q"], values.get("root")), None, {}
     if rest and rest[0] == RESOLVE:
         if len(rest) != 1:
             raise not_served(rest)

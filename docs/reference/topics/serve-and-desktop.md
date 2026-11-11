@@ -1409,6 +1409,9 @@ GET /v1/projects/<name>/files/<root>/blob/<path>       one file's bytes
 GET /v1/projects/<name>/files/scratch/<session>/tree[/<path>]   a session's scratchpad, a directory
 GET /v1/projects/<name>/files/scratch/<session>/blob/<path>     and one of its files
 GET /v1/projects/<name>/files/resolve?path=<text>      where a path written in prose is
+GET /v1/projects/<name>/files/search?q=<text>[&root=<root>]   files whose path or lines hold the text
+GET /v1/projects/<name>/files/recent                   the files opened in the app, newest first
+POST /v1/projects/<name>/files/recent                  record one: {"root": "code", "path": "src/a.py"}
 ```
 
 **The permission.** Every one of these needs a device token holding the `files` permission,
@@ -1422,7 +1425,7 @@ kyo devices issue my-ipad --permission files --permission send
 does not read source. `kyo devices grant <name> --permission files` adds it to a token
 already issued. The token is
 checked before the path, so a request without the permission learns nothing about any path.
-The routes do not ask for the `serve_send` setting, and they write nothing.
+The routes do not ask for the `serve_send` setting, and they write nothing except the recent list below.
 
 **The roots.** `code` is the project's code repository and `store` is its store repository,
 the two directories `kyo where` prints. Under the split layout they are two repositories and
@@ -1464,6 +1467,32 @@ to a file inside the root is read only when git shows that file too. Dotfiles th
 are listed; hiding them is the client's choice. The server asks git on every request and
 caches nothing, so a file added a moment ago is in the next listing. A root that is not
 inside a git repository serves nothing (409, `not-a-repository`).
+
+**Search (KYO-814).** `files/search?q=<text>` looks in every served `code` and `store` root,
+or in the one named by `root=`, for files whose path holds the text and for lines of files that
+hold it. The text is matched case-insensitively as one phrase, not as words. The files searched
+are the ones the tree route serves, as git lists them (tracked files and untracked files no
+ignore rule covers), so an ignored file is never found. A file over `max_file_bytes`, one that
+cannot be read and one with a NUL byte in its first 8 KiB (taken to be binary) are searched by
+name only. Contents are read directly, not with `git grep`, which would not see an untracked
+file. The response holds `results`, in root order and, within a root, the name matches before
+the line matches; each result has its `root`, its `path` and `match` (`name` or `contents`),
+and a contents result also has its `line` number and `text` (cut at 400 characters). At most
+`limit` results (200) are returned, and `more` is true when another was found. The session
+scratchpads are not searched. An empty or over-long text, an unknown query key and a `root`
+that is not a served root are refused.
+
+**Recently opened files (KYO-814).** `files/recent` keeps, per project and on the server, the
+files a client reports having opened, so that devices share one list as they share the
+project's draft. GET returns `entries`, newest first, each `{root, path, opened_at}`, and
+`limit` (50), the number kept: past it the oldest is dropped. POST takes `{"root", "path"}`,
+puts that file at the top (a file listed already moves there, so each appears once) and
+returns the list. A `path` is checked as the blob route checks it, so an ignored file, a path
+outside the root, a directory and a file that is absent are refused with that route's
+reasons, and nothing is recorded. Only `code` and `store` files can be listed. The list is
+one JSON file per project under `$KYOSEI_HOME/composer/recent-files/`, beside the drafts,
+outside every repository and readable by this account alone. This is the one file route that
+writes, and it writes only that file. Both routes need the `files` permission.
 
 A path is relative to its root and is refused as text, before anything is looked at on disk,
 when it is absolute or holds a NUL byte, an empty segment, a `.` or `..` segment, or a `.git`
