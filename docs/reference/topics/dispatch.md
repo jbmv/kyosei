@@ -47,10 +47,10 @@ file, not a collision**. It is not refused; `kyo dispatch` states the file and e
 side's symbols, in its output, in `--json` (`touch_narrowings`, never folded into
 `collisions_overridden` — nothing was forced past) and in the frozen brief, so the
 worker knows another worker is in that file. Either side declaring the bare path
-instead gets the whole-file collision back. Measured need: two dispatches editing
-different functions in `doctor.py` and different paragraphs in `README.md` were
-refused against each other, and `--force` — recording an override of a collision that
-was never there — was the only way through.
+instead gets the whole-file collision back. The case was observed: two dispatches editing
+different functions in `doctor.py` and different paragraphs in `README.md` would otherwise be
+refused against each other, with `--force`, which records an override of a collision that
+does not exist, the only way to proceed.
 
 **A second exception, stated as a warning** (KYO-395): a `+path` new-file touch of the
 dispatch being created that lies under a `dir/` touch of a running one, where the file
@@ -72,8 +72,8 @@ additively (`path#+`). Both rest on the stated textual approximation of a symbol
 region, placed in the branch tip's copy of the file the diff's line numbers belong
 to, never in the orchestrator's checkout (KYO-406); and both say `not-run` rather than
 "clean" whenever the diff could not be had (a merged branch, no branch, no git), or
-name the paths whose diff or tip copy could not be read. The correction the command prints now
-carries the record's existing `#symbol`s instead of flattening them to bare paths.
+name the paths whose diff or tip copy could not be read. The correction the command prints
+carries the record's existing `#symbol`s and does not reduce them to bare paths.
 
 **The correction applies where the workflow says to apply it** (KYO-307). A drift
 correction is applied *after* the merge, because a file the branch created exists only
@@ -84,9 +84,9 @@ So a `+path` line whose file now exists is emitted as the plain path it has beco
 they converted; while the file is still only on the branch the `+` form is kept
 exactly as it was. The conversion is in the correction and not in validation, so the
 printed lines still paste into `kyo edit --touches-file` and a hand-written `+path`
-for a file that is already there is refused as before. A `dir/` directory touch needs
-none of this — it is accepted whether or not the tree exists. The far side of the same
-rule (KYO-436): a claimed file that no longer exists — the branch deleted it, or another
+for a file that is already there is refused. A `dir/` directory touch needs
+none of this — it is accepted whether or not the tree exists. The converse case
+(KYO-436): a claimed file that no longer exists — the branch deleted it, or another
 merge removed it from the trunk — is left out of the correction, and both commands name
 each dropped line and which of the two happened. A plain path must exist to be claimed,
 and work that removed a file has reached that claim rather than left it unfinished. A
@@ -94,16 +94,16 @@ third case is dropped the same way (KYO-543): a file the branch itself created, 
 and then deleted on the trunk — a notes fragment `kyo docs assemble` consumed — which the
 branch tip still has; whether the tip is an ancestor of HEAD, not whether it has the file,
 tells it from unlanded work, and it is named as this branch's own file deleted after the
-merge. A file the branch created and the merge has not landed yet is still kept, and
-since KYO-543.c2 it is kept as `+path` rather than the plain path, so `kyo accept` run
+merge. A file the branch created and the merge has not landed yet is kept, as
+`+path` rather than the plain path (KYO-543.c2), so `kyo accept` run
 *before* the merge stores the correction instead of meeting the plain-path refusal; after
 the merge the KYO-307 conversion above turns it back into the plain path. Only a branch
 git can still read proves that: with no branch to ask the line stays plain and is listed
 as waiting on the merge.
 
-**What that check is worth, said out loud** (KYO-147.c1). Disjointness is computed
-from DECLARED touches on both sides — predictions written before the work — and a
-passing check used to say nothing at all, so silence read as "no collision". It now
+**What the check establishes** (KYO-147.c1). Disjointness is computed
+from DECLARED touches on both sides, which are predictions written before the work,
+so a passing check
 states what it compared: per other running dispatch, how many paths it declared, that
 it has not reported (structurally: ingesting a report moves a dispatch out of
 `running`, so no set in the comparison has ever been checked against a diff), and how
@@ -112,18 +112,18 @@ the files an earlier report on that claim proved it is missing. With nothing els
 running it says that too: nothing was compared, so the dispatch is unconstrained by
 the check rather than cleared by it.
 
-**And what the declared files usually drag in** (KYO-147.c2/c3). The brief's Touches
+**Files that usually change with the declared ones** (KYO-147.c2/c3). The brief's Touches
 section also lists files that dispatches touching each declared file have historically
 also touched and this record does not name — derived from the `touched_files[]` on
 reports the store already holds, at generation time, refusing nothing. It is aimed at
 the class of file no touches table predicts, because the coupling lives in the
 *dependent* file: a generated mirror, a positionally-keyed index, a byte-identical
-twin. Below its thresholds, or on a store with too little history, it prints **nothing
-at all** — never a weak signal with a percentage attached to make it look like one.
+twin. Below its thresholds, or on a store with too little history, it prints nothing,
+so that a weak signal is not presented as a finding.
 
 **Where the declared symbols are, and where this project's tests have been**
-(KYO-327.c2). Two answers the store could already give and did not, both aimed at the
-first stretch of turns of a dispatch, which goes to finding what the record already
+(KYO-327.c2). The brief gives two answers from the store, both for the
+first turns of a dispatch, which are spent finding what the record already
 names. The Touches table states, per `path#symbol` touch, the **line that symbol was
 found at when the brief was frozen** — through `sweep.symbol_regions`, the same reader
 that judges touch drift, so the brief points at the lines the tool itself will judge
@@ -142,15 +142,15 @@ a path that several `--also-covers` records declare is not repeated for each of 
 The test-history block likewise has one row for each declared file, and the disjointness
 block puts the running dispatches that share a finding on one line.
 
-**And the standing rules are one line each, not their essays** (KYO-327.c1). Every
-worker-audience rule from `kyosei/procedures.md` still reaches every brief — that is
-law 15 and it is tested — but as its title, a one-line `enforced-by` (the level
+**The standing rules are carried as one line each** (KYO-327.c1). Every
+worker-audience rule from `kyosei/procedures.md` reaches every brief (law 15,
+which a test holds), as its title, a one-line `enforced-by` (the level
 verbatim, plus the commands and test files the bullet cites) and the ledger's own
 first sentence of reasoning. Nothing is paraphrased, so no rule's meaning can change,
 and the argument behind each rule is one read-only command away: `kyo rules "<title>"`
 prints one rule in full and `kyo rules` lists them. On one project's ledger the
-section went from about 9.8 KB to 4.2 KB. The standing **stance** is not a rule and is
-carried verbatim, as it always was.
+section measured about 4.2 KB in this form, against 9.8 KB with each rule in full.
+The standing **stance** is not a rule and is carried verbatim.
 
 The frozen brief is generated
 entirely from the record — never hand-typed — per `templates/brief-template.md`'s
@@ -182,7 +182,7 @@ there, so a re-dispatch from a predecessor's unmerged branch reports a
 (KYO-487): its worktree checks it out as it stands, so the dispatch records that
 branch's tip as its base sha and the brief says so, rather than the code
 repository's HEAD. `--no-create-worktree` records and prints instead.
-`worktree_setup` is still printed, never run.
+`worktree_setup` is printed, never run.
 `--brief-out` is checked before anything is written, so a missing directory or an
 unwritable file refuses with no dispatch created; a write that still fails after
 the dispatch is recorded says which dispatch exists and not to re-run.
@@ -211,14 +211,13 @@ declaration refuses `kyo dispatch` and no other command, and `kyo doctor`'s `gua
 check names it, along with any declared test file that does not exist in the code
 repository. The commands are printed, never run.
 
-`kyo dispatch` itself no longer prints the whole frozen brief to the terminal by
-default (KYO-326): it prints everything else it always did — warnings, the
-drag-in summary, the disjointness lines, the worktree line — and, in
+`kyo dispatch` does not print the whole frozen brief to the terminal by
+default (KYO-326): it prints its warnings, the
+drag-in summary, the disjointness lines and the worktree line, and, in
 the brief's place, a length/digest line naming `kyo show <dispatch-id>` as where
-to read it. The full brief used to come back on every call (about 35 KB for a
-typical brief) and stay in an orchestrator's context to be re-read every
-turn, unread. `--print-brief` restores the old full terminal print; `--brief-out`
-and `--json` were never affected either way.
+to read it. A typical brief is about 35 KB, which would otherwise stay in the
+orchestrator's context and be re-read on every turn. `--print-brief` prints the
+full brief to the terminal; `--brief-out` and `--json` are unaffected.
 
 Under that line `kyo dispatch` prints the brief's length by section, in characters and
 in the order the brief is written (KYO-773): the header, the record summary, the
@@ -242,8 +241,8 @@ removes it (`rm`, `rm -r`, `KYOSEI_HOME=... kyo projects remove ...`), with `con
 worker-wrote-outside-its-worktree` (exit 2). It cannot tell who made a path, so the
 stop that follows a blocked one (`stop_hook_active`) reports the same list without
 blocking: a path the worker did not make, or cannot remove, costs it one wake. Every
-other blocking finding of `kyo check-clean` and `kyo check-branch` does the same since
-KYO-592: the first stop blocks with the full remedy, and a repeat stop reports the finding,
+other blocking finding of `kyo check-clean` and `kyo check-branch` does the same
+(KYO-592): the first stop blocks with the full remedy, and a repeat stop reports the finding,
 exits 0 and records the unblocked stop in the stop audit, which `kyo report` and
 `kyo show <dispatch-id>` list under the dispatch. A
 dispatch with no baseline says so rather than passing silently. Each `kyo dispatch`
@@ -256,14 +255,14 @@ home (see "Where the store lives").
 the transcript names — which is not the same fact as the `worker model` the
 orchestrator declared beside it. The number is summed from the worker transcript
 that the `SubagentStop` resolution (KYO-128/154) matched to this dispatch and
-recorded in the events ledger (KYO-134); nothing here goes looking for a
-transcript of its own, because a second guess at the harness's private file
-layout would be a second answer to whose file is whose. A dispatch with no
+recorded in the events ledger (KYO-134); nothing here searches for a
+transcript of its own, because a second reading of the harness's private file
+layout could give a second answer to which transcript belongs to which dispatch. A dispatch with no
 matched, recorded transcript reads `unknown` with the resolution's own named
 outcome as the reason, never a zero. `kyo worktrees --json` carries the same
 answer on every row, which is where the desktop app's activity list reads it.
 
-Three things about that sum are worth knowing before you read one (KYO-292).
+Three things qualify that sum (KYO-292).
 **One assistant message is counted once, not once per content block**: the
 harness writes a transcript row per block and repeats the message's whole
 `usage` on each of them, so the rows are grouped by `message.id` and the last
@@ -295,7 +294,7 @@ after a full-suite run — and none in the three workers that ran test files onl
 Both fields are additive: every field these surfaces carried before means the
 same thing beside them. They are the measurement behind
 ["The whole suite is the orchestrator's"](operating.md#the-whole-suite-is-the-orchestrators-orchestrator_only_commands-kyo-298),
-and the reason that policy can be re-checked per dispatch rather than believed.
+and they allow that policy to be checked per dispatch.
 
 Each row of `kyo worktrees --json` also carries **when that dispatch finished
 and where that moment came from** (KYO-286): `finished_at`, plus
@@ -304,7 +303,7 @@ resolution matched to it, which is the closest thing recorded to its worker
 stopping), `report-ingest` or `closed-at` — and `finished_at_why` saying it in a
 sentence. A close or an ingest is an orchestrator's act and can land hours after
 the worker stopped, so neither outranks the stop. `finished_at` is null on a
-running dispatch, whose clock is genuinely still going, and null when none of
+running dispatch, which has not finished, and null when none of
 the three can date it, rather than standing in for the unknown with the current
 time. `dispatches.closed_at` is written by `kyo dispatch close` and by nothing
 else, so a dispatch that simply reported has none — which is why a consumer
@@ -313,21 +312,19 @@ measuring a run time from `closed_at` alone measures one that keeps growing.
 `--terminated-no-report`, `--withdrawn`, `--why` and `--why-file` are meaningful
 only with
 `kyo dispatch close <dispatch-id>` (below); passed alongside a record id instead,
-they used to be silently accepted and silently ignored while the command
-dispatched a brand-new record anyway — the maximally unhelpful outcome for a
-mistyped closure. It is now a usage error naming the correct form and, when the
+they are a usage error naming the correct form and, when the
 record already has a running dispatch, that dispatch's own id (KYO-133).
 
 `kyo dispatch <record> --also-covers ID [ID ...]` (KYO-13.c4) lets one dispatch
 formally cover more than one record — each covered record's own criteria are
 appended to the frozen brief under its own heading, and the covered ids are
 frozen onto the dispatch (`dispatches.covers_json`) alongside it. Without
-`--also-covers`, a dispatch covers exactly its own record, as before.
+`--also-covers`, a dispatch covers exactly its own record.
 
 `kyo report <dispatch-id> --file .kyosei-report.json` validates the file against the report
 schema `kyo report-schema` prints (required keys, verdict/method enums, the
 void/unobserved-needs-a-reason rule, no unknown keys — implemented against the
-stdlib, no `jsonschema` dependency), refuses loudly on a mismatched
+stdlib, no `jsonschema` dependency), refuses a mismatched
 `dispatch_id`/`record_id`, and stores every array (`criteria_verdicts`,
 `premise_false`, `disagreements`, `corrected_numbers`, `commits`, and the
 optional `docs_verdicts`) structurally.
@@ -344,8 +341,8 @@ record or to any record it formally covers via `--also-covers` — anything
 else is refused (KYO-12: a report cannot informally bundle a record its
 dispatch never declared covering). Ingestion moves the dispatch
 `running -> reported`; it never calls `kyo verify` — applying a verdict to a
-criterion stays an orchestrator act, always. Since KYO-198 that act can be one
-command: `kyo verify --from-report <dispatch-id> [--only <criterion-id>...]`
+criterion stays an orchestrator act, always. That act can be one
+command (KYO-198): `kyo verify --from-report <dispatch-id> [--only <criterion-id>...]`
 applies the report's own `criteria_verdicts[]`, method and evidence included,
 and prints every entry it did *not* apply (a `void-*` verdict, which stays a
 premise judgment made by hand, or a criterion restated since the report was
@@ -379,9 +376,9 @@ commands do nothing with it, and they cannot fail over it. See "A session's task
 serve-and-desktop.md.
 
 **Accepting a report: `kyo accept <dispatch-id>`** (KYO-331). Applying one
-report was seven commands and about ten reports a session, and a step was easy
-to drop — a doc-ref obligation on KYO-263 and a drift correction on KYO-314 each
-needed a second pass. `kyo accept` runs three of them as one act: `kyo verify
+report takes several commands, and a step is easily omitted (a doc-ref
+obligation on KYO-263 and a drift correction on KYO-314 each
+needed a second pass). `kyo accept` runs three of them as one act: `kyo verify
 --from-report`, then `kyo docs settle --from-report`, then `kyo edit
 --touches-from-drift` on the dispatch's own record. It is a composition and not
 a second implementation — each step is reached through the same parser and the
@@ -451,10 +448,10 @@ left open. A script that keys on the exit status alone reads a partial acceptanc
 as a whole one; key on `complete` instead.
 
 **Confirming a person's look: `kyo confirm`** (KYO-494). Closing a human gate
-was three commands every time — `kyo verify` the criterion `human-observed` with
-the maintainer's words as evidence, `kyo ungate`, `kyo move` (46 human-gate
-clearings measured across two stores, 39 followed by a move within fifteen
-minutes) — and approving a proposal is the same act with no gate in it.
+takes three commands: `kyo verify` on the criterion as `human-observed` with
+the maintainer's words as evidence, `kyo ungate`, and `kyo move` (of 46 human-gate
+clearings measured across two stores, 39 were followed by a move within fifteen
+minutes). Approving a proposal is the same act with no gate in it.
 `kyo confirm <record-id> --quote-file q.txt` (or `--quote TEXT` for one line,
 `--quote-file -` for stdin) is that act, composed the way `kyo accept` is: each
 write is `kyo verify`, `kyo attach`, `kyo ungate` or `kyo move`, reached through
@@ -489,10 +486,10 @@ Each refusal writes nothing, exits non-zero under its own contract name and
 prints the ready `kyo confirm` line(s) that resolve it:
 `confirm-ambiguous-gate` (several open human gates and no `--gate`),
 `confirm-ambiguous-criteria` (several `unmet-unobserved` criteria and nothing
-naming all of them; the remedies are `--criterion <ids>` and `--all-unobserved` — one approval applied to observations nobody named is a rubber
-stamp), `confirm-nothing-to-confirm` (no human gate, no unobserved criterion),
-`confirm-record-retired`, `confirm-dispatch-running` (a look taken while a
-worker is changing the thing is a look at a build about to change; the same line
+naming all of them; the remedies are `--criterion <ids>` and `--all-unobserved`, because one approval would otherwise be applied to observations nobody
+named), `confirm-nothing-to-confirm` (no human gate, no unobserved criterion),
+`confirm-record-retired`, `confirm-dispatch-running` (a running
+worker is still changing what the person would be looking at; the same line
 runs once the report is ingested), `confirm-criterion-not-confirmable` (another
 record's, void or missing), `confirm-gate-not-confirmable` (missing, another
 record's, already cleared, or not a human gate) and
@@ -550,9 +547,9 @@ happened. The declaration is a field in the report rather than a flag on the
 command because the party who knows the first report was wrong is the worker,
 who cannot type the orchestrator's flags — and because it names *which* account is
 being replaced, so an `amends` pointing at anything but the dispatch's current
-report is refused (`report-amends-wrong-report`) rather than reconciled. The
-point is not only that the corrected report lands: every consumer re-runs over
-it — schema validation, the branch check that still refuses a commit not
+report is refused (`report-amends-wrong-report`) rather than reconciled. Every
+consumer also re-runs over the corrected
+report — schema validation, the branch check that still refuses a commit not
 reachable from the declared branch, and touch drift over `touched_files[]`.
 Nothing is reopened: `state` stays `reported`, `closed_at` stays whatever it
 was, and `kyo doctor`'s `report_amendment_chain` check keeps a dispatch's
@@ -579,12 +576,12 @@ dispatch's `state` is always exactly one of `running`, `reported`,
 state: a worker was spawned and the work STOPPED. `--withdrawn --why ...`
 (KYO-345) records the other thing that ends a dispatch with no report — it was
 never handed to a worker at all, which is what a brief frozen with the wrong
-model, branch or record is. A frozen brief is immutable by design, so before
-this state the only exit from such a mistake was to file a death that had not
-happened, on a dispatch every later brief then told an orchestrator to flag. The
+model, branch or record is. A frozen brief is immutable by design, so without
+this state such a mistake could be ended only by recording a termination that did not
+happen, on a dispatch every later brief would then tell an orchestrator to flag. The
 two are the same in what they require (a `--why`, which is the whole account of
 what went wrong) and in what they release (the worktree and the touch claims);
-they differ in volume. A terminated dispatch stays in every `kyo brief` until
+they differ in how visible they remain. A terminated dispatch stays in every `kyo brief` until
 its record is answered; a withdrawn one is listed in no brief at all, and
 `kyo show <record-id>` prints it in the record's dispatch history under its own
 word. `kyo doctor` holds both to the same invariant: a state that means "no
@@ -606,8 +603,8 @@ branches are merged, in the order that keeps the generated documents true: it mo
 record to its completion status through the ladder's rungs (through `kyo move` itself, so
 each rung meets the same transition contracts), runs the project's declared generators,
 commits the store's export and every file the generators changed in one commit, and then
-prints the declared after-steps. Before the moves, the changelog would be regenerated
-from records not yet closed — the order is the point.
+prints the declared after-steps. The moves come first because the changelog would
+otherwise be regenerated from records not yet closed.
 
 When the session it runs in has a task list, a close-wave that has closed its records also
 checks the list's item for the wave's close (KYO-770; "A session's task list" in
@@ -695,7 +692,7 @@ governs: src/kyosei/sweep.py, src/kyosei/brief.py
 
 `kyo sweep` flags — it never edits a record (charter: "flags, never
 auto-edits"). Only records whose kind is `archetype: work` and carries
-`policy.swept: true` are ever considered (the field's promised full consumer).
+`policy.swept: true` are ever considered (this is the consumer of `policy.swept`).
 Four flag classes: three matching KYO-8.c1/c2/c3 exactly, and a fourth,
 `description-predates-claim`, added by KYO-137.c7
 (`docs/design/charter.md`'s "Sweep" section names several more — claims aged
@@ -712,8 +709,8 @@ none is built here):
   declared output arriving rather than the ground moving under it (KYO-225).
   A record whose every touch on a changed file names a `#symbol` is flagged only
   when the change reached one of those symbols' regions, and the flag names the
-  symbol rather than the file (KYO-300); a plain-path touch is flagged exactly as
-  before, and a symbol the textual approximation cannot place counts as changed.
+  symbol rather than the file (KYO-300); a plain-path touch is flagged on any change
+  to its file, and a symbol the textual approximation cannot place counts as changed.
   The regions are placed in the file as of the sweep's current sha, not the
   working tree, whose uncommitted edits would shift them off the committed hunks;
   a file that cannot be read at that sha counts as changed (KYO-406).
@@ -728,14 +725,14 @@ none is built here):
   declared is gone" does not apply to it (KYO-209). Nor is a new-file touch, for
   the same reason one scale smaller (KYO-225). A record carries at most one open
   touch-missing flag: a later sweep that finds a different missing set restates the
-  standing flag in place, as touch-changed has widened since KYO-69, and so does
+  standing flag in place, as touch-changed widens (KYO-69), and so does
   `description-predates-claim` when a newer claim arrives (KYO-418).
 - **near-duplicate-criteria** — unmet criterion text that collides, at a high
   `difflib.SequenceMatcher` ratio over normalised (case-folded,
   punctuation-stripped) text, with another record's unmet criterion text.
   Tuned for precision over recall: short texts (under 16 normalised
-  characters) are never compared, and the threshold is 0.90 — "a false
-  'duplicate!' warning trains people to ignore it."
+  characters) are never compared, and the threshold is 0.90, because a false
+  duplicate warning leads readers to disregard the check.
 - **description-predates-claim** (KYO-137.c7) — a record whose description has
   not been edited since a live claim on it was recorded. Advisory and store-only:
   a prompt, never a refusal, since a newer claim may confirm the description word
@@ -763,8 +760,8 @@ lives in the **store** repository. Under the split layout (the `kyo init` defaul
 those are two repositories whose histories advance independently, and nothing
 guarantees that a later clone of the code contains the recorded sha: it may be
 shallow, a fork, an unmerged branch, or a history that was rewritten. A sweep that
-cannot diff creates no `touch-changed` flags — which is byte-for-byte what a
-project with nothing stale looks like (KYO-63).
+cannot diff creates no `touch-changed` flags, which is indistinguishable from a
+project with nothing stale (KYO-63).
 
 So every recorded run records **`coverage`**: whether the staleness question was answered,
 and if not, why not. It is `swept` only when the diff actually ran; otherwise
@@ -778,8 +775,9 @@ A run with nothing new to say is not recorded at all (KYO-418): at the same base
 code history and coverage as the last recorded run, filing and widening no flag, it
 writes no `sweep_runs` row, no event and no export file, and says `not recorded — same
 base as <that run>`. The Stop hook sweeps after every assistant turn, and
-recording each of those dirtied the export to say what the last recorded row already
-says; that row is still what the next sweep diffs from and what `kyo brief` reads.
+recording each of those runs would change the export only to repeat what the last
+recorded row already says; that row is what the next sweep diffs from and what
+`kyo brief` reads.
 
 When it cannot resolve its own base, `kyo sweep` **flags nothing for that class and
 says so** — in its output, in `--json`, in `kyo brief`'s "staleness coverage"
@@ -787,10 +785,10 @@ section, and durably on the row. It does not refuse (that would discard the thre
 flag classes which never needed a base, and record nothing at all, in a command
 run from a session-stop hook) and it does not fall back to a full scan (that
 asserts every declared touch changed, which the tool does not know, and routine
-false positives are how an advisory check gets ignored). The run re-baselines at
+false positives lead readers to disregard an advisory check). The run re-baselines at
 the `HEAD` it can see, so the *next* sweep answers staleness again; the window it
 could not read stays unread rather than being counted as clean. Any surface
-rendering staleness therefore has three states to paint, not two — `stale`, `not
+rendering staleness therefore has three states: `stale`, `not
 stale`, and `could not tell`.
 
 **A fifth flag class, not raised by sweep.** `kyo ungate` flags the record when a
@@ -800,8 +798,8 @@ something that will change what it should be", so clearing one always implies
 something just changed; the test is `criterion.created_at` against the gate's
 resolution, with no text analysis in it, and only still-unmet criteria are named
 (a settled one directs nobody). Only `holding-for` raises it: the other three gate
-types clear when something *happened* or someone *looked*, and a flag that fires on
-every clearing becomes the routine false positive nobody reads.
+types clear when something *happened* or someone *looked*, and a flag raised on
+every clearing would be a routine false positive.
 
 `kyo flag resolve <flag-id>... [--why]` is this build's own acknowledge/resolve
 design for a flag: it records who resolved it and when, and never re-runs or
@@ -812,12 +810,12 @@ resolve, with the condition still true, creates a *new* flag rather than reopeni
 old one.
 
 `touch-changed` is the one flag class that *supersedes* rather than accumulates
-(KYO-69). Sweep runs on every session-stop hook, and before this it filed a new
-flag every run for every open record whose declared touches the diff touched — so
-the count grew with the number of sweeps, not the number of problems (75 unresolved
-flags in one store, all of one type, nine on one record, each true and
-all of them the same finding). A sweep that re-observes a record's open
-`touch-changed` finding now widens the standing flag instead: same start sha, new
+(KYO-69). Sweep runs on every session-stop hook, so a new
+flag on every run for every open record whose declared touches the diff reached would
+make the count grow with the number of sweeps and not the number of findings (one
+store held 75 unresolved flags of this one type, nine of them on one record, before
+this rule). A sweep that re-observes a record's open
+`touch-changed` finding therefore widens the standing flag: same start sha, new
 end sha, union of files, sweep count + 1. `kyo flag collapse` is the one-off
 migration for a store that accumulated flags before that — it merges each record's
 duplicates into its earliest flag and closes the rest with a `resolved_why` that
@@ -855,15 +853,15 @@ run in bulk.
 
 One class is withheld from that list and rendered beside it under `finished but
 not moved`: a record that has criteria, every one of them **settled** (`met` or
-void), has nothing left to build, whoever built it, and offering it as
-dispatchable is how one project's "dispatchable now (31)" came to hold 16
-finished records (KYO-87). The class is derived from the criteria alone. It
-does not ask whether a dispatch reported — until KYO-289 it did, which excluded
-exactly the work nobody dispatched (built in-session, or verified by the
-maintainer by hand) and left 23 of one store's 28 "ready" records sitting
-in the list an orchestrator reads *instead of* the records; a dispatch that
+void), has nothing left to build, whoever built it; listed as dispatchable, such
+records made up 16 of the 31 under one project's "dispatchable now"
+(KYO-87). The class is derived from the criteria alone. It
+does not ask whether a dispatch reported, because that would exclude
+the work nobody dispatched (built in-session, or verified by the
+maintainer by hand): in one store 23 of 28 "ready" records were of that
+kind (KYO-289). A dispatch that
 formally spoke for the record is named on the row (`reported_by`, an empty list
-when there is none) rather than deciding the class. Each row names the move that
+when there is none) and does not decide the class. Each row names the move that
 clears it — the verified rung, or the completion move for a record already
 standing at verified (KYO-173) — and no surface performs it, because a status
 change fires transition contracts and stays the orchestrator's act.
@@ -889,7 +887,7 @@ record goes to `finished but not moved` first. When every blocker settles the re
 ready again; `kyo dispatch` refuses a blocked record off the same function (see "The
 dispatch loop").
 
-Disjointness has three outcomes, not two. A record that declares **no** touches
+Disjointness has three outcomes. A record that declares **no** touches
 is not disjoint from anything; it is a record about which nothing can be
 computed, because set intersection cannot tell "I have not said what I touch"
 apart from "I have said, and it is independent" — the empty set intersects
@@ -901,8 +899,8 @@ surfaces cannot disagree about what is safe. Declaring the scope (`kyo edit <id>
 --touches-file FILE`) clears it; `kyo dispatch --force` dispatches anyway and
 records the unchecked comparison on the dispatch, next to a forced touch
 collision. With nothing running there is nothing to be disjoint from, so an
-unscoped record is simply ready — zero-ceremony intake is untaxed in the quiet
-case.
+unscoped record is ready, and intake without touches costs nothing while no
+dispatch is running.
 
 Overlap is measured at the file, with one refinement: two records naming the same
 file at `#symbol`s that do not overlap are **disjoint**, and both surfaces read that
@@ -933,8 +931,8 @@ printed immediately above the flag list, because an empty flag list means both
 shift log written
 since the previous brief, and every event since the previous brief. The last
 two are bounded by a `brief_runs` row's own recorded cursor (`last_event_seq`,
-`last_shift_note_seq`) — a design constraint, not an implementation
-convenience: "what changed since I last looked" must never be a git diff.
+`last_shift_note_seq`), which is a design constraint: what changed since the
+last brief is never computed from a git diff.
 Only when something differs, the brief also carries a block, printed above the
 events, naming each packaged asset whose copy in this project has fallen behind this
 build's — the same drift comparisons `kyo doctor` uses, read here at session start
@@ -958,9 +956,8 @@ an open gate ends its line with `[waiting: <gate-id> <type>, open <n>d]`, and is
 listed under gated work as well. `--json` carries `carried[]`, each with `id`, `kind`,
 `title`, `status`, `since`, `age_days` and `open_gates[]` (`gate_id`, `gate_type`,
 `opened_at`, `age_days`), and `carried_kinds[]`, the registry's carried kinds; when there
-are none, the full brief says so in one line rather than printing an empty list. This is
-the list a closing note used to re-type by hand with day counts that drifted, so a
-closing note no longer needs to carry it. The `--json` keys keep the policy's word,
+are none, the full brief says so in one line rather than printing an empty list. A
+closing note therefore does not need to carry this list. The `--json` keys keep the policy's word,
 `carried`; only the heading took the kind's name. Settle an item with `kyo move <id> done --why
 "..."`, which also clears its gates.
 
