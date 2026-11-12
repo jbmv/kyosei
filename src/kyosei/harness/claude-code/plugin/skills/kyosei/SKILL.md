@@ -42,8 +42,8 @@ re-derive board state by reading record files.**
 
 Run `kyo sessions scratch <dir>` with your session's scratchpad directory, so the maintainer can
 open its files. Plan your coming turns on the session's list (`kyo agenda add --text "..."`,
-`kyo agenda check <id>`), where the maintainer adds reminders; each prompt prints what is
-unchecked.
+`kyo agenda check <id>`), where the maintainer adds reminders; a prompt prints what is
+unchecked when it changed.
 
 **Read a record with `kyo show <id> --json`; a write's `--json` is a receipt** -- ids, status and
 `changed_fields`, not the document; add `--full` for the whole one. Off a terminal
