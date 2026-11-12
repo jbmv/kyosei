@@ -37,6 +37,21 @@ record's `touches`. `kyo docs check` reports every unresolved target in one pass
 3, the same family as `kyo doctor`'s invariant failures) rather than stopping
 at the first.
 
+A docs obligation names its section by the heading text. Where two or more sections
+of one document that declare `governs:` have the same heading, each is named with
+the headings above it, joined by ` > ` and taking as many levels as it takes to
+tell them apart: two `### Notes` sections under `## Server` and `## Client` are
+`Server > Notes` and `Client > Notes`, and each raises its own obligation. That
+name is what `kyo docs preview`, `kyo show` and `kyo docs obligations` print and
+what a `docs_verdicts[]` entry must carry; an entry naming the heading alone
+matches neither. A section whose heading no other `governs:` section shares
+keeps the plain heading, so an obligation stored under one is unaffected. Sections
+with the same heading under the same headings cannot be told apart this way: a
+change that reaches any of them raises one obligation that carries every matched
+target and says how many sections it stands for, and `kyo docs check` names the
+document and the shared name under `shared_headings` without failing. Renaming
+all but one of them gives each its own obligation (KYO-844).
+
 ### A section's status and its links agree (KYO-499)
 
 governs: src/kyosei/docs_check.py#SectionStatusProblem, src/kyosei/docs_check.py#section_status_problems, src/kyosei/docs_check.py#_pairs_agree, src/kyosei/docs_check.py#_set_rules, src/kyosei/docs_check.py#_pointer_problems, src/kyosei/docs_check.py#_cites_number, src/kyosei/docs_parse.py#SectionStatusSet, src/kyosei/docs_parse.py#declared_section_status_sets, src/kyosei/docs_parse.py#section_is_dead, src/kyosei/docs_parse.py#link_values

@@ -384,7 +384,10 @@ written) with the command that would.
 A report may also carry **`docs_verdicts[]`** (KYO-199): one entry per governed
 document section the branch's diff raises an obligation against, keyed by
 document path and section heading — the obligation ids do not exist until this
-ingest mints them. `kyo report` matches each entry to the obligation it raised,
+ingest mints them. Where two sections of a document share a heading, the key is
+the name `kyo docs preview` prints for each, which includes the headings above it
+(KYO-844; see `kyo reference docs`). `kyo report` matches each entry to the
+obligation it raised,
 prints the match beside that obligation, and names any entry that matched none.
 In a document declared `numbered:` in `documents.yml`, an entry whose heading
 differs from the document's after the number is matched by its section number
