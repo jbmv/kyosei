@@ -627,3 +627,82 @@ def test_the_section_survives_compact_mode(kyo) -> None:
     assert record in out
     assert 'kyo gate <id> awaiting:human-run --do "..."' in out
     assert 'kyo gate <id> awaiting:human-run --do "..."' in kyo("brief").out
+
+
+# ----------------------------------------- KYO-865: plans out of work, discussions left open
+
+
+def _plan_with(kyo, *member_statuses: str) -> tuple[str, list[str]]:
+    plan = new_record(kyo, kind="plan", title="A plan")
+    members = []
+    for status in member_statuses:
+        member = new_record(kyo, kind="task", title=f"member {status}", criteria=["a"])
+        assert kyo("edit", member, "--plan", plan).code == 0
+        if status != "open":
+            assert kyo("move", member, status, "--why", "settled for the test").code == 0
+        members.append(member)
+    return plan, members
+
+
+def test_a_plan_with_every_member_settled_is_listed_and_one_with_an_open_member_is_not(
+    kyo,
+) -> None:
+    """KYO-865.c1."""
+    finished, _ = _plan_with(kyo, "wont-do")
+    running, _ = _plan_with(kyo, "wont-do", "open")
+    filed = new_record(kyo, kind="plan", title="Just filed")
+
+    data = kyo("brief", "--json").json
+    listed = {row["id"]: row for row in data["exhausted_plans"]}
+    assert finished in listed and listed[finished]["members"] == 1
+    assert running not in listed and filed not in listed
+
+    out = kyo("brief").out
+    assert "plans out of work (1):" in out
+    assert "kyo move <plan> done" in out and "kyo new --plan <plan>" in out
+    rows = [line for line in out.splitlines() if line.strip().startswith(finished)]
+    assert any("(1 member)" in line for line in rows)
+
+
+def test_a_discussion_opened_in_the_current_session_is_not_listed(
+    kyo, monkeypatch
+) -> None:
+    """KYO-865.c2: a discussion opened before the session's opening brief is listed; one
+    opened after it is not; a closed one never is."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "7c1d2e3f-1111-4a2b-9c3d-0123456789ab")
+    earlier = kyo("discuss", "open", "--title", "Left from before", "--json").json["id"]
+    closed = kyo("discuss", "open", "--title", "Settled before", "--json").json["id"]
+    assert kyo("discuss", "close", closed, "--dropped", "--why", "nothing came of it").code == 0
+    assert kyo("brief", "--session-start").code == 0
+    current = kyo("discuss", "open", "--title", "In progress now", "--json").json["id"]
+
+    listed = [row["id"] for row in kyo("brief", "--json").json["left_open_discussions"]]
+    assert listed == [earlier]
+    assert current not in listed and closed not in listed
+    out = kyo("brief").out
+    assert "discussions left open (1):" in out and "kyo spawn" in out and "--dropped --why" in out
+    # The session-start brief reports every open discussion: all precede it.
+    opening = kyo("brief", "--session-start", "--json").json["left_open_discussions"]
+    assert {row["id"] for row in opening} == {earlier, current}
+
+
+def test_both_classes_are_counted_when_empty_and_carried_in_json(kyo) -> None:
+    """KYO-865.c3."""
+    compact = kyo("brief", "--compact")
+    line = next(ln for ln in compact.out.splitlines() if ln.startswith("  empty (0 each): "))
+    assert "plans out of work" in line and "discussions left open" in line
+    data = kyo("brief", "--compact", "--json").json
+    assert data["exhausted_plans"] == [] and data["left_open_discussions"] == []
+
+
+def test_compact_lists_the_ids_of_both_classes_on_one_line_each(kyo, monkeypatch) -> None:
+    """KYO-865.c4: each class adds a heading, a remedy sentence and one line of ids."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "7c1d2e3f-1111-4a2b-9c3d-0123456789ab")
+    plan, _ = _plan_with(kyo, "wont-do")
+    disc = kyo("discuss", "open", "--title", "Left", "--json").json["id"]
+    out = kyo("brief", "--compact", "--session-start").out
+    lines = out.splitlines()
+    i = next(n for n, ln in enumerate(lines) if ln.startswith("plans out of work"))
+    assert lines[i + 2].strip() == plan
+    j = next(n for n, ln in enumerate(lines) if ln.startswith("discussions left open"))
+    assert lines[j + 2].strip() == disc
