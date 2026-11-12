@@ -101,6 +101,23 @@ test("a prompt sent to an idle session shows at once, dimmed, and is replaced by
   assert.equal((await page.run<Place>(where)).end, true);
 });
 
+test("a prompt's turn takes the preview's place though the server wrote anchor lines into it", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await openSession(page);
+  const typed = "Short one.\n\nAnd the second paragraph, which is longer than the first.";
+  await page.run(`window.kyo.draft(${JSON.stringify({ boxes: [{ id: "a", text: typed }], etag: "e1" })})`);
+  await page.run(`document.querySelector("#boxes .box .box-send").click()`);
+  await page.run(`window.kyo.sent({ id: "m1" })`);
+  await page.run(`window.kyo.held({ outcome: "delivered", id: "m1", held: null })`);
+  const anchored = '[re: KYO-883 at "the arrow"]\nShort one.\n\n[re: KYO-884 at "red"]\nAnd the second paragraph, which is longer than the first.';
+  await page.run(`window.kyo.apply(${JSON.stringify({ turns: [{ id: "t2", at: later(90), text: anchored }] })})`);
+  const turns = await page.run<{ previews: number; turns: number }>(`({
+    previews: document.querySelectorAll("#chat .turn:not([data-key])").length,
+    turns: document.querySelectorAll("#chat .turn").length,
+  })`);
+  assert.deepEqual(turns, { previews: 0, turns: 2 });
+});
+
 test("a prompt sent while the session works is held, and is not drawn in the chat", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   await openSession(page);

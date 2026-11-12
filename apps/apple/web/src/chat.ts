@@ -1673,7 +1673,7 @@ const kyo = {
         sources.set(`t:${turn.id}`, turn.text ?? "");
         if (!elements.has(`t:${turn.id}`)) {
           prompted = true;
-          landSent(turn);
+          landSent();
         }
         place(`t:${turn.id}`, turn.at, version, () => drawTurn(turn));
         linkPlaced(`t:${turn.id}`);
@@ -4042,11 +4042,13 @@ function dropSentPreview(): void {
   sentPreview = null;
 }
 
-/** The transcript's turn for the previewed prompt has arrived, so the preview goes. */
-function landSent(turn: Turn): void {
-  if (!sentPreview) return;
-  const sent = lettersAndDigits(sentPreview.text).slice(0, LIVE_COMPARED_CHARS);
-  if (lettersAndDigits(turn.text ?? "").includes(sent)) dropSentPreview();
+/**
+ * A new prompt of the person's has reached the chat while a preview stands: it is the one
+ * just sent, so the preview goes. Its text is not compared, since the server writes lines
+ * into a prompt it delivers (an anchor above each anchored paragraph, the held line at the top).
+ */
+function landSent(): void {
+  dropSentPreview();
 }
 
 const heldBox = document.getElementById("held")!;
