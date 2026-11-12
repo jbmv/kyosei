@@ -7,13 +7,31 @@ import WebKit
 struct ChatView: View {
     let feed: SessionFeed
 
+    /// A model id's family word, capitalized: `claude-opus-5-5` is `Opus`.
+    static func family(of model: String?) -> String? {
+        guard let model else { return nil }
+        let word = model.split(separator: "-").first {
+            $0 != "claude" && !$0.isEmpty && $0.allSatisfy(\.isLetter)
+        }
+        return word.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? model
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ChatWebView(feed: feed)
             Divider()
             HStack(spacing: 14) {
-                Text(feed.project.isEmpty ? "No project" : feed.project)
-                    .fontWeight(.semibold).foregroundStyle(.primary)
+                // KYO-883: how long ago the session was last active, where the project's name
+                // was; the project is named in the page's dropdown above.
+                if !feed.activity.text.isEmpty {
+                    Text(feed.activity.text)
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            feed.activity.level == "red"
+                                ? Color.red : feed.activity.level == "amber" ? Color.orange : Color.secondary
+                        )
+                        .help(feed.activity.title)
+                }
                 if let percent = feed.facts?.context?.percent {
                     ContextMeter(percent: percent)
                 }
@@ -26,10 +44,10 @@ struct ChatView: View {
                     }
                 }
                 if let facts = feed.facts {
-                    // The effort follows the model's name, as in `claude-opus-5 high`.
-                    Text(
-                        [facts.model ?? "model unknown", facts.effort]
-                            .compactMap { $0 }.joined(separator: " "))
+                    // The model, then its effort, spaced as the bar's other items are (KYO-883).
+                    // KYO-883: the model's family alone, `Opus` or `Fable`.
+                    Text(Self.family(of: facts.model) ?? "model unknown")
+                    if let effort = facts.effort { Text(effort) }
                 }
                 if let mode = feed.facts?.permission_mode { Text(mode) }
                 if let lines = feed.facts?.lines {
@@ -559,6 +577,15 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "projects", let body = message.body as? [String: Any] {
                 feed.projects(body: body)
+                return
+            }
+            if message.name == "strip", let body = message.body as? [String: Any],
+                let activity = body["activity"] as? [String: Any]
+            {
+                feed.activity = (
+                    activity["text"] as? String ?? "", activity["level"] as? String ?? "",
+                    activity["title"] as? String ?? ""
+                )
                 return
             }
             if message.name == "strip", let body = message.body as? [String: Any],

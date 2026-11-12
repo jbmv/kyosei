@@ -169,16 +169,25 @@ test("a prompt delivered, or its turn read, is the top bar's last activity (KYO-
   if (!page) return t.skip("no Chrome on this machine");
   await openSession(page);
   const activity = () => page!.run<string>(`document.getElementById("top-activity").textContent`);
-  assert.match(await activity(), /^Last activity: \d+h \d\dm ago$/);
+  assert.equal(await activity(), "> 1h ago");
   await page.run(`window.kyo.draft({ boxes: [{ id: "a", text: "A long prompt" }], etag: "e1" })`);
   await page.run(`document.querySelector("#boxes .box .box-send").click()`);
   await page.run(`window.kyo.sent({ id: "m1" })`);
   await page.run(`window.kyo.held({ outcome: "delivered", id: "m1", held: null })`);
-  assert.match(await activity(), /^Last activity: 0m 0\ds ago$/);
+  assert.equal(await activity(), "< 1m ago");
   // A prompt typed in the terminal is read from the transcript, and counts the same.
   await openSession(page);
   await page.run(`window.kyo.apply(${JSON.stringify({ turns: [{ id: "t9", at: new Date().toISOString(), text: "typed there" }] })})`);
   await page.run(`window.kyo.facts({})`);
   await new Promise((done) => setTimeout(done, 1100));
-  assert.match(await activity(), /^Last activity: 0m 0\ds ago$/);
+  assert.equal(await activity(), "< 1m ago");
+});
+
+test("an ended session's activity is said as Inactive (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await openSession(page);
+  await page.run(`window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+    { session_id: "S1", title: "t", live: false, first_seen: "${AT}", remote_control_url: null } ] } })`);
+  await new Promise((done) => setTimeout(done, 1100));
+  assert.equal(await page.run<string>(`document.getElementById("top-activity").textContent`), "Inactive");
 });

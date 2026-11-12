@@ -67,6 +67,9 @@ struct KyoseiMacApp: App {
             ChatView(feed: feed)
                 .frame(minWidth: 560, minHeight: 400)
                 .navigationTitle(feed.project.isEmpty ? "Kyosei" : feed.project)
+                // KYO-883: the title names the project for the Window menu and Mission
+                // Control; the title bar does not draw it beside the page's project dropdown.
+                .toolbar(removing: .title)
         }
         .defaultSize(width: 980, height: 860)
         .commands {

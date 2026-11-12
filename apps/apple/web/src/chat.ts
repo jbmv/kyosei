@@ -219,31 +219,43 @@ const ACTIVITY_RED_MS = 45 * 60 * 1000;
  */
 function drawActivity(): void {
   const label = document.getElementById("top-activity")!;
+  let text = "";
+  let level = "";
+  let title = "";
   if (sessionEnded) {
-    const when = endedAt ? new Date(endedAt) : null;
-    label.title = "";
-    label.className = "";
-    label.textContent = when && Number.isFinite(when.getTime())
-      ? `Session ended ${when.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-      : "Session ended";
-    return;
+    // KYO-883: the bottom bar says as little as it can.
+    text = "Inactive";
+  } else {
+    const ago = lastMainActivity ? Date.now() - new Date(lastMainActivity).getTime() : NaN;
+    const expires = facts?.cache?.expires_at;
+    title = expires
+      ? `The prompt cache expires at ${new Date(expires).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+      : "";
+    if (Number.isFinite(ago)) {
+      text = activityWords(ago);
+      level = ago > ACTIVITY_RED_MS ? "red" : ago > ACTIVITY_AMBER_MS ? "amber" : "";
+    }
   }
-  const ago = lastMainActivity ? Date.now() - new Date(lastMainActivity).getTime() : NaN;
-  const expires = facts?.cache?.expires_at;
-  label.title = expires
-    ? `The prompt cache expires at ${new Date(expires).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-    : "";
-  if (!Number.isFinite(ago)) {
-    label.textContent = "";
-    return;
+  label.textContent = text;
+  label.className = level;
+  label.title = title;
+  // KYO-883: said in the app's bottom bar, where the project's name was.
+  const sent = `${text}|${level}|${title}`;
+  if (sent !== activitySent) {
+    activitySent = sent;
+    (window as any).webkit?.messageHandlers?.strip?.postMessage({ activity: { text, level, title } });
   }
-  const seconds = Math.max(0, Math.floor(ago / 1000));
-  const minutes = Math.floor(seconds / 60);
-  const words = minutes >= 60
-    ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
-    : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-  label.textContent = `Last activity: ${words} ago`;
-  label.className = ago > ACTIVITY_RED_MS ? "red" : ago > ACTIVITY_AMBER_MS ? "amber" : "";
+}
+
+/** What the bottom bar was last told of the activity, so it is told only of a change. */
+let activitySent = "";
+
+/** How long ago, as briefly as the bottom bar needs: under a minute, minutes, over an hour. */
+function activityWords(ago: number): string {
+  const minutes = Math.floor(Math.max(0, ago) / 60000);
+  if (minutes < 1) return "< 1m ago";
+  if (minutes >= 60) return "> 1h ago";
+  return `${minutes}m ago`;
 }
 setInterval(drawActivity, 1000);
 
@@ -1201,7 +1213,7 @@ function drawAgents(): void {
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
   drawFinished("side-agents-finished", finished.length, showFinishedAgents);
-  drawRunningAgents(running);
+  drawRunningAgents(running, finished);
   // The app is told the count as well, for anything outside the page that states it.
   (window as any).webkit?.messageHandlers?.strip?.postMessage({
     subagents: running.length,
@@ -1217,31 +1229,49 @@ function drawAgents(): void {
 }
 
 /**
- * `Subagents: N` under the composer's Send, green while any runs. A press lists the running
- * ones: what each is, its type and model, and since when.
+ * `Subagents: N` under the composer's Send, green while any runs. A press lists them, as
+ * Chat's side bar did before it went (KYO-883): the running ones, then under a rule the
+ * finished ones, newest first, each with what it ran on, its tokens, its time and its lines.
  */
-function drawRunningAgents(running: Subagent[]): void {
+function drawRunningAgents(running: Subagent[], finished: Subagent[]): void {
   const count = document.getElementById("running-agents-count")!;
   count.textContent = `Subagents: ${running.length}`;
   count.classList.toggle("running", running.length > 0);
   const list = document.getElementById("running-agents-list")!;
-  if (!running.length) list.hidden = true;
-  list.replaceChildren(...running.map((agent) => {
-    const row = document.createElement("div");
-    row.className = "running-agent";
-    const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? "";
-    const facts = [
-      agent.agent_type, shortModel(agentFacts.get(agent.agent_id)?.model ?? agent.model),
-      agentFacts.get(agent.agent_id)?.effort ?? agent.effort ?? "", since ? elapsed(since) : "",
-    ].filter(Boolean).join(" · ");
-    row.append(span("running-agent-name", agent.description), span("running-agent-facts", facts));
-    return row;
-  }));
+  if (!running.length && !finished.length) list.hidden = true;
+  const row = (agent: Subagent, isRunning: boolean) => {
+    const item = document.createElement("div");
+    item.className = isRunning ? "running-agent running" : "running-agent";
+    const words = agentMeta(agent, isRunning);
+    const facts = span("running-agent-facts", words.parts.join("  ·  "));
+    if (words.lines) {
+      if (words.parts.length) facts.append("  ·  ");
+      facts.append(...words.lines);
+    }
+    item.append(span("running-agent-name", agent.description || agent.agent_type), facts);
+    return item;
+  };
+  const rule = document.createElement("hr");
+  rule.className = "running-agents-rule";
+  list.replaceChildren(
+    ...running.map((agent) => row(agent, true)),
+    ...(running.length && finished.length ? [rule] : []),
+    ...finished.map((agent) => row(agent, false)),
+  );
 }
 
 document.getElementById("running-agents-count")!.addEventListener("click", () => {
   const list = document.getElementById("running-agents-list")!;
   list.hidden = !list.hidden || !list.childElementCount;
+  // A finished agent's lines and tokens are read when the list is first opened.
+  if (!list.hidden) {
+    for (const agent of subagents.values()) {
+      if (agentFinished(agent) && !agentCalls.has(agent.agent_id) && !requestedAgents.has(agent.agent_id)) {
+        requestedAgents.add(agent.agent_id);
+        requestAgent(agent.agent_id);
+      }
+    }
+  }
 });
 document.addEventListener("mousedown", (event) => {
   if (!document.getElementById("running-agents")!.contains(event.target as Node)) {
@@ -1505,6 +1535,11 @@ document.getElementById("side-agents-finished")!.addEventListener("click", () =>
 });
 
 document.getElementById("terminal-toggle")!.addEventListener("click", () => {
+  // KYO-883: from another view the button opens Chat with its terminal shown.
+  if (currentView !== "chat") {
+    showView("chat");
+    if (document.body.classList.contains("terminal-open")) return;
+  }
   if (!document.body.classList.toggle("terminal-open")) {
     post("terminal", { action: "close" });
     return;
@@ -3415,6 +3450,8 @@ function openSearch(): void {
   findField.placeholder = FIND_PLACEHOLDERS[currentView] ?? "Search";
   findField.setAttribute("aria-label", findField.placeholder);
   findBar.hidden = false;
+  // KYO-883: Chat's second row is shown only to hold the search.
+  document.body.classList.add("finding");
   findField.focus();
   findField.select();
   drawFoldsSoon();
@@ -3428,6 +3465,7 @@ function closeSearch(): void {
   if (foldTimer !== undefined) window.clearTimeout(foldTimer);
   foldTimer = undefined;
   findBar.hidden = true;
+  document.body.classList.remove("finding");
   hits = [];
   currentHit = -1;
   paintHits();
@@ -4598,8 +4636,33 @@ function projectRows(): HTMLElement[] {
       row.append(problem);
     }
     rows.push(row);
+    // KYO-883: with Chat's side bar gone, the window's project lists its live sessions here,
+    // when it has more than one, so the chat can follow another.
+    if (choice.current) rows.push(...liveSessionRows());
   }
   return rows;
+}
+
+function liveSessionRows(): HTMLElement[] {
+  const live = (menu?.sessions.sessions ?? []).filter((row) => row.live);
+  if (live.length < 2) return [];
+  return live.map((row) => {
+    const item = document.createElement("button");
+    item.className = "project-row project-session";
+    item.dataset.session = row.session_id;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(row.session_id === menu?.current));
+    const name = document.createElement("span");
+    name.className = "project-row-name";
+    name.textContent = sessionLabel(row);
+    item.append(name);
+    item.addEventListener("click", () => {
+      closeProjects();
+      showView("chat");
+      select(row.session_id);
+    });
+    return item;
+  });
 }
 
 function projectsOpen(): boolean {
@@ -7419,7 +7482,7 @@ function applyDocks(): void {
   const home = (currentView === "records" && openRecordId === null)
     || (currentView === "files" && openFile === null);
   document.body.classList.toggle("home-page", home);
-  document.body.classList.toggle("dock-left", docked[`left:${currentView}`] === true);
+  document.body.classList.toggle("dock-left", currentView !== "chat" && docked[`left:${currentView}`] === true);
   document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
   document.body.classList.toggle("has-outline",
     (currentView === "history" && !historyReader.hidden)

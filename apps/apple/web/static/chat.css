@@ -455,10 +455,9 @@ body.terminal-open #jump-bottom { display: none; }
 
 #menu-icon { left: 10px; }
 #terminal-toggle {
-  position: fixed;
-  top: calc(10px + var(--views-height));
-  right: calc(var(--composer-width) + 18px);
-  z-index: 3;
+  /* KYO-883: in the views bar, at its end, on every view. */
+  margin-left: auto;
+  flex: none;
   width: 30px;
   height: 26px;
   display: flex;
@@ -472,8 +471,13 @@ body.terminal-open #jump-bottom { display: none; }
 
 #terminal-toggle:hover, #menu:hover #menu-icon { background: var(--panel); }
 body.terminal-open #terminal-toggle { background: var(--line); }
-/* The terminal belongs to the chat: the other views do not show its button (2026-11-11). */
-body.view-records #terminal-toggle, body.view-files #terminal-toggle, body.view-history #terminal-toggle { display: none; }
+/* KYO-883: Chat has no side bar, and its second row is shown only to hold an open search,
+   over the chat's first lines; the chat and the terminal start under the views bar. */
+body.view-chat #menu { display: none; }
+body.view-chat #top { display: none; }
+body.view-chat.finding #top { display: flex; z-index: 3; }
+body.view-chat #page, body.view-chat #terminal { top: var(--views-height); }
+body.no-project #terminal-toggle, body.pick-project #terminal-toggle { display: none; }
 
 /* The terminal is dark in both colour schemes, as the program in it was drawn for. */
 #terminal {
@@ -679,11 +683,13 @@ body.terminal-open #terminal { display: flex; }
 #running-agents-count.running { color: var(--apple-green); font-weight: 600; animation: agents-glow 1.8s ease-in-out infinite; }
 @keyframes agents-glow { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { #running-agents-count.running { animation: none; } }
-#running-agents-list { position: absolute; right: 0; bottom: 22px; z-index: 5; width: 280px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
+#running-agents-list { position: absolute; right: 0; bottom: 22px; z-index: 5; width: 320px; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
 #running-agents-list[hidden] { display: none; }
 .running-agent { padding: 3px 0; }
 .running-agent-name { display: block; color: var(--text); }
-.running-agent-facts { display: block; color: var(--muted); font-size: 11.5px; }
+.running-agent-facts { display: block; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.running-agent:not(.running) .running-agent-name { color: var(--muted); }
+.running-agents-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--soft-line); }
 
 /* KYO-719: shown when the project has no live session. */
 #start { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
@@ -853,6 +859,8 @@ body.ended #chat ::highlight(found-current) { background-color: color-mix(in srg
 .session-link:hover { color: var(--text); }
 .session-link[aria-current="true"] { color: var(--text); font-weight: 600; }
 #views-divider { flex: none; width: 1px; height: 16px; background: var(--line); }
+/* KYO-883: the project's live sessions, under its row, when it has more than one. */
+.project-row.project-session { padding-left: 34px; font-size: 12.5px; }
 
 /* With no project the list of them stands in place of everything under the bar, and the
    bar holds no view to choose. */

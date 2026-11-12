@@ -88,6 +88,9 @@ final class SessionFeed {
     /// Commits on the branch that its upstream lacks; nil without an upstream (KYO-717).
     private(set) var ahead: Int?
     var runningSubagents = 0
+    /// How long ago the session was last active, as the page words it for the bottom bar
+    /// (KYO-883): its words, `amber` or `red` as the hour's cache nears its end, and a tooltip.
+    var activity: (text: String, level: String, title: String) = ("", "", "")
     var runningAgents: [RunningAgent] = []
     /// Where the composer's boxes are read from and saved to (KYO-763): the followed
     /// session's draft while it is live, and the project's when no session is live. The
