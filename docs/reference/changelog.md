@@ -631,6 +631,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-12** — `KYO-838` (bug) — Mac app: Command-F marks nothing in the chat of an ended session, which is drawn dimmed
 - **2026-11-12** — `KYO-833` (bug) — Mac app: turning the Records Open chip on or off is slow while the list redraws
 - **2026-11-11** — `KYO-837` (task) — kyo serve: the project's starred files
 - **2026-11-11** — `KYO-832` (task) — Symbol targets: Swift files are narrowed, five chat.ts functions are found, and symbol-only coverage is reported
