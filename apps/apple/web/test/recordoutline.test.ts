@@ -18,6 +18,14 @@ const RECORD = {
     { id: "KYO-9.c2", text: "The second", state: "unmet-unbuilt" },
   ],
   touches: [{ id: "KYO-9.t1", path: "src/a.py" }],
+  gates: [
+    { id: "KYO-9.g1", type: "awaiting:human-run", do: "Look at it" },
+    { id: "KYO-9.g2", type: "awaiting:event", do: "Wait", cleared_at: "2026-01-02T00:00:00Z", cleared_as: "answered" },
+  ],
+  members: [
+    { id: "KYO-10", kind: "task", title: "An open member", status: "open" },
+    { id: "KYO-11", kind: "task", title: "A finished member", status: "done" },
+  ],
 };
 
 test("the outline names the record's sections, lists a section's items on its caret, and shows only with a record open", async (t) => {
@@ -63,4 +71,33 @@ test("the outline names the record's sections, lists a section's items on its ca
   assert.ok(outline.rows.some((row) => row.startsWith("Criteria")), outline.rows.join(" | "));
   assert.deepEqual(outline.items.length, 2);
   assert.ok(outline.items[0].startsWith("c1"), outline.items[0]);
+});
+
+test("an item's row holds its id, its first words and its state, in red while a gate or a member is open", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const found = await page.run<Record<string, { ref: string; text: string; state: string; open: boolean }[]>>(`(() => {
+    const out = {};
+    for (const section of document.querySelectorAll("#record-outline .outline-section")) {
+      const name = section.textContent.split(" ")[0].replace("›", "").trim();
+      out[name] = [...section.nextElementSibling.querySelectorAll(".outline-item")].map((row) => ({
+        ref: row.querySelector(".outline-ref")?.textContent ?? "",
+        text: row.querySelector(".outline-text")?.textContent ?? "",
+        state: row.querySelector(".outline-state")?.textContent ?? "",
+        open: Boolean(row.querySelector(".outline-state.open")),
+      }));
+    }
+    return out;
+  })()`);
+  assert.deepEqual(found.Criteria, [
+    { ref: "c1:", text: "The first", state: "met", open: false },
+    { ref: "c2:", text: "The second", state: "unmet-unbuilt", open: false },
+  ]);
+  assert.deepEqual(found.Gates, [
+    { ref: "g1:", text: "Look at it", state: "open", open: true },
+    { ref: "g2:", text: "Wait", state: "cleared as answered", open: false },
+  ]);
+  assert.deepEqual(found.Members, [
+    { ref: "", text: "KYO-10 An open member", state: "open", open: true },
+    { ref: "", text: "KYO-11 A finished member", state: "done", open: false },
+  ]);
 });

@@ -4824,6 +4824,8 @@ recordsHomeSearch.addEventListener("keydown", (event) => {
 /** The open record's outline in the right drawer: its sections, each listing its items. */
 /** The sections the person folded; every other one lists its items (KYO-846). */
 const foldedOutline = new Set<string>();
+/** The states of an item that is still to be dealt with: an open gate, a member under way. */
+const UNSETTLED = new Set(["open", "working", "built", "verified"]);
 function drawRecordOutline(): void {
   const holder = document.getElementById("record-outline")!;
   if (openRecordId === null || !openRecordDoc) {
@@ -4858,12 +4860,18 @@ function drawRecordOutline(): void {
     list.className = "outline-items";
     list.hidden = foldedOutline.has(name);
     for (const item of items) {
+      // One line: the item's short id, as much of its text as fits, and its state at the
+      // end, in red while the item is still open (a gate, a plan's member).
       const row = document.createElement("div");
-      row.className = "outline-row";
-      const ref = item.dataset.ref ?? "";
+      row.className = "outline-row outline-item";
+      const ref = (item.dataset.ref ?? "").replace(`${openRecordId}.`, "");
       const state = item.querySelector(".rec-state")?.textContent ?? "";
-      row.textContent = [ref.replace(`${openRecordId}.`, ""), state].filter(Boolean).join(" · ")
-        || firstWords(item.textContent ?? "", 6);
+      const text = (item.querySelector(":scope > .rec-text")?.textContent ?? "").trim().split("\n")[0];
+      if (ref) row.append(span("outline-ref", text ? `${ref}:` : ref));
+      if (text) row.append(span("outline-text", text));
+      if (state) row.append(span(UNSETTLED.has(state) ? "outline-state open" : "outline-state", state));
+      if (!row.childNodes.length) row.textContent = firstWords(item.textContent ?? "", 6);
+      row.title = [ref, text, state].filter(Boolean).join(" · ");
       row.addEventListener("click", () => item.scrollIntoView({ block: "center" }));
       list.append(row);
     }
@@ -5145,6 +5153,8 @@ const recordFrames = {
     drawRecordLists();
     // A link or a member on the open page is named by the list's titles.
     if (openRecordDoc) drawRecord();
+    // So is a record linked in the chat, in the chat's side bar.
+    drawChatLinks();
   },
 
   /** One record as `kyo show --json` prints it, or why it could not be read. */
@@ -5746,7 +5756,19 @@ function linkRow(item: ChatLink): HTMLElement {
   if (item.given) row.dataset.given = item.given;
   row.dataset.kind = item.kind;
   row.title = item.kind === "url" ? item.href : item.place;
-  row.append(span("mention-name", item.name), span("mention-place", item.place));
+  // A record is named by its title, read from the record list, which is asked for once a
+  // link needs it; until it answers the row says Record.
+  let place = item.place;
+  if (item.kind === "record") {
+    const id = parseLink(item.href)?.record;
+    const title = id ? recordRows.find((row) => row.id === id)?.title : undefined;
+    if (title) place = row.title = title;
+    else if (!listsAsked) {
+      listsAsked = true;
+      post("records", { want: "lists" });
+    }
+  }
+  row.append(span("mention-name", item.name), span("mention-place", place));
   return row;
 }
 

@@ -54,6 +54,13 @@ test("the side bar lists the links of prompts and replies, newest first, and no 
   ]);
   assert.equal(listed[0].href, "kyosei://KYO/KYO-810");
   assert.equal(listed[1].place, "Code · docs");
+  // A record is named by its title once the record list is read, which the row asks for.
+  assert.equal(listed[0].place, "Record");
+  const asked = await page.run<boolean>(`window.posted.some((p) => p.name === "records" && p.body.want === "lists")`);
+  assert.equal(asked, true, "the list was asked for");
+  await page.run(`window.kyo.recordLists({ list: { records: [
+    { id: "KYO-810", kind: "bug", title: "A prompt was typed but not submitted", status: "open" }] } })`);
+  assert.equal((await page.run<Row[]>(rows))[0].place, "A prompt was typed but not submitted");
 });
 
 test("a row of the list opens what it names: a file in Files, a record in Records", async (t) => {

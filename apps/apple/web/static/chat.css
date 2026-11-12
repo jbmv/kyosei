@@ -1173,6 +1173,11 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 .outline-items { padding-left: 16px; }
 .outline-items[hidden] { display: none; }
 .outline-items .outline-row { font-size: 12.5px; color: var(--muted); }
+.outline-item { display: flex; align-items: baseline; gap: 6px; }
+.outline-ref, .outline-state { flex: none; }
+.outline-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.outline-state { margin-left: auto; }
+.outline-state.open { color: var(--apple-red); font-weight: 600; }
 
 /* ---------------------------------------------------------------- The Files home (KYO-835) */
 /* A fixed column in Finder's manner beside a list with columns, which scrolls sideways when narrow. */
