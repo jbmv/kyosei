@@ -208,7 +208,7 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
       .filter((cell) => getComputedStyle(cell).color === "rgb(255, 59, 48)").map((cell) => cell.textContent),
   })`);
   assert.equal(planRow.count, String(MEMBERS.length));
-  // KYO-883: the plan is named by its id and title, and its open members' status is red.
+  // KYO-883: the plan is named by its id and title, and its outstanding members' status is red.
   assert.match(planRow.name, new RegExp(`^${PLAN} `));
   assert.ok(planRow.red.length > 0 && planRow.red.every((status) => status === "open"), JSON.stringify(planRow.red));
   const redInAll = `[...document.querySelectorAll("#records-table .rec-status")].some((cell) => getComputedStyle(cell).color === "rgb(255, 59, 48)")`;
@@ -356,4 +356,23 @@ test("Shift notes is a Location of the home, the latest note is one press away, 
   assert.equal(drawn.body, "The second note.");
   assert.equal(drawn.session, "The session");
   assert.equal(drawn.view, true, "the link opens the session in History");
+});
+
+test("a chosen plan's members still outstanding have their status in red, and settled ones do not (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const member = (seq: number, status: string) => ({
+    id: `KYO-${seq}`, kind: "task", title: `Member ${seq}`, status, seq,
+    created_at: new Date(Date.UTC(2026, 0, 1) + seq * 3600_000).toISOString(), plan: "KYO-1",
+  });
+  const rows = [
+    { id: "KYO-1", kind: "plan", title: "The plan", status: "open", seq: 1, created_at: "2026-01-01T00:00:00Z", plan: null },
+    ...["open", "working", "built", "verified", "done", "wont-do"].map((status, index) => member(index + 2, status)),
+  ];
+  const opened = await open(rows as Row[]);
+  const red = await opened.run<string[]>(`(() => {
+    document.querySelector('#records-plans [data-plan="KYO-1"]').click();
+    return [...document.querySelectorAll("#records-table .rec-status")]
+      .filter((cell) => getComputedStyle(cell).color === "rgb(255, 59, 48)").map((cell) => cell.textContent).sort();
+  })()`);
+  assert.deepEqual(red, ["built", "open", "verified", "working"]);
 });

@@ -51,6 +51,13 @@ test("the working line, Interrupt and the subagent count stand under the compose
     inChat: Boolean(document.querySelector("#page #background")),
   })`);
   assert.match(whole.under, /^Working.*  ·  1 agent, 1 shell in the background$/);
+  // One row, cut with an ellipsis, and the whole line in the tooltip.
+  const row = await page.run<{ title: string; wrap: string; overflow: string }>(`(() => {
+    const text = document.getElementById("working-text");
+    const style = getComputedStyle(text);
+    return { title: text.title, wrap: style.whiteSpace, overflow: style.textOverflow };
+  })()`);
+  assert.deepEqual(row, { title: whole.under, wrap: "nowrap", overflow: "ellipsis" });
   assert.equal(whole.inChat, false);
   // Idle with work still in the background says that work, and is not a wait on the person.
   await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);

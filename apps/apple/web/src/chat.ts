@@ -681,6 +681,8 @@ function drawWorking(): void {
   working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;
   workingText.textContent = words;
+  // KYO-883: the line keeps to one row, so the composer does not move; hovering shows it whole.
+  workingText.title = words;
   working.hidden = !words;
 }
 
@@ -4743,10 +4745,17 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
   } else {
     // A row of the home's table (KYO-862): id and title under Name, then one cell a column.
     item.append(
-      id, title, kindLabel(row.kind), span(`rec-status ${standingOf(row)}`, standingOf(row)),
+      id, title, kindLabel(row.kind), statusCell(row),
       span("rec-day", dayOf(row.updated_at ?? row.created_at)));
   }
   return item;
+}
+
+/** A row's status in the home's table, marked when the record is still outstanding (KYO-883). */
+function statusCell(row: RecordRow): HTMLElement {
+  const cell = span("rec-status", standingOf(row));
+  if (UNSETTLED.has(standingOf(row))) cell.classList.add("outstanding");
+  return cell;
 }
 
 function emptyRow(text: string): HTMLElement {
@@ -4960,7 +4969,7 @@ function drawRecordsHome(nothing: string): void {
   });
   if (recordsHomeSearch.value !== homeSearch) recordsHomeSearch.value = homeSearch;
   const rows = listsRead ? homeRows() : [];
-  // KYO-883: a plan's members still open are marked in red, as the plan's outline marks them.
+  // KYO-883: a plan's members still outstanding are marked in red, as the plan's outline marks them.
   document.getElementById("records-landing")!.classList.toggle("plan-chosen", chosenPlan() !== null);
   fill(recordsTable, rows.length
     ? rows.map((row) => keptRow(row, "landing"))

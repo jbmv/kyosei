@@ -667,8 +667,8 @@ body.terminal-open #terminal { display: flex; }
    works, and the running subagents at the right, under Send. */
 #composer-status { flex: none; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 2px 2px; font-size: 12.5px; }
 #working { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); }
-/* KYO-883: the line is shown whole, wrapping under itself when the column is narrow. */
-#working-text { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+/* One row, so the composer above does not move as the line grows; the title holds it whole (KYO-883). */
+#working-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #working[hidden] { display: flex; visibility: hidden; }
 #working.idle { font-style: italic; }
 #working.idle .pulse { display: none; }
@@ -1288,7 +1288,7 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 .records-home-searchrow { margin-bottom: 12px; }
 .location-row .tree-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .location-row .rec-id { margin-right: 2px; }
-#records-landing.plan-chosen #records-table .rec-status.open { color: var(--apple-red); font-weight: 600; }
+#records-landing.plan-chosen #records-table .rec-status.outstanding { color: var(--apple-red); font-weight: 600; }
 .location-count { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .records-home-side .rec-row { padding: 3px 8px; font-size: 13px; }
 .records-home-side .rec-row .kind { display: none; }
