@@ -905,11 +905,13 @@ kyo move KYO-1 working --json              # a write's --json is its receipt: ea
                                            # changed_fields, not the whole document
 kyo move KYO-1 working --json --full       # the same with every record document whole;
                                            # `kyo show KYO-1 --json` is the read, always whole
-kyo new task --title T --description-file d.md   # piped or captured, a write prints its
-                                           # receipt: what it did and the ids, each stored
-                                           # text as its length and digest, every warning
-kyo new task --title T --description-file d.md --full   # the whole output, as a terminal
-                                           # prints it: every stored text echoed back
+kyo new task --title "Cache warmup" --description-file desc.md | cat
+                                           # piped or captured, a write prints its receipt:
+                                           # what it did and the ids, each stored text as its
+                                           # length and digest, and every warning
+kyo new task --title "Cache warmup" --description-file desc.md --full | cat
+                                           # the whole output, as a terminal prints it:
+                                           # every stored text echoed back
 kyo list --json --pretty                   # --json is one line when stdout is not a terminal
                                            # and indented on one; --pretty / --compact-json
                                            # force either (--slim: accepted, a no-op)
