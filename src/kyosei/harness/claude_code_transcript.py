@@ -1253,6 +1253,61 @@ def _opens_prompt(record: dict) -> str | None:
     return prompt_id if isinstance(prompt_id, str) and prompt_id else None
 
 
+@dataclass
+class MessageTexts:
+    """The texts a session's transcript holds for its messages, for a caller that must
+    reproduce a committed message (KYO-660): top-level records by uuid, and the agent's
+    texts by the prompt id of the turn they fall in."""
+
+    by_uuid: dict[str, dict]
+    replies: dict[str, list[str]]
+
+    def candidates(self, *, turn: object, prompt_id: object, reply: bool) -> list[str]:
+        """Texts offered for one message, most likely first. The caller keeps only a text
+        that reproduces what was committed, so an extra candidate costs nothing."""
+        if reply:
+            # The reply the Stop hook committed is the last text of its turn; an earlier
+            # Stop of the same turn committed an earlier one, so every text is offered.
+            key = prompt_id if isinstance(prompt_id, str) else ""
+            return list(reversed(self.replies.get(key, [])))
+        record = self.by_uuid.get(turn) if isinstance(turn, str) else None
+        if record is None:
+            return []
+        if record.get("type") == "attachment":
+            prompt = (record.get("attachment") or {}).get("prompt")
+            return [prompt] if isinstance(prompt, str) else []
+        content = (record.get("message") or {}).get("content")
+        found: list[str] = []
+        for text in (_block_text(content), _text_of(content)):
+            if isinstance(text, str) and text not in found:
+                found.append(text)
+        return found
+
+
+def message_texts(paths: list[Path]) -> MessageTexts:
+    """Read ``paths`` (a session's transcript and its archived copies) into
+    :class:`MessageTexts`: each top-level record once, in file order. Raises ``OSError``
+    when a file cannot be read."""
+    records: dict[str, dict] = {}
+    for path in paths:
+        for record in _parse_lines(path):
+            uuid = record.get("uuid")
+            if isinstance(uuid, str) and not record.get("isSidechain"):
+                records.setdefault(uuid, record)
+    replies: dict[str, list[str]] = {}
+    current: str | None = None
+    for record in records.values():
+        opened = _opens_prompt(record)
+        if opened is not None:
+            current = opened
+        if record.get("type") != "assistant" or current is None:
+            continue
+        text = _block_text((record.get("message") or {}).get("content"))
+        if text.strip():
+            replies.setdefault(current, []).append(text)
+    return MessageTexts(records, replies)
+
+
 def split_turns(records: Iterator[dict] | list[dict]) -> Iterator[list[dict]]:
     """Group a transcript's main-chain records into turns, in order. A turn starts at the
     first record of each prompt id and holds everything up to the next one's."""

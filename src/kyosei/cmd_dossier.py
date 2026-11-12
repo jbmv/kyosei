@@ -12,8 +12,8 @@ on the page are the quotes credits already store as evidence artifacts, and thos
 printed verbatim: an id inside a person's quoted words is left as they wrote it.
 
 EXCERPT PACKS. ``kyo excerpt`` (KYO-660) makes them, apart from this page, and no page
-attaches one. Part eight reads the credit's ``span_seal`` (KYO-663) and says "not sealed" for a credit
-without one (:func:`seal_sentence`).
+attaches one. Part eight reads the credit's ``span_seal`` (KYO-663) and says "not sealed"
+for a credit without one (:func:`seal_sentence`).
 
 WHO PROPOSED AN OPTION (KYO-786). An alternative of a decided credit may name its proposer.
 Part three names the proposer of each option, and credits the agent with an option whose

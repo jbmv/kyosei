@@ -837,8 +837,9 @@ kyo show KYO-1
 kyo dossier KYO-4                          # a decision as a Markdown page for a reader outside
                                            # the project: eight parts, each naming its source
                                            # in the store; reads no transcript (KYO-659)
-kyo excerpt KYO-4.p1 --draft                # the lines of the discussion a credit cites, for the person
-                                           # to cut before anything is shared (KYO-660)
+kyo excerpt KYO-4.p1 --draft               # [illustration] KYO-4.p1: a credit of yours, in a project that
+                                           # reads transcripts. The lines of the discussion it cites,
+                                           # for the person to cut before anything is shared (KYO-660)
 kyo move KYO-1 working                     # contracts are checked here
 kyo gate KYO-1 awaiting:human-run --do "run the staging migration, then reload the dashboard" \
                                   --tag ui-review   # tags from kyosei/gate-tags.yml;

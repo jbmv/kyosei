@@ -2050,7 +2050,7 @@ def build_parser() -> KyoseiParser:
         parents=[common],
         help="draft, preview and write an excerpt pack of the discussion a credit cites: the "
         "lines of its messages the person chose to share, each with the salt and proof a "
-        "reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py "
+        "reader checks against the credit's span_seal with the standalone verifier "
         "(KYO-660). --pack is refused without the person's approval, an authorized credit",
         description="An excerpt pack holds the credit, and for each message of its span the "
         "index line and the lines shared with their salts and Merkle proofs; a line not "

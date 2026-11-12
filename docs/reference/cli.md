@@ -45,7 +45,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
 | [`kyo dossier`](#kyo-dossier) | yes | no | print one decision as a Markdown page for a reader outside the project: the decision, the problem, what was on the table, who decided and in what words, the timeline, the depth of the discussion, what happened next, and how the record was made, each part naming its source in the store (KYO-659). It reads no transcript; a go-ahead is never shown as a decision |
 | [`kyo edit`](#kyo-edit) | yes | yes | change a record |
-| [`kyo excerpt`](#kyo-excerpt) | yes | no | draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py (KYO-660). --pack is refused without the person's approval, an authorized credit |
+| [`kyo excerpt`](#kyo-excerpt) | yes | no | draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with the standalone verifier (KYO-660). --pack is refused without the person's approval, an authorized credit |
 | [`kyo export`](#kyo-export) | yes | no | rewrite drifted export documents from the db (KYO-6) |
 | [`kyo flag`](#kyo-flag) | yes | yes | list, acknowledge/resolve a sweep flag (M6) |
 | [`kyo gate`](#kyo-gate) | yes | yes | add a gate; orthogonal to status |
@@ -714,7 +714,7 @@ Text output prints the quoted short form in place of the full text after it, whi
 
 ## `kyo excerpt`
 
-draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py (KYO-660). --pack is refused without the person's approval, an authorized credit
+draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with the standalone verifier (KYO-660). --pack is refused without the person's approval, an authorized credit
 
 Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
 

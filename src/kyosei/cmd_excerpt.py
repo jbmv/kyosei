@@ -122,9 +122,8 @@ def _refuse_unsealed(credit: dict) -> None:
         )
 
 
-def _transcript_records(ctx: Context, session: str) -> list[dict]:
-    """The session's top-level transcript records in file order, each uuid once, from the
-    original or the archive."""
+def _message_texts(ctx: Context, session: str) -> transcript.MessageTexts:
+    """The texts the session's transcript, original or archived, holds for its messages."""
     from .transcript_archive import archive_dir
 
     try:
@@ -141,60 +140,10 @@ def _transcript_records(ctx: Context, session: str) -> list[dict]:
             f"no transcript, original or archived, for session {session}: the text of its "
             "messages cannot be read, so no excerpt can be drafted"
         )
-    records: dict[str, dict] = {}
-    for path in paths:
-        try:
-            for record in transcript._parse_lines(path):  # noqa: SLF001 - the module's own reader
-                uuid = record.get("uuid")
-                if isinstance(uuid, str) and not record.get("isSidechain"):
-                    records.setdefault(uuid, record)
-        except OSError as exc:
-            raise UsageError(f"the transcript of session {session} cannot be read: {exc}") from exc
-    return list(records.values())
-
-
-@dataclass
-class Transcript:
-    """What the candidates are drawn from: records by uuid, and the agent's texts by the
-    prompt id of the turn they fall in."""
-
-    by_uuid: dict[str, dict]
-    replies: dict[str, list[str]]
-
-    @classmethod
-    def of(cls, records: list[dict]) -> Transcript:
-        replies: dict[str, list[str]] = {}
-        current: str | None = None
-        for record in records:
-            opened = transcript._opens_prompt(record)  # noqa: SLF001
-            if opened is not None:
-                current = opened
-            if record.get("type") != "assistant" or current is None:
-                continue
-            text = transcript._block_text((record.get("message") or {}).get("content"))  # noqa: SLF001
-            if text.strip():
-                replies.setdefault(current, []).append(text)
-        return cls({r["uuid"]: r for r in records}, replies)
-
-
-def _candidates(line: dict, source: Transcript) -> list[str]:
-    """Texts the transcript offers for the message on ``line``, most likely first."""
-    if line.get("role") == seal.ROLE_ASSISTANT:
-        # The reply the Stop hook committed is the last text of its turn; an earlier Stop
-        # of the same turn committed an earlier one, so every text of the turn is offered.
-        return list(reversed(source.replies.get(line.get("prompt_id") or "", [])))
-    record = source.by_uuid.get(line.get("turn") or "")
-    if record is None:
-        return []
-    if record.get("type") == "attachment":
-        prompt = (record.get("attachment") or {}).get("prompt")
-        return [prompt] if isinstance(prompt, str) else []
-    content = (record.get("message") or {}).get("content")
-    found: list[str] = []
-    for text in (transcript._block_text(content), transcript._text_of(content)):  # noqa: SLF001
-        if isinstance(text, str) and text not in found:
-            found.append(text)
-    return found
+    try:
+        return transcript.message_texts(paths)
+    except OSError as exc:
+        raise UsageError(f"the transcript of session {session} cannot be read: {exc}") from exc
 
 
 def _read_key(ctx: Context) -> bytes:
@@ -245,7 +194,7 @@ def build_span(ctx: Context, identifier: str) -> tuple[Span, bytes]:
             "span_seal, so the index was changed after the credit was written"
         )
     key = _read_key(ctx)
-    source = Transcript.of(_transcript_records(ctx, session))
+    source = _message_texts(ctx, session)
     quotes = {e["id"]: e["text"] for e in doc["evidence_artifacts"] if not e["redacted_at"]}
     span = Span(
         credit=credit, record_id=doc["id"], session=session, quote=quotes.get(credit["quote_id"])
@@ -255,7 +204,11 @@ def build_span(ctx: Context, identifier: str) -> tuple[Span, bytes]:
         if not line.get("root"):
             message.why = "it was not committed when it was sent (a message sent mid-turn)"
         else:
-            for text in _candidates(line, source):
+            for text in source.candidates(
+                turn=line.get("turn"),
+                prompt_id=line.get("prompt_id"),
+                reply=line.get("role") == seal.ROLE_ASSISTANT,
+            ):
                 if seal.verify_message(key, line, text):
                     message.lines = seal.split_lines(text)
                     break
