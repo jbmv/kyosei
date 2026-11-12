@@ -1807,7 +1807,14 @@ const kyo = {
     retracting = false;
     showHeld(null);
     const marks = restoredMarks(frame.prompt?.marks ?? []);
-    showTexts([frame.text, ...currentTexts()], [{ text: frame.text, marks }, ...currentBoxes()]);
+    // KYO-883: the prompt goes back where it stood when it was sent, between the same
+    // neighbours, or last, as the latest sent, when that place is not known here.
+    const others = currentBoxes();
+    const restored: NamedBox = { id: sentPlace?.id ?? boxId(), text: frame.text, marks };
+    const list = [...others];
+    list.splice(placeAmong(others, sentPlace), 0, restored);
+    sentPlace = null;
+    showTexts(list.map((box) => box.text), list);
   },
 
   /**
@@ -4000,6 +4007,7 @@ function attemptSend(area: HTMLTextAreaElement): void {
   }
   coldConfirm = null;
   if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
+  sentPlace = placeOf(area);
   composerNote.textContent = "Sending…";
   drawSending();
   // A prompt sent while the session works is held, and is shown in the held box instead.
@@ -4020,6 +4028,28 @@ let sentPreview: { element: HTMLElement; text: string; id?: string; drop?: numbe
  * and the held box offers Edit and Send now (KYO-883).
  */
 const PREVIEW_GRACE_MS = 2500;
+
+/**
+ * Where the prompt last sent from this window stood among the prompts (KYO-883): its id and
+ * the ids of the prompts before and after it, so that Edit on it puts it back there.
+ */
+let sentPlace: { id: string; after: string | null; before: string | null } | null = null;
+
+function placeOf(area: HTMLTextAreaElement): { id: string; after: string | null; before: string | null } {
+  const drafts = textAreas().filter(isDraft);
+  const at = drafts.indexOf(area);
+  const id = (other: HTMLTextAreaElement | undefined) => (other ? boxIds.get(other) ?? null : null);
+  return { id: boxIds.get(area)!, after: at > 0 ? id(drafts[at - 1]) : null, before: id(drafts[at + 1]) };
+}
+
+/** The index a returned prompt takes among `boxes`: after its old neighbour, before the other, or last. */
+function placeAmong(boxes: NamedBox[], place: typeof sentPlace): number {
+  const after = place?.after ? boxes.findIndex((box) => box.id === place.after) : -1;
+  if (after >= 0) return after + 1;
+  const before = place?.before ? boxes.findIndex((box) => box.id === place.before) : -1;
+  if (before >= 0) return before;
+  return boxes.length;
+}
 
 /** A queued prompt the server says waits on something, or will not try again: a real hold. */
 function waitsOnSomething(message: Held | null | undefined): boolean {

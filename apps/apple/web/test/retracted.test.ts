@@ -56,3 +56,32 @@ test("a plain prompt taken back is its text alone", async (t) => {
   })()`);
   assert.deepEqual(texts, ["plain"]);
 });
+
+const order = `[...document.querySelectorAll("#boxes textarea")].map((area) => area.value).filter(Boolean)`;
+
+test("a prompt sent from the middle and taken back returns to its place (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await page.reload();
+  const texts = await page.run<string[]>(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.screen({ screen: { state: "working" } });
+    window.kyo.draft({ boxes: [{ id: "a", text: "first" }, { id: "b", text: "second" }, { id: "c", text: "third" }], etag: "e" });
+    document.querySelectorAll("#boxes .box .box-send")[1].click();
+    window.kyo.sent({ id: "m1" });
+    window.kyo.retracted({ text: "second" });
+    return ${order};
+  })()`);
+  assert.deepEqual(texts, ["first", "second", "third"]);
+});
+
+test("a prompt taken back whose place this window does not know goes last, as the latest sent (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await page.reload();
+  const texts = await page.run<string[]>(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.draft({ boxes: [{ id: "a", text: "first" }, { id: "b", text: "second" }], etag: "e" });
+    window.kyo.retracted({ text: "from elsewhere" });
+    return ${order};
+  })()`);
+  assert.deepEqual(texts, ["first", "second", "from elsewhere"]);
+});
