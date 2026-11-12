@@ -4743,7 +4743,7 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
   } else {
     // A row of the home's table (KYO-862): id and title under Name, then one cell a column.
     item.append(
-      id, title, kindLabel(row.kind), span("rec-status", standingOf(row)),
+      id, title, kindLabel(row.kind), span(`rec-status ${standingOf(row)}`, standingOf(row)),
       span("rec-day", dayOf(row.updated_at ?? row.created_at)));
   }
   return item;
@@ -4942,15 +4942,16 @@ function drawRecordsHome(nothing: string): void {
     row.className = plan.id === chosenPlan() ? "location-row current" : "location-row";
     row.dataset.plan = plan.id;
     row.title = `${plan.id} ${plan.title}`;
-    row.append(span("tree-name", plan.title), span("location-count", String(membersOf(recordRows, plan.id).length)));
+    // KYO-883: the plan's id before its title, as the record lists name a record.
+    const name = span("tree-name", "");
+    name.append(span("rec-id", plan.id), " ", plan.title);
+    row.append(name, span("location-count", String(membersOf(recordRows, plan.id).length)));
     return row;
   }) : [emptyRow(listsRead ? "No plan is open." : "")]);
   const short = (rows: RecordRow[], none: string) => rows.length
     ? rows.slice(0, HOME_SIDE_ROWS).map(homeSideRow) : [emptyRow(none)];
   fill(document.getElementById("records-home-recent")!,
     short(historyRows(viewedRecords, listedRows()), "None yet."));
-  // The note written last is the one a person reads to pick a project up, so it is one press away.
-  fill(document.getElementById("records-home-latest-note")!, short(noteList.slice(0, 1), "None yet."));
   fill(document.getElementById("records-home-mentioned")!, short(mentionedRecords(), "None yet."));
   document.querySelectorAll<HTMLElement>(".records-head [data-record-sort]").forEach((button) => {
     if (button.dataset.recordSort === homeSort.by) {
@@ -4959,6 +4960,8 @@ function drawRecordsHome(nothing: string): void {
   });
   if (recordsHomeSearch.value !== homeSearch) recordsHomeSearch.value = homeSearch;
   const rows = listsRead ? homeRows() : [];
+  // KYO-883: a plan's members still open are marked in red, as the plan's outline marks them.
+  document.getElementById("records-landing")!.classList.toggle("plan-chosen", chosenPlan() !== null);
   fill(recordsTable, rows.length
     ? rows.map((row) => keptRow(row, "landing"))
     : [emptyRow(!listsRead ? nothing : homeSearch.trim() ? "No record matches." : "None.")]);

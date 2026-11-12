@@ -26,8 +26,8 @@ function records(size = SIZE, word = "record"): Row[] {
       status: index % 9 === 0 ? "open" : index % 70 === 1 ? "wont-do" : "done",
       seq,
       created_at: new Date(Date.UTC(2026, 0, 1) + seq * 3600_000).toISOString(),
-      // Every thirtieth record belongs to the first open plan of the list.
-      plan: index % 30 === 7 ? "KYO-55" : null,
+      // Every thirtieth record belongs to the first open plan of the list, and one open record.
+      plan: index % 30 === 7 || index === 63 ? "KYO-55" : null,
     };
   });
 }
@@ -201,10 +201,21 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   // The sort pressed above still stands: oldest first.
   assert.deepEqual(found.rows, [...MEMBERS].reverse());
   assert.ok(found.locations.every(([, , current]) => !current), "no Location is the current one");
-  const planRow = await opened.run<string>(`document.querySelector('#records-plans .current .location-count').textContent`);
-  assert.equal(planRow, String(MEMBERS.length));
+  const planRow = await opened.run<{ count: string; name: string; red: string[] }>(`({
+    count: document.querySelector('#records-plans .current .location-count').textContent,
+    name: document.querySelector('#records-plans .current .tree-name').textContent,
+    red: [...document.querySelectorAll("#records-table .rec-status")]
+      .filter((cell) => getComputedStyle(cell).color === "rgb(255, 59, 48)").map((cell) => cell.textContent),
+  })`);
+  assert.equal(planRow.count, String(MEMBERS.length));
+  // KYO-883: the plan is named by its id and title, and its open members' status is red.
+  assert.match(planRow.name, new RegExp(`^${PLAN} `));
+  assert.ok(planRow.red.length > 0 && planRow.red.every((status) => status === "open"), JSON.stringify(planRow.red));
+  const redInAll = `[...document.querySelectorAll("#records-table .rec-status")].some((cell) => getComputedStyle(cell).color === "rgb(255, 59, 48)")`;
   await opened.run(`document.querySelector('#records-locations [data-location="All"]').click()`);
   assert.deepEqual((await home()).rows, [...ALL].reverse());
+  // Outside a plan the status is not coloured.
+  assert.equal(await opened.run<boolean>(redInAll), false);
   // The home's field is its own: the drawer's lists are not narrowed by it.
   const drawer = await opened.run<number>(`document.querySelectorAll("#records-list [data-open]").length`);
   assert.equal(drawer, SIZE);
@@ -302,15 +313,15 @@ test("Shift notes is a Location of the home, the latest note is one press away, 
       count: document.querySelector('#records-locations [data-location="Shift notes"] .location-count').textContent,
       rows: [...document.querySelectorAll("#records-table [data-open]")].map((row) => row.dataset.open),
       kinds: [...document.querySelectorAll("#records-table .kind")].map((kind) => kind.textContent),
-      latest: document.querySelector("#records-home-latest-note [data-open]").dataset.open,
+      latest: document.getElementById("records-home-latest-note") === null ? "gone" : "shown",
       counted: document.getElementById("records-count").textContent,
     };
-    document.querySelector("#records-home-latest-note [data-open]").click();
+    document.querySelector('#records-table [data-open="KYO-S2"]').click();
     out.asked = window.posted.slice(before).some((p) => p.name === "records" && p.body.want === "record" && p.body.id === "KYO-S2");
     return out;
   })()`);
   assert.deepEqual(found, {
-    count: "2", rows: ["KYO-S2", "KYO-S1"], kinds: ["shift note", "shift note"], latest: "KYO-S2",
+    count: "2", rows: ["KYO-S2", "KYO-S1"], kinds: ["shift note", "shift note"], latest: "gone",
     counted: "2 shift notes", asked: true,
   });
   const drawn = await opened.run<{ head: string; body: string; session: string; view: boolean }>(`(() => {

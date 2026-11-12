@@ -1287,6 +1287,8 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 #records-landing:not([hidden]) { display: flex; gap: 22px; align-items: flex-start; }
 .records-home-searchrow { margin-bottom: 12px; }
 .location-row .tree-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.location-row .rec-id { margin-right: 2px; }
+#records-landing.plan-chosen #records-table .rec-status.open { color: var(--apple-red); font-weight: 600; }
 .location-count { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .records-home-side .rec-row { padding: 3px 8px; font-size: 13px; }
 .records-home-side .rec-row .kind { display: none; }
