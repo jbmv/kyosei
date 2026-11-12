@@ -31,6 +31,8 @@ export interface Page {
    * as the key's default action: a page that cancels the keydown cancels the command too.
    */
   press(key: string, modifiers?: number, command?: string): Promise<void>;
+  /** What the window shows, as a PNG in base64, one pixel of it for each CSS pixel. */
+  shot(): Promise<string>;
   /** Loads the page again with nothing kept from before. */
   reload(): Promise<void>;
   close(): Promise<void>;
@@ -127,8 +129,9 @@ export async function openPage(): Promise<Page | null> {
     const type = async (text: string) => {
       for (const letter of text) await call("Input.insertText", { text: letter });
     };
+    const shot = async () => (await call("Page.captureScreenshot", { format: "png" })).data as string;
     return {
-      run, type, press, close,
+      run, type, press, shot, close,
       reload: async () => {
         await run("localStorage.clear()");
         await reload();
