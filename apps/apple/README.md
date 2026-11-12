@@ -84,7 +84,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
 | `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
-| `web/src/agents.ts` | how a subagent is named in the status bar and the side panel |
+| `web/src/agents.ts` | how a subagent is named under the composer and in the side panel |
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |

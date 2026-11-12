@@ -184,7 +184,6 @@
     <aside id="composer">
       <div id="composer-top">
         <button id="new-prompt" title="New prompt" aria-label="New prompt">+</button>
-        <button id="interrupt" hidden>Interrupt</button>
       </div>
       <div id="boxes">
         <section id="agenda" hidden aria-label="Session list">
@@ -203,6 +202,16 @@
       <div id="composer-actions">
         <span id="composer-note"></span>
       </div>
+      <!-- What the session is doing, under the prompt being written: the working line, Interrupt
+           while it works, and the running subagents. -->
+      <div id="composer-status">
+        <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
+        <button id="interrupt" hidden>Interrupt</button>
+        <div id="running-agents">
+          <button id="running-agents-count" type="button">Subagents: 0</button>
+          <div id="running-agents-list" hidden></div>
+        </div>
+      </div>
     </aside>
 
     <button id="jump-bottom" title="Jump to the end" aria-label="Jump to the end"><svg viewBox="0 0 24 24" class="icon"><path d="M12 5v13M6 12.5l6 6 6-6"/></svg></button>
@@ -211,7 +220,6 @@
         <div id="chat"></div>
         <div id="empty-chat" hidden>Session active&hellip; waiting for first input</div>
         <article id="live" class="reply"></article>
-        <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
         <div id="start" hidden>
           <span id="start-text"></span>
           <button id="start-button">Start orchestrator</button>

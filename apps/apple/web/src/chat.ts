@@ -633,13 +633,22 @@ function workingWords(): string {
   return [words, backgroundWords()].filter(Boolean).join("  ·  ");
 }
 
+/** What the line under the composer says while the session waits on the person. */
+const WAITING = "Waiting for you…";
+
+/**
+ * The line under the composer: what the session is doing, or that it waits on the person
+ * when it is live and doing nothing. Nothing is said of an ended session, nor before the
+ * server has read a pane.
+ */
 function drawWorking(): void {
-  const words = workingWords();
+  const doing = workingWords();
+  const idle = !doing && !sessionEnded && screenState !== null;
+  const words = doing || (idle ? WAITING : "");
+  working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;
-  keepingPlace(() => {
-    workingText.textContent = words;
-    working.hidden = !words;
-  });
+  workingText.textContent = words;
+  working.hidden = !words;
 }
 
 // Only the times change here: rebuilding the rows each second would lose a click in progress.
@@ -1142,7 +1151,8 @@ function drawAgents(): void {
     ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
   );
   drawFinished("side-agents-finished", finished.length, showFinishedAgents);
-  // The status bar lists the running ones: what each is, and since when.
+  drawRunningAgents(running);
+  // The app is told the count as well, for anything outside the page that states it.
   (window as any).webkit?.messageHandlers?.strip?.postMessage({
     subagents: running.length,
     agents: running.map((agent) => ({
@@ -1155,6 +1165,39 @@ function drawAgents(): void {
     })),
   });
 }
+
+/**
+ * `Subagents: N` under the composer's Send, green while any runs. A press lists the running
+ * ones: what each is, its type and model, and since when.
+ */
+function drawRunningAgents(running: Subagent[]): void {
+  const count = document.getElementById("running-agents-count")!;
+  count.textContent = `Subagents: ${running.length}`;
+  count.classList.toggle("running", running.length > 0);
+  const list = document.getElementById("running-agents-list")!;
+  if (!running.length) list.hidden = true;
+  list.replaceChildren(...running.map((agent) => {
+    const row = document.createElement("div");
+    row.className = "running-agent";
+    const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? "";
+    const facts = [
+      agent.agent_type, shortModel(agentFacts.get(agent.agent_id)?.model ?? agent.model),
+      agentFacts.get(agent.agent_id)?.effort ?? agent.effort ?? "", since ? elapsed(since) : "",
+    ].filter(Boolean).join(" · ");
+    row.append(span("running-agent-name", agent.description), span("running-agent-facts", facts));
+    return row;
+  }));
+}
+
+document.getElementById("running-agents-count")!.addEventListener("click", () => {
+  const list = document.getElementById("running-agents-list")!;
+  list.hidden = !list.hidden || !list.childElementCount;
+});
+document.addEventListener("mousedown", (event) => {
+  if (!document.getElementById("running-agents")!.contains(event.target as Node)) {
+    document.getElementById("running-agents-list")!.hidden = true;
+  }
+});
 
 /** Each subagent's latest turn in tokens, as the server last read its transcript. */
 const agentUsage = new Map<string, number>();
@@ -2240,12 +2283,36 @@ function drawMarks(area: HTMLTextAreaElement): void {
   });
   marks.ghost.hidden = true;
   marks.gutter.replaceChildren(marks.ghost, ...held);
+  drawLanding();
   paintAnchors();
   if (openMark?.area === area) {
     if (marks.ids.includes(openMark.id)) showMark(area, openMark.id);
     else hideMark();
   }
 }
+
+/**
+ * While no box of the composer has the caret, an arrow in the gutter marks the paragraph an
+ * anchor or an attachment made now would land on: the caret's paragraph of the box last
+ * typed in, as `showAnchorMenu` chooses it. It stands over whatever mark that paragraph
+ * holds, since without the caret nothing else says where the next one goes.
+ */
+function drawLanding(): void {
+  boxes.querySelectorAll(".mark-landing").forEach((arrow) => arrow.remove());
+  const active = document.activeElement;
+  if (active instanceof HTMLTextAreaElement && marksOf.has(active)) return;
+  const areas = textAreas();
+  const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
+  const marks = area ? marksOf.get(area) : undefined;
+  if (!area || !marks) return;
+  const arrow = span("mark mark-landing", "➜");
+  arrow.title = "An anchor or an attachment made now lands on this paragraph";
+  arrow.style.top = `${lineTop(marks, caretLine(area))}px`;
+  marks.gutter.append(arrow);
+}
+// The focus has moved by the time a timer runs, which `focusout` alone does not promise.
+document.addEventListener("focusin", () => drawLanding());
+document.addEventListener("focusout", () => window.setTimeout(drawLanding, 0));
 
 /** The ghost [+] follows the mouse, on the paragraphs that hold nothing yet. */
 function followMouse(area: HTMLTextAreaElement, event: MouseEvent): void {

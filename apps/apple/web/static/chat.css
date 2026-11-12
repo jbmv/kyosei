@@ -248,7 +248,7 @@ body.terminal-open #jump-bottom { display: none; }
 #new-prompt { width: 30px; height: 26px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
 #new-prompt:hover { background: var(--line); color: var(--text); }
 /* Bare text beside the add button: the red says it is pressable, and the underline says it is under the pointer. */
-#interrupt { margin-left: 14px; padding: 0; border: 0; background: none; color: var(--apple-red); font-size: 13px; font-weight: 500; }
+#interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--apple-red); font-size: 13px; font-weight: 500; }
 #interrupt[hidden] { display: none; }
 #interrupt:hover { text-decoration: underline; }
 #boxes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
@@ -391,6 +391,9 @@ body.terminal-open #jump-bottom { display: none; }
   text-align: center;
 }
 .mark[hidden] { display: none; }
+/* The paragraph the next anchor lands on, shown while the composer has no caret. It covers
+   the paragraph's own mark and takes no press, so the mark under it still opens. */
+.mark.mark-landing { z-index: 1; background: var(--background); color: var(--apple-green); font-size: 14px; font-weight: 700; pointer-events: none; }
 .mark.ghost { opacity: 0.45; }
 .mark.ghost:hover { opacity: 1; background: var(--line); }
 .mark.held { color: var(--pastel-blue); font-size: 13px; font-weight: 700; }
@@ -655,17 +658,24 @@ body.terminal-open #terminal { display: flex; }
 .diff .add { background: rgba(47, 143, 78, 0.18); }
 .diff .del { background: rgba(194, 65, 58, 0.18); }
 
-#working {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  color: var(--muted);
-  font-size: 13.5px;
-  white-space: pre-wrap;
-}
-
-#working[hidden] { display: none; }
+/* Under the composer: what the session is doing at the left, Interrupt beside it while it
+   works, and the running subagents at the right, under Send. */
+#composer-status { flex: none; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 2px 2px; font-size: 12.5px; }
+#working { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+#working-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#working[hidden] { display: flex; visibility: hidden; }
+#working.idle { font-style: italic; }
+#working.idle .pulse { display: none; }
+#running-agents { flex: none; position: relative; margin-left: auto; }
+#running-agents-count { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-variant-numeric: tabular-nums; cursor: default; }
+#running-agents-count.running { color: var(--apple-green); font-weight: 600; animation: agents-glow 1.8s ease-in-out infinite; }
+@keyframes agents-glow { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #running-agents-count.running { animation: none; } }
+#running-agents-list { position: absolute; right: 0; bottom: 22px; z-index: 5; width: 280px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
+#running-agents-list[hidden] { display: none; }
+.running-agent { padding: 3px 0; }
+.running-agent-name { display: block; color: var(--text); }
+.running-agent-facts { display: block; color: var(--muted); font-size: 11.5px; }
 
 /* KYO-719: shown when the project has no live session. */
 #start { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
