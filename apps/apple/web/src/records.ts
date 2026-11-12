@@ -783,7 +783,7 @@ export function homeGroups<T extends RecordRow>(
 // ------------------------------------------------- the Records home as a table (KYO-862)
 
 /** The Locations of the Records home's side bar, each a filter of the table. */
-export const LOCATIONS = ["Awaiting you", "Dispatchable", "Other open", "Closed", "All"] as const;
+export const LOCATIONS = ["Awaiting you", "Dispatchable", "Other open", "Closed", "Reference", "All"] as const;
 export type RecordLocation = typeof LOCATIONS[number];
 
 /** A stored Location, or All when what was stored names none. */
@@ -791,12 +791,22 @@ export function locationFrom(stored: unknown): RecordLocation {
   return LOCATIONS.find((name) => name === stored) ?? "All";
 }
 
-/** The rows of each Location, in the order of `rows`; All is every row. */
+/** The standings of a knowledge record: a decision, a discussion or a piece of evidence. */
+const KNOWLEDGE = new Set(["current", "void"]);
+
+/**
+ * The rows of each Location, in the order of `rows`; All is every row. Reference holds the
+ * knowledge records, which are never work to finish, so Closed is finished work only.
+ */
 export function located<T extends RecordRow>(
   rows: T[], ready: ReadonlySet<string>, awaiting: ReadonlySet<string>,
 ): Record<RecordLocation, T[]> {
-  const [waiting, dispatchable, open, closed] = homeGroups(rows, ready, awaiting).map((group) => group.rows);
-  return { "Awaiting you": waiting, Dispatchable: dispatchable, "Other open": open, Closed: closed, All: rows };
+  const [waiting, dispatchable, open, settled] = homeGroups(rows, ready, awaiting).map((group) => group.rows);
+  const reference = (row: T) => KNOWLEDGE.has(standingOf(row));
+  return {
+    "Awaiting you": waiting, Dispatchable: dispatchable, "Other open": open,
+    Closed: settled.filter((row) => !reference(row)), Reference: settled.filter(reference), All: rows,
+  };
 }
 
 /** The plans still open, in the order of `rows`: the Plans of the home's side bar (KYO-862). */

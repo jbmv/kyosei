@@ -145,7 +145,8 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   let found = await home();
   assert.deepEqual(found.locations, [
     ["Awaiting you", String(awaiting), false], ["Dispatchable", String(ready), false],
-    ["Other open", String(otherOpen), false], ["Closed", String(closed), false], ["All", String(SIZE), true],
+    ["Other open", String(otherOpen), false], ["Closed", String(closed), false], ["Reference", "0", false],
+    ["All", String(SIZE), true],
   ]);
   assert.deepEqual(found.rows, ALL);
   assert.equal(found.sorted, "name descending");

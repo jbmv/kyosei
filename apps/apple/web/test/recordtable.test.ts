@@ -22,14 +22,17 @@ test("each Location holds its records in the order given, and All holds every on
   assert.deepEqual(ids(found["Awaiting you"]), ["K-1"]);
   assert.deepEqual(ids(found.Dispatchable), ["K-2"]);
   assert.deepEqual(ids(found["Other open"]), ["K-3"]);
-  assert.deepEqual(ids(found.Closed), ["K-4", "K-5"]);
+  // K-5 has no standing in this list, so its status places it: a decision stored `current`.
+  assert.deepEqual(ids(found.Closed), ["K-4"]);
+  assert.deepEqual(ids(found.Reference), ["K-5"]);
   assert.deepEqual(ids(found.All), ids(rows));
 });
 
 test("a record is placed, filtered and sorted by its standing where the list gives one", () => {
   const decision = { id: "K-9", kind: "decision", title: "z", status: "open", standing: "current", seq: 9 };
   const all = [...rows, decision];
-  assert.deepEqual(ids(located(all, new Set(), new Set()).Closed), ["K-4", "K-5", "K-9"]);
+  assert.deepEqual(ids(located(all, new Set(), new Set()).Closed), ["K-4"]);
+  assert.deepEqual(ids(located(all, new Set(), new Set()).Reference), ["K-5", "K-9"]);
   const openOnly = { open: true, dispatchable: false, awaiting: false, search: "" };
   assert.deepEqual(ids(narrow(all, openOnly, new Set())), ["K-1", "K-2"]);
   assert.equal(ids(sortRecords(all, { by: "status", descending: true }))[0], "K-9");
