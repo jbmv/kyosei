@@ -103,7 +103,7 @@ from .prose import (
     read_prose,
     single_line,
 )
-from .receipt import detail, details, receipt_form
+from .receipt import Line, detail, details, receipt_form
 from .render import (
     current_credits,
     echo_block,
@@ -2257,6 +2257,33 @@ def _check_kind_accepts_kind(
     raise ContractViolation(CONTRACT_KIND_NOT_SPAWNABLE_FROM, detail)
 
 
+def _criteria_measure(added: list[tuple[str, str]], suffix: str = "") -> Line:
+    """The line a receipt prints for the criteria a command stored: how many, which ids,
+    and one length and digest over their texts joined by newlines (law 5). ``suffix``
+    ends the count in the full form (``" added"``), and the receipt extends that form."""
+    count = f"stored criteria: {len(added)}{suffix}"
+    if not added:
+        return receipt_form(count, count)
+    text = "\n".join(text for _cid, text in added)
+    first, last = added[0][0], added[-1][0]
+    ids = first if first == last else f"{first} to {last}"
+    return receipt_form(
+        count, f"{count}, {ids} ({len(text)} chars, sha256:{fingerprint(text)})"
+    )
+
+
+#: The lines of a credit's echo that restate the words and the discussion the person
+#: gave; the rest (who was credited, a check that failed, a span that is not sealed)
+#: stays in a receipt.
+_CREDIT_RESTATED = re.compile(r"^  (outcome: |discussion: \d+ turn\(s\)|span sealed: )")
+
+
+def credit_receipt_lines(lines: list[str]) -> list[str]:
+    """``lines`` of :func:`credits.lines`, with the ones that restate the decision's
+    outcome and the discussion's span marked as detail (KYO-880)."""
+    return [detail(line) if _CREDIT_RESTATED.match(line) else line for line in lines]
+
+
 def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     """``kyo spawn <source-id> --kind <target>`` — the kind-to-kind edge (KYO-50).
 
@@ -2568,33 +2595,35 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added_criteria)
 
+    # KYO-880: marked as `kyo new` is (KYO-874) -- the receipt keeps the id, the title
+    # as stored, the measures of the stored texts, the link and every warning.
     lines = [
         f"created {record_id} (spawned from {source_id}: {source_kind} -> {args.kind})",
         *warning_lines,
-        echo_value("kind", args.kind),
+        detail(echo_value("kind", args.kind)),
         echo_value("title", title),
         *title_warning_lines,
-        echo_value("scope", scope or "(none declared)"),
+        detail(echo_value("scope", scope or "(none declared)")),
     ]
     if plan:
-        lines.append(echo_value("plan", plan))
+        lines.append(detail(echo_value("plan", plan)))
     lines += echo_block("description", description)
-    lines.append(f"stored criteria: {len(added_criteria)}")
-    lines += [f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added_criteria]
+    lines.append(_criteria_measure(added_criteria))
+    lines += details(f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added_criteria)
     lines += criteria_warning_lines
     lines.append(f"stored touches: {len(added_touches)}")
-    lines += [
+    lines += details(
         f"  {tid}  {path}" + (f"#{symbol}" if symbol else "")
         for tid, path, symbol in added_touches
-    ]
+    )
     lines.append(f"link: {link_id}  {record_id} produced-by {source_id}")
     lines += _implements_line(implements_link)
     if evidence is not None:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
-        lines.append(echo_value("sha256", evidence[1]))
+        lines.append(detail(echo_value("sha256", evidence[1])))
     if credit is not None and credit_id is not None:
-        lines += credits.lines(store, credit_id, credit)
+        lines += credit_receipt_lines(credits.lines(store, credit_id, credit))
     lines += cmd_discuss.filing_lines(store, discussed)
     # KYO-50.c2, decision 2: said out loud, because "the source is now settled" is
     # the assumption a spawn invites and the one thing this command does not do.
@@ -2617,7 +2646,8 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     lines += prior_art_lines
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "spawn",
             "prior_art": prior_art_data,
@@ -2707,9 +2737,13 @@ def _correct_criterion_text(store: Store, criterion, text: str) -> tuple[list[st
         "UPDATE criteria SET text = ?, updated_at = ? WHERE id = ?",
         (corrected, now(), criterion["id"]),
     )
+    measured = (
+        f"stored criterion {criterion['id']} text "
+        f"({len(corrected)} chars, sha256:{fingerprint(corrected)})"
+    )
     lines = [
-        echo_value(f"criterion {criterion['id']} text", corrected),
-        f"  was: {criterion['text']}",
+        receipt_form(echo_value(f"criterion {criterion['id']} text", corrected), measured),
+        detail(f"  was: {criterion['text']}"),
         "  corrected in place: no verdict had been recorded against the old wording, so "
         "nothing attests to it (the old text stays readable in the events ledger)",
     ]
@@ -3000,20 +3034,20 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
             store.conn.execute(
                 "UPDATE records SET plan_id = ? WHERE id = ?", (args.plan, record_id)
             )
-            lines.append(echo_value("plan", args.plan))
+            lines.append(detail(echo_value("plan", args.plan)))
         elif args.no_plan:
             store.conn.execute("UPDATE records SET plan_id = NULL WHERE id = ?", (record_id,))
-            lines.append(echo_value("plan", "(none)"))
+            lines.append(detail(echo_value("plan", "(none)")))
 
         # KYO-100. `--no-scope` exists for the same reason `--no-plan` does: a nullable
         # column needs a way back to NULL, and "pass an empty --scope" would collide
         # with the registry check, which has nothing to say about the empty string.
         if scope is not None:
             store.conn.execute("UPDATE records SET scope = ? WHERE id = ?", (scope, record_id))
-            lines.append(echo_value("scope", scope))
+            lines.append(detail(echo_value("scope", scope)))
         elif args.no_scope:
             store.conn.execute("UPDATE records SET scope = NULL WHERE id = ?", (record_id,))
-            lines.append(echo_value("scope", "(none declared)"))
+            lines.append(detail(echo_value("scope", "(none declared)")))
 
         # KYO-498: set later for an item a project carried before this shipped, judged
         # against the record's own stored filing stamp.
@@ -3029,13 +3063,14 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
             store.conn.execute(
                 "UPDATE records SET since_note = ? WHERE id = ?", (since_note, record_id)
             )
-            lines.append(echo_value("since note", since_note))
+            lines.append(detail(echo_value("since note", since_note)))
 
         if args.add_criteria_file is not None:
             texts = read_lines(args.add_criteria_file, what="--add-criteria-file")
             added = _add_criteria(store, record_id, texts)
-            lines.append(f"stored criteria: {len(added)} added")
-            lines += [f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added]
+            # KYO-880: one measure over the added texts in a receipt, as `kyo new` has.
+            lines.append(_criteria_measure(added, " added"))
+            lines += details(f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added)
             added_warning_lines, added_warning_data = _criteria_warning_output(added)
             lines += added_warning_lines
             criteria_warning_data += added_warning_data
@@ -3079,9 +3114,11 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
             refs, dropped_refs = _replace_doc_refs(store, record_id, new_doc_refs)
             lines.append(f"doc-refs: {len(dropped_refs)} -> {len(refs)}")
             for path, section in dropped_refs:
-                lines.append(f"  - {path}" + (f"#{section}" if section else ""))
+                lines.append(detail(f"  - {path}" + (f"#{section}" if section else "")))
             for ref_id, path, section in refs:
-                lines.append(f"  + {ref_id}  {path}" + (f"#{section}" if section else ""))
+                lines.append(
+                    detail(f"  + {ref_id}  {path}" + (f"#{section}" if section else ""))
+                )
 
         if args.criterion:
             criterion = store.criterion(args.criterion)
@@ -3177,7 +3214,8 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
     lines += scope_lines
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "edit",
             "record_id": record_id,

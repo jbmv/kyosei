@@ -17,7 +17,7 @@ import pytest
 from kyosei import cli, clock, receipt, render
 from kyosei.prose import fingerprint
 
-from .conftest import Run, declare_person, git_init, invoke, valid_report
+from .conftest import Run, declare_person, git_init, invoke, opt_in_transcripts, valid_report
 from .test_kyo137_docs_obligations import (
     GOVERNED_DOC,
     _branch_editing,
@@ -382,6 +382,8 @@ def _same_but_for_the_project(receipt_line: str, full_lines: list[str]) -> bool:
     def shape(line: str) -> str:
         line = re.sub(r"/[^ ']*/(piped|whole)\b", "<ROOT>", line)
         line = re.sub(r"\b[0-9a-f]{40}\b", "<SHA>", line)
+        line = re.sub(r"\b[0-9a-f]{12}\b(?!\))", "<SHA12>", line)
+        line = re.sub(r"\d{4}-\d\d-\d\dT[\d:.]+Z", "<TIME>", line)
         return re.sub(r"sha256:[0-9a-f]{12,64}", "sha256:<D>", line)
 
     return shape(receipt_line) in {shape(line) for line in full_lines}
@@ -395,13 +397,20 @@ def test_a_write_read_off_a_terminal_prints_a_receipt(both, command: str) -> Non
     """c1. One line saying what was done, with the ids; the measure of each stored text
     and none of the text; and nothing of the full output but what warns."""
     receipts, full = both
-    receipt, whole = _lines(receipts[command]), _lines(full[command])
     says, ids = FIRST_LINE[command]
+    assert_a_receipt(receipts[command], full[command], says, ids)
+
+
+def assert_a_receipt(
+    receipts: Run, full: Run, says: str, ids: list[str], replaced: tuple[str, ...] = ()
+) -> None:
+    """The body of c1 for one command's two runs."""
+    receipt, whole = _lines(receipts), _lines(full)
     assert receipt[0].startswith(says), receipt[0]
     for made in ids:
         assert made in receipt[0], (made, receipt[0])
     assert len(receipt) < len(whole)
-    assert len(receipts[command].out.encode()) < len(full[command].out.encode())
+    assert len(receipts.out.encode()) < len(full.out.encode())
     # Law 5: every text the full output measures is measured in the receipt, and no
     # line of any text is printed.
     assert not [line for line in receipt if ECHOED_TEXT.match(line)]
@@ -413,6 +422,9 @@ def test_a_write_read_off_a_terminal_prints_a_receipt(both, command: str) -> Non
     # line of the full output (a measured line loses only its trailing colon).
     composed = 0
     for line in receipt:
+        if line.startswith(replaced):
+            # A line the command replaces by a count; the test names it.
+            continue
         if _same_but_for_the_project(line, whole) or _same_but_for_the_project(
             line + ":", whole
         ):
@@ -447,8 +459,13 @@ def test_a_receipt_drops_no_warning_refusal_or_remedy(both, command: str) -> Non
     """c2. Each warning the input raises is in both outputs, and no line the receipt
     leaves out is a warning, a refusal, a failed outcome or a command to run."""
     receipts, full = both
-    receipt, whole = _lines(receipts[command]), _lines(full[command])
-    for warning in WARNINGS[command]:
+    assert_nothing_lost(receipts[command], full[command], command, WARNINGS[command])
+
+
+def assert_nothing_lost(receipts: Run, full: Run, command: str, warnings: list[str]) -> None:
+    """The body of c2 for one command's two runs."""
+    receipt, whole = _lines(receipts), _lines(full)
+    for warning in warnings:
         assert any(warning in line for line in whole), f"the input did not warn: {warning}"
         assert any(warning in line for line in receipt), f"the receipt lost: {warning}"
     footer = f"explained in `kyo reference {command}`"
@@ -625,3 +642,301 @@ def test_the_script_prints_fewer_bytes_as_receipts(
         for command in COMMANDS:
             most = {"report": 9, "dispatch": 6, "confirm": 14}.get(command, 5)
             assert receipts[command].out.count("\n") <= most, receipts[command].out
+
+
+# ------------------------------------------------------------------------ KYO-880
+#
+# KYO-880 adds `kyo spawn`, `kyo edit`, `kyo discuss` (note, close, skip; open is run as
+# a step of the script), `kyo note --shift` and `kyo close-wave`. They run in their own
+# script, on the same plan: once as a pipe reads it, once with `--full`, over two
+# identical histories, on inputs that warn and on inputs that do not.
+
+MORE = (
+    "spawn",
+    "edit",
+    "discuss open",
+    "discuss note",
+    "discuss close",
+    "discuss skip",
+    "note",
+    "close-wave",
+)
+
+SESSION = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
+PROMPT = "aaaaaaaa-0000-4000-8000-000000000001"
+
+
+def _discussion_turn(root: Path, kyo) -> None:
+    """One prompt of the session in the turn index, which `kyo discuss skip` marks."""
+    from .test_kyo658_discussions import (
+        agent_text,
+        person,
+        prompt_hook,
+        write_transcript,
+    )
+
+    write_transcript(
+        [
+            person("p-1", PROMPT, "should the cache stay?", "2026-11-06T10:00:00.000Z"),
+            agent_text("a-1", "I recommend keeping it.", "2026-11-06T10:00:30.000Z"),
+        ]
+    )
+    prompt_hook(kyo, PROMPT)
+
+
+def script_more(
+    root: Path, scratch: Path, flags: tuple[str, ...] = (), *, warns: bool = True
+) -> dict[str, Run]:
+    """Run the commands of KYO-880 in the project at ``root``; ``{command: Run}``."""
+
+    def kyo(*args: str, stdin: str | None = None) -> Run:
+        return invoke(["--root", str(root), *args], stdin=stdin)
+
+    runs: dict[str, Run] = {}
+
+    def run(key: str, *args: str, stdin: str | None = None) -> Run:
+        runs[key] = kyo(*args, *flags, stdin=stdin)
+        assert runs[key].code == 0, runs[key]
+        return runs[key]
+
+    def setup(*args: str, stdin: str | None = None) -> dict:
+        done = kyo(*args, "--json", stdin=stdin)
+        assert done.code == 0, done
+        return json.loads(done.out)
+
+    scratch.mkdir(parents=True, exist_ok=True)
+    opt_in_transcripts(root)
+    config = root / "kyosei" / "config.yml"
+    config.write_text(
+        config.read_text("utf-8")
+        + "close_wave:\n  suite:\n    - \"true\"\n  generate:\n"
+        + "    - \"mkdir -p docs && echo generated > docs/generated.md\"\n"
+        + "  after:\n    - \"true\"\n",
+        "utf-8",
+    )
+    _write(root, "src/app.py", "x = 1\n")
+    _commit(root, "baseline")
+    _discussion_turn(root, kyo)
+
+    def file(name: str, text: str) -> str:
+        path = scratch / name
+        path.write_text(text, "utf-8")
+        return str(path)
+
+    # 1. discuss open, then note: the note names an absolute path when the script warns.
+    opened = run(
+        "discuss open", "discuss", "open", "--title",
+        f"Whether the stop check leaves out what a build writes under {PATH}"
+        if warns
+        else "Whether the stop check leaves out what a build writes",
+    )  # fmt: skip
+    discussion = re.match(r"opened (\S+)", opened.out).group(1)
+    run(
+        "discuss note", "discuss", "note", discussion, "--file", "-",
+        stdin="Options: leave out the declared directories, or name them. I recommend the "
+        f"first. {PATH if warns else 'the build directory'} is what the build writes.\n",
+    )  # fmt: skip
+
+    # 2. spawn from it: a long title, a criterion with a semicolon and a path in the
+    # description when the script warns. The spawn closes the discussion.
+    criteria = file(
+        "criteria.txt",
+        "\n".join(CRITERIA) if warns else "\n".join(CRITERIA).replace("; a test", ", and a test"),
+    )
+    run(
+        "spawn", "spawn", discussion, "--kind", "task", "--title",
+        "The stop check names files a declared build wrote, which the worker did not "
+        "make and cannot remove without breaking the build it was told to run"
+        if warns
+        else "The stop check leaves out what a declared build wrote",
+        "--description-file", "-", "--criteria-file", criteria,
+        "--touches-file", file("touches.txt", "src/app.py\n"), "--no-prior-art",
+        stdin=DESCRIPTION if warns else DESCRIPTION.replace(PATH, "its build directory"),
+    )  # fmt: skip
+    record = "TST-2"
+
+    # 3. discuss close: a second discussion that led to the record, and one that did not.
+    second = setup("discuss", "open", "--title", "Where the declaration belongs")["record_id"]
+    run("discuss close", "discuss", "close", second, "--produced", record)
+
+    # 4. discuss skip: the reason names an absolute path when the script warns.
+    run(
+        "discuss skip", "discuss", "skip", "--at-prompt", PROMPT, "--why",
+        f"a question about a log line under {PATH}" if warns else "a question about a log line",
+    )  # fmt: skip
+
+    # 5. edit: a title, a note and a criterion that warns.
+    run(
+        "edit", "edit", record, "--title",
+        "The stop check names files a declared build wrote, which the worker did not "
+        "make and cannot remove without breaking the build it was told to run"
+        if warns
+        else "The stop check leaves out the files a declared build wrote",
+        "--add-criteria-file",
+        file(
+            "more.txt",
+            "The key is read; and a test proves it\n" if warns else "The key is read\n",
+        ),
+        "--note-file", "-", "--no-scope",
+        stdin=f"The path is {PATH}.\n" if warns else "The path is the build directory.\n",
+    )  # fmt: skip
+
+    # 6. note --shift.
+    run(
+        "note", "note", "--shift", "--file", "-",
+        stdin=f"Waiting on a person to read {PATH}.\n"
+        if warns
+        else "Waiting on a person to read the page.\n",
+    )  # fmt: skip
+
+    # 7. close-wave: the record is finished and the pass is recorded first.
+    for n in range(1, 6):
+        setup(
+            "verify", f"{record}.c{n}", "--verdict", "met", "--method", "machine-checked",
+            "--evidence-file", "-", stdin="tests/test_stop_check.py: 60 passed\n",
+        )  # fmt: skip
+    _commit(root, "the store, before the wave")
+    run("close-wave", "close-wave", record, "--suite-passed", "true")
+    return runs
+
+
+
+#: For each command of KYO-880, what its first receipt line says it did and the ids it
+#: names.
+FIRST_LINE_MORE = {
+    "spawn": ("created TST-2 (spawned from TST-1: discussion -> task)", ["TST-2", "TST-1"]),
+    "edit": ("edited TST-2 (task)", ["TST-2"]),
+    "discuss open": ("opened TST-1", ["TST-1"]),
+    "discuss note": ("noted on TST-1: TST-1.n1", ["TST-1", "TST-1.n1"]),
+    "discuss close": ("closed TST-3, produced TST-2", ["TST-3", "TST-2"]),
+    "discuss skip": (f"skipped prompt {PROMPT} at ", [PROMPT]),
+    "note": ("appended shift note TST-S1", ["TST-S1"]),
+    "close-wave": ("suite pass recorded: `true` at ", []),
+}
+
+_ABSOLUTE = "warning: this prose names 1 absolute path(s)"
+
+#: For each command of KYO-880, a piece of every warning, refusal and remedy the script's
+#: input raises.
+WARNINGS_MORE = {
+    "spawn": [
+        "warning: title is 144 characters",
+        "warning: TST-2.c2: criterion is 2 semicolon-separated clauses",
+        _ABSOLUTE,
+        "--keep-open leaves a discussion open for the next record",
+        "TST-1 is unchanged at current: spawning is not a status change",
+    ],
+    "edit": [
+        "warning: title is 144 characters",
+        "warning: TST-2.c5: criterion is 2 semicolon-separated clauses",
+        _ABSOLUTE,
+    ],
+    "discuss open": [_ABSOLUTE],
+    "discuss note": [_ABSOLUTE],
+    "discuss close": ["link: TST-L2  TST-2 produced-by TST-3", "produced TST-2"],
+    "discuss skip": [_ABSOLUTE],
+    "note": [_ABSOLUTE],
+    "close-wave": [
+        "after-steps (not run; pass --run-after to run them):",
+        "suite pass for `true` carried to ",
+    ],
+}
+
+
+@pytest.fixture
+def both_more(tmp_path: Path, monkeypatch) -> tuple[dict[str, Run], dict[str, Run]]:
+    """``(receipts, full)`` of :func:`script_more`."""
+    monkeypatch.delenv(cli.OUTPUT_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    receipts = script_more(_project(tmp_path, "piped"), tmp_path / "piped")
+    full = script_more(_project(tmp_path, "whole"), tmp_path / "whole", (cli.FULL_FLAG,))
+    return receipts, full
+
+
+@pytest.mark.parametrize("command", MORE)
+def test_kyo880_c1_a_write_read_off_a_terminal_prints_a_receipt(
+    both_more, command: str
+) -> None:
+    """KYO-880.c1. Each command prints a receipt to a pipe: what was done and the ids,
+    the measure of each stored text and none of the text."""
+    receipts, full = both_more
+    says, ids = FIRST_LINE_MORE[command]
+    replaced = ("committed ",) if command == "close-wave" else ()
+    assert_a_receipt(receipts[command], full[command], says, ids, replaced)
+
+
+@pytest.mark.parametrize("command", MORE)
+def test_kyo880_c2_a_receipt_drops_no_warning_refusal_or_remedy(
+    both_more, command: str
+) -> None:
+    """KYO-880.c2. On an input that warns, each warning and each sentence naming a
+    remedy is in the receipt, and nothing the receipt leaves out is one."""
+    receipts, full = both_more
+    assert_nothing_lost(receipts[command], full[command], command, WARNINGS_MORE[command])
+
+
+def test_kyo880_a_discussion_close_keeps_what_was_produced_and_each_link(both_more) -> None:
+    """KYO-878's line naming what a `discuss close` produced, and each link, are in its
+    receipt; the discussion's earlier turn references are left to `kyo show`."""
+    receipts, full = both_more
+    kept, whole = _lines(receipts["discuss close"]), _lines(full["discuss close"])
+    assert "      produced TST-2" in kept and "  link: TST-L2  TST-2 produced-by TST-3" in kept
+    assert any("TST-3.s1  opened" in line for line in whole)
+    assert not any("TST-3.s1  opened" in line for line in kept)
+
+
+def test_kyo880_a_flagged_turn_reference_stays_in_a_receipt(tmp_path: Path, monkeypatch) -> None:
+    """A reference the index stamped late or not at all is a warning about the turn it
+    names, so it is printed in a receipt where a stamped one is left out."""
+    monkeypatch.delenv(cli.OUTPUT_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    root = _project(tmp_path, "unindexed")
+    done = invoke(["--root", str(root), "discuss", "open", "--title", "A question"])
+    assert done.code == 0, done
+    assert "index absent" in done.out
+
+
+def test_kyo880_a_spawn_keeps_a_credit_line_that_is_not_a_restatement() -> None:
+    """The credit's outcome, the discussion's span and its seal restate what the person
+    gave and are left out of a receipt; the line saying who was credited, and a span
+    that is not sealed, stay."""
+    from kyosei.cmd_records import credit_receipt_lines
+
+    lines = [
+        "credit TST-2.p1: decided by tester",
+        "  outcome: unprompted",
+        "  discussion: 3 turn(s) of the person's, 3 reply(ies) of the agent's, 40s active, a to b",
+        "  span sealed: abc",
+        "  span not sealed: the turn index holds no sealed line for the span's last turn",
+    ]
+    assert receipt.receipt_lines(credit_receipt_lines(lines)) == [lines[0], lines[4]]
+
+
+# ------------------------------------------------------------------------ KYO-880.c3
+
+
+@pytest.mark.parametrize("warns", [True, False], ids=["warning", "routine"])
+def test_kyo880_c3_the_script_prints_fewer_bytes_as_receipts(
+    tmp_path: Path, monkeypatch, capsys, warns: bool
+) -> None:
+    """KYO-880.c3. The bytes and lines each command prints, before (`--full`) and after,
+    on inputs that warn and on routine ones; ``pytest -s`` prints the table."""
+    monkeypatch.delenv(cli.OUTPUT_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    receipts = script_more(_project(tmp_path, "piped"), tmp_path / "piped", warns=warns)
+    full = script_more(
+        _project(tmp_path, "whole"), tmp_path / "whole", (cli.FULL_FLAG,), warns=warns
+    )
+    kind = "warning" if warns else "routine"
+    with capsys.disabled():
+        print(f"\n{kind} inputs        before (--full)        after (receipt)")
+        for command in MORE:
+            r, f = receipts[command].out, full[command].out
+            print(
+                f"  {command:14} {len(f.encode()):6} bytes {f.count(chr(10)):3} lines   "
+                f"{len(r.encode()):6} bytes {r.count(chr(10)):3} lines"
+            )
+    for command in MORE:
+        assert len(receipts[command].out.encode()) <= len(full[command].out.encode()), command
+    for command in ("spawn", "edit", "discuss note", "note", "close-wave"):
+        assert len(receipts[command].out.encode()) < len(full[command].out.encode()), command

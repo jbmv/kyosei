@@ -113,6 +113,7 @@ from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .kinds import DISCUSSION_KIND
 from .prose import read_prose, single_line
+from .receipt import detail
 from .render import PRODUCED_WHY_PREFIX, echo_block, echo_value, turn_ref_lines
 from .store import Store
 
@@ -686,9 +687,22 @@ def filing_lines(store: Store, done: dict | None) -> list[str]:
 # ------------------------------------------------------------------ the command
 
 
-def _receipt(store: Store, record_id: str, head: str) -> list[str]:
-    refs = _refs(store, record_id)
-    return [head, *(f"  {line}" for line in turn_ref_lines(refs))]
+def _ref_lines(refs: list[dict], *, keep: int = 0) -> list[str]:
+    """``turn_ref_lines`` of ``refs``, indented. KYO-880: a reference's lines restate
+    what `kyo show` prints of the discussion, so a receipt leaves them out, except the
+    last ``keep`` references, and any reference the index stamped late or not at all,
+    which is a warning about the turn it names."""
+    out: list[str] = []
+    for position, ref in enumerate(refs):
+        flagged = bool(ref.get("late")) or ref.get("index_state") != "indexed"
+        kept = flagged or position >= len(refs) - keep
+        for line in turn_ref_lines([ref]):
+            out.append(f"  {line}" if kept else detail(f"  {line}"))
+    return out
+
+
+def _receipt(store: Store, record_id: str, head: str, *, keep: int = 0) -> list[str]:
+    return [head, *_ref_lines(_refs(store, record_id), keep=keep)]
 
 
 def _open(ctx: Context, store: Store, args: Namespace) -> Output:
@@ -713,13 +727,14 @@ def _open(ctx: Context, store: Store, args: Namespace) -> Output:
     commands._finish_mutation(store, [record_id], events)
     lines = [
         f"opened {record_id}",
-        echo_value("kind", DISCUSSION_KIND),
+        detail(echo_value("kind", DISCUSSION_KIND)),
         echo_value("title", title),
         *_receipt(store, record_id, "turn references:")[1:],
     ]
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "discuss open",
             "id": record_id,
@@ -769,11 +784,12 @@ def _note(ctx: Context, store: Store, args: Namespace) -> Output:
     lines = [
         f"noted on {args.id}: {note_id}",
         *echo_block("note", text),
-        *(f"  {line}" for line in turn_ref_lines([export._turn_ref(store.turn_refs(args.id)[-1])])),
+        *_ref_lines([export._turn_ref(store.turn_refs(args.id)[-1])]),
     ]
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "discuss note",
             "id": args.id,
@@ -858,7 +874,9 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
         head = f"closed {args.id}, produced {', '.join(produced)}"
     else:
         head = f"closed {args.id}, produced {why}"
-    lines = _receipt(store, args.id, head)
+    # KYO-880: the closing reference stays, with what was produced and each link; the
+    # discussion's earlier turns are `kyo show`'s.
+    lines = _receipt(store, args.id, head, keep=1)
     lines += [
         f"  link: {link}  {rid} produced-by {args.id}"
         for rid, link in zip(produced, links, strict=True)
@@ -866,7 +884,8 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
     ]
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "discuss close",
             "id": args.id,
@@ -1165,8 +1184,9 @@ def _skip(ctx: Context, store: Store, args: Namespace) -> Output:
     if written is None:
         raise KyoseiError(f"the turn index no longer holds {key} of session {session}")
     return Output(
-        [f"skipped prompt {key} at {written['at']}", echo_value("why", why)],
-        {
+        [f"skipped prompt {key} at {written['at']}", detail(echo_value("why", why))],
+        receipt=True,
+        data={
             "ok": True,
             "command": "discuss skip",
             "session": session,

@@ -112,6 +112,7 @@ from .config import (
 from .contracts import GUARDED_BRANCH_DIRS
 from .errors import ContractViolation, KyoseiError, UsageError
 from .git_queries import run_git
+from .receipt import detail, receipt_form
 
 #: The ``kyosei/config.yml`` key this command reads (``schema.CONFIG_CONSUMERS``).
 CONFIG_KEY = "close_wave"
@@ -583,7 +584,8 @@ def cmd_close_wave(ctx: Context, args: Namespace) -> Output:
         data["suite_pass_recorded"] = not dry
     if not ids:
         data["complete"] = True
-        return Output(lines, data)
+        # KYO-880: the pass it recorded is the whole output, and a receipt keeps it.
+        return Output(lines, data, receipt=not dry)
 
     store = ctx.store()
     ladder = _load_status_ladder(store)
@@ -675,7 +677,8 @@ def cmd_close_wave(ctx: Context, args: Namespace) -> Output:
             lines += [f"generate FAILED (exit {result.exit_code}): {step.run}",
                       *(f"  {x}" for x in result.tail)]  # fmt: skip
             _incomplete(lines, "the records were moved; nothing was committed")
-        lines.append(f"generated: {step.run}")
+        # KYO-880: the commit line below says what the generators changed.
+        lines.append(detail(f"generated: {step.run}"))
     data["generate"] = generated
 
     # 3. the commit: the store's export and what the generators changed
@@ -684,7 +687,7 @@ def cmd_close_wave(ctx: Context, args: Namespace) -> Output:
     # 4. the after-steps
     data["after"] = _after(cfg, state, args, lines)
     data["complete"] = True
-    output = Output(lines, data)
+    output = Output(lines, data, receipt=True)
     # KYO-770: the wave's item on the session's task list is checked, when there is one.
     from . import cmd_agenda
 
@@ -1061,8 +1064,12 @@ def _commit_all(ctx: Context, state: CodeState, message: str, lines: list[str]) 
     for top, paths in groups.items():
         sha = _commit(top, paths, message)
         commits.append({"repo": str(top), "paths": paths, "sha": sha})
+        # KYO-880: a receipt names the commit and counts its paths; `git show` lists them.
         lines.append(
-            f"committed {sha[:12]} in {top}: {', '.join(paths)}"
+            receipt_form(
+                f"committed {sha[:12]} in {top}: {', '.join(paths)}",
+                f"committed {sha[:12]} in {top}: {len(paths)} path(s)",
+            )
             if sha
             else f"nothing to commit in {top} ({', '.join(paths)} unchanged)"
         )
@@ -1071,7 +1078,9 @@ def _commit_all(ctx: Context, state: CodeState, message: str, lines: list[str]) 
 
 def _after(cfg: CloseWaveConfig, state: CodeState, args: Namespace, lines: list[str]) -> list:
     if not cfg.after:
-        lines.append(f"after-steps: none declared ({CONFIG_KEY}: after: in {CONFIG_NAME})")
+        lines.append(
+            detail(f"after-steps: none declared ({CONFIG_KEY}: after: in {CONFIG_NAME})")
+        )
         return []
     if not args.run_after:
         lines.append("after-steps (not run; pass --run-after to run them):")

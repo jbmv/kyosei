@@ -1255,8 +1255,9 @@ A write echoes back what it stored, so that a text the shell altered is seen. An
 every byte of that echo and reads it again on each later turn, and one that filters the output
 to shorten it keeps the lines it expected and drops a warning it did not. When stdout is not a
 terminal, `kyo new`, `kyo dispatch`, `kyo report`, `kyo accept`, `kyo verify`, `kyo gate`,
-`kyo attach`, `kyo confirm` and `kyo docs settle --from-report` therefore print a receipt in
-place of the full output. Every other command, including each one a hook runs, prints the same
+`kyo attach`, `kyo confirm`, `kyo docs settle --from-report`, `kyo spawn`, `kyo edit`,
+`kyo discuss` (`open`, `note`, `close` and `skip`), `kyo note --shift` and `kyo close-wave`
+(when it writes) therefore print a receipt in place of the full output. Every other command, including each one a hook runs, prints the same
 text to every reader.
 
 A receipt carries:
@@ -1267,7 +1268,8 @@ A receipt carries:
 - one line for each stored text, giving its label, its length in characters and the first
   twelve hex digits of its sha256, without the text: `stored description (792 chars,
   sha256:62fdeec317ac)`. `kyo new` gives one such measure for its criteria, taken over their
-  texts joined by newlines in the order stored, and prints the title as stored;
+  texts joined by newlines in the order stored, and prints the title as stored; `kyo spawn`
+  and `kyo edit` do the same, and `kyo close-wave` counts the paths of each commit it makes;
 - every line of the full output that warns, refuses, reports an outcome that is not a pass,
   or names a command to run, unchanged and whole. A report's `premise_false`, `disagreements`
   and `corrected_numbers` entries and each proposed verdict other than `met` are among them.

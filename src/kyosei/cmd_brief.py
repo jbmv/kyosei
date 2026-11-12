@@ -1510,4 +1510,8 @@ def cmd_note(ctx: Context, args: Namespace) -> Output:
 
     lines = [f"appended shift note {note_id}"]
     lines += echo_block("shift note", text)
-    return Output(lines, {"ok": True, "command": "note", "shift_note_id": note_id, "text": text})
+    return Output(
+        lines,
+        {"ok": True, "command": "note", "shift_note_id": note_id, "text": text},
+        receipt=True,
+    )
