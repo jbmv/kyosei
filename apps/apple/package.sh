@@ -20,6 +20,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$PRODUCTS/KyoseiMac" "$APP/Contents/MacOS/Kyosei"
 cp -R "$PRODUCTS/KyoseiApple_KyoseiMac.bundle" "$APP/Contents/Resources/"
 cp Packaging/Info.plist "$APP/Contents/Info.plist"
+cp Packaging/Kyosei.icns "$APP/Contents/Resources/Kyosei.icns"
 
 if [ -n "${KYOSEI_SIGN_IDENTITY:-}" ] && [ -n "${KYOSEI_PROVISIONING_PROFILE:-}" ]; then
   : "${KYOSEI_TEAM_ID:?KYOSEI_PROVISIONING_PROFILE needs KYOSEI_TEAM_ID, the team the profile was issued to}"

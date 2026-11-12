@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zhi+Mang+Xing&display=swap">
+<style>html,body{margin:0;background:transparent}canvas{display:block}</style>
+<canvas id="c" width="1024" height="1024"></canvas>
+<script>
+const params = new URLSearchParams(location.search);
+const GAP = Number(params.get("gap") ?? 0.035);      // seal's distance from 生's ink, share of the icon
+const SIZE = Number(params.get("size") ?? 0.40);     // em size of a character, share of the icon
+const LEAD = Number(params.get("lead") ?? 0.03);     // space between the two characters' ink
+const SEAL = Number(params.get("seal") ?? 0.105);    // seal's side, share of the icon
+const DX = Number(params.get("dx") ?? 0), DY = Number(params.get("dy") ?? 0);   // the seal moved after the group is centred
+const PLATE = params.get("plate") === "1";            // macOS: the square inset in a clear canvas, with a soft shadow
+const N = 1024, FONT = '"Zhi Mang Xing"';
+function ink(ch, px) {            // the character drawn alone, and the box its ink fills
+  const c = document.createElement("canvas"); c.width = c.height = px * 2;
+  const g = c.getContext("2d"); g.font = `${px}px ${FONT}`; g.textBaseline = "alphabetic";
+  g.fillStyle = "#000"; g.fillText(ch, px * 0.5, px * 1.4);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let x0 = c.width, y0 = c.height, x1 = 0, y1 = 0;
+  for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++)
+    if (d[(y * c.width + x) * 4 + 3] > 40) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  return { c, x0, y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+document.fonts.load(`100px ${FONT}`, "共生").then(() => {
+  const px = Math.round(N * SIZE), a = ink("共", px), b = ink("生", px);
+  const seal = N * SEAL, gap = N * GAP, lead = N * LEAD;
+  const colW = Math.max(a.w, b.w);
+  const groupW = Math.max(colW, (colW + b.w) / 2 + gap + seal);   // characters centred on one axis, seal right of 生
+  const groupH = a.h + lead + b.h;
+  const left = (N - groupW) / 2, top = (N - groupH) / 2, axis = left + colW / 2;
+  const g = document.getElementById("c").getContext("2d");
+  if (PLATE) {
+    g.translate(100, 100); g.scale(824 / N, 824 / N);
+    g.save(); g.shadowColor = "rgba(0,0,0,0.28)"; g.shadowBlur = 22; g.shadowOffsetY = 10;
+    g.fillStyle = "#fff"; g.beginPath(); g.roundRect(0, 0, N, N, N * 0.225); g.fill(); g.restore();
+  } else {
+    g.fillStyle = "#fff"; g.beginPath(); g.roundRect(0, 0, N, N, N * 0.225); g.fill();
+  }
+  g.drawImage(a.c, a.x0, a.y0, a.w, a.h, axis - a.w / 2, top, a.w, a.h);
+  g.drawImage(b.c, b.x0, b.y0, b.w, b.h, axis - b.w / 2, top + a.h + lead, b.w, b.h);
+  g.fillStyle = "#b3261e"; g.beginPath();
+  g.roundRect(axis + b.w / 2 + gap + N * DX, top + groupH - seal + N * DY, seal, seal, seal * 0.12); g.fill();
+  document.title = JSON.stringify({ left: Math.round(left), right: Math.round(N - left - groupW), top: Math.round(top), font: document.fonts.check(`100px ${FONT}`, "共生") });
+});
+</script>

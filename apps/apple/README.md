@@ -451,6 +451,13 @@ Files and file links need it to hold the `files` permission.
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.
 
+The package's icon is `Packaging/Kyosei.icns`: the characters 共生 in a brush hand with a red
+seal mark, on white. It is drawn by `Packaging/icon/render.html`, a canvas page that measures
+each character's ink, centres the two as a column and places the mark beside the second;
+`Packaging/icon/Kyosei-1024.png` is its output, from which the sizes in the `.icns` file are
+scaled. The typeface is Zhi Mang Xing, published under the SIL Open Font License, which the
+page loads from Google Fonts; nothing of the typeface is kept in this repository.
+
 With `KYOSEI_PROVISIONING_PROFILE`, the path of a Developer ID provisioning profile issued for
 the app's identifier, and `KYOSEI_TEAM_ID`, the script embeds the profile and signs with three
 entitlements: the application identifier, the team identifier and a keychain access group of

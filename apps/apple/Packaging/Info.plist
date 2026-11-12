@@ -4,6 +4,8 @@
 <dict>
   <key>CFBundleExecutable</key>
   <string>Kyosei</string>
+  <key>CFBundleIconFile</key>
+  <string>Kyosei</string>
   <key>CFBundleIdentifier</key>
   <string>dev.kyosei.apple</string>
   <key>CFBundleName</key>
