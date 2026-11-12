@@ -778,6 +778,33 @@ def test_no_consumer_surface_cites_a_source_tree_only_path() -> None:
     )
 
 
+def _holds_a_string_literal(path: Path) -> bool:
+    """Whether a module holds a string that is not a docstring.
+
+    KYO-874: `receipt.py` holds docstrings and `None` and nothing else, so it has no
+    literal a consumer could be sent; counting any constant asked it for one.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    return any(
+        isinstance(node, ast.JoinedStr)
+        or (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        )
+        for node in ast.walk(tree)
+    )
+
+
 def test_the_surface_enumeration_covers_the_package_without_a_registry() -> None:
     """KYO-156.c3 — the property that makes the check survive the next surface.
 
@@ -801,10 +828,7 @@ def test_the_surface_enumeration_covers_the_package_without_a_registry() -> None
         for path in _package_py_files()
         # __init__ and other pure-docstring modules legitimately hold no checkable
         # literal; requiring one would be asserting a fact about their contents.
-        if any(
-            isinstance(node, (ast.Constant, ast.JoinedStr))
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        )
+        if _holds_a_string_literal(path)
     }
     missing_modules = sorted(m for m in package_modules if m not in literal_files)
     assert not missing_modules, f"package modules contributing no surface: {missing_modules}"

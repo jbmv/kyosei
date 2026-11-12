@@ -409,6 +409,8 @@ def test_the_prompt_hook_is_packaged_and_installed(kyo, project) -> None:
     assert [install_hooks.hook_action(c) for c in commands] == [
         "kyo check-build --hook",
         "kyo turns --hook",
+        # KYO-876: the discussion check names a candidate turn at the next prompt.
+        "kyo discuss check --hook",
     ]
     assert "check-build" in {shape.command for shape in cmd_check_build.HOOK_INVOCATIONS}
 
