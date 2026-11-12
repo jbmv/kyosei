@@ -598,6 +598,8 @@ kyo credit --withdraw <credit> --why  # retract a credit that should not exist, 
 kyo discuss open --title ...      # a discussion, stamped at the person's turn from the turn index (KYO-658)
 kyo dossier <id>                  # one decision as a Markdown page for a reader outside the project,
                                   #   each part naming its source in the store (KYO-659)
+kyo excerpt <credit> --draft|--preview|--pack   # the lines of a credit's discussion the person shares,
+                                  #   with salts and proofs a reader checks against span_seal (KYO-660)
 kyo discuss check --hook          # at Stop: asks the agent to open one, or `kyo discuss skip --why`,
                                   #   when a turn put a choice to the person and none is open (KYO-662)
 kyo wont-do <id> --why            # terminal; ID retired forever
