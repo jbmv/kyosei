@@ -519,6 +519,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## store-governance
 
+- **2026-11-12** — `KYO-844` (bug) — Two sections of one document with the same heading raise one obligation, and the second is dropped without notice
 - **2026-11-12** — `KYO-392` (proposal) — Docs obligations name the ### subsections their targets matched, still one obligation per section
 - **2026-10-13** — `KYO-627` (task) — Retitle completed records whose titles carry private text
 - **2026-10-11** — `KYO-579` (bug) — The shipped templates name consumer projects, so kyo install-skill and install-procedures copy those names into every consumer
