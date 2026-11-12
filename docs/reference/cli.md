@@ -45,6 +45,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
 | [`kyo dossier`](#kyo-dossier) | yes | no | print one decision as a Markdown page for a reader outside the project: the decision, the problem, what was on the table, who decided and in what words, the timeline, the depth of the discussion, what happened next, and how the record was made, each part naming its source in the store (KYO-659). It reads no transcript; a go-ahead is never shown as a decision |
 | [`kyo edit`](#kyo-edit) | yes | yes | change a record |
+| [`kyo excerpt`](#kyo-excerpt) | yes | no | draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py (KYO-660). --pack is refused without the person's approval, an authorized credit |
 | [`kyo export`](#kyo-export) | yes | no | rewrite drifted export documents from the db (KYO-6) |
 | [`kyo flag`](#kyo-flag) | yes | yes | list, acknowledge/resolve a sweep flag (M6) |
 | [`kyo gate`](#kyo-gate) | yes | yes | add a gate; orthogonal to status |
@@ -710,6 +711,31 @@ Text output prints the quoted short form in place of the full text after it, whi
 
 - "corrects this record; the guard reads the next record's table" — This makes <record_id> TRUE; it does not improve the disjointness guard, which reads the next record's table and not this one's — measured on one consumer project, where feeding drift back after every merge left four of five following declarations still insufficient (KYO-147.c4)
 - "The stored scope is unchanged." — The stored scope is unchanged — derivation never overrides a declaration. (KYO-100.c3)
+
+## `kyo excerpt`
+
+draft, preview and write an excerpt pack of the discussion a credit cites: the lines of its messages the person chose to share, each with the salt and proof a reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py (KYO-660). --pack is refused without the person's approval, an authorized credit
+
+Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo excerpt [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] (--draft | --preview | --pack) [--from DRAFT] [--approved-by CREDIT] [--out FILE] CREDIT`
+
+### Positional arguments
+
+- `CREDIT` — **required**. the credit's id (PREFIX-N.pN); it must cite a sealed discussion span
+
+### Options
+
+- `--draft` — optional. write the readable page of every line in the span and list the private-term hits
+- `--preview` — optional. render the pack as its reader will see it, from the trimmed draft given with --from
+- `--pack` — optional. write the pack, from the trimmed draft given with --from, naming the approving credit given with --approved-by
+- `--from DRAFT` — optional. the draft, with the lines to withhold deleted; a draft whose remaining lines are not lines of the span, in order, is refused
+- `--approved-by CREDIT` — optional. the `authorized` credit, on the same record as the excerpted credit, that records the person's approval of this pack; --pack is refused without it (contract excerpt-requires-approval)
+- `--out FILE` — optional. where to write the draft or the pack; by default the session's scratch directory, as recorded by `kyo sessions scratch`
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
 ## `kyo export`
 
