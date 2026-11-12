@@ -132,6 +132,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-12** — `KYO-444` (plan) — CLI distribution and kyo serve (KYO-443)
 - **2026-11-12** — `KYO-425` (plan) — Split the seven oversized CLI modules by subject and move their KYO history into docs/design
 - **2026-11-11** — `KYO-775` (task) — The stop announcement of dispatches in flight is said once per session
 - **2026-11-11** — `KYO-774` (bug) — The sweep and doctor chain is cancelled at SessionEnd; it runs at Stop only
