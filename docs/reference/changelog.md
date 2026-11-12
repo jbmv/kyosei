@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-12** — `KYO-873` (plan) — Orchestrator friction from the session of 2026-11-12: output and attention
 - **2026-11-12** — `KYO-870` (task) — Mac app Records: Shift notes and Briefs as Locations
 - **2026-11-12** — `KYO-866` (task) — Mac app polish, 2026-11-12: outline rows, linked titles, the composer's status row and landing arrow
 - **2026-11-12** — `KYO-863` (task) — Mac app Records: the home as a sortable table with Locations, and the drawer's three lists
