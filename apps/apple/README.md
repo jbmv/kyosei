@@ -324,8 +324,9 @@ millisecond for each marked range that lies in a shut fold. The matching is in
 Records shows the project's records, one at a time. With none open it shows a home laid out
 as the Files home is (KYO-862): a fixed column beside a table. The column lists five
 Locations, each a filter of the table and each with its count: Awaiting you, Dispatchable,
-Other open, Closed and All. Below them are Recents, the records viewed last, and Mentioned,
-the records the chat names. The table's columns are Name, Kind, Status, Created and
+Other open, Closed and All. Below them are Plans, the open plans, each a filter of the table
+to the records that belong to it (the list's `plan` field, KYO-864), then Recents, the
+records viewed last, and Mentioned, the records the chat names. The table's columns are Name, Kind, Status, Created and
 Modified; a press on a column's head sorts by it and a second press reverses it. A search
 field above the table narrows the chosen Location's rows. A record is placed and shown by
 its standing, so a current decision is in Closed and not among the open work.

@@ -18,7 +18,8 @@ import { chipPieces } from "./chipwords";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordLocation, type RecordRow, type RecordSort,
   type RecordSortBy, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
-  dayOf, dispatchableIds, historyFrom, historyRows, located, locationFrom, LOCATIONS, narrow, newestFirst,
+  dayOf, dispatchableIds, historyFrom, historyRows, located, locationFrom, LOCATIONS, membersOf, narrow, newestFirst,
+  openPlans,
   parseLink, prefixOf, pressedSort, recordSortFrom, sortRecords, standingOf, storedFilters,
   recordOf, recordPage, refParts, visit, when, withKinds,
 } from "./records";
@@ -4465,6 +4466,9 @@ const HOME_SORT_KEY = "records-home-sort";
 let homeLocation: RecordLocation = locationFrom(stored<unknown>(HOME_LOCATION_KEY, null));
 let homeSort: RecordSort = recordSortFrom(stored<unknown>(HOME_SORT_KEY, null));
 let homeSearch = "";
+const HOME_PLAN_KEY = "records-home-plan";
+/** The plan whose members the table shows in place of a Location's records, or null. */
+let homePlan: string | null = stored<string | null>(HOME_PLAN_KEY, null);
 let viewedRecords: string[] = [];
 /** The records opened, in order, with the landing page as home (KYO-738). */
 let recordPlaces: History<string> = fresh();
@@ -4701,10 +4705,18 @@ function drawRecordLists(): void {
 
 /** The table's rows: the chosen Location's records that the home's search leaves, sorted. */
 function homeRows(): RecordRow[] {
-  const inLocation = located(rowsNewestFirst(), readyRecords, awaitingRecords)[homeLocation];
+  const plan = chosenPlan();
+  const inLocation = plan
+    ? membersOf(rowsNewestFirst(), plan)
+    : located(rowsNewestFirst(), readyRecords, awaitingRecords)[homeLocation];
   const found = narrow(
     inLocation, { open: false, dispatchable: false, awaiting: false, search: homeSearch }, readyRecords);
   return sortRecords(found, homeSort);
+}
+
+/** The plan chosen in the side bar while it is still one of the open plans; otherwise the Location stands. */
+function chosenPlan(): string | null {
+  return homePlan && openPlans(recordRows).some((row) => row.id === homePlan) ? homePlan : null;
 }
 
 /** A record named in a short list of the home's side bar: its id over nothing, then its title. */
@@ -4734,11 +4746,20 @@ function drawRecordsHome(nothing: string): void {
   const places = located(rowsNewestFirst(), readyRecords, awaitingRecords);
   fill(document.getElementById("records-locations")!, LOCATIONS.map((name) => {
     const row = document.createElement("div");
-    row.className = name === homeLocation ? "location-row current" : "location-row";
+    row.className = name === homeLocation && !chosenPlan() ? "location-row current" : "location-row";
     row.dataset.location = name;
     row.append(span("tree-name", name), span("location-count", listsRead ? String(places[name].length) : ""));
     return row;
   }));
+  const plans = openPlans(rowsNewestFirst());
+  fill(document.getElementById("records-plans")!, plans.length ? plans.map((plan) => {
+    const row = document.createElement("div");
+    row.className = plan.id === chosenPlan() ? "location-row current" : "location-row";
+    row.dataset.plan = plan.id;
+    row.title = `${plan.id} ${plan.title}`;
+    row.append(span("tree-name", plan.title), span("location-count", String(membersOf(recordRows, plan.id).length)));
+    return row;
+  }) : [emptyRow(listsRead ? "No plan is open." : "")]);
   const short = (rows: RecordRow[], none: string) => rows.length
     ? rows.slice(0, HOME_SIDE_ROWS).map(homeSideRow) : [emptyRow(none)];
   fill(document.getElementById("records-home-recent")!,
@@ -4760,7 +4781,18 @@ document.getElementById("records-locations")!.addEventListener("click", (event) 
   const row = (event.target as Element).closest<HTMLElement>("[data-location]");
   if (!row) return;
   homeLocation = locationFrom(row.dataset.location);
+  homePlan = null;
   store(HOME_LOCATION_KEY, homeLocation);
+  store(HOME_PLAN_KEY, null);
+  drawRecordLists();
+  recordsPane.scrollTop = 0;
+});
+
+document.getElementById("records-plans")!.addEventListener("click", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>("[data-plan]");
+  if (!row) return;
+  homePlan = row.dataset.plan ?? null;
+  store(HOME_PLAN_KEY, homePlan);
   drawRecordLists();
   recordsPane.scrollTop = 0;
 });

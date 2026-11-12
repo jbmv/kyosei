@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  LOCATIONS, NEWEST, dayOf, located, locationFrom, narrow, pressedSort, recordSortFrom, sortRecords,
+  LOCATIONS, NEWEST, dayOf, located, locationFrom, membersOf, narrow, openPlans, pressedSort, recordSortFrom, sortRecords,
   storedFilters,
 } from "../src/records.ts";
 
@@ -33,6 +33,19 @@ test("a record is placed, filtered and sorted by its standing where the list giv
   const openOnly = { open: true, dispatchable: false, awaiting: false, search: "" };
   assert.deepEqual(ids(narrow(all, openOnly, new Set())), ["K-1", "K-2"]);
   assert.equal(ids(sortRecords(all, { by: "status", descending: true }))[0], "K-9");
+});
+
+test("the Plans are the plans still open, and a plan's members are the records that name it", () => {
+  const all = [
+    { id: "K-1", kind: "plan", title: "p", status: "open", standing: "open" },
+    { id: "K-2", kind: "plan", title: "q", status: "done", standing: "done" },
+    { id: "K-3", kind: "task", title: "a", status: "done", plan: "K-1" },
+    { id: "K-4", kind: "task", title: "b", status: "open", plan: null },
+    { id: "K-5", kind: "bug", title: "c", status: "open", plan: "K-1" },
+  ];
+  assert.deepEqual(ids(openPlans(all)), ["K-1"]);
+  assert.deepEqual(ids(membersOf(all, "K-1")), ["K-3", "K-5"]);
+  assert.deepEqual(ids(membersOf(all, "K-2")), []);
 });
 
 test("a stored Location that names none is All", () => {

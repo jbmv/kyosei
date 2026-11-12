@@ -12,6 +12,8 @@ export interface RecordRow {
   status: string;
   /** The status as `kyo list` states it: `current` or `void` for a knowledge record. */
   standing?: string;
+  /** The plan the record belongs to, where the list says (KYO-864). */
+  plan?: string | null;
   seq?: number;
   created_at?: string;
   updated_at?: string;
@@ -795,6 +797,16 @@ export function located<T extends RecordRow>(
 ): Record<RecordLocation, T[]> {
   const [waiting, dispatchable, open, closed] = homeGroups(rows, ready, awaiting).map((group) => group.rows);
   return { "Awaiting you": waiting, Dispatchable: dispatchable, "Other open": open, Closed: closed, All: rows };
+}
+
+/** The plans still open, in the order of `rows`: the Plans of the home's side bar (KYO-862). */
+export function openPlans<T extends RecordRow>(rows: T[]): T[] {
+  return rows.filter((row) => row.kind === "plan" && standingOf(row) === "open");
+}
+
+/** The records that belong to a plan, in the order of `rows`. */
+export function membersOf<T extends RecordRow>(rows: T[], plan: string): T[] {
+  return rows.filter((row) => row.plan === plan);
 }
 
 /** The table's columns that sort it. */

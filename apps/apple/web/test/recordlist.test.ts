@@ -13,7 +13,7 @@ const KINDS = ["bug", "task", "decision", "proposal", "plan"];
 /** How many records the store had when the press was reported slow. */
 const SIZE = 834;
 
-interface Row { id: string; kind: string; title: string; status: string; seq: number; created_at: string }
+interface Row { id: string; kind: string; title: string; status: string; seq: number; created_at: string; plan: string | null }
 
 /** A list of the store's size and proportions: about one record in nine open, titles of a line or two. */
 function records(size = SIZE, word = "record"): Row[] {
@@ -26,6 +26,8 @@ function records(size = SIZE, word = "record"): Row[] {
       status: index % 9 === 0 ? "open" : index % 70 === 1 ? "wont-do" : "done",
       seq,
       created_at: new Date(Date.UTC(2026, 0, 1) + seq * 3600_000).toISOString(),
+      // Every thirtieth record belongs to the first open plan of the list.
+      plan: index % 30 === 7 ? "KYO-55" : null,
     };
   });
 }
@@ -36,6 +38,9 @@ const ALL = newestIds(ROWS);
 const OPEN = newestIds(ROWS.filter((row) => row.status === "open"));
 const READY = OPEN.slice(0, 12);
 const AWAITING = ALL.filter((_, index) => index % 100 === 3);
+/** An open plan of the list (index 54: a plan, and open), and the records that name it. */
+const PLAN = "KYO-55";
+const MEMBERS = newestIds(ROWS.filter((row) => row.plan === PLAN));
 
 /** The Records landing page with the list read, no record open and no chip pressed. */
 async function open(rows: Row[] = ROWS): Promise<Page> {
@@ -165,6 +170,21 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   const plans = ROWS.filter((row) => row.kind === "plan" && row.title.includes("numbered 83")).map((row) => row.id);
   assert.ok(plans.length > 0);
   assert.deepEqual(found.rows, plans);
+  // A plan in the side bar filters the table to its members, and a Location puts it back.
+  await opened.run(`(() => {
+    const field = document.getElementById("records-home-search");
+    field.value = "";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('#records-plans [data-plan="${PLAN}"]').click();
+  })()`);
+  found = await home();
+  // The sort pressed above still stands: oldest first.
+  assert.deepEqual(found.rows, [...MEMBERS].reverse());
+  assert.ok(found.locations.every(([, , current]) => !current), "no Location is the current one");
+  const planRow = await opened.run<string>(`document.querySelector('#records-plans .current .location-count').textContent`);
+  assert.equal(planRow, String(MEMBERS.length));
+  await opened.run(`document.querySelector('#records-locations [data-location="All"]').click()`);
+  assert.deepEqual((await home()).rows, [...ALL].reverse());
   // The home's field is its own: the drawer's lists are not narrowed by it.
   const drawer = await opened.run<number>(`document.querySelectorAll("#records-list [data-open]").length`);
   assert.equal(drawer, SIZE);

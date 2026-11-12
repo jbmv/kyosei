@@ -1266,7 +1266,8 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 #view-records #records-landing { max-width: none; }
 #records-landing:not([hidden]) { display: flex; gap: 22px; align-items: flex-start; }
 #records-home-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
-.location-count { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.location-row .tree-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.location-count { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .records-home-side .rec-row { padding: 3px 8px; font-size: 13px; }
 .records-home-side .rec-row .kind { display: none; }
 .records-home-side .rec-row { display: flex; align-items: baseline; gap: 7px; }
