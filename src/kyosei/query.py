@@ -194,6 +194,10 @@ ROW_FIELDS: tuple[str, ...] = (
     "seq",
     "kind",
     "scope",
+    # KYO-864: the plan the record belongs to (`records.plan_id`), or null. Shown for
+    # the reason ``scope`` is (law 2): the Mac app's Records home filters its table by
+    # plan and the row did not say which plan a record was in.
+    "plan",
     "status",
     "standing",
     "gates_open",
@@ -540,6 +544,8 @@ def run(
                 # of the filter. A field that can only be *searched* for and never
                 # *seen* is one a reader has to already know the value of.
                 "scope": row["scope"],
+                # KYO-864: membership as stored on the member; null for a record in no plan.
+                "plan": row["plan_id"],
                 "status": row["status"],
                 # KYO-44.c2: what that status *means* for this record's archetype.
                 # Beside the stored value, never instead of it.

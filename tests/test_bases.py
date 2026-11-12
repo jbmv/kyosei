@@ -706,3 +706,19 @@ def test_a_base_definition_is_not_reachable_through_the_store(kyo, project: Path
     assert bases_module.bases_path(project / "kyosei").name == "bases.yml"
     result = kyo("base", "run", "nope")
     assert "add a `nope:` entry" in result.err
+
+
+def test_a_base_can_filter_and_group_by_plan(kyo, project: Path) -> None:
+    """KYO-864.c2: ``plan`` is a row field a base may name as ``group-by`` and filter on."""
+    plan = new_record(kyo, kind="plan", title="a plan")
+    member = new_record(kyo, kind="bug", title="a member")
+    assert kyo("edit", member, "--plan", plan).code == 0
+    new_record(kyo, kind="bug", title="not a member")
+
+    write_bases(project, base_of(filters={"plan": plan}, **{"group-by": "plan"}))
+    run = kyo("base", "run", "only", "--json").json
+    assert [row["id"] for row in run["rows"]] == [member]
+    assert [row["plan"] for row in run["rows"]] == [plan]
+
+    write_bases(project, base_of(columns=["id", "plan"], **{"group-by": "plan"}))
+    assert kyo("base", "run", "only", "--json").code == 0

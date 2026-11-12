@@ -483,7 +483,7 @@ record has an id and a file has a path.
 
 | source | what a row is | its fields | its filters |
 |---|---|---|---|
-| `records` | one record | `id`, `seq`, `kind`, `scope`, `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at`, `people` (the persons with a current credit on the record) | `kind`, `scope`, `status`, `plan`, `gate-tag`, `person`, `decided-by` — exactly `kyo list`'s filters; its flags `--unsettled`, `--overrode` and `--limit` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
+| `records` | one record | `id`, `seq`, `kind`, `scope`, `plan` (the id of the plan the record belongs to, or null), `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at`, `people` (the persons with a current credit on the record) | `kind`, `scope`, `status`, `plan`, `gate-tag`, `person`, `decided-by` — exactly `kyo list`'s filters; its flags `--unsettled`, `--overrode` and `--limit` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
 | `ideas` | one file under `ideas/` | `id` (its path), `title`, `stamped`, `promoted`, `promoted_at`, `section_count`, `promoted_section_count`, `properties` | `path`, `contains`, any field, `properties.<key>` |
 | `docs` | one file under `docs/` | `id` (its path), `title`, `section_count`, `governs`, `governs_broken`, `amended`, `staleness`, `staleness_says`, `properties` | the same four |
 

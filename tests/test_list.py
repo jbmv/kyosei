@@ -190,3 +190,15 @@ def test_list_rows_carry_the_records_own_timestamps(kyo) -> None:
         assert rows[record]["updated_at"] == shown["updated_at"]
     assert rows[first]["updated_at"] >= rows[first]["created_at"]
     assert rows[first]["updated_at"] >= rows[second]["updated_at"]
+
+
+def test_a_row_carries_the_plan_it_belongs_to(kyo) -> None:
+    """KYO-864.c1: ``plan`` is the id of the record's plan, or null for a record in none."""
+    plan = new_record(kyo, kind="plan", title="a plan")
+    member = new_record(kyo, kind="bug", title="a member")
+    loose = new_record(kyo, kind="bug", title="in no plan")
+    assert kyo("edit", member, "--plan", plan).code == 0
+    rows = {r["id"]: r for r in kyo("list", "--json").json["records"]}
+    assert rows[member]["plan"] == plan
+    assert rows[loose]["plan"] is None
+    assert rows[plan]["plan"] is None
