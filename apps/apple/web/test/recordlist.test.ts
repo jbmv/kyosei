@@ -221,19 +221,32 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   assert.equal(drawer, SIZE);
 });
 
-test("the drawer is away on the home and holds Awaiting you, Recents and All beside an open record, all narrowed together", async (t) => {
+test("one drawer holds the home's lists on the home and Awaiting you, Recents and All beside an open record, docked on both", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
-  const shown = () => opened.run<{ menu: string; home: boolean }>(`({
+  const shown = () => opened.run<{ menu: string; home: boolean; homeLists: boolean; recordLists: boolean; docked: boolean; paneLeft: number }>(`({
     menu: getComputedStyle(document.getElementById("menu")).display,
     home: document.body.classList.contains("home-page"),
+    homeLists: getComputedStyle(document.querySelector("#records-side .records-home-side")).display !== "none",
+    recordLists: getComputedStyle(document.getElementById("records-list")).display !== "none",
+    docked: document.body.classList.contains("dock-left"),
+    paneLeft: Math.round(document.getElementById("view-records").getBoundingClientRect().left),
   })`);
-  assert.deepEqual(await shown(), { menu: "none", home: true });
-  // A record opened from the table brings the drawer back.
+  // KYO-883: on the home the drawer is there, holding the home's lists and not a record's,
+  // and the home's page has no fixed column of its own.
+  let now = await shown();
+  assert.deepEqual([now.menu !== "none", now.home, now.homeLists, now.recordLists], [true, true, true, false]);
+  assert.equal(await opened.run<number>(`document.querySelectorAll("#records-landing #records-locations").length`), 0);
+  // Docked on the home, the drawer pushes the page over, and stays docked beside a record.
+  await opened.run(`document.getElementById("menu-icon").click()`);
+  now = await shown();
+  assert.deepEqual([now.docked, now.paneLeft], [true, 300]);
   const first = AWAITING[0];
   await opened.run(`document.querySelector('#records-table [data-open="${first}"]').click()`);
-  assert.equal((await shown()).home, false);
-  assert.notEqual((await shown()).menu, "none");
+  now = await shown();
+  assert.deepEqual([now.home, now.homeLists, now.recordLists, now.docked], [false, false, true, true]);
+  await opened.run(`document.getElementById("menu-icon").click()`);
+  assert.equal((await shown()).docked, false);
   const lists = () => opened.run<{ heads: string[]; awaiting: string[]; recents: string[]; all: number }>(`({
     heads: [...document.querySelectorAll("#records-side > h4")].filter((head) => !head.hidden).map((head) => head.textContent),
     awaiting: [...document.querySelectorAll("#records-awaiting [data-open]")].map((row) => row.dataset.open),
@@ -259,9 +272,10 @@ test("the drawer is away on the home and holds Awaiting you, Recents and All bes
   assert.deepEqual(await lists(), { heads: ["Awaiting you", "Recents", "All"], awaiting: [second], recents: [], all: 1 });
   await search(opened, "no-such-word");
   assert.deepEqual(await lists(), { heads: ["Recents", "All"], awaiting: [], recents: [], all: 0 });
-  // Home puts the drawer away again.
+  // Home turns the same drawer back to the home's lists.
   await opened.run(`document.getElementById("records-home").click()`);
-  assert.deepEqual(await shown(), { menu: "none", home: true });
+  const back = await shown();
+  assert.deepEqual([back.home, back.homeLists, back.recordLists], [true, true, false]);
 });
 
 test("a kept row follows the record that is open, and a new list from the server is drawn anew", async (t) => {

@@ -7201,11 +7201,12 @@ function drawOpened(): void {
 
 function applyDocks(): void {
   document.body.classList.toggle("view-chat", currentView === "chat");
-  // KYO-862: a home page has its own fixed column, so the drawer is away there, docked or not.
+  // KYO-883: a home page shows its own lists in the view's one drawer, which docks as it does
+  // beside an open record or file, so a narrow screen can put it away.
   const home = (currentView === "records" && openRecordId === null)
     || (currentView === "files" && openFile === null);
   document.body.classList.toggle("home-page", home);
-  document.body.classList.toggle("dock-left", !home && docked[`left:${currentView}`] === true);
+  document.body.classList.toggle("dock-left", docked[`left:${currentView}`] === true);
   document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
   document.body.classList.toggle("has-outline",
     (currentView === "history" && !historyReader.hidden)

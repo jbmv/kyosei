@@ -84,6 +84,18 @@
     <nav id="menu">
       <div id="menu-panel">
         <div id="records-side" data-view="records" hidden>
+          <!-- KYO-883: one drawer for the view. On the home it holds the home's Locations, Plans,
+               Recents and Mentioned (KYO-862); beside an open record, the lists below. -->
+          <div class="files-home-side records-home-side">
+            <h5>Locations</h5>
+            <div id="records-locations"></div>
+            <h5>Plans</h5>
+            <div id="records-plans"></div>
+            <h5>Recents</h5>
+            <div id="records-home-recent"></div>
+            <h5>Mentioned</h5>
+            <div id="records-home-mentioned"></div>
+          </div>
           <div class="records-searchrow">
             <input class="records-search" type="search" placeholder="Search records" aria-label="Search records" />
             <div class="kind-control">
@@ -120,6 +132,18 @@
           <div id="history-recent"></div>
         </div>
         <div id="files-side" data-view="files" hidden>
+          <!-- KYO-883: on the home, the home's Finder-style column (KYO-835); beside an open
+               file, the search, the tree and the lists below. -->
+          <div class="files-home-side">
+            <h5>Locations</h5>
+            <div id="files-locations"></div>
+            <h5>Recents</h5>
+            <div id="files-home-recent"></div>
+            <h5>Mentioned</h5>
+            <div id="files-home-mentioned"></div>
+            <h5>Starred</h5>
+            <div id="files-home-starred"></div>
+          </div>
           <!-- Search (KYO-814): every served code and store root at once, by name and contents. -->
           <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
           <div class="files-found" hidden></div>
@@ -230,17 +254,6 @@
       <div class="records-inner">
         <div id="records-note" hidden></div>
         <div id="records-landing">
-          <!-- KYO-862: the Records home, a fixed column of Locations beside a table, as Files has. -->
-          <nav class="files-home-side records-home-side">
-            <h5>Locations</h5>
-            <div id="records-locations"></div>
-            <h5>Plans</h5>
-            <div id="records-plans"></div>
-            <h5>Recents</h5>
-            <div id="records-home-recent"></div>
-            <h5>Mentioned</h5>
-            <div id="records-home-mentioned"></div>
-          </nav>
           <div class="files-home-main">
             <div class="records-searchrow records-home-searchrow">
               <input id="records-home-search" class="records-search" type="search" placeholder="Search records" aria-label="Search the records of this Location" />
@@ -305,17 +318,6 @@
       <div class="files-inner">
         <div id="files-note" hidden></div>
         <div id="files-landing">
-          <!-- KYO-835: the Files home, a fixed Finder-style column beside a list with columns. -->
-          <nav class="files-home-side">
-            <h5>Locations</h5>
-            <div id="files-locations"></div>
-            <h5>Recents</h5>
-            <div id="files-home-recent"></div>
-            <h5>Mentioned</h5>
-            <div id="files-home-mentioned"></div>
-            <h5>Starred</h5>
-            <div id="files-home-starred"></div>
-          </nav>
           <div class="files-home-main">
             <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
             <div class="files-found" hidden></div>

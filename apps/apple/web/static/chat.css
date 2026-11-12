@@ -1312,6 +1312,11 @@ body.home-page.view-records .records-inner { max-width: none; }
 #records-table .rec-title { display: block; white-space: nowrap; text-overflow: ellipsis; }
 #records-table .rec-status, #records-table .rec-day { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
 
-/* On a home page the fixed column stands in the drawer's place, so the drawer and its icon
-   are away and the two never stand side by side (KYO-862). */
-body.home-page #menu { display: none; }
+/* KYO-883: the view's one drawer holds the home's lists on a home page and the open record's
+   or file's lists beside it, never both. */
+body.home-page #records-side > :not(.files-home-side),
+body.home-page #files-side > :not(.files-home-side),
+body:not(.home-page) #menu-panel .files-home-side { display: none; }
+/* A search typed on the home lists its results in the home's pane and leaves the drawer's lists. */
+body.home-page #files-side.searching > .files-home-side { display: block; }
+#menu-panel .files-home-side { flex: 1; min-height: 0; width: auto; position: static; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; }

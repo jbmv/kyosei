@@ -46,6 +46,20 @@ test("the home column lists the locations and the starred files, beside a list w
   assert.equal(home.first[0].startsWith("a.py"), true);
   assert.equal(home.first[3], "Python");
   assert.equal(home.star, true);
+  // KYO-883: the column is the view's drawer on the home, holding these lists and not the
+  // tree, and a search typed on the home leaves them there.
+  const drawer = `(() => ({
+    inDrawer: Boolean(document.querySelector("#menu-panel #files-side #files-locations")),
+    homeLists: getComputedStyle(document.querySelector("#files-side .files-home-side")).display !== "none",
+    tree: getComputedStyle(document.querySelector("#files-side .files-tree")).display !== "none",
+  }))()`;
+  assert.deepEqual(await opened.run(drawer), { inDrawer: true, homeLists: true, tree: false });
+  await opened.run(`(() => {
+    const field = document.querySelector("#files-landing .files-search");
+    field.value = "readme";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  assert.deepEqual(await opened.run(drawer), { inDrawer: true, homeLists: true, tree: false });
 });
 
 test("a column's header sorts the list, a second press reverses it, and folders stay first", async (t) => {
