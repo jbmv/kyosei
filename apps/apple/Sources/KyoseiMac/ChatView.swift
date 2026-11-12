@@ -275,7 +275,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
             "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
-            "sendNow", "copy",
+            "sendNow", "copy", "attention",
             "terminal", "records", "files", "history", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
@@ -342,6 +342,12 @@ struct ChatWebView: NSViewRepresentable {
                 let id = body["id"] as? String
             {
                 feed.sendNow(id: id)
+                return
+            }
+            // KYO-883: the session now waits on the person. The Dock icon bounces once when
+            // another app is in front, on whichever screen; in front, the red line says it.
+            if message.name == "attention" {
+                if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
                 return
             }
             if message.name == "copy", let body = message.body as? [String: Any],

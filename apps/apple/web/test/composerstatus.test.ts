@@ -1,6 +1,7 @@
 // Run with `npm test`. The line under the composer: what the session is doing, Interrupt
 // while it works, the running subagents, and "Waiting for you…" when it is live and idle.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { openPage, type Page } from "./chrome.ts";
 
@@ -70,6 +71,7 @@ test("the working line, Interrupt and the subagent count stand under the compose
   assert.deepEqual([now.shown, now.idle, now.text, now.interrupt], [true, true, "Waiting for you…", false]);
   const style = await page.run<string>(`getComputedStyle(document.getElementById("working")).fontStyle`);
   assert.equal(style, "italic");
+  assert.equal(await page.run<string>(`getComputedStyle(document.getElementById("working")).color`), "rgb(255, 59, 48)");
   // An ended session says nothing.
   await page.run(`(() => { ${session(false)}; })()`);
   now = await page.run<Status>(status);
@@ -113,4 +115,52 @@ test("with no caret in the composer an arrow marks the paragraph the next anchor
   await page.run(`document.querySelector("#boxes textarea").focus()`);
   await new Promise((done) => setTimeout(done, 50));
   assert.equal(await page.run(arrow), null, "it goes when the caret is back");
+});
+
+test("only Waiting for you is red at rest: Delete and Interrupt are grey until the pointer is on them (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+    window.kyo.screen({ screen: { state: "working" } });
+    window.kyo.draft({ boxes: [{ id: "a", text: "words" }], etag: "e" }); })()`);
+  const colours = await page.run<{ interrupt: string; remove: string; muted: string }>(`(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--muted)";
+    document.body.append(probe);
+    const out = {
+      interrupt: getComputedStyle(document.getElementById("interrupt")).color,
+      remove: getComputedStyle(document.querySelector("#boxes .box-delete")).color,
+      muted: getComputedStyle(probe).color,
+    };
+    probe.remove();
+    return out;
+  })()`);
+  assert.deepEqual([colours.interrupt, colours.remove], [colours.muted, colours.muted]);
+  assert.notEqual(colours.muted, "rgb(255, 59, 48)");
+  // The red on hover is in the stylesheet, read from disk: a headless page cannot hover.
+  const css = readFileSync(new URL("../static/chat.css", import.meta.url), "utf8");
+  for (const selector of ["#interrupt:hover", ".box-delete:hover"]) {
+    const rule = css.split("\n").find((line) => line.startsWith(`${selector} {`));
+    assert.match(rule ?? "", /color: var\(--apple-red\)/, selector);
+  }
+});
+
+test("the session coming to wait on the person asks the app to bounce its Dock icon, and opening on a wait does not (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  const asked = () => page!.run<number>(`window.posted.filter((p) => p.name === "attention").length`);
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+    window.kyo.screen({ screen: { state: "idle" } }); })()`);
+  assert.equal(await asked(), 0);
+  await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  assert.equal(await asked(), 1);
+  // A second idle frame, or the clock's redraw, is no new wait.
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  await new Promise((done) => setTimeout(done, 1100));
+  assert.equal(await asked(), 1);
+  // Idle over background work is not a wait; its end is.
+  await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  assert.equal(await asked(), 2);
 });

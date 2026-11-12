@@ -668,6 +668,8 @@ function workingWords(): string {
 
 /** What the line under the composer says while the session waits on the person. */
 const WAITING = "Waiting for you…";
+/** Whether the line last said the session waits on the person; null before any screen was read. */
+let waitingSeen: boolean | null = null;
 
 /**
  * The line under the composer, whole: what the session is doing and what runs in the
@@ -678,6 +680,10 @@ function drawWorking(): void {
   const doing = workingWords();
   const idle = !doing && !sessionEnded && screenState !== null;
   const words = doing || (idle ? WAITING : "");
+  // KYO-883: when the session comes to wait on the person, the app bounces its Dock icon if
+  // another app is in front. The first state read is not a change, so opening does not bounce.
+  if (idle && waitingSeen === false) post("attention", {});
+  if (screenState !== null) waitingSeen = idle;
   working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;
   workingText.textContent = words;
@@ -1551,6 +1557,8 @@ const kyo = {
     turnsLoaded = false;
     dropSentPreview();
     unseen = 0;
+    // Another session's state is no change of this one's, so it does not bounce the Dock.
+    waitingSeen = null;
     drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();

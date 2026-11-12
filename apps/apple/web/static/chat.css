@@ -253,9 +253,10 @@ body.terminal-open #jump-bottom { display: none; }
 #new-prompt { width: 30px; height: 26px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
 #new-prompt:hover { background: var(--line); color: var(--text); }
 /* Bare text beside the add button: the red says it is pressable, and the underline says it is under the pointer. */
-#interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--apple-red); font-size: 13px; font-weight: 500; }
+/* KYO-883: grey until the pointer is on it, then red; the only red at rest is "Waiting for you…". */
+#interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 500; }
 #interrupt[hidden] { display: none; }
-#interrupt:hover { text-decoration: underline; }
+#interrupt:hover { color: var(--apple-red); text-decoration: underline; }
 #boxes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 /* The prompts sit at the bottom of their column. The session's list is the column's first
    child and sits directly above them, so it rises as they grow, and once they need the room
@@ -342,8 +343,8 @@ body.terminal-open #jump-bottom { display: none; }
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
 .box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
 /* The prompt's text starts 18px in from the box's padding, past the gutter that holds the marks. */
-.box-delete { margin-left: 18px; color: var(--apple-red); font-weight: 500; }
-.box-delete:hover { text-decoration: underline; }
+.box-delete { margin-left: 18px; color: var(--muted); font-weight: 500; }
+.box-delete:hover { color: var(--apple-red); text-decoration: underline; }
 /* Bare text in the accent colour, with the keys that do the same beside it. */
 .box-send { color: var(--link); font-weight: 600; }
 .box-send:hover:not(:disabled) { color: var(--pastel-blue); text-decoration: underline; }
@@ -670,7 +671,8 @@ body.terminal-open #terminal { display: flex; }
 /* One row, so the composer above does not move as the line grows; the title holds it whole (KYO-883). */
 #working-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #working[hidden] { display: flex; visibility: hidden; }
-#working.idle { font-style: italic; }
+/* KYO-883: nothing is happening and the session waits on the person: steady red, no motion. */
+#working.idle { font-style: italic; color: var(--apple-red); }
 #working.idle .pulse { display: none; }
 #running-agents { flex: none; position: relative; margin-left: auto; }
 #running-agents-count { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-variant-numeric: tabular-nums; cursor: default; }
