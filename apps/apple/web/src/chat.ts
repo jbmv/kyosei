@@ -154,8 +154,8 @@ function toEnd(): void {
 }
 
 /**
- * When the main conversation last replied or called a tool. A subagent's work and a
- * background task's are not counted: they do not read the main conversation's cache.
+ * When the main conversation last took a prompt, replied or called a tool. A subagent's work
+ * and a background task's are not counted: they do not read the main conversation's cache.
  */
 let lastMainActivity = "";
 
@@ -174,6 +174,13 @@ function drawEnded(): void {
   drawEmptyChat();
   if (sessionEnded) document.getElementById("interrupt")!.hidden = true;
   drawWorking();
+}
+
+/** A prompt reached the session: the top bar's last activity is now (KYO-883). */
+function sentNow(): void {
+  const now = new Date().toISOString();
+  if (now > lastMainActivity) lastMainActivity = now;
+  drawActivity();
 }
 
 /** True once a batch of the followed session's turns has been drawn, even an empty one. */
@@ -1672,7 +1679,8 @@ const kyo = {
     let prompted = false;
     keepingPlace(() => {
       if (batch.reset) kyo.clear();
-      for (const { at } of [...(batch.replies ?? []), ...(batch.tool_calls ?? [])]) {
+      // KYO-883: the person's prompt is activity too: the request it starts reads the cache.
+      for (const { at } of [...(batch.turns ?? []), ...(batch.replies ?? []), ...(batch.tool_calls ?? [])]) {
         if (at > lastMainActivity) lastMainActivity = at;
       }
       for (const turn of batch.turns ?? []) {
@@ -1764,6 +1772,8 @@ const kyo = {
    * `held` is the message as the server keeps it, with why it has not been delivered.
    */
   held(frame: { outcome?: string; id?: string; held?: Held | null }): void {
+    // A prompt delivered is activity now, before its turn is read from the transcript.
+    if (frame.outcome === "delivered") sentNow();
     if (sentPreview && frame.id && sentPreview.id === frame.id) {
       // Every prompt goes by the server's queue; the preview stands while it is delivered.
       if (frame.outcome === "delivered") confirmSentPreview();
@@ -1790,7 +1800,10 @@ const kyo = {
     if (sentPreview && frame.id) {
       sentPreview.id = frame.id;
       sentPreview.grace = window.setTimeout(heldAfterAll, PREVIEW_GRACE_MS);
-    } else if (!frame.id) confirmSentPreview();
+    } else if (!frame.id) {
+      confirmSentPreview();
+      sentNow();
+    }
     showHeld(frame.id ? { id: frame.id } : null);
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();

@@ -164,3 +164,21 @@ test("a prompt sent while the session works is held, and is not drawn in the cha
   await page.run(`window.kyo.sent({ error: "No session is live." })`);
   assert.equal(await page.run<number>(`document.querySelectorAll("#chat .turn.sending, #chat .turn:not([data-key])").length`), 0);
 });
+
+test("a prompt delivered, or its turn read, is the top bar's last activity (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await openSession(page);
+  const activity = () => page!.run<string>(`document.getElementById("top-activity").textContent`);
+  assert.match(await activity(), /^Last activity: \d+h \d\dm ago$/);
+  await page.run(`window.kyo.draft({ boxes: [{ id: "a", text: "A long prompt" }], etag: "e1" })`);
+  await page.run(`document.querySelector("#boxes .box .box-send").click()`);
+  await page.run(`window.kyo.sent({ id: "m1" })`);
+  await page.run(`window.kyo.held({ outcome: "delivered", id: "m1", held: null })`);
+  assert.match(await activity(), /^Last activity: 0m 0\ds ago$/);
+  // A prompt typed in the terminal is read from the transcript, and counts the same.
+  await openSession(page);
+  await page.run(`window.kyo.apply(${JSON.stringify({ turns: [{ id: "t9", at: new Date().toISOString(), text: "typed there" }] })})`);
+  await page.run(`window.kyo.facts({})`);
+  await new Promise((done) => setTimeout(done, 1100));
+  assert.match(await activity(), /^Last activity: 0m 0\ds ago$/);
+});

@@ -265,6 +265,9 @@ final class ChatPage: WKWebView {
         let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]
         guard menu.items.contains(where: { imageItems.contains($0.identifier?.rawValue ?? "") })
         else { return }
+        // Open Image in New Window has no window to open here: the app makes no second page.
+        menu.items.filter { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenImageInNewWindow" }
+            .forEach(menu.removeItem)
         let item = NSMenuItem(title: "Quick Look", action: #selector(quickLookChosen), keyEquivalent: "")
         item.target = self
         menu.insertItem(item, at: 0)
