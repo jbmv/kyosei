@@ -654,6 +654,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-12** — `KYO-827` (task) — Mac app: the History view, searching what was said in this project
 - **2026-11-12** — `KYO-771` (task) — Mac app: the session's task list in a bubble above the composer
 - **2026-11-12** — `KYO-750` (bug) — Mac app: the composer jumps when predictive text offers a completion on a new line
+- **2026-11-12** — `KYO-376` (plan) — Project server: TLS with pinning, the app always a client of this machine's server, a shared project list, a daemon at login, a password that issues tokens — decided by jbmv
 - **2026-11-11** — `KYO-837` (task) — kyo serve: the project's starred files
 - **2026-11-11** — `KYO-832` (task) — Symbol targets: Swift files are narrowed, five chat.ts functions are found, and symbol-only coverage is reported
 - **2026-11-11** — `KYO-830` (task) — The desktop app's README describes the app as built, now that it governs the sources
