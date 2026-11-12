@@ -1,5 +1,6 @@
 import AppKit
 import KyoseiClient
+import Quartz
 import SwiftUI
 import WebKit
 
@@ -255,6 +256,90 @@ final class ChatPage: WKWebView {
         }
         return super.performKeyEquivalent(with: event)
     }
+
+    // MARK: Quick Look on an image (KYO-883)
+
+    /// WebKit's menu for an image gains Quick Look at its top; the page says which image.
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]
+        guard menu.items.contains(where: { imageItems.contains($0.identifier?.rawValue ?? "") })
+        else { return }
+        let item = NSMenuItem(title: "Quick Look", action: #selector(quickLookChosen), keyEquivalent: "")
+        item.target = self
+        menu.insertItem(item, at: 0)
+        menu.insertItem(.separator(), at: 1)
+    }
+
+    @objc private func quickLookChosen() {
+        evaluateJavaScript("window.kyo.quickLook()", completionHandler: nil)
+    }
+
+    /// The file the Quick Look panel shows: a copy of the image in this app's temporary folder.
+    private var previewItem: URL?
+
+    func quickLook(dataURL: String, name: String) {
+        guard let comma = dataURL.firstIndex(of: ","), dataURL.hasPrefix("data:"),
+            let bytes = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...]))
+        else { return }
+        let header = dataURL[dataURL.index(dataURL.startIndex, offsetBy: 5)..<comma]
+        quickLook(bytes: bytes, mediaType: header.split(separator: ";").first.map(String.init), name: name)
+    }
+
+    func quickLook(bytes: Data, mediaType: String?, name: String) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Kyosei Quick Look", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stem = (name as NSString).deletingPathExtension
+        let safe = String(stem.map { "/:\\".contains($0) ? "-" : $0 }).prefix(80)
+        let file = folder.appendingPathComponent(
+            "\(safe.isEmpty ? "image" : String(safe)).\(Self.fileExtension(mediaType, bytes))")
+        guard (try? bytes.write(to: file, options: .atomic)) != nil else { return }
+        previewItem = file
+        // The panel asks the responder chain for its items, so this page must be in it.
+        let inPage = (window?.firstResponder as? NSView)?.isDescendant(of: self) ?? false
+        if !inPage { window?.makeFirstResponder(self) }
+        guard let panel = QLPreviewPanel.shared() else { return }
+        if panel.isVisible { panel.reloadData() } else { panel.makeKeyAndOrderFront(nil) }
+    }
+
+    private static func fileExtension(_ mediaType: String?, _ bytes: Data) -> String {
+        switch mediaType {
+        case "image/png": return "png"
+        case "image/jpeg": return "jpg"
+        case "image/gif": return "gif"
+        case "image/webp": return "webp"
+        default: break
+        }
+        let head = [UInt8](bytes.prefix(4))
+        if head.starts(with: [0x89, 0x50]) { return "png" }
+        if head.starts(with: [0xFF, 0xD8]) { return "jpg" }
+        if head.starts(with: [0x47, 0x49]) { return "gif" }
+        return "webp"
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        previewItem != nil
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = self
+        panel.reloadData()
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = nil
+    }
+}
+
+extension ChatPage: @preconcurrency QLPreviewPanelDataSource {
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        previewItem == nil ? 0 : 1
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        previewItem as NSURL?
+    }
 }
 
 /// The read-only chat: a page drawn from the renderer in the app's resources. It loads
@@ -275,7 +360,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
             "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
-            "sendNow", "copy", "attention",
+            "sendNow", "copy", "attention", "quicklook",
             "terminal", "records", "files", "history", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
@@ -357,6 +442,25 @@ struct ChatWebView: NSViewRepresentable {
                 }
                 if waiting, !NSApp.isActive {
                     attentionRequest = NSApp.requestUserAttention(.criticalRequest)
+                }
+                return
+            }
+            // KYO-883: Quick Look on an image the page was right-clicked on: its data, or a
+            // composer attachment's id, whose whole image the server holds.
+            if message.name == "quicklook", let body = message.body as? [String: Any] {
+                let name = body["name"] as? String ?? "image"
+                let data = body["data"] as? String
+                let page = feed.webView as? ChatPage
+                if let attachment = body["attachment"] as? String {
+                    Task { @MainActor in
+                        if let bytes = await feed.attachmentBytes(attachment) {
+                            page?.quickLook(bytes: bytes, mediaType: nil, name: name)
+                        } else if let data {
+                            page?.quickLook(dataURL: data, name: name)
+                        }
+                    }
+                } else if let data {
+                    page?.quickLook(dataURL: data, name: name)
                 }
                 return
             }

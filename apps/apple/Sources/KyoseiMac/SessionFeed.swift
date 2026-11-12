@@ -1299,6 +1299,18 @@ final class SessionFeed {
         }
     }
 
+    /// An attachment's bytes for Quick Look (KYO-883): one uploaded from this session's
+    /// composer, whose chip holds only a thumbnail.
+    func attachmentBytes(_ id: String) async -> Data? {
+        guard let session = current, let token = Self.deviceToken() else { return nil }
+        guard
+            let reply = try? await client.authorised(
+                "GET", sessionPath(session, "attachments/\(id)"), token: token),
+            reply.status == 200
+        else { return nil }
+        return reply.data
+    }
+
     /// A sent attachment's image, by its id, for the prompt it was sent in (KYO-720).
     /// The History reader names the session it is reading (KYO-850): an attachment is kept
     /// with the session it was sent to, which need not be the live one.

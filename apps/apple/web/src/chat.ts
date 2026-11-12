@@ -1659,6 +1659,11 @@ const kyo = {
     openSearch();
   },
 
+  /** Quick Look in the image menu was chosen: the app is handed the image last right-clicked. */
+  quickLook(): void {
+    if (quickLookTarget) post("quicklook", quickLookTarget);
+  },
+
   apply(batch: Batch): void {
     // A session's first read lands at its end, as before; after that, output is not followed.
     const loading = batch.reset || !turnsLoaded;
@@ -2435,6 +2440,9 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
         const thumb = document.createElement("img");
         thumb.className = "mark-thumb";
         thumb.src = item.thumb;
+        // Quick Look shows the whole image, which the server holds once it is uploaded.
+        if (!item.pending) thumb.dataset.attachment = item.id;
+        thumb.alt = item.name;
         chip.append(thumb);
       } else {
         chip.append(icon("file"));
@@ -2706,6 +2714,8 @@ function ownSelection(): boolean {
 
 chat.addEventListener("contextmenu", (event) => {
   const target = event.target as HTMLElement;
+  // An image keeps WebKit's own menu, where the app adds Quick Look (KYO-883).
+  if (target instanceof HTMLImageElement) return;
   const holder = target.closest<HTMLElement>("#chat > [data-key]");
   const key = holder?.dataset.key;
   const session = menu?.current;
@@ -3827,6 +3837,23 @@ function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   if (!texts.length) addBox();
   remember();
 }
+
+/**
+ * KYO-883: the image a right-click was on, which Quick Look in the image menu shows. An image
+ * the page holds whole goes as its data; a chip's thumbnail is small, so the app fetches the
+ * attachment it stands for.
+ */
+type QuickLookTarget = { data: string; name: string; attachment?: string };
+let quickLookTarget: QuickLookTarget | null = null;
+document.addEventListener("contextmenu", (event) => {
+  const image = event.target instanceof HTMLImageElement ? event.target : null;
+  const name = image?.alt || "image";
+  quickLookTarget = !image ? null
+    : !image.src.startsWith("data:") ? null
+      // A chip's thumbnail is shown if the server no longer has its attachment for this session.
+      : image.dataset.attachment ? { attachment: image.dataset.attachment, name, data: image.src }
+        : { data: image.src, name };
+}, true);
 
 /** One mark of a prompt as `send-prompt` takes it and the server returns it (KYO-809). */
 interface SentMarkBody {
