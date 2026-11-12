@@ -135,6 +135,7 @@ from .docs_parse import (
     heading_anchor,
     link_values,
     section_is_dead,
+    shared_names,
 )
 from .docs_regions import narrows_by_symbol, region_suffixes_says, symbol_regions
 from .docs_targets import SHAPE_PATH_SYMBOL, SHAPE_SYMBOL, target_resolver
@@ -203,6 +204,32 @@ class GovernsNotice:
     says: str
 
 
+@dataclass(frozen=True)
+class SharedHeading:
+    """One name that several ``governs:``-declaring sections of one document carry.
+
+    KYO-844. A docs obligation is identified by its document and its section's name. Two
+    sections that share a heading are named apart by the headings above them
+    (:attr:`kyosei.docs_parse.Section.name`); where those are the same too, the sections
+    share the name and a change reaching any of them raises one obligation that asks
+    about all of them. The document is valid and the obligation is still raised, so this
+    is reported the way a :class:`GovernsNotice` is and never moves the exit status.
+    """
+
+    doc_path: str  # relative to the project root, posix-style
+    section: str  # the name the sections share, as an obligation would carry it
+    sections: int  # how many live sections declaring governs: carry it
+
+    @property
+    def says(self) -> str:
+        return (
+            f"{self.doc_path} [{self.section}] names {self.sections} sections that "
+            f"declare governs:, with the same heading under the same headings, so a "
+            f"change that reaches any of them raises one obligation that asks about all "
+            f"of them — rename all but one to have each asked about on its own"
+        )
+
+
 #: Documents were found and every ``governs:`` target in them resolves.
 DOCS_CLEAN = "clean"
 #: Documents were found and at least one ``governs:`` target no longer resolves.
@@ -268,6 +295,9 @@ class DocsCheck:
     #: linked section that never cites the linking one back, and a ``src/`` pointer to a
     #: superseded section. Each is a failure exactly as a :attr:`problems` entry is.
     section_problems: tuple[SectionStatusProblem, ...] = ()
+    #: KYO-844. One entry per section name that more than one ``governs:``-declaring
+    #: section of a document carries. Never a failure, like :attr:`notices`.
+    shared_headings: tuple[SharedHeading, ...] = ()
 
     @property
     def answered(self) -> bool:
@@ -289,6 +319,7 @@ def check_docs(root: Path, *, documents_in: DocumentSet = DEFAULT) -> DocsCheck:
     scanned: list[str] = []
     problems: list[GovernsProblem] = []
     notices: list[GovernsNotice] = []
+    shared_headings: list[SharedHeading] = []
     dead_sections_skipped = 0
     resolve = target_resolver(root, documents_in)
     for doc_path in _iter_docs_files(root, documents_in.globs):
@@ -313,7 +344,11 @@ def check_docs(root: Path, *, documents_in: DocumentSet = DEFAULT) -> DocsCheck:
                 if target.reason is not None
             ]
             continue
-        for section in _sections(text, resolve):
+        sections = _sections(text, resolve)
+        shared_headings += [
+            SharedHeading(rel, name, count) for name, count in shared_names(sections).items()
+        ]
+        for section in sections:
             if section.dead:
                 # KYO-204: never even reaches `target.reason` below -- `_sections`
                 # never resolved this section's targets in the first place, so there is
@@ -405,6 +440,7 @@ def check_docs(root: Path, *, documents_in: DocumentSet = DEFAULT) -> DocsCheck:
             dead_sections_skipped,
             kept,
             section_problems,
+            tuple(shared_headings),
         )
     return DocsCheck(
         DOCS_CLEAN,
@@ -415,6 +451,7 @@ def check_docs(root: Path, *, documents_in: DocumentSet = DEFAULT) -> DocsCheck:
         documents_in,
         dead_sections_skipped,
         kept,
+        shared_headings=tuple(shared_headings),
     )
 
 
@@ -1102,6 +1139,7 @@ __all__ = [
     "GovernsNotice",
     "GovernsProblem",
     "SectionStatusProblem",
+    "SharedHeading",
     "check_docs",
     "docs_check_answered",
     "numbered_headings",

@@ -27,6 +27,7 @@ from .docs_parse import (
     _iter_docs_files,
     heading_anchor,
     read_document,
+    shared_names,
     split_target,
 )
 from .docs_recx import diff_sides, prefix_matches, widen_with_sides
@@ -223,9 +224,11 @@ class DocsObligation:
 
     #: The document, relative to the code root, posix-style.
     doc_path: str
-    #: The heading whose section declared the relation — :data:`PREAMBLE` for a
-    #: ``governs:`` line before the first heading. **Per section, not per file**
-    #: (KYO-137.c3): a README with one stale paragraph is not a
+    #: The name of the section that declared the relation: its heading, or, where two
+    #: sections of the document that can raise share that heading, the heading with the
+    #: headings above it (:attr:`kyosei.docs_parse.Section.name`, KYO-844) —
+    #: :data:`PREAMBLE` for a ``governs:`` line before the first heading. **Per section,
+    #: not per file** (KYO-137.c3): a README with one stale paragraph is not a
     #: stale README, and one obligation per file makes the signal mush.
     section: str
     #: One of :data:`OBLIGATION_CAUSES` — which of the two directions raised this.
@@ -376,6 +379,11 @@ def _governs_obligations(
     changed: frozenset[str],
     changes: Mapping[str, FileChange] = MappingProxyType({}),
 ) -> Iterator[DocsObligation]:
+    # KYO-844: keyed by the section's NAME, in the order first reached. Two sections that
+    # share a heading are named apart by the headings above them wherever those differ
+    # (`Section.name`); two that share those as well share the name, and their matches are
+    # gathered into the one obligation that name can carry, so neither is dropped.
+    matched: dict[str, tuple[list[str], set[str]]] = {}
     for section in document.sections:
         # KYO-204: a dead section raises nothing, checked explicitly and before the
         # `resolved or governs` fallback below rather than relied on to fall out of it —
@@ -407,7 +415,6 @@ def _governs_obligations(
                 matched_changed.add(hit)
         if not matched_targets:
             continue
-        hits = tuple(sorted(matched_changed))
         # The dispatch's own diff, as a staleness answer: this instrument observed the
         # governed file change on this branch, where `governs_staleness` can only compare
         # two git dates. It is put through the same predicate anyway (c8) so there is one
@@ -415,17 +422,30 @@ def _governs_obligations(
         state = STALENESS_STALE
         if not staleness_raises_obligation(state):  # pragma: no cover - see c8's test
             continue
+        gathered_targets, gathered_changed = matched.setdefault(section.name, ([], set()))
+        gathered_targets.extend(t for t in matched_targets if t not in gathered_targets)
+        gathered_changed.update(matched_changed)
+    shared = shared_names(document.sections) if matched else {}
+    for name, (matched_targets, matched_changed) in matched.items():
+        hits = tuple(sorted(matched_changed))
+        says = (
+            f"{document.path} [{name}] governs "
+            f"{', '.join(matched_targets)}, and this dispatch changed "
+            f"{', '.join(hits)}"
+        )
+        if name in shared:
+            says += (
+                f". {shared[name]} sections of {document.path} that declare governs: "
+                f"have this heading under the same headings, so this one obligation "
+                f"asks about each of them (`kyo docs check` names the document)"
+            )
         yield DocsObligation(
             doc_path=document.path,
-            section=section.heading,
+            section=name,
             cause=OBLIGATION_GOVERNS,
             targets=tuple(matched_targets),
             changed=hits,
-            says=(
-                f"{document.path} [{section.heading}] governs "
-                f"{', '.join(matched_targets)}, and this dispatch changed "
-                f"{', '.join(hits)}"
-            ),
+            says=says,
         )
 
 
@@ -506,7 +526,7 @@ def standing_obligations(
                 f"`{named.expected_heading}` in {named.home}), so it raised nothing"
             )
             continue
-        doc_path, heading = named.owner.doc_path, named.owner.section.heading
+        doc_path, heading = named.owner.doc_path, named.owner.section.name
         if _unobligated(doc_path):
             skipped.append(f"{named.identifier}: {doc_path} is under a path that never raises")
             continue
@@ -691,7 +711,7 @@ def _pointer_join(
                     if not region:
                         found.append(
                             _PointerSite(
-                                doc_path, section.heading, f"{doc_path}#{anchor}", path,
+                                doc_path, section.name, f"{doc_path}#{anchor}", path,
                                 number, side, None, hit=True,
                             )
                         )
@@ -699,7 +719,7 @@ def _pointer_join(
                     start, end, _ = region
                     found.append(
                         _PointerSite(
-                            doc_path, section.heading, f"{doc_path}#{anchor}", path,
+                            doc_path, section.name, f"{doc_path}#{anchor}", path,
                             number, side, region,
                             # Blank lines at either end are not the region's text: a
                             # function inserted above a commented statement adds one, and
@@ -1219,7 +1239,10 @@ def section_whole_file_targets(
                 continue
             targets = whole_file_targets(section.resolved or section.governs)
             if targets:
-                found[(document.path, section.heading)] = targets
+                # KYO-844: keyed by the name an obligation is stored under, and sections
+                # that share a name share the entry.
+                key = (document.path, section.name)
+                found[key] = tuple(dict.fromkeys((*found.get(key, ()), *targets)))
     return found
 
 
