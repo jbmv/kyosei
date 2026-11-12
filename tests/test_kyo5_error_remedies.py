@@ -4060,8 +4060,8 @@ UNREACHED: dict[str, str] = {
     "cmd_turns.py:_seal_key#1": (
         "not provoked by this walk: "
         "the named `kyo turns --seal-key icloud-keychain --key-leaves-this-machine` writes "
-        "to the account's iCloud Keychain when it succeeds; proved against the Security "
-        "framework seam by "
+        "to the account's iCloud Keychain when it succeeds; proved against a stub of "
+        "the Mac app's executable by "
         "test_icloud_keychain_is_refused_until_the_disclosure_is_acknowledged"
     ),
     "cmd_discuss.py:_refuse_closed_source#0": (

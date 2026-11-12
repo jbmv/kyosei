@@ -368,58 +368,99 @@ def test_the_key_is_a_local_file_until_another_store_is_chosen(kyo, project: Pat
     assert "leaves this machine" in shown.out
 
 
+STUB = """#!/bin/sh
+# Plays the Mac app's executable: the synchronizable item is the file $STUB_DIR/item.
+[ "$1" = seal-key ] || exit 64
+echo "$*" >> "$STUB_DIR/calls"
+if [ -f "$STUB_DIR/refuse" ]; then echo "OSStatus -34018" >&2; exit 4; fi
+case "$2" in
+  read) [ -f "$STUB_DIR/item" ] || exit 3; cat "$STUB_DIR/item" ;;
+  add) read key; [ -f "$STUB_DIR/item" ] && exit 5; echo "$key" > "$STUB_DIR/item" ;;
+  delete) rm -f "$STUB_DIR/item" ;;
+  *) exit 64 ;;
+esac
+"""
+
+
+class Helper:
+    """The stub executable and the item it holds."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.item = directory / "item"
+        self.calls = directory / "calls"
+
+    @property
+    def held(self) -> bytes | None:
+        return bytes.fromhex(self.item.read_text().strip()) if self.item.exists() else None
+
+    def put(self, key: bytes) -> None:
+        self.item.write_text(key.hex() + "\n")
+
+    def refuse(self) -> None:
+        (self.directory / "refuse").write_text("")
+
+    @property
+    def operations(self) -> list[str]:
+        return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+
 @pytest.fixture
-def fake_icloud(monkeypatch):
-    """The Security framework seam: a synchronizable keychain that is a dict."""
-    held: dict[str, bytes] = {}
-    calls: list[tuple[str, bool]] = []
+def helper(tmp_path: Path, monkeypatch) -> Helper:
+    """A stub of the app's executable, named by $KYOSEI_SEAL_HELPER."""
+    directory = tmp_path / "helper"
+    directory.mkdir()
+    script = directory / "Kyosei"
+    script.write_text(STUB)
+    script.chmod(0o755)
+    monkeypatch.setenv("STUB_DIR", str(directory))
+    monkeypatch.setenv(seal.HELPER_ENV, str(script))
+    return Helper(directory)
 
-    def sec_item(operation, key=None, *, synchronizable=True, service=seal.KEYCHAIN_SERVICE):
-        calls.append((operation, synchronizable))
-        if operation == "read":
-            data = held.get(service)
-            return (0, data) if data is not None else (-25300, None)
-        if operation == "add":
-            held[service] = key.hex().encode("ascii")
-            return 0, None
-        held.pop(service, None)
-        return 0, None
 
-    monkeypatch.setattr(seal, "_sec_item", sec_item)
-    return held, calls
+CHOOSE = ("turns", "--seal-key", "icloud-keychain", "--key-leaves-this-machine")
 
 
 def test_icloud_keychain_is_refused_until_the_disclosure_is_acknowledged(
-    kyo, project: Path, fake_icloud
+    kyo, project: Path, helper: Helper
 ) -> None:
     """The refusal states the disclosure and names the flag, and the flag clears it."""
-    held, calls = fake_icloud
     three_prompts(kyo, project)
     key = seal.load_key()
     refused = kyo("turns", "--seal-key", "icloud-keychain")
     assert refused.code == 64, refused
     assert "leaves this machine, end-to-end encrypted by iCloud Keychain" in refused.err
+    assert "copy also stays in a local store on this machine" in " ".join(refused.err.split())
     assert "--key-leaves-this-machine" in refused.err
-    assert not held and not calls and seal.recorded_choice() is None
-    assert seal.key_path().exists()
+    assert helper.held is None and not helper.operations and seal.recorded_choice() is None
 
-    chosen = kyo("turns", "--seal-key", "icloud-keychain", "--key-leaves-this-machine")
+    chosen = kyo(*CHOOSE)
     assert chosen.code == 0, chosen
     assert "leaves this machine, end-to-end encrypted by iCloud Keychain" in chosen.out
+    assert "the key was added to iCloud Keychain" in chosen.out
     assert seal.recorded_choice() == seal.STORE_ICLOUD
-    # The same key, stored as a synchronizable item, and gone from the file.
-    assert held[seal.KEYCHAIN_SERVICE] == key.hex().encode("ascii")
-    assert ("add", True) in calls
-    assert not seal.key_path().exists()
+    assert seal.local_store() == seal.STORE_FILE
+    # The same key is the item and stays in the local file the hooks read.
+    assert helper.held == key and seal.key_path().exists()
     assert seal.load_key() == key
+    # The key went on standard input, never in an argument.
+    assert helper.operations == ["seal-key read", "seal-key add", "seal-key read"]
     # Roots committed before the move still verify, and new lines commit with the key.
     prompt_hook(kyo, "aaaaaaaa-0000-4000-8000-000000000004", prompt="after the move")
     lines = index(project)
     assert seal.verify_message(key, lines[1], THREE_LINES)
     assert seal.verify_message(key, lines[-1], "after the move")
+    assert json.loads(seal.choice_path().read_text()) == {
+        "key_store": "icloud-keychain", "local": "file",
+    }  # fmt: skip
 
+    shown = kyo("turns", "--seal-key")
+    assert "kept in iCloud Keychain, with a copy in the file store" in shown.out, shown
+
+    # Choosing the file again keeps the local copy and leaves the item.
     back = kyo("turns", "--seal-key", "file")
-    assert back.code == 0 and not held, back
+    assert back.code == 0 and "the iCloud Keychain item is left" in back.out, back
+    assert helper.held == key and "delete" not in " ".join(helper.operations)
     assert seal.load_key() == key and seal.chosen_store() == seal.STORE_FILE
 
 
@@ -429,35 +470,171 @@ def test_the_acknowledgement_flag_belongs_to_icloud_keychain_only(kyo, project: 
 
 
 def test_a_store_that_does_not_keep_the_key_leaves_it_where_it_was(
-    kyo, project: Path, monkeypatch
+    kyo, project: Path, helper: Helper
 ) -> None:
     three_prompts(kyo, project)
     key = seal.load_key()
-    monkeypatch.setattr(seal, "_sec_item", lambda operation, key=None, **_: (-34018, None))
-    refused = kyo("turns", "--seal-key", "icloud-keychain", "--key-leaves-this-machine")
+    helper.refuse()
+    refused = kyo(*CHOOSE)
     assert refused.code == 1 and "stays where it was" in refused.err, refused
+    assert "OSStatus -34018" in refused.err and "iCloud Keychain refused" in refused.err
+    assert seal.recorded_choice() is None and seal.load_key() == key and helper.held is None
+
+
+def test_a_missing_helper_leaves_the_key_and_the_choice_as_they_were(
+    kyo, project: Path, monkeypatch, tmp_path: Path
+) -> None:
+    three_prompts(kyo, project)
+    key = seal.load_key()
+    monkeypatch.setenv(seal.HELPER_ENV, str(tmp_path / "absent" / "Kyosei"))
+    refused = kyo(*CHOOSE)
+    assert refused.code == 1 and "stays where it was" in refused.err, refused
+    assert "was not found" in refused.err and seal.HELPER_ENV in refused.err
     assert seal.recorded_choice() is None and seal.load_key() == key
+    # The remedy: the executable named where it can be found clears the refusal.
+    script = tmp_path / "Kyosei"
+    script.write_text(STUB)
+    script.chmod(0o755)
+    (tmp_path / "item-dir").mkdir()
+    monkeypatch.setenv("STUB_DIR", str(tmp_path / "item-dir"))
+    monkeypatch.setenv(seal.HELPER_ENV, str(script))
+    assert kyo(*CHOOSE).code == 0 and seal.recorded_choice() == seal.STORE_ICLOUD
+
+
+def test_the_helper_is_looked_for_in_the_applications_folders(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv(seal.HELPER_ENV, raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # The machine's own /Applications may hold the app; the first path is a stand-in.
+    system = tmp_path / "system" / "Kyosei.app/Contents/MacOS/Kyosei"
+    monkeypatch.setattr(seal, "HELPER_PATHS", (str(system), seal.HELPER_PATHS[1]))
+    with pytest.raises(seal.SealKeyError) as err:
+        seal._helper_path(None)
+    assert str(system) in str(err.value)
+    assert str(tmp_path / "Applications/Kyosei.app/Contents/MacOS/Kyosei") in str(err.value)
+    found = tmp_path / "Applications/Kyosei.app/Contents/MacOS/Kyosei"
+    found.parent.mkdir(parents=True)
+    found.write_text("#!/bin/sh\n")
+    found.chmod(0o755)
+    assert seal._helper_path(None) == str(found)
+
+
+def test_icloud_keychain_is_refused_off_macos(kyo, project: Path, monkeypatch) -> None:
+    three_prompts(kyo, project)
+    monkeypatch.delenv(seal.HELPER_ENV, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    refused = kyo(*CHOOSE)
+    assert refused.code == 1 and "macOS only" in refused.err, refused
+    assert seal.recorded_choice() is None
+
+
+def test_a_machine_with_no_key_fetches_the_item_into_its_local_store(
+    kyo, project: Path, helper: Helper
+) -> None:
+    helper.put(KEY)
+    fetched = kyo(*CHOOSE)
+    assert fetched.code == 0 and "fetched from iCloud Keychain" in fetched.out, fetched
+    assert seal.key_path().read_text().strip() == KEY.hex()
+    assert seal.load_key() == KEY and "add" not in " ".join(helper.operations)
+
+
+def test_a_machine_with_no_key_and_no_item_makes_one_in_both(
+    kyo, project: Path, helper: Helper
+) -> None:
+    made = kyo(*CHOOSE)
+    assert made.code == 0 and "a new key was made" in made.out, made
+    assert helper.held is not None and seal.load_key() == helper.held
+
+
+def test_a_machine_whose_key_differs_from_the_item_is_refused(
+    kyo, project: Path, helper: Helper
+) -> None:
+    three_prompts(kyo, project)
+    key = seal.load_key()
+    helper.put(KEY)
+    refused = kyo(*CHOOSE)
+    assert refused.code == 1 and "the two keys differ" in refused.err, refused
+    assert seal.recorded_choice() is None and seal.load_key() == key and helper.held == KEY
+
+
+def test_choosing_it_again_with_the_same_key_moves_nothing(
+    kyo, project: Path, helper: Helper
+) -> None:
+    three_prompts(kyo, project)
+    assert kyo(*CHOOSE).code == 0
+    before = list(helper.operations)
+    again = kyo(*CHOOSE)
+    assert again.code == 0 and "already hold the same key" in again.out, again
+    assert "add" not in " ".join(helper.operations[len(before):])
+
+
+def test_the_copy_stays_in_the_login_keychain_when_that_held_the_key(
+    kyo, project: Path, helper: Helper, temporary_keychain
+) -> None:
+    three_prompts(kyo, project)
+    key = seal.load_key()
+    assert kyo("turns", "--seal-key", "keychain").code == 0
+    assert kyo(*CHOOSE).code == 0
+    assert seal.local_store() == seal.STORE_KEYCHAIN and seal.load_key() == key
+    assert helper.held == key and not seal.key_path().exists()
+    assert json.loads(seal.choice_path().read_text())["local"] == "keychain"
+
+
+def test_a_record_in_the_old_form_is_read_with_the_file_as_its_copy(
+    kyo, project: Path, helper: Helper
+) -> None:
+    seal.choice_path().write_text(json.dumps({"key_store": "icloud-keychain"}) + "\n")
+    assert seal.chosen_store() == seal.STORE_ICLOUD and seal.local_store() == seal.STORE_FILE
+    seal._file_write(KEY, None)
+    assert seal.load_key() == KEY and not helper.operations
+
+
+def test_a_hook_on_a_machine_with_no_copy_chains_the_line_and_makes_no_key(
+    kyo, project: Path, helper: Helper
+) -> None:
+    """The hook must not fail the prompt, and must not make a key that differs from the
+    item; the error names the command that fetches the key, and running it clears it."""
+    opt_in_transcripts(project)
+    helper.put(KEY)
+    seal.record_choice(seal.STORE_ICLOUD, None, seal.STORE_FILE)
+    with pytest.raises(seal.SealKeyError, match="run `kyo turns --seal-key icloud-keychain"):
+        seal.load_key()
+    ran = prompt_hook(kyo, PROMPT_1, prompt="hello")
+    assert ran.code == 0 and ran.out == "", ran
+    (line,) = index(project)
+    assert line["seal"] == seal.SEAL_VERSION and line["root"] is None
+    assert not seal.key_path().exists() and not helper.operations
+
+    assert kyo(*CHOOSE).code == 0
+    assert seal.load_key() == KEY
+    prompt_hook(kyo, PROMPT_2, prompt="again")
+    assert seal.verify_message(KEY, index(project)[-1], "again")
 
 
 def test_a_key_store_that_cannot_be_read_still_chains_the_line(
-    kyo, project: Path, monkeypatch
+    kyo, project: Path, helper: Helper
 ) -> None:
-    """The hook must not fail the prompt: the line is chained and commits nothing."""
     opt_in_transcripts(project)
-    seal.record_choice(seal.STORE_ICLOUD)
-    monkeypatch.setattr(seal, "_sec_item", lambda operation, key=None, **_: (-34018, None))
+    seal.record_choice(seal.STORE_ICLOUD, None, seal.STORE_KEYCHAIN)
+    seal.key_path().unlink(missing_ok=True)
+    helper.refuse()
     ran = prompt_hook(kyo, PROMPT_1, prompt="hello")
     assert ran.code == 0 and ran.out == "", ran
     (line,) = index(project)
     assert line["seal"] == seal.SEAL_VERSION and line["root"] is None
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Security framework is macOS's")
-def test_the_security_framework_call_runs_and_finds_no_such_item() -> None:
-    """A read of a synchronizable item under a service name nothing uses: it exercises
-    the real ctypes call and writes nothing."""
-    status, data = seal._sec_item("read", service="dev.kyosei.seal-key.no-such-item")
-    assert (status, data) == (-25300, None)
+def test_an_item_that_appears_between_the_read_and_the_add_is_not_replaced(
+    kyo, project: Path, helper: Helper, monkeypatch
+) -> None:
+    """Exit 5 from `add`: the item exists, so nothing is recorded."""
+    three_prompts(kyo, project)
+    key = seal.load_key()
+    monkeypatch.setattr(seal, "_icloud_read", lambda environ: None)
+    helper.put(KEY)
+    with pytest.raises(seal.SealKeyError, match="already holds a seal key item"):
+        seal.move_key(seal.STORE_ICLOUD)
+    assert seal.recorded_choice() is None and seal.load_key() == key
 
 
 @pytest.fixture

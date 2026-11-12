@@ -50,12 +50,15 @@ recorded in ``$KYOSEI_HOME/seal.json``:
 - ``icloud-keychain``: a synchronizable generic password, which iCloud Keychain carries to
   the person's other Apple devices. The key then leaves this machine, end-to-end
   encrypted by iCloud Keychain. It is never chosen by default (:data:`ICLOUD_DISCLOSURE`).
+  The item is reached only through the signed Mac app's executable (:func:`_helper_run`),
+  because a synchronizable item needs an entitlement that an unsigned Python process
+  cannot carry (KYO-789). A copy of the key also stays in ``file`` or ``keychain`` on each
+  machine, which the hooks read, so a hook never depends on the app; ``seal.json`` records
+  which of the two holds the copy.
 """
 
 from __future__ import annotations
 
-import ctypes
-import ctypes.util
 import hashlib
 import hmac
 import json
@@ -99,8 +102,21 @@ KEYCHAIN_ACCOUNT = "seal-key"
 ICLOUD_DISCLOSURE = (
     "With icloud-keychain the seal key is stored as a synchronizable keychain item, and "
     "iCloud Keychain copies it to the other Apple devices signed in to the same account. "
+    "A copy also stays in a local store on this machine, which the hooks read. "
     "The key then leaves this machine, end-to-end encrypted by iCloud Keychain."
 )
+
+#: The local stores that hold the copy the hooks read when the choice is icloud-keychain.
+LOCAL_STORES = (STORE_FILE, STORE_KEYCHAIN)
+
+#: Names the executable that reaches the synchronizable item, instead of the search below.
+HELPER_ENV = "KYOSEI_SEAL_HELPER"
+HELPER_PATHS = (
+    "/Applications/Kyosei.app/Contents/MacOS/Kyosei",
+    "~/Applications/Kyosei.app/Contents/MacOS/Kyosei",
+)
+#: The command that fetches the key, which a refusal names as the remedy.
+FETCH_COMMAND = "kyo turns --seal-key icloud-keychain --key-leaves-this-machine"
 
 _SECURITY_TIMEOUT = 10
 
@@ -305,13 +321,17 @@ def choice_path(environ: Mapping[str, str] | None = None) -> Path:
     return store_home(dict(environ) if environ is not None else None) / CHOICE_FILE
 
 
-def recorded_choice(environ: Mapping[str, str] | None = None) -> str | None:
-    """The key store the person chose on this machine, or None when none is recorded."""
+def _recorded(environ: Mapping[str, str] | None) -> dict:
     try:
         data = json.loads(choice_path(environ).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    choice = data.get("key_store") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def recorded_choice(environ: Mapping[str, str] | None = None) -> str | None:
+    """The key store the person chose on this machine, or None when none is recorded."""
+    choice = _recorded(environ).get("key_store")
     return choice if choice in KEY_STORES else None
 
 
@@ -320,13 +340,30 @@ def chosen_store(environ: Mapping[str, str] | None = None) -> str:
     return recorded_choice(environ) or STORE_FILE
 
 
-def record_choice(store: str, environ: Mapping[str, str] | None = None) -> None:
+def local_store(environ: Mapping[str, str] | None = None) -> str:
+    """The store on this machine that holds the key the hooks read: the chosen store, or,
+    when that is ``icloud-keychain``, the local store recorded beside it (the file for a
+    record written before the copy was recorded)."""
+    store = chosen_store(environ)
+    if store != STORE_ICLOUD:
+        return store
+    local = _recorded(environ).get("local")
+    return local if local in LOCAL_STORES else STORE_FILE
+
+
+def record_choice(
+    store: str, environ: Mapping[str, str] | None = None, local: str | None = None
+) -> None:
+    """Record the choice; with ``icloud-keychain``, ``local`` names the store of the copy."""
     if store not in KEY_STORES:
         raise ValueError(f"unknown key store {store!r}")
+    body: dict[str, str] = {"key_store": store}
+    if store == STORE_ICLOUD:
+        body["local"] = local if local in LOCAL_STORES else STORE_FILE
     path = choice_path(environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps({"key_store": store}) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(body) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -431,135 +468,78 @@ def _keychain_delete(environ: Mapping[str, str] | None) -> None:
     )
 
 
-# iCloud Keychain, through the Security framework
+# iCloud Keychain, through the signed Mac app's executable
 
-_ERR_ITEM_NOT_FOUND = -25300
-_UTF8 = 0x08000100
+_HELPER_NO_ITEM = 3
+_HELPER_REFUSED = 4
+_HELPER_EXISTS = 5
+_HELPER_TIMEOUT = 10
 
 
-def _sec_item(
-    operation: str,
-    key: bytes | None = None,
-    *,
-    synchronizable: bool = True,
-    service: str = KEYCHAIN_SERVICE,
-):
-    """One Security framework call on the synchronizable seal-key item.
-
-    ``operation`` is ``read``, ``add`` or ``delete``; returns ``(status, data)``. This is
-    the seam the tests replace: ``security`` cannot address synchronizable items, so the
-    calls go through :mod:`ctypes`, and a real ``add`` would write to the account's
-    iCloud Keychain.
-    """
-    if sys.platform != "darwin":
+def _helper_path(environ: Mapping[str, str] | None) -> str:
+    named = (environ if environ is not None else os.environ).get(HELPER_ENV)
+    if named:
+        candidates = [named]
+    elif sys.platform != "darwin":
         raise SealKeyError("the keychain stores exist on macOS only")
-    void = ctypes.c_void_p
-    cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
-    sec = ctypes.CDLL(ctypes.util.find_library("Security"))
-    cf.CFStringCreateWithCString.restype = void
-    cf.CFStringCreateWithCString.argtypes = [void, ctypes.c_char_p, ctypes.c_uint32]
-    cf.CFDataCreate.restype = void
-    cf.CFDataCreate.argtypes = [void, ctypes.c_char_p, ctypes.c_long]
-    cf.CFDataGetLength.restype = ctypes.c_long
-    cf.CFDataGetLength.argtypes = [void]
-    cf.CFDataGetBytePtr.restype = ctypes.POINTER(ctypes.c_ubyte)
-    cf.CFDataGetBytePtr.argtypes = [void]
-    cf.CFDictionaryCreateMutable.restype = void
-    cf.CFDictionaryCreateMutable.argtypes = [void, ctypes.c_long, void, void]
-    cf.CFDictionarySetValue.argtypes = [void, void, void]
-    cf.CFRelease.argtypes = [void]
-    for name in ("SecItemCopyMatching", "SecItemAdd"):
-        getattr(sec, name).restype = ctypes.c_int32
-        getattr(sec, name).argtypes = [void, ctypes.POINTER(void)]
-    sec.SecItemDelete.restype = ctypes.c_int32
-    sec.SecItemDelete.argtypes = [void]
-
-    def constant(library, name: str):
-        return void.in_dll(library, name)
-
-    def string(text: str):
-        return cf.CFStringCreateWithCString(None, text.encode("utf-8"), _UTF8)
-
-    owned = [string(service), string(KEYCHAIN_ACCOUNT)]
-    query = cf.CFDictionaryCreateMutable(
-        None,
-        0,
-        ctypes.addressof(ctypes.c_char.in_dll(cf, "kCFTypeDictionaryKeyCallBacks")),
-        ctypes.addressof(ctypes.c_char.in_dll(cf, "kCFTypeDictionaryValueCallBacks")),
+    else:
+        candidates = [os.path.expanduser(path) for path in HELPER_PATHS]
+    for path in candidates:
+        if os.access(path, os.X_OK) and os.path.isfile(path):
+            return path
+    raise SealKeyError(
+        "the Kyosei Mac app's executable, which reaches iCloud Keychain, was not found at "
+        + " or ".join(candidates)
+        + f"; install the signed Mac app there, or name its executable in ${HELPER_ENV}"
     )
-    true = constant(cf, "kCFBooleanTrue")
-    cf.CFDictionarySetValue(
-        query, constant(sec, "kSecClass"), constant(sec, "kSecClassGenericPassword")
-    )
-    cf.CFDictionarySetValue(query, constant(sec, "kSecAttrService"), owned[0])
-    cf.CFDictionarySetValue(query, constant(sec, "kSecAttrAccount"), owned[1])
-    if synchronizable:
-        cf.CFDictionarySetValue(query, constant(sec, "kSecAttrSynchronizable"), true)
+
+
+def _helper_run(
+    operation: str, environ: Mapping[str, str] | None, stdin: str | None = None
+) -> subprocess.CompletedProcess:
+    """Run ``<app executable> seal-key <operation>``. The key goes on standard input and
+    never in an argument, which another process could read from the process table."""
+    path = _helper_path(environ)
     try:
-        if operation == "read":
-            cf.CFDictionarySetValue(query, constant(sec, "kSecReturnData"), true)
-            found = void()
-            status = sec.SecItemCopyMatching(query, ctypes.byref(found))
-            if status != 0 or not found.value:
-                return status, None
-            length = cf.CFDataGetLength(found)
-            data = bytes(cf.CFDataGetBytePtr(found)[:length])
-            cf.CFRelease(found)
-            return status, data
-        if operation == "add":
-            if key is None:
-                raise ValueError("add needs the key")
-            payload = key.hex().encode("ascii")
-            data_ref = cf.CFDataCreate(None, payload, len(payload))
-            owned.append(data_ref)
-            cf.CFDictionarySetValue(query, constant(sec, "kSecValueData"), data_ref)
-            # A synchronizable item cannot be bound to this device, so the accessibility
-            # class is the one without "ThisDeviceOnly".
-            cf.CFDictionarySetValue(
-                query,
-                constant(sec, "kSecAttrAccessible"),
-                constant(sec, "kSecAttrAccessibleAfterFirstUnlock"),
-            )
-            return sec.SecItemAdd(query, None), None
-        if operation == "delete":
-            return sec.SecItemDelete(query), None
-        raise ValueError(f"unknown operation {operation!r}")
-    finally:
-        for ref in owned:
-            cf.CFRelease(ref)
-        cf.CFRelease(query)
+        return subprocess.run(  # noqa: S603 - the app's own executable, no shell
+            [path, "seal-key", operation],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=_HELPER_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SealKeyError(f"the Kyosei Mac app's executable did not answer: {exc}") from exc
+
+
+def _helper_refusal(result: subprocess.CompletedProcess, what: str) -> SealKeyError:
+    detail = (result.stderr or "").strip() or f"exit {result.returncode}"
+    if result.returncode == _HELPER_REFUSED:
+        return SealKeyError(f"iCloud Keychain refused {what}: {detail}")
+    return SealKeyError(f"the Kyosei Mac app's executable failed to {what}: {detail}")
 
 
 def _icloud_read(environ: Mapping[str, str] | None) -> bytes | None:
-    status, data = _sec_item("read")
-    if status == _ERR_ITEM_NOT_FOUND:
+    result = _helper_run("read", environ)
+    if result.returncode == _HELPER_NO_ITEM:
         return None
-    if status != 0 or data is None:
-        raise SealKeyError(
-            f"the synchronizable keychain did not give the seal key (OSStatus {status})"
-        )
-    return _decode(data.decode("ascii", errors="replace"), "the synchronizable keychain item")
+    if result.returncode != 0:
+        raise _helper_refusal(result, "read the seal key")
+    return _decode(result.stdout, "the iCloud Keychain item")
 
 
 def _icloud_write(key: bytes, environ: Mapping[str, str] | None) -> None:
-    status, _ = _sec_item("add", key)
-    if status != 0:
-        raise SealKeyError(
-            f"the synchronizable keychain did not take the seal key (OSStatus {status})"
-        )
-
-
-def _icloud_delete(environ: Mapping[str, str] | None) -> None:
-    _sec_item("delete")
+    result = _helper_run("add", environ, stdin=key.hex() + "\n")
+    if result.returncode == _HELPER_EXISTS:
+        raise SealKeyError("iCloud Keychain already holds a seal key item, and it was not replaced")
+    if result.returncode != 0:
+        raise _helper_refusal(result, "take the seal key")
 
 
 _READ = {STORE_FILE: _file_read, STORE_KEYCHAIN: _keychain_read, STORE_ICLOUD: _icloud_read}
 _WRITE = {STORE_FILE: _file_write, STORE_KEYCHAIN: _keychain_write, STORE_ICLOUD: _icloud_write}
-_DELETE = {
-    STORE_FILE: _file_delete,
-    STORE_KEYCHAIN: _keychain_delete,
-    STORE_ICLOUD: _icloud_delete,
-}
+_DELETE = {STORE_FILE: _file_delete, STORE_KEYCHAIN: _keychain_delete}
 
 
 def read_key(store: str, environ: Mapping[str, str] | None = None) -> bytes | None:
@@ -568,15 +548,23 @@ def read_key(store: str, environ: Mapping[str, str] | None = None) -> bytes | No
 
 
 def load_key(environ: Mapping[str, str] | None = None) -> bytes:
-    """The seal key from the chosen store, made there on first use.
+    """The seal key from the local store, made there on first use.
+
+    With ``icloud-keychain`` chosen the local store holds the copy, and a machine with no
+    copy makes no key: a second key would differ from the one in iCloud Keychain.
 
     Raises :class:`SealKeyError` when the store cannot be read or written; the caller
     then writes its line chained and uncommitted, since a salt cannot be made.
     """
-    store = chosen_store(environ)
+    store = local_store(environ)
     key = read_key(store, environ)
     if key is not None:
         return key
+    if chosen_store(environ) == STORE_ICLOUD:
+        raise SealKeyError(
+            f"iCloud Keychain is chosen and the {store} store on this machine holds no copy "
+            f"of the seal key; run `{FETCH_COMMAND}` to fetch it"
+        )
     _WRITE[store](secrets.token_bytes(KEY_BYTES), environ)
     # Read back rather than trust what was generated: when two hooks run at once, the
     # one that lost the race to create the key must use the winner's.
@@ -591,16 +579,24 @@ def move_key(target: str, environ: Mapping[str, str] | None = None) -> str:
 
     The key is copied, read back from ``target`` and only then removed from where it
     was, so that roots already committed stay reproducible and a failed move loses
-    nothing. With no key anywhere, one is made in ``target``.
+    nothing. With no key anywhere, one is made in ``target``. For ``icloud-keychain`` the
+    key is added to the item or fetched from it, the local copy stays where it is, and a
+    machine whose key differs from the item's is refused. Leaving ``icloud-keychain`` keeps
+    the local copy and never deletes the item, which other machines may rely on.
     """
     if target not in KEY_STORES:
         raise ValueError(f"unknown key store {target!r}")
-    current = chosen_store(environ)
+    if target == STORE_ICLOUD:
+        return _adopt_icloud(environ)
+    current = local_store(environ)
+    left_icloud = chosen_store(environ) == STORE_ICLOUD
     held = read_key(target, environ)
     if current == target:
         if held is None:
             _WRITE[target](secrets.token_bytes(KEY_BYTES), environ)
             done = "a new key was made there"
+        elif left_icloud:
+            done = "the local copy of the key is kept, and the iCloud Keychain item is left"
         else:
             done = "the key was already there"
     else:
@@ -626,7 +622,49 @@ def move_key(target: str, environ: Mapping[str, str] | None = None) -> str:
                 )
             _DELETE[current](environ)
             done = f"the key was moved from the {current} store"
+            if left_icloud:
+                done += ", and the iCloud Keychain item is left"
     if read_key(target, environ) is None:
         raise SealKeyError(f"the {target} key store did not keep the seal key")
     record_choice(target, environ)
+    return done
+
+
+def _adopt_icloud(environ: Mapping[str, str] | None) -> str:
+    """Make iCloud Keychain the key store, with the local copy where it is."""
+    local = local_store(environ)
+    held = read_key(local, environ)
+    item = _icloud_read(environ)
+    if held is not None and item is not None:
+        if held != item:
+            raise SealKeyError(
+                f"the two keys differ: the iCloud Keychain item holds a different seal key "
+                f"from the one in the {local} store on this machine, and neither was changed"
+            )
+        done = f"the item and the {local} store already hold the same key"
+    elif held is not None:
+        _icloud_write(held, environ)
+        if _icloud_read(environ) != held:
+            raise SealKeyError(
+                "iCloud Keychain did not return the key it was given; the key stays in "
+                f"the {local} store and nothing was recorded"
+            )
+        done = f"the key was added to iCloud Keychain, and the copy stays in the {local} store"
+    elif item is not None:
+        _WRITE[local](item, environ)
+        if read_key(local, environ) != item:
+            raise SealKeyError(
+                f"the {local} store did not keep the key fetched from iCloud Keychain"
+            )
+        done = f"the key was fetched from iCloud Keychain into the {local} store"
+    else:
+        key = secrets.token_bytes(KEY_BYTES)
+        _icloud_write(key, environ)
+        if _icloud_read(environ) != key:
+            raise SealKeyError(
+                "iCloud Keychain did not return the key it was given; nothing was recorded"
+            )
+        _WRITE[local](key, environ)
+        done = f"a new key was made, added to iCloud Keychain and copied to the {local} store"
+    record_choice(STORE_ICLOUD, environ, local)
     return done
