@@ -271,3 +271,76 @@ test("in a file, the phrase is found in the lines as they are drawn", async (t) 
   assert.equal(found.count, "1 of 1");
   assert.deepEqual(found.current, [PHRASE]);
 });
+
+// ---- an ended session's chat (KYO-838): drawn dimmed, and its hits marked as strongly as a live one's
+
+interface Marks { count: string; stepped: string; current: string; found: number[]; lit: number[]; bare: number[] }
+
+/** Searches a chat whose session is live or has ended, steps once, and reads the colours the marks are painted in. */
+async function chatMarks(opened: Page, live: boolean): Promise<Marks> {
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "t", live: ${live}, first_seen: "2026-01-01T00:00:00Z",
+        ended_at: ${live ? "null" : '"2026-01-02T00:00:00Z"'}, remote_control_url: null },
+    ] } });
+    window.kyo.apply({ reset: true,
+      turns: [{ id: "u1", at: "2026-01-01T00:00:00Z", text: "Open a record, with care." }],
+      replies: [{ message_id: "m1", uuid: "x1", at: "2026-01-01T00:00:01Z",
+        text: "A search of a record reads its page. A record stays." }] });
+    window.kyo.find();
+  })()`);
+  const found = await search(opened, "record");
+  await opened.run(`document.getElementById("find-field").focus()`);
+  await opened.press("Enter");
+  const shot = await opened.shot();
+  const read = await opened.run<Omit<Marks, "count">>(`new Promise((done) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      // The colour most of a box is painted in: the mark behind the letters, not the letters.
+      const colour = (box) => {
+        const seen = new Map();
+        const data = context.getImageData(Math.ceil(box.left), Math.ceil(box.top), Math.floor(box.width), Math.floor(box.height)).data;
+        for (let at = 0; at < data.length; at += 4) {
+          const key = data[at] + "," + data[at + 1] + "," + data[at + 2];
+          seen.set(key, (seen.get(key) ?? 0) + 1);
+        }
+        return [...seen].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
+      };
+      const current = [...CSS.highlights.get("found-current")][0];
+      const reply = document.querySelector('#chat [data-key^="r:"]').getBoundingClientRect();
+      done({
+        stepped: document.getElementById("find-count").textContent,
+        current: current.toString(),
+        found: colour([...CSS.highlights.get("found")][0].getBoundingClientRect()),
+        lit: colour(current.getBoundingClientRect()),
+        bare: colour({ left: reply.left, top: reply.bottom + 2, width: 40, height: 4 }),
+      });
+    };
+    image.src = "data:image/png;base64,${shot}";
+  })`);
+  return { count: found.count, ...read };
+}
+
+test("in the chat of an ended session, which is dimmed, the hits are marked and stepped to as in a live one", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const live = await chatMarks(page, true);
+  const ended = await chatMarks(page, false);
+  assert.equal(await page.run(`document.body.classList.contains("ended")`), true);
+  assert.equal(await page.run(`getComputedStyle(document.getElementById("chat")).opacity`), "0.55");
+  assert.deepEqual([ended.count, ended.stepped, ended.current], ["1 of 3", "2 of 3", "record"]);
+  assert.deepEqual([live.count, live.stepped, live.current], ["1 of 3", "2 of 3", "record"]);
+  // The marks are painted, in the live chat, in colours that are not the page's.
+  const apart = (one: number[], other: number[]) => Math.max(...one.map((value, at) => Math.abs(value - other[at])));
+  assert.ok(apart(live.found, live.bare) > 4 && apart(live.lit, live.found) > 4, JSON.stringify(live));
+  // And in the ended one in the same colours, to within the rounding of a channel.
+  assert.ok(apart(ended.found, live.found) <= 2, `a hit: ${ended.found} ended, ${live.found} live`);
+  assert.ok(apart(ended.lit, live.lit) <= 2, `the current hit: ${ended.lit} ended, ${live.lit} live`);
+  assert.deepEqual(ended.bare, live.bare);
+});

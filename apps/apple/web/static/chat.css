@@ -775,6 +775,10 @@ body.anchor-mode.anchor-off, body.anchor-mode.anchor-off * { cursor: var(--ancho
 /* KYO-717: a session that has ended is shown dimmed; the text stays selectable. */
 body.ended #chat,
 body.ended #live { opacity: 0.55; }
+/* KYO-838: the dimming also thins a search hit's mark, to where it is not seen. Each mark is
+   made stronger by the same factor (16% and 42%, over 0.55), so it is painted as in a live chat. */
+body.ended #chat ::highlight(found) { background-color: color-mix(in srgb, var(--pastel-blue) 29.09%, transparent); }
+body.ended #chat ::highlight(found-current) { background-color: color-mix(in srgb, var(--pastel-blue) 76.36%, transparent); }
 .copy-code .icon { width: 16px; height: 16px; vertical-align: 0; }
 
 /* ------------------------------------------------------------------ the views (KYO-732) */
