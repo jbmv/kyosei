@@ -422,6 +422,9 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-879` (task) — The Stop hook commits a split store, one commit a turn
+- **2026-11-12** — `KYO-878` (task) — kyo discuss close --produced names what a discussion led to
+- **2026-11-12** — `KYO-877` (task) — kyo move takes several records as one act with one commit
 - **2026-11-12** — `KYO-876` (task) — The discussion check asks at the next prompt, not at the stop, and a closing question does not fire it
 - **2026-11-12** — `KYO-875` (task) — The session list's hook lines and the brief's rules print only when they change
 - **2026-11-12** — `KYO-874` (task) — Write commands print a receipt when output is not a terminal
