@@ -321,7 +321,7 @@ const sources = new Map<string, string>();
 
 const imageData = new Map<string, string>();
 
-function drawImage(turn: Turn, index: number): HTMLElement {
+function drawImage(turn: Turn, index: number, session?: string): HTMLElement {
   const key = `${turn.id}/${index}`;
   const image = document.createElement("img");
   image.className = "turn-image";
@@ -330,7 +330,8 @@ function drawImage(turn: Turn, index: number): HTMLElement {
     image.src = data;
   } else {
     image.dataset.image = key;
-    (window as any).webkit?.messageHandlers?.image?.postMessage({ turn: turn.id, index });
+    // The History reader names its session; the chat's images are the live session's.
+    post("image", session ? { turn: turn.id, index, session } : { turn: turn.id, index });
   }
   return image;
 }
@@ -432,10 +433,10 @@ function drawChipWords(words: string): Node[] {
   });
 }
 
-function drawTurn(turn: Turn): HTMLElement {
+function drawTurn(turn: Turn, session?: string): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
-  for (const { index } of turn.images ?? []) element.append(drawImage(turn, index));
+  for (const { index } of turn.images ?? []) element.append(drawImage(turn, index, session));
   // The line the server puts above an anchored paragraph is drawn as a chip. The text
   // around it stays as it was sent, which is what an anchor on this prompt measures against.
   let plain: string[] = [];
@@ -4657,6 +4658,17 @@ function drawRecordLists(): void {
   recordsList.hidden = !searching;
   recordsHistoryList.hidden = searching;
   document.getElementById("records-history-head")!.hidden = searching;
+  // KYO-846: the records awaiting the person, above History, so they can be gone through
+  // without returning to the home page. Nothing is shown for the group when none waits.
+  const waiting = searching ? [] : rowsNewestFirst().filter((row) => awaitingRecords.has(row.id));
+  const awaitingList = document.getElementById("records-awaiting")!;
+  awaitingList.hidden = !waiting.length;
+  document.getElementById("records-awaiting-head")!.hidden = !waiting.length;
+  fill(awaitingList, waiting.map((row) => {
+    const item = recordRow(row, "side");
+    item.classList.toggle("current", row.id === openRecordId);
+    return item;
+  }));
   if (searching) fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
   else {
     fill(
@@ -4743,7 +4755,8 @@ recordsGroups.addEventListener("click", (event) => {
 });
 
 /** The open record's outline in the right drawer: its sections, each listing its items. */
-const openOutline = new Set<string>();
+/** The sections the person folded; every other one lists its items (KYO-846). */
+const foldedOutline = new Set<string>();
 function drawRecordOutline(): void {
   const holder = document.getElementById("record-outline")!;
   if (openRecordId === null || !openRecordDoc) {
@@ -4767,7 +4780,7 @@ function drawRecordOutline(): void {
     }
     const line = document.createElement("div");
     line.className = "outline-section";
-    if (openOutline.has(name)) line.classList.add("open");
+    if (!foldedOutline.has(name)) line.classList.add("open");
     const caret = span("chevron", items.length ? "›" : "");
     const label = document.createElement("div");
     label.className = "outline-row";
@@ -4776,7 +4789,7 @@ function drawRecordOutline(): void {
     line.append(caret, label);
     const list = document.createElement("div");
     list.className = "outline-items";
-    list.hidden = !openOutline.has(name);
+    list.hidden = foldedOutline.has(name);
     for (const item of items) {
       const row = document.createElement("div");
       row.className = "outline-row";
@@ -4788,10 +4801,10 @@ function drawRecordOutline(): void {
       list.append(row);
     }
     caret.addEventListener("click", () => {
-      if (openOutline.has(name)) openOutline.delete(name);
-      else openOutline.add(name);
-      line.classList.toggle("open", openOutline.has(name));
-      list.hidden = !openOutline.has(name);
+      if (foldedOutline.has(name)) foldedOutline.delete(name);
+      else foldedOutline.add(name);
+      line.classList.toggle("open", !foldedOutline.has(name));
+      list.hidden = foldedOutline.has(name);
     });
     rows.push(line, list);
   }
@@ -6954,8 +6967,8 @@ function drawReader(turns: Turn[], replies: Reply[]): void {
   readerElements.clear();
   readerTurns = turns;
   const items = [
-    ...turns.filter((turn) => turn.text?.trim()).map((turn) => ({ at: turn.at, key: `t:${turn.id}`, uuid: turn.id, person: true,
-      draw: () => drawTurn({ ...turn, images: [] }), text: turn.text })),
+    ...turns.filter((turn) => turn.text?.trim() || turn.images?.length).map((turn) => ({ at: turn.at, key: `t:${turn.id}`, uuid: turn.id, person: true,
+      draw: () => drawTurn(turn, readerSession ?? undefined), text: turn.text })),
     ...replies.filter((reply) => reply.text?.trim()).map((reply) => ({ at: reply.at, key: `r:${reply.message_id}`, uuid: reply.uuid ?? "", person: false,
       draw: () => drawReply({ ...reply, thinking: null }), text: reply.text })),
   ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -6999,6 +7012,17 @@ function drawAttachments(): void {
   setKind("history-attachments", rows);
 }
 
+/**
+ * Where a sent anchor is in the reader. The server gives a reply's anchor its `message`, as
+ * the chat keys a reply, and a prompt's its record `uuid`; one whose place was lost has the
+ * record's uuid alone, which `readerElement` still finds.
+ */
+function anchorPlace(anchor: SentMark["anchors"][number]): Pick<ReaderPlace, "message" | "key"> {
+  return anchor.message
+    ? { message: anchor.message, key: `r:${anchor.message}` }
+    : { message: anchor.uuid ?? "", key: `t:${anchor.uuid ?? ""}` };
+}
+
 /** The session's sent tags and anchors, each opening the place it belongs to. */
 function drawReaderMarks(marks: SentMark[]): void {
   const byTag = new Map<string, SentMark[]>();
@@ -7007,18 +7031,17 @@ function drawReaderMarks(marks: SentMark[]): void {
     for (const tag of mark.tags ?? []) byTag.set(tag, [...(byTag.get(tag) ?? []), mark]);
     for (const anchor of mark.anchors ?? []) {
       if (anchor.kind && anchor.kind !== "turn") continue;
-      const key = anchor.role === "assistant" && anchor.message ? `r:${anchor.message}` : `t:${anchor.uuid ?? anchor.message ?? ""}`;
+      const reply = anchor.message !== undefined || (anchor.role !== undefined && anchor.role !== "person");
       anchors.push(sideRow(
         firstWords((mark.text ?? mark.note ?? "").trim() || "(no words)", 8),
-        anchor.role === "assistant" ? "on a reply" : "on a prompt",
-        () => revealInReader({ message: anchor.uuid ?? anchor.message ?? "", key })));
+        reply ? "on a reply" : "on a prompt",
+        () => revealInReader(anchorPlace(anchor))));
     }
   }
   const tags = [...byTag].sort(([a], [b]) => a.localeCompare(b)).map(([tag, found]) => {
     const first = found[0].anchors?.find((anchor) => !anchor.kind || anchor.kind === "turn");
-    const key = first?.role === "assistant" && first.message ? `r:${first.message}` : `t:${first?.uuid ?? first?.message ?? ""}`;
     return sideRow(`#${tag}`, `${found.length} ${found.length === 1 ? "note" : "notes"}`,
-      () => revealInReader({ message: first?.uuid ?? first?.message ?? "", key }));
+      () => { if (first) revealInReader(anchorPlace(first)); });
   });
   setKind("history-tags", tags);
   setKind("history-anchors", anchors);

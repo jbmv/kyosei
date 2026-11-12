@@ -1166,6 +1166,8 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 .home-group:not(.open) .home-group-body { display: none; }
 .home-more { margin: 4px 0 0; }
 #records-list[hidden], #records-history[hidden], #records-history-head[hidden] { display: none; }
+#records-awaiting { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#records-awaiting[hidden], #records-awaiting-head[hidden] { display: none; }
 /* The outline of an open record: its sections, each with a caret that lists its items. */
 .outline-section { display: flex; align-items: baseline; gap: 6px; }
 .outline-section .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; cursor: default; }

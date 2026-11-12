@@ -31,21 +31,34 @@ test("the outline names the record's sections, lists a section's items on its ca
     return document.body.classList.contains("has-outline");
   })()`);
   assert.equal(before, false, "no outline on the home page");
-  const outline = await page.run<{ shown: boolean; rows: string[]; items: string[] }>(`(() => {
+  const outline = await page.run<{ shown: boolean; rows: string[]; items: string[]; open: boolean; folded: boolean; kept: boolean }>(`(() => {
     const row = document.querySelector('#records-groups [data-open="KYO-9"]');
     row.click();
     window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
     const section = [...document.querySelectorAll("#record-outline .outline-section")]
       .find((line) => line.textContent.includes("Criteria"));
+    // KYO-846: a section lists its items without a press, and one the person folds stays
+    // folded when the record is drawn again.
+    const open = !section.nextElementSibling.hidden;
+    const items = [...section.nextElementSibling.querySelectorAll(".outline-row")].map((line) => line.textContent);
     section.querySelector(".chevron").click();
+    const folded = section.nextElementSibling.hidden;
+    window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
+    const again = [...document.querySelectorAll("#record-outline .outline-section")]
+      .find((line) => line.textContent.includes("Criteria"));
+    const others = [...document.querySelectorAll("#record-outline .outline-items")].filter((list) => list !== again.nextElementSibling);
     return {
+      open, folded, items,
+      kept: again.nextElementSibling.hidden && others.every((list) => !list.hidden),
       shown: document.body.classList.contains("has-outline"),
       rows: [...document.querySelectorAll("#record-outline > .outline-row, #record-outline .outline-section .outline-row")]
         .map((line) => line.textContent),
-      items: [...section.nextElementSibling.querySelectorAll(".outline-row")].map((line) => line.textContent),
     };
   })()`);
   assert.equal(outline.shown, true);
+  assert.equal(outline.open, true, "a section's items show without a press");
+  assert.equal(outline.folded, true, "the caret folds it");
+  assert.equal(outline.kept, true, "it stays folded when the record is drawn again, the others open");
   assert.equal(outline.rows[0], "KYO-9");
   assert.ok(outline.rows.some((row) => row.startsWith("Criteria")), outline.rows.join(" | "));
   assert.deepEqual(outline.items.length, 2);

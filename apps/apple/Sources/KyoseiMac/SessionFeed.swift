@@ -1284,13 +1284,14 @@ final class SessionFeed {
     }
 
     /// Fetches one of the person's images for the page, which may load only its own files.
-    func loadImage(turn: String, index: Int) {
-        guard let session = current else { return }
+    /// The History reader names the session it is reading (KYO-845), which need not be the live one.
+    func loadImage(turn: String, index: Int, session named: String? = nil) {
+        guard let session = named ?? current else { return }
         Task {
             guard
                 let image = try? await client.image(
                     project: project, session: session, turn: turn, index: index),
-                session == current
+                named != nil || session == current
             else { return }
             let data = "data:\(image.mediaType);base64,\(image.data.base64EncodedString())"
             let key = "\(turn)/\(index)"

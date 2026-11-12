@@ -100,11 +100,12 @@ test("a press on a block opens the session in History, never in the chat, at the
   const read = await page.run<{ reader: boolean; lit: string | null; outline: string[]; tags: string[]; selected: boolean; nav: boolean }>(`(() => {
     const ask = window.posted.filter((p) => p.body.want === "turns").pop().body.ask;
     window.kyo.historyTurns({ ask, session: "S1", status: 200, document: {
-      turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?" }],
+      turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?", images: [{ index: 0 }] }],
       replies: [{ message_id: "msg_1", uuid: "x-1", at: "2026-01-01T00:00:01Z", text: "The anchor mode builds on right-click." }],
       tool_calls: [{ call_id: "c1", uuid: "y1", at: "2026-01-01T00:00:02Z", name: "Bash", input: {}, result: null }] } });
     window.kyo.historyMarks({ ask, session: "S1", status: 200, document: { marks: [
-      { note: "n1", text: "Look here", tags: ["layout"], anchors: [{ role: "assistant", message: "msg_1" }] } ] } });
+      { note: "n1", text: "Look here", tags: ["layout"], anchors: [{ role: "agent", message: "msg_1", start: 0, end: 3 }] },
+      { note: "n2", text: "And here", tags: [], anchors: [{ role: "person", uuid: "u-1", start: 0, end: 3 }] } ] } });
     return {
       reader: !document.getElementById("history-reader").hidden && document.getElementById("history-home-page").hidden,
       lit: document.querySelector("#history-reader .history-flash")?.dataset.hkey ?? null,
@@ -121,6 +122,32 @@ test("a press on a block opens the session in History, never in the chat, at the
   assert.deepEqual(read.tags, ["#layout"]);
   assert.equal(read.selected, true, "the chat is untouched");
   assert.equal(read.nav, true, "Home returns to the results");
+  // KYO-845: the drawer's rows open their places, with the anchors as the server gives them
+  // (a reply's by role agent and its message, a prompt's by its uuid), and the reader asks for
+  // a prompt's image by the session it reads.
+  const drawer = await page.run<{ places: string[]; lit: (string | null)[]; image: unknown; shown: number; attachments: string[] }>(`(() => {
+    // The outline marks the one message last opened; several may still be fading.
+    const lit = () => document.querySelector("#history-outline .outline-row.current")?.dataset.key ?? null;
+    const rows = [...document.querySelectorAll("#history-anchors .mention-row")];
+    const seen = [];
+    for (const row of [...rows].reverse()) { row.click(); seen.push(lit()); }
+    document.querySelector("#history-tags .mention-row").click();
+    seen.push(lit());
+    document.querySelector("#history-attachments .mention-row").click();
+    seen.push(lit());
+    return {
+      places: rows.map((row) => row.querySelector(".mention-place").textContent),
+      lit: seen,
+      image: window.posted.filter((p) => p.name === "image").pop()?.body ?? null,
+      shown: document.querySelectorAll("#history-reader .turn .turn-image").length,
+      attachments: [...document.querySelectorAll("#history-attachments .mention-name")].map((e) => e.textContent),
+    };
+  })()`);
+  assert.deepEqual(drawer.places, ["on a reply", "on a prompt"]);
+  assert.deepEqual(drawer.lit, ["t:u-1", "r:msg_1", "r:msg_1", "t:u-1"], "the prompt's anchor, the reply's, the tag, the attachment");
+  assert.deepEqual(drawer.image, { turn: "u-1", index: 0, session: "S1" });
+  assert.equal(drawer.shown, 1, "the prompt's image is drawn in the reader");
+  assert.deepEqual(drawer.attachments, ["1 image"]);
   const back = await page.run<{ results: number; reader: boolean }>(`(() => {
     document.getElementById("history-home").click();
     return {

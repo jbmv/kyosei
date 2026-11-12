@@ -489,7 +489,7 @@ struct ChatWebView: NSViewRepresentable {
             if message.name == "image", let body = message.body as? [String: Any],
                 let turn = body["turn"] as? String, let index = body["index"] as? Int
             {
-                feed.loadImage(turn: turn, index: index)
+                feed.loadImage(turn: turn, index: index, session: body["session"] as? String)
                 return
             }
             print("[page] \(message.body)")

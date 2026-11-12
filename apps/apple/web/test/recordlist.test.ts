@@ -152,6 +152,18 @@ test("the home page groups every record by what it waits on, Closed folded and d
     history: !document.getElementById("records-history").hidden,
   })`);
   assert.deepEqual(drawer, { results: false, history: true });
+  // KYO-846: the records awaiting the person are listed in the drawer too, above History,
+  // and a press opens one.
+  const waiting = await opened.run<{ rows: number; above: boolean; opened: boolean }>(`(() => {
+    const list = document.getElementById("records-awaiting");
+    const rows = [...list.querySelectorAll("[data-open]")];
+    const head = document.getElementById("records-history-head");
+    const above = !list.hidden && Boolean(list.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const before = window.posted.length;
+    rows[0].click();
+    return { rows: rows.length, above, opened: window.posted.slice(before).some((p) => JSON.stringify(p.body).includes(rows[0].dataset.open)) };
+  })()`);
+  assert.deepEqual(waiting, { rows: awaiting, above: true, opened: true });
 });
 
 test("a kept row follows the record that is open, and a new list from the server is drawn anew", async (t) => {
