@@ -1486,6 +1486,19 @@ def _settled_not_moved_detail(item: dict) -> str:
     return f"{settled} — needs `{item['needs']}`"
 
 
+#: KYO-865: the two classes the brief names that no record's criteria reach. Remedies in
+#: a sentence each, printed in both forms whenever the class holds something, as the
+#: ungated-unobserved sentence is.
+EXHAUSTED_PLANS_SENTENCE = (
+    "no member of a work kind is unsettled — `kyo move <plan> done`, or file its next "
+    "member with `kyo new --plan <plan>`"
+)
+LEFT_OPEN_DISCUSSIONS_SENTENCE = (
+    "opened before this session and not closed — file what it produced with `kyo spawn`, "
+    'or `kyo discuss close <id> --dropped --why "..."`'
+)
+
+
 def _ungated_unobserved_lines(items: list[dict], *, heading: str, compact: bool) -> list[str]:
     """The ungated-unobserved section, rendered once for `kyo brief` and `kyo next`
     (KYO-267).
@@ -2185,6 +2198,43 @@ def brief_text(data: dict, *, compact: bool) -> str:
         if compact:
             continue
         out.append(f"      {_settled_not_moved_detail(item)}")
+
+    # KYO-865: plans with nothing left to do and discussions left open by an earlier
+    # session. Neither has criteria, so neither reaches the class above. One line a row;
+    # `--compact` prints the ids only, as its other classes print theirs.
+    plans = data.get("exhausted_plans", [])
+    if compact and not plans:
+        empty.append("plans out of work")
+    else:
+        out.append("")
+        out.append(f"plans out of work ({len(plans)}):")
+        if plans or not compact:
+            out.append(f"  ({EXHAUSTED_PLANS_SENTENCE})")
+        if not plans:
+            out.append("  (none)")
+    if compact:
+        if plans:
+            out.append("  " + ", ".join(p["id"] for p in plans))
+    else:
+        for item in plans:
+            n = item["members"]
+            out.append(f"  {item['id']:<10} {item['title']} ({n} member{'' if n == 1 else 's'})")
+    discussions = data.get("left_open_discussions", [])
+    if compact and not discussions:
+        empty.append("discussions left open")
+    else:
+        out.append("")
+        out.append(f"discussions left open ({len(discussions)}):")
+        if discussions or not compact:
+            out.append(f"  ({LEFT_OPEN_DISCUSSIONS_SENTENCE})")
+        if not discussions:
+            out.append("  (none)")
+    if compact:
+        if discussions:
+            out.append("  " + ", ".join(d["id"] for d in discussions))
+    else:
+        for item in discussions:
+            out.append(f"  {item['id']:<10} {item['title']}")
 
     # KYO-18: `built` -> `verified` is a real transition the
     # status flow already models, and its queue is the one whose items need a human

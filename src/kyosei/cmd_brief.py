@@ -36,6 +36,7 @@ from .contracts import (
     standing,
 )
 from .errors import KyoseiError, UsageError
+from .kinds import DISCUSSION_KIND
 from .prose import read_prose
 from .render import brief_text, echo_block
 from .store import Store
@@ -113,6 +114,68 @@ def _awaiting_verification(store: Store, registry: kinds.KindRegistry) -> list[d
                 "unsettled_criteria": unsettled,
             }
         )
+    return out
+
+
+def _exhausted_plans(store: Store, registry: kinds.KindRegistry) -> list[dict]:
+    """KYO-865.c1: open plans that have members and no member of a work kind still
+    unsettled, each with its member count.
+
+    Derived fresh on every read and stored nowhere, as ``settled_not_moved`` is. A plan
+    carries no criteria, so nothing else reaches it; a plan with no member has just been
+    filed and is not listed. Knowledge members (decisions, discussions, evidence) are
+    ignored, and "unsettled" is "not terminal on the ladder".
+    """
+    ladder = _load_status_ladder(store)
+    out: list[dict] = []
+    for plan in store.conn.execute(
+        "SELECT id, title, status FROM records WHERE kind = 'plan' ORDER BY seq"
+    ):
+        if ladder.is_terminal(plan["status"]):
+            continue
+        members = list(
+            store.conn.execute(
+                "SELECT kind, status FROM records WHERE plan_id = ?", (plan["id"],)
+            )
+        )
+        if not members:
+            continue
+        unsettled = False
+        for member in members:
+            kind_def = registry.get(member["kind"])
+            if (
+                kind_def is not None
+                and kind_def.archetype == "work"
+                and not ladder.is_terminal(member["status"])
+            ):
+                unsettled = True
+                break
+        if not unsettled:
+            out.append({"id": plan["id"], "title": plan["title"], "members": len(members)})
+    return out
+
+
+def _left_open_discussions(store: Store, *, before: str | None) -> list[dict]:
+    """KYO-865.c2: discussions no reference has closed and that are not void, opened
+    before ``before`` (the opening brief of the session this brief is printed for).
+
+    ``before`` is None when the brief has no session to compare with, or opens one
+    itself; every open discussion is then older than it and is listed.
+    """
+    ladder = _load_status_ladder(store)
+    out: list[dict] = []
+    for row in store.conn.execute(
+        "SELECT r.id, r.title, r.status, o.created_at AS opened_at FROM records r"
+        " JOIN turn_refs o ON o.record_id = r.id AND o.role = 'opened'"
+        " WHERE r.kind = ? AND NOT EXISTS (SELECT 1 FROM turn_refs c"
+        " WHERE c.record_id = r.id AND c.role = 'closed') ORDER BY r.seq",
+        (DISCUSSION_KIND,),
+    ):
+        if ladder.is_terminal(row["status"]):
+            continue
+        if before is not None and not row["opened_at"] < before:
+            continue
+        out.append({"id": row["id"], "title": row["title"], "opened_at": row["opened_at"]})
     return out
 
 
@@ -1167,6 +1230,8 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         orchestrator_rules = [r for r in orchestrator_rules if not _is_citation_rule(r["title"])]
 
     board = _ready_records(store, registry)
+    opening = bool(getattr(args, "session_start", False))
+    session_anchor = None if opening else store.latest_session_brief_run()
     data: dict = {
         "counts_by_kind": _counts_by_kind(store, registry),
         "ready": board.ready,
@@ -1181,6 +1246,11 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         # is the list this brief offers as what to hand out next.
         "settled_not_moved": board.settled_not_moved,
         "awaiting_verification": _awaiting_verification(store, registry),
+        # KYO-865: derived like the class above, stored nowhere.
+        "exhausted_plans": _exhausted_plans(store, registry),
+        "left_open_discussions": _left_open_discussions(
+            store, before=None if session_anchor is None else session_anchor["at"]
+        ),
         # KYO-267: the class beside it — a criterion waiting on a person, with no gate
         # to make the wait findable and nothing running that would observe it. It was
         # in no section of this document at all, so the only place the ask lived was a

@@ -1012,9 +1012,23 @@ closing note therefore does not need to carry this list. The `--json` keys keep 
 `carried`; only the heading took the kind's name. Settle an item with `kyo move <id> done --why
 "..."`, which also clears its gates.
 
+Two classes that no record's criteria reach have sections of their own (KYO-865). A
+plan lists under `plans out of work` when it is open, has at least one
+member, and none of its members of a work kind is short of a terminal status; knowledge
+members are ignored, and a plan with no member is not listed. The remedy is to move the
+plan to done or to file its next member. A discussion lists under `discussions left
+open` when it is not void, no reference has closed it, and it was opened before the
+opening brief of the session the brief is printed for (every open discussion, where the
+brief opens a session or has none to compare with); the remedy is `kyo spawn` for what
+it produced or `kyo discuss close --dropped --why`. Both are derived on each read and
+stored nowhere. A row is one line, the plan's with its member count; `--compact` prints
+the ids only. `--json` carries `exhausted_plans[]` (`id`, `title`, `members`) and
+`left_open_discussions[]` (`id`, `title`, `opened_at`).
+
 `--compact` is the form the packaged `SessionStart` hook injects, and it is
 shorter in two ways (KYO-419). Every count-section with nothing in it (scope
-unknown, blocked, finished but not moved, built awaiting verification, unobserved
+unknown, blocked, finished but not moved, plans out of work,
+discussions left open, built awaiting verification, unobserved
 waiting on a person, reminders, standing docs obligations, running dispatches,
 terminated-no-report) is named on one shared
 `empty (0 each):` line rather than given a heading and a "(none)" of its own, so
