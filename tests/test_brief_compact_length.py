@@ -269,3 +269,26 @@ def test_compact_is_at_most_half_its_pre_change_size(tmp_path: Path) -> None:
     out = brief_text(_measured(build_fixture_payload(tmp_path)), compact=True)
     size = len(out.encode("utf-8"))
     assert size * 2 <= PRE_CHANGE_COMPACT_BYTES, (size, PRE_CHANGE_COMPACT_BYTES)
+
+
+def test_a_later_brief_of_a_session_names_kyo_rules_in_place_of_the_rule_list(
+    tmp_path: Path,
+) -> None:
+    """KYO-875.c3: the session-start brief lists the orchestrator rules; a later brief of
+    the same session prints one line naming `kyo rules`, and `--json` keeps the list."""
+    opening = build_fixture_payload(tmp_path)
+    root = tmp_path / "proj"
+    titles = [r["title"] for r in opening["orchestrator_rules"]]
+    assert titles and opening["orchestrator_rules_elided"] is False
+    opening_text = brief_text(opening, compact=True)
+    assert "orchestrator-audience rules:\n" in opening_text
+    assert all(title in opening_text for title in titles)
+
+    later = _run(root, "brief", "--compact", "--json").json
+    later_text = brief_text(later, compact=True)
+    assert later["orchestrator_rules_elided"] is True
+    assert [r["title"] for r in later["orchestrator_rules"]] == titles
+    assert "orchestrator-audience rules:\n" not in later_text
+    assert not any(title in later_text for title in titles)
+    assert f"{len(titles)}, listed in this session's opening brief" in later_text
+    assert "`kyo rules` lists them" in later_text

@@ -1300,6 +1300,16 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         # only consumer is render.py in this same build, and a second key would be a
         # copy that can drift (law 3).
         "orchestrator_rules": orchestrator_rules,
+        # KYO-875.c3: true when this brief is a later one of a session whose opening brief
+        # listed the rules and none has changed since, so the text prints one line naming
+        # `kyo rules` in their place. The list above stays whole: the digests recorded
+        # below, and `--json`, are measured from it.
+        "orchestrator_rules_elided": (
+            not opening
+            and session_anchor is not None
+            and bool(orchestrator_rules)
+            and not any(r.get("change") for r in orchestrator_rules)
+        ),
         # KYO-531.c2: the earlier brief each rule's `change` was measured against --
         # the latest one whose event recorded rule digests -- or null when none has,
         # in which case no rule is marked and the text says why.

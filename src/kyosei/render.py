@@ -2537,7 +2537,15 @@ def brief_text(data: dict, *, compact: bool) -> str:
             record = f" {event['record_id']}" if event["record_id"] else ""
             out.append(f"  {event['at']}  {event['actor']}{record}  {event['command']}")
 
-    if data["orchestrator_rules"]:
+    if data["orchestrator_rules"] and data.get("orchestrator_rules_elided"):
+        # KYO-875.c3: the session's opening brief listed them; a later one names where they are.
+        out.append("")
+        out.append(
+            f"orchestrator-audience rules: {len(data['orchestrator_rules'])}, listed in this "
+            f"session's opening brief and unchanged since; `kyo rules` "
+            "lists them."
+        )
+    elif data["orchestrator_rules"]:
         out.append("")
         out.append("orchestrator-audience rules:")
         # KYO-356.c2: printed once, ahead of the rules themselves, so the form a

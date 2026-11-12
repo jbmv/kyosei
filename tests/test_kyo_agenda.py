@@ -566,7 +566,7 @@ def test_the_stop_hook_says_when_dispatches_run_and_the_list_holds_nothing_of_th
     assert _stop_hook(kyo).out == ""
 
 
-def test_the_in_flight_sentence_is_said_once_per_count_and_the_person_s_items_every_stop(
+def test_the_in_flight_sentence_is_said_once_per_count_and_the_person_s_items_once_per_change(
     kyo, git_project: Path, in_session: str, store_home: Path
 ) -> None:
     first = new_record(kyo, criteria=["it works"])
@@ -584,7 +584,7 @@ def test_the_in_flight_sentence_is_said_once_per_count_and_the_person_s_items_ev
     assert json.loads(_stop_hook(kyo).out)["systemMessage"].startswith("2 dispatch(es)")
     assert _stop_hook(kyo).out == ""
 
-    # The person's items keep their announcement at every stop, beside the limited sentence.
+    # The person's items are announced when they differ from the last stop's (KYO-875).
     listed = agenda_file(store_home, SESSION)
     listed.parent.mkdir(parents=True, exist_ok=True)
     listed.write_text(
@@ -593,10 +593,10 @@ def test_the_in_flight_sentence_is_said_once_per_count_and_the_person_s_items_ev
                                "changed_at": "2026-01-01T00:00:00Z"}]}),
         encoding="utf-8",
     )
-    for _ in range(2):
-        assert json.loads(_stop_hook(kyo).out)["systemMessage"] == (
-            "Unchecked on the session list, yours (1): push"
-        )
+    assert json.loads(_stop_hook(kyo).out)["systemMessage"] == (
+        "Unchecked on the session list, yours (1): push"
+    )
+    assert _stop_hook(kyo).out == ""
     assert json.loads(said_file.read_text())["in_flight"] == 2
 
 
@@ -685,3 +685,52 @@ def test_a_brief_with_nothing_left_says_nothing_and_makes_no_list(
     brief = _open_session(kyo, SESSION)
     assert "the previous session" not in brief.out
     assert not agenda_file(store_home, SESSION).exists()
+
+
+# ------------------------------------------------ KYO-875: lines print only when they change
+
+
+def test_the_prompt_hook_prints_the_list_again_only_when_it_changed(
+    kyo, store_home: Path, in_session: str
+) -> None:
+    kyo("agenda", "add", "--text", "one")
+    assert "1 orchestrator: one" in _prompt_hook(kyo).out, "the first prompt prints"
+    assert _prompt_hook(kyo).out == "", "the same list prints nothing"
+    assert _prompt_hook(kyo).out == ""
+    kyo("agenda", "add", "--text", "two")
+    assert "2 orchestrator: two" in _prompt_hook(kyo).out, "a changed list prints"
+    assert _prompt_hook(kyo).out == ""
+    kyo("agenda", "check", "1", "2")
+    assert _prompt_hook(kyo).out == ""
+    kyo("agenda", "uncheck", "2")
+    assert "2 orchestrator: two" in _prompt_hook(kyo).out, "a list that returns prints"
+
+
+def test_the_prompt_hook_remembers_per_session(
+    kyo, store_home: Path, in_session: str
+) -> None:
+    kyo("agenda", "add", "--text", "one")
+    assert _prompt_hook(kyo).out != ""
+    assert _prompt_hook(kyo).out == ""
+    other = agenda_file(store_home, "other-session")
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text(agenda_file(store_home, SESSION).read_text(), encoding="utf-8")
+    assert "one" in _prompt_hook(kyo, "other-session").out, "another session has its own"
+
+
+def test_the_stop_line_prints_again_only_when_the_person_s_items_changed(
+    bed: Bed, kyo, token: str, store_home: Path
+) -> None:
+    request(bed, "PUT", {"items": [{"text": "push"}]}, token, If_None_Match="*")
+    first = json.loads(_stop_hook(kyo, OLD).out)["systemMessage"]
+    assert first == "Unchecked on the session list, yours (1): push"
+    assert _stop_hook(kyo, OLD).out == "", "the same items, said at the last stop"
+    assert _stop_hook(kyo, OLD).out == ""
+    listed = agenda_file(store_home, OLD)
+    document = json.loads(listed.read_text())
+    document["items"].append({**document["items"][0], "id": "9", "text": "email"})
+    listed.write_text(json.dumps(document), encoding="utf-8")
+    assert json.loads(_stop_hook(kyo, OLD).out)["systemMessage"] == (
+        "Unchecked on the session list, yours (2): push; email"
+    ), "a changed set prints"
+    assert _stop_hook(kyo, OLD).out == ""

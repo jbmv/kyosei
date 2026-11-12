@@ -973,7 +973,9 @@ can fail its own command over the list.
 **The hooks print three things.**
 
 - The prompt hook, `kyo check-build --hook`, prints the unchecked items into the session's
-  context on each prompt, and nothing when there are none:
+  context at the session's first prompt and afterwards only when the unchecked items differ
+  from what the session was last shown, and nothing when there are none or when they are
+  the same as before (KYO-875):
 
   ```
   session list, unchecked (`kyo agenda`):
@@ -989,10 +991,11 @@ can fail its own command over the list.
   1 dispatch(es) are running or unaccepted and the session list holds no item of the orchestrator's (kyo agenda add --text "...")
   ```
 
-  The first sentence is said at every stop while an item is unchecked. The second is said
+  The first sentence is said when the person's unchecked items differ from what the
+  session's last stop said, so the first stop after an item appears or changes. The second is said
   once per session, and again only when the number in flight has risen since it was last
-  said; the count last said is kept in a small file beside the session's list, never in the
-  store. The sentences are printed as one hook `systemMessage`, which Claude Code shows to the
+  said; the count last said, and a digest of the items each hook last showed, are kept in small
+  files beside the session's list, never in the store. The sentences are printed as one hook `systemMessage`, which Claude Code shows to the
   person. It does not block the stop and does not reach the agent: at `Stop`, text that
   reaches the agent makes it take another turn. The agent reads the same items on the next
   prompt. A dispatch counts as in flight while it is running, or when it was created in this

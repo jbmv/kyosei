@@ -1037,7 +1037,13 @@ explanatory parentheticals are dropped, the unobserved section's remedy sentence
 included. `kyo brief` without `--compact` prints all of it, and `kyo rules
 "<title>"` prints one rule verbatim.
 
-Under both forms each orchestrator-audience rule prints as one line, under the
+A brief that is not a session-start brief, run after a session-start brief, prints the
+orchestrator-audience rules as one line giving their number and naming `kyo rules`, unless
+a rule is new or changed since the previous brief, when the list prints as below
+(KYO-875). `--json` carries the whole list in either case, with
+`orchestrator_rules_elided` saying whether the text left it out.
+
+Under both forms, where the list prints, each orchestrator-audience rule prints as one line, under the
 store's own record-link example: its title and its enforced-by kind in a word
 (`mechanism` or `aspirational`), then one line naming `kyo rules "<title>"` for the
 rest (KYO-531). Where `onboarding:` in `kyosei/config.yml` records setup decision E4 as

@@ -29,8 +29,10 @@ and only when that session already has a list, and none of them able to fail its
 - ``kyo accept`` adds one item for closing the wave, unless ``--close`` finished every record
   it covers; ``kyo close-wave`` checks it when it has closed its records.
 - ``kyo check-build --hook``, the prompt hook, prints the unchecked items with who wrote each
-  (:func:`prompt_lines`).
-- ``kyo sessions --hook`` at ``Stop`` announces the person's unchecked items to the person, and
+  (:func:`prompt_lines`) at the session's first prompt and afterwards only when they differ
+  from what the session was last shown (KYO-875).
+- ``kyo sessions --hook`` at ``Stop`` announces the person's unchecked items to the person when
+  they differ from what the session's last stop announced (KYO-875), and
   says when dispatches are in flight and the list holds nothing of the orchestrator's, once
   per session and again only when the count has risen (:func:`stop_message`, KYO-775). It is
   printed as a hook's ``systemMessage``, which is shown and does not continue the
@@ -647,10 +649,75 @@ def _quietly_read(environ: dict[str, str], session_id: str | None) -> dict | Non
         return None
 
 
+#: What follows ``$KYOSEI_HOME/composer/``: one file per session holding a digest of the
+#: unchecked items each hook last had in view, ``prompt`` for the prompt hook and ``stop``
+#: for the Stop line (KYO-875). Session state, like the list, and never the store's.
+SHOWN = "agenda-shown"
+
+
+def _digest(items: list[dict]) -> str:
+    """A digest of the items' ids, authors and texts; a check or an edit changes it."""
+    import hashlib
+
+    rows = [[str(i.get("id")), str(i.get("author")), str(i.get("text"))] for i in items]
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def _shown(environ: dict[str, str], session_id: str, which: str) -> str | None:
+    """The digest last remembered for ``which`` hook, or None for none or an unreadable file."""
+    try:
+        from . import serve_files
+
+        raw = serve_files.composer_path(environ, SHOWN, session_id).read_bytes()
+        value = json.loads(raw.decode("utf-8")).get(which)
+        return value if isinstance(value, str) else None
+    except Exception:  # noqa: BLE001 - a hook never fails over this file
+        return None
+
+
+def _remember_shown(environ: dict[str, str], session_id: str, which: str, digest: str) -> None:
+    """Keep ``digest`` as what ``which`` hook has shown, leaving the other hook's alone."""
+    with contextlib.suppress(Exception):
+        from . import serve_files
+
+        target = serve_files.composer_target(environ, SHOWN, session_id)
+        try:
+            current = json.loads(target.read_bytes().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current[which] = digest
+        data = (json.dumps(current) + "\n").encode("utf-8")
+        with serve_files._WRITE_LOCK:
+            serve_files._write_atomically(
+                target, data, create=not target.exists(), private=True
+            )
+
+
+def _changed_since_shown(
+    environ: dict[str, str], session_id: str | None, which: str, items: list[dict]
+) -> bool:
+    """Whether ``items`` differ from what ``which`` hook last showed this session.
+
+    A session never shown anything counts every non-empty list as changed. The digest is
+    remembered whether or not it prints, so a list that empties and later returns prints.
+    """
+    if not session_id:
+        return bool(items)
+    digest = _digest(items)
+    changed = digest != (_shown(environ, session_id, which) or _digest([]))
+    if changed:
+        _remember_shown(environ, session_id, which, digest)
+    return changed
+
+
 def prompt_lines(environ: dict[str, str], session_id: str | None) -> list[str]:
-    """What the prompt hook adds to the session's context: the unchecked items, or nothing."""
+    """What the prompt hook adds to the session's context: the unchecked items when they
+    differ from what this session was last shown (the first prompt shows them), or nothing
+    (KYO-875)."""
     waiting = unchecked(_quietly_read(environ, session_id))
-    if not waiting:
+    if not _changed_since_shown(environ, session_id, "prompt", waiting) or not waiting:
         return []
     return ["session list, unchecked (`kyo agenda`):"] + [
         f"  {item['id']} {item['author']}: {item['text']}" for item in waiting
@@ -729,7 +796,8 @@ def stop_message(environ: dict[str, str], session_id: str | None, db_path: Path)
 
     One sentence for the person's unchecked items, and one when dispatches are in flight
     and the list holds no item of the orchestrator's. Neither blocks the stop. The first is said
-    at every stop while an item is unchecked; the second once per session for a given count,
+    when the person's unchecked items differ from what the last stop of the session said
+    (KYO-875); the second once per session for a given count,
     and again only when the count has risen since it was last said or fell (KYO-775).
     """
     if not session_id:
@@ -737,7 +805,7 @@ def stop_message(environ: dict[str, str], session_id: str | None, db_path: Path)
     document = _quietly_read(environ, session_id)
     parts: list[str] = []
     mine = unchecked(document, PERSON)
-    if mine:
+    if _changed_since_shown(environ, session_id, "stop", mine) and mine:
         parts.append(
             f"Unchecked on the session list, yours ({len(mine)}): "
             + "; ".join(item["text"] for item in mine)
