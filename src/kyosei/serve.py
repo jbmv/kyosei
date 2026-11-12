@@ -296,6 +296,9 @@ NOT_SERVED: dict[str, str] = {
     # KYO-659: a page meant to leave the project, so the person prints it where the store
     # is and decides where it goes; no viewer asks for it.
     "dossier": "it prints a page for a reader outside the project, at the store's machine",
+    # KYO-660: it reads the seal key and the transcript and writes the person's excerpt to
+    # a scratch file, which only the store's machine should do.
+    "excerpt": "it reads the seal key and writes an excerpt file, at the store's machine",
 }
 
 #: Query keys refused by name: the server sets `--root` from `{project}`, runs as

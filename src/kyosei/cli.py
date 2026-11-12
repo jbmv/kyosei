@@ -44,6 +44,7 @@ from . import (
     cmd_dispatch,
     cmd_dossier,
     cmd_evidence,
+    cmd_excerpt,
     cmd_flags,
     cmd_harness,
     cmd_install_agents,
@@ -228,6 +229,9 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # KYO-659: one decision as a page for a reader outside the project. Not in
     # MUTATING_COMMANDS: it reads the store and the turn index and writes nothing.
     "dossier": (cmd_dossier.cmd_dossier, PROJECT_REQUIRED),
+    # KYO-660: an excerpt pack of a credit's discussion, trimmed by the person. It writes a
+    # draft or a pack to the scratch directory and nothing to the store.
+    "excerpt": (cmd_excerpt.cmd_excerpt, PROJECT_REQUIRED),
     "docs": (cmd_views.cmd_docs, PROJECT_REQUIRED),
     # KYO-138.c1: the command-and-option reference, generated from the parser below
     # rather than written. PROJECT_NONE on `report-schema`'s reasoning exactly: this
@@ -2039,6 +2043,64 @@ def build_parser() -> KyoseiParser:
         metavar="ID",
         help="a decision record, or any record a `decided` credit is on; a credit id "
         "(PREFIX-N.pN) selects one decision of a record that holds several",
+    )
+
+    p_excerpt = sub.add_parser(
+        "excerpt",
+        parents=[common],
+        help="draft, preview and write an excerpt pack of the discussion a credit cites: the "
+        "lines of its messages the person chose to share, each with the salt and proof a "
+        "reader checks against the credit's span_seal with tools/kyosei-verify-excerpt.py "
+        "(KYO-660). --pack is refused without the person's approval, an authorized credit",
+        description="An excerpt pack holds the credit, and for each message of its span the "
+        "index line and the lines shared with their salts and Merkle proofs; a line not "
+        "shared is its position only. The seal key, the text of a line not shared and the "
+        "transcript never enter it. --draft writes every line of the span to the session's "
+        "scratch directory and lists the lines holding a private term; the person's cut is "
+        "made by deleting lines from that draft. --preview shows the pack as its reader will "
+        "see it, and --pack writes it.",
+    )
+    p_excerpt.add_argument(
+        "id",
+        metavar="CREDIT",
+        help="the credit's id (PREFIX-N.pN); it must cite a sealed discussion span",
+    )
+    excerpt_mode = p_excerpt.add_mutually_exclusive_group(required=True)
+    excerpt_mode.add_argument(
+        "--draft",
+        action="store_true",
+        help="write the readable page of every line in the span and list the private-term hits",
+    )
+    excerpt_mode.add_argument(
+        "--preview",
+        action="store_true",
+        help="render the pack as its reader will see it, from the trimmed draft given with --from",
+    )
+    excerpt_mode.add_argument(
+        "--pack",
+        action="store_true",
+        help="write the pack, from the trimmed draft given with --from, naming the approving "
+        "credit given with --approved-by",
+    )
+    p_excerpt.add_argument(
+        "--from",
+        dest="draft_file",
+        metavar="DRAFT",
+        help="the draft, with the lines to withhold deleted; a draft whose remaining lines are "
+        "not lines of the span, in order, is refused",
+    )
+    p_excerpt.add_argument(
+        "--approved-by",
+        metavar="CREDIT",
+        help="the `authorized` credit, on the same record as the excerpted credit, that "
+        "records the person's approval of this pack; --pack is refused without it (contract "
+        "excerpt-requires-approval)",
+    )
+    p_excerpt.add_argument(
+        "--out",
+        metavar="FILE",
+        help="where to write the draft or the pack; by default the session's scratch "
+        "directory, as recorded by `kyo sessions scratch`",
     )
 
     p_agenda = sub.add_parser(
