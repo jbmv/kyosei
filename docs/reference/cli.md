@@ -529,7 +529,7 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 ### Positional arguments
 
-- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the Stop check asked about is not a discussion; check --hook is that Stop check (KYO-662)
+- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the check asked about is not a discussion; check --hook is that check, run at Stop and at the next prompt (KYO-662, KYO-876)
 - `[ID]` — optional. note and close: the discussion, PREFIX-N
 
 ### Options
@@ -539,7 +539,7 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--file FILE` — optional. note: what was put to the person, the options and the recommendation, from a file or '-' for stdin (law 5)
 - `--dropped` — optional. close: the discussion produced nothing; needs --why
 - `--why WHY` — optional. close --dropped: why nothing was produced; skip: why the turn is not a discussion. One line
-- `--hook` — optional. check: read Claude Code's Stop payload on stdin and, when the turn put a choice to the person and no discussion is open in this session, print one line of hook JSON whose additionalContext asks the agent to open one or skip. Claude Code continues the conversation once for it. Never blocks and always exits 0; how the packaged Stop hook invokes this (KYO-662)
+- `--hook` — optional. check: read Claude Code's hook payload on stdin. At Stop, when the turn put a choice to the person and no discussion is open in this session, mark the turn as a candidate and print nothing. At UserPromptSubmit, print one line of context naming the newest candidate not yet asked about, once, for the agent to open a discussion or skip. Never blocks and always exits 0; how the packaged hooks invoke this (KYO-662, KYO-876)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

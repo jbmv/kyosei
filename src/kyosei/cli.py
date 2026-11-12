@@ -3311,8 +3311,9 @@ def build_parser() -> KyoseiParser:
         choices=["open", "note", "close", "skip", "check"],
         help="open files a discussion at the person's latest confirmed turn; note keeps what "
         "was put to the person; close --dropped closes one with nothing produced; skip "
-        "records, on the turn's index line, why a turn the Stop check asked about is not a "
-        "discussion; check --hook is that Stop check (KYO-662)",
+        "records, on the turn's index line, why a turn the check asked about is not a "
+        "discussion; check --hook is that check, run at Stop and at the next prompt "
+        "(KYO-662, KYO-876)",
     )
     p_discuss.add_argument("id", nargs="?", help="note and close: the discussion, PREFIX-N")
     p_discuss.add_argument("--title", help="open: the topic, one line")
@@ -3342,11 +3343,12 @@ def build_parser() -> KyoseiParser:
     p_discuss.add_argument(
         "--hook",
         action="store_true",
-        help="check: read Claude Code's Stop payload on stdin and, when the turn put a "
-        "choice to the person and no discussion is open in this session, print one line of "
-        "hook JSON whose additionalContext asks the agent to open one or skip. Claude Code "
-        "continues the conversation once for it. Never blocks and always exits 0; how the "
-        "packaged Stop hook invokes this (KYO-662)",
+        help="check: read Claude Code's hook payload on stdin. At Stop, when the turn put a "
+        "choice to the person and no discussion is open in this session, mark the turn as a "
+        "candidate and print nothing. At UserPromptSubmit, print one line of context naming "
+        "the newest candidate not yet asked about, once, for the agent to open a discussion "
+        "or skip. Never blocks and always exits 0; how the packaged hooks invoke this "
+        "(KYO-662, KYO-876)",
     )
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and
