@@ -655,6 +655,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-12** — `KYO-833` (bug) — Mac app: turning the Records Open chip on or off is slow while the list redraws
 - **2026-11-12** — `KYO-827` (task) — Mac app: the History view, searching what was said in this project
 - **2026-11-12** — `KYO-771` (task) — Mac app: the session's task list in a bubble above the composer
+- **2026-11-12** — `KYO-767` (plan) — Orchestrator friction from the sessions of 2026-11-10
 - **2026-11-12** — `KYO-750` (bug) — Mac app: the composer jumps when predictive text offers a completion on a new line
 - **2026-11-12** — `KYO-655` (plan) — Decision capture (KYO-651, KYO-654)
 - **2026-11-12** — `KYO-616` (plan) — Public release: split store, one-time scrub, fresh public history
