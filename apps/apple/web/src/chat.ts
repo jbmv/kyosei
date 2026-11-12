@@ -1671,6 +1671,11 @@ const kyo = {
     if (quickLookTarget) post("quicklook", quickLookTarget);
   },
 
+  /** Download Image in the image menu: the app saves the image last right-clicked to Downloads. */
+  saveImage(): void {
+    if (quickLookTarget) post("quicklook", { ...quickLookTarget, save: true });
+  },
+
   apply(batch: Batch): void {
     // A session's first read lands at its end, as before; after that, output is not followed.
     const loading = batch.reset || !turnsLoaded;
@@ -5049,6 +5054,54 @@ function mentionedRecords(): RecordRow[] {
   return historyRows(ids, listedRows());
 }
 
+/** One choice of a home's Location dropdown (KYO-883): its words, its count, and what it sets. */
+interface PlaceChoice { label: string; count?: string; data: Record<string, string>; current: boolean }
+
+/**
+ * Draws a home's Location dropdown (KYO-883). The button holds every choice's words in one
+ * cell with the shown one seen, so it is as wide as the widest and keeps that width; `shown`
+ * may be words no choice has, such as a plan's id. `extra` closes the menu, after a rule.
+ */
+function drawPlaceControl(control: HTMLElement, choices: PlaceChoice[], shown: string, extra: HTMLElement[] = []): void {
+  const signature = JSON.stringify([choices, shown, extra.map((item) => item.outerHTML)]);
+  if (control.dataset.drawn === signature) return;
+  control.dataset.drawn = signature;
+  const sizer = span("place-sizer", "");
+  const words = [...new Set([...choices.map((choice) => choice.label), shown])];
+  sizer.append(...words.map((word) => span(word === shown ? "shown" : "", word)));
+  const button = control.querySelector<HTMLButtonElement>(".place-button")!;
+  button.replaceChildren(sizer);
+  button.title = shown;
+  const rows = choices.map((choice) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.setAttribute("role", "menuitemradio");
+    row.setAttribute("aria-checked", String(choice.current));
+    Object.assign(row.dataset, choice.data);
+    row.append(span("place-check", choice.current ? "✓" : ""), span("place-label", choice.label));
+    if (choice.count !== undefined) row.append(span("location-count", choice.count));
+    return row;
+  });
+  control.querySelector(".place-menu")!.replaceChildren(
+    ...rows, ...(extra.length ? [document.createElement("hr"), ...extra] : []));
+}
+
+document.querySelectorAll<HTMLElement>(".place-control").forEach((control) => {
+  const button = control.querySelector<HTMLButtonElement>(".place-button")!;
+  const menu = control.querySelector<HTMLElement>(".place-menu")!;
+  const shut = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  button.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    button.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  // A choice closes the menu; what it sets is done by the handler its data names.
+  menu.addEventListener("click", (event) => {
+    if ((event.target as Element).closest("button")) shut();
+  });
+  control.addEventListener("keydown", (event) => { if (event.key === "Escape") shut(); });
+  document.addEventListener("mousedown", (event) => { if (!control.contains(event.target as Node)) shut(); });
+});
+
 /** The Records home (KYO-862): Locations with their counts, Recents, Mentioned and the table. */
 function drawRecordsHome(nothing: string): void {
   const places = located(rowsNewestFirst(), readyRecords, awaitingRecords, { notes: noteList, briefs: briefList });
@@ -5059,6 +5112,14 @@ function drawRecordsHome(nothing: string): void {
     row.append(span("tree-name", name), span("location-count", listsRead ? String(places[name].length) : ""));
     return row;
   }));
+  // KYO-883: the same Locations in the dropdown beside the search; a chosen plan is named by its id.
+  const plan = chosenPlan();
+  drawPlaceControl(document.getElementById("records-place")!, LOCATIONS.map((name) => ({
+    label: name,
+    count: listsRead ? String(places[name].length) : "",
+    data: { location: name },
+    current: name === homeLocation && !plan,
+  })), plan ?? homeLocation);
   const plans = openPlans(rowsNewestFirst());
   fill(document.getElementById("records-plans")!, plans.length ? plans.map((plan) => {
     const row = document.createElement("div");
@@ -5090,7 +5151,8 @@ function drawRecordsHome(nothing: string): void {
     : [emptyRow(!listsRead ? nothing : homeSearch.trim() ? "No record matches." : "None.")]);
 }
 
-document.getElementById("records-locations")!.addEventListener("click", (event) => {
+/** A Location chosen in the side bar or the dropdown beside the search (KYO-883). */
+function onLocationChosen(event: Event): void {
   const row = (event.target as Element).closest<HTMLElement>("[data-location]");
   if (!row) return;
   homeLocation = locationFrom(row.dataset.location);
@@ -5099,7 +5161,9 @@ document.getElementById("records-locations")!.addEventListener("click", (event) 
   store(HOME_PLAN_KEY, null);
   drawRecordLists();
   recordsPane.scrollTop = 0;
-});
+}
+document.getElementById("records-locations")!.addEventListener("click", onLocationChosen);
+document.querySelector("#records-place .place-menu")!.addEventListener("click", onLocationChosen);
 
 document.getElementById("records-plans")!.addEventListener("click", (event) => {
   const row = (event.target as Element).closest<HTMLElement>("[data-plan]");
@@ -6497,7 +6561,16 @@ function drawFilesHome(root: string | null): void {
   fill(document.getElementById("files-home-mentioned")!,
     mentions.length ? mentions.slice(0, 10).map(mentionRow) : [emptyRow("None yet.")]);
   fill(document.getElementById("files-home-starred")!, list(starredFiles, "Star a file from its row."));
-  setText("files-home-root", root ? rootLabel(root) : "");
+  // KYO-883: the roots in the dropdown beside the search, and Show dotfiles at its foot.
+  const dots = document.createElement("button");
+  dots.type = "button";
+  dots.className = "place-dots";
+  dots.setAttribute("role", "menuitemcheckbox");
+  dots.setAttribute("aria-checked", String(showDotfiles));
+  dots.append(span("place-check", showDotfiles ? "✓" : ""), span("place-label", "Show dotfiles"));
+  drawPlaceControl(document.getElementById("files-place")!, fileRoots.map((info) => ({
+    label: rootLabel(info.name), data: { root: info.name }, current: info.name === root,
+  })), root ? rootLabel(root) : "Files", [dots]);
   document.querySelectorAll<HTMLElement>(".files-head [data-sort]").forEach((button) => {
     if (button.dataset.sort === fileSort.by) {
       button.setAttribute("aria-sort", fileSort.descending ? "descending" : "ascending");
@@ -7023,7 +7096,7 @@ document.addEventListener("click", (event) => {
     drawFilesSide();
     return;
   }
-  const chip = target.closest<HTMLElement>(".files-roots [data-root], #files-locations [data-root]");
+  const chip = target.closest<HTMLElement>(".files-roots [data-root], #files-locations [data-root], #files-place [data-root]");
   if (chip?.dataset.root) {
     chosenRoot = chip.dataset.root;
     store(FILES_ROOT_KEY, chosenRoot);
@@ -7031,7 +7104,7 @@ document.addEventListener("click", (event) => {
     drawFilesSide();
     return;
   }
-  if (target.closest(".files-dots")) {
+  if (target.closest(".files-dots, .place-dots")) {
     showDotfiles = !showDotfiles;
     store(FILES_DOTFILES_KEY, showDotfiles);
     drawFilesSide();

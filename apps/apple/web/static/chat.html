@@ -137,6 +137,8 @@
           <div class="files-home-side">
             <h5>Locations</h5>
             <div id="files-locations"></div>
+            <!-- KYO-883: beside the Locations, as the home's dropdown holds it. -->
+            <button class="files-dots text-button files-side-dots" aria-pressed="false">Show dotfiles</button>
             <h5>Recents</h5>
             <div id="files-home-recent"></div>
             <h5>Mentioned</h5>
@@ -257,6 +259,11 @@
           <div class="files-home-main">
             <div class="records-searchrow records-home-searchrow">
               <input id="records-home-search" class="records-search" type="search" placeholder="Search records" aria-label="Search the records of this Location" />
+              <!-- KYO-883: the Location shown, and a way to change it, while the drawer is not docked. -->
+              <div class="place-control" id="records-place">
+                <button class="place-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Location"></button>
+                <div class="place-menu" role="menu" hidden></div>
+              </div>
               <div class="kind-control">
                 <button class="kind-button" type="button" aria-haspopup="true" aria-expanded="false">Kind</button>
                 <button class="kind-clear" type="button" aria-label="Clear the kind filter" title="Clear the kind filter" hidden>&times;</button>
@@ -319,12 +326,15 @@
         <div id="files-note" hidden></div>
         <div id="files-landing">
           <div class="files-home-main">
-            <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
-            <div class="files-found" hidden></div>
-            <div class="files-bar">
-              <span id="files-home-root"></span>
-              <button class="files-dots text-button" aria-pressed="false">Show dotfiles</button>
+            <div class="records-searchrow files-home-searchrow">
+              <input class="records-search files-search" type="search" placeholder="Search files" aria-label="Search files" />
+              <!-- KYO-883: the Location shown, and a way to change it, while the drawer is not docked. -->
+              <div class="place-control" id="files-place">
+                <button class="place-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Location"></button>
+                <div class="place-menu" role="menu" hidden></div>
+              </div>
             </div>
+            <div class="files-found" hidden></div>
             <div class="files-list">
               <div class="files-head">
                 <button data-sort="name">Name</button>

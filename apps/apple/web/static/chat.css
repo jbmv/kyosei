@@ -928,6 +928,27 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .kind-clear[hidden] { display: none; }
 .kind-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; min-width: 150px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
 .kind-menu[hidden] { display: none; }
+/* KYO-883: the Location dropdown beside a home's search, shown while the drawer is not docked.
+   The button holds every Location's name in one cell, the chosen one seen, so its width is
+   the widest name's and does not change as the choice does. */
+.place-control { position: relative; flex: none; display: flex; }
+body.dock-left .place-control { display: none; }
+.place-button { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--background); color: var(--text); font: 13.5px -apple-system, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+.place-button:hover { border-color: var(--muted); }
+.place-button::after { content: "▾"; color: var(--muted); font-size: 11px; }
+.place-sizer { display: inline-grid; text-align: left; }
+.place-sizer > span { grid-area: 1 / 1; visibility: hidden; }
+.place-sizer > span.shown { visibility: visible; }
+.place-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; min-width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
+.place-menu[hidden] { display: none; }
+.place-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border: 0; border-radius: 5px; background: none; color: var(--text); font: 13.5px -apple-system, system-ui, sans-serif; text-align: left; white-space: nowrap; cursor: pointer; }
+.place-menu button:hover { background: var(--panel); }
+.place-menu .place-check { width: 12px; flex: none; color: var(--link); }
+.place-menu .location-count { margin-left: auto; padding-left: 16px; }
+.place-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--soft-line); }
+.files-home-searchrow { margin-bottom: 12px; }
+.files-home-searchrow > .files-search { flex: 1; min-width: 0; margin: 0; }
+.files-side-dots { display: block; margin: 6px 8px 0; padding: 0; font-size: 12.5px; }
 .kind-menu label { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; font-size: 13.5px; cursor: pointer; }
 .kind-menu label:hover { background: var(--panel); }
 .kind-menu input { margin: 0; accent-color: var(--link); }
@@ -1062,7 +1083,7 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 .files-home-main > .files-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 /* While a search is shown it takes the side bar, or the page, and the tree and the lists wait beneath. */
 #files-side.searching > :not(.files-search):not(.files-found),
-#files-landing.searching .files-home-main > :not(.files-search):not(.files-found) { display: none; }
+#files-landing.searching .files-home-main > :not(.files-home-searchrow):not(.files-found) { display: none; }
 #files-side > .files-found { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .files-found[hidden] { display: none; }
 .found-file, .found-line { padding: 4px 10px; border-radius: 7px; cursor: default; }

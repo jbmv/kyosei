@@ -51,3 +51,15 @@ test("a composer chip's thumbnail goes to Quick Look as its attachment, and text
   const text = await page.run<{ shown: boolean; posted: unknown[] }>(rightClick("#boxes textarea"));
   assert.deepEqual(text.posted, []);
 });
+
+test("Download Image hands the app the same image, to save (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const saved = await page.run<unknown[]>(`(() => {
+    document.querySelector("img.mark-thumb").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    window.posted.length = 0;
+    window.kyo.saveImage();
+    return window.posted.filter((p) => p.name === "quicklook").map((p) => p.body);
+  })()`);
+  assert.equal(saved.length, 1);
+  assert.equal((saved[0] as { save: boolean }).save, true);
+});

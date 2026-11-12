@@ -272,6 +272,19 @@ final class ChatPage: WKWebView {
         item.target = self
         menu.insertItem(item, at: 0)
         menu.insertItem(.separator(), at: 1)
+        // WebKit's Download Image has no download to hand to here; the app saves the image itself.
+        if let download = menu.items.firstIndex(where: {
+            $0.identifier?.rawValue == "WKMenuItemIdentifierDownloadImage"
+        }) {
+            let own = NSMenuItem(title: "Download Image", action: #selector(saveChosen), keyEquivalent: "")
+            own.target = self
+            menu.removeItem(at: download)
+            menu.insertItem(own, at: download)
+        }
+    }
+
+    @objc private func saveChosen() {
+        evaluateJavaScript("window.kyo.saveImage()", completionHandler: nil)
     }
 
     @objc private func quickLookChosen() {
@@ -281,22 +294,44 @@ final class ChatPage: WKWebView {
     /// The file the Quick Look panel shows: a copy of the image in this app's temporary folder.
     private var previewItem: URL?
 
-    func quickLook(dataURL: String, name: String) {
+    /// A `data:` URL's bytes and media type.
+    static func decode(dataURL: String) -> (bytes: Data, mediaType: String?)? {
         guard let comma = dataURL.firstIndex(of: ","), dataURL.hasPrefix("data:"),
             let bytes = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...]))
-        else { return }
+        else { return nil }
         let header = dataURL[dataURL.index(dataURL.startIndex, offsetBy: 5)..<comma]
-        quickLook(bytes: bytes, mediaType: header.split(separator: ";").first.map(String.init), name: name)
+        return (bytes, header.split(separator: ";").first.map(String.init))
+    }
+
+    /// A file name for an image: its name without a path or an extension, and the extension its bytes call for.
+    private static func fileName(_ name: String, _ mediaType: String?, _ bytes: Data, number: Int = 1) -> String {
+        let stem = (name as NSString).deletingPathExtension
+        let safe = String(String(stem.map { "/:\\".contains($0) ? "-" : $0 }).prefix(80))
+        let base = safe.isEmpty ? "image" : safe
+        return "\(number > 1 ? "\(base) \(number)" : base).\(fileExtension(mediaType, bytes))"
+    }
+
+    /// KYO-883: Download Image saves the image to the Downloads folder, under a name not yet
+    /// taken there, and the Downloads stack in the Dock is told, as a browser's download does.
+    func saveToDownloads(bytes: Data, mediaType: String?, name: String) {
+        guard let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        else { return }
+        var number = 1
+        var file = folder.appendingPathComponent(Self.fileName(name, mediaType, bytes))
+        while FileManager.default.fileExists(atPath: file.path) {
+            number += 1
+            file = folder.appendingPathComponent(Self.fileName(name, mediaType, bytes, number: number))
+        }
+        guard (try? bytes.write(to: file, options: .withoutOverwriting)) != nil else { return }
+        DistributedNotificationCenter.default().post(
+            name: Notification.Name("com.apple.DownloadFileFinished"), object: file.path)
     }
 
     func quickLook(bytes: Data, mediaType: String?, name: String) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
             "Kyosei Quick Look", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let stem = (name as NSString).deletingPathExtension
-        let safe = String(stem.map { "/:\\".contains($0) ? "-" : $0 }).prefix(80)
-        let file = folder.appendingPathComponent(
-            "\(safe.isEmpty ? "image" : String(safe)).\(Self.fileExtension(mediaType, bytes))")
+        let file = folder.appendingPathComponent(Self.fileName(name, mediaType, bytes))
         guard (try? bytes.write(to: file, options: .atomic)) != nil else { return }
         previewItem = file
         // The panel asks the responder chain for its items, so this page must be in it.
@@ -453,17 +488,23 @@ struct ChatWebView: NSViewRepresentable {
             if message.name == "quicklook", let body = message.body as? [String: Any] {
                 let name = body["name"] as? String ?? "image"
                 let data = body["data"] as? String
+                let save = body["save"] as? Bool ?? false
                 let page = feed.webView as? ChatPage
-                if let attachment = body["attachment"] as? String {
-                    Task { @MainActor in
-                        if let bytes = await feed.attachmentBytes(attachment) {
-                            page?.quickLook(bytes: bytes, mediaType: nil, name: name)
-                        } else if let data {
-                            page?.quickLook(dataURL: data, name: name)
-                        }
+                let show = { (bytes: Data, mediaType: String?) in
+                    if save {
+                        page?.saveToDownloads(bytes: bytes, mediaType: mediaType, name: name)
+                    } else {
+                        page?.quickLook(bytes: bytes, mediaType: mediaType, name: name)
                     }
-                } else if let data {
-                    page?.quickLook(dataURL: data, name: name)
+                }
+                Task { @MainActor in
+                    if let attachment = body["attachment"] as? String,
+                        let bytes = await feed.attachmentBytes(attachment)
+                    {
+                        show(bytes, nil)
+                    } else if let data, let decoded = ChatPage.decode(dataURL: data) {
+                        show(decoded.bytes, decoded.mediaType)
+                    }
                 }
                 return
             }

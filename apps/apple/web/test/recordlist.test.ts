@@ -376,3 +376,32 @@ test("a chosen plan's members still outstanding have their status in red, and se
   })()`);
   assert.deepEqual(red, ["built", "open", "verified", "working"]);
 });
+
+test("the home's Location dropdown names the Location shown, chooses one, keeps its width, and is away while the drawer is docked (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  const state = () => opened.run<{ shown: string; width: number; visible: boolean; current: string; rows: number }>(`({
+    shown: document.querySelector("#records-place .place-sizer .shown").textContent,
+    width: Math.round(document.querySelector("#records-place .place-button").getBoundingClientRect().width),
+    visible: getComputedStyle(document.getElementById("records-place")).display !== "none",
+    current: document.querySelector("#records-locations .current")?.dataset.location ?? "",
+    rows: document.querySelectorAll("#records-table [data-open]").length,
+  })`);
+  const before = await state();
+  assert.deepEqual([before.shown, before.visible, before.current], ["All", true, "All"]);
+  await opened.run(`(() => {
+    document.querySelector("#records-place .place-button").click();
+    document.querySelector('#records-place .place-menu [data-location="Closed"]').click();
+  })()`);
+  const after = await state();
+  assert.deepEqual([after.shown, after.current], ["Closed", "Closed"]);
+  assert.ok(after.rows < before.rows);
+  assert.equal(after.width, before.width, "the button keeps its width");
+  assert.equal(await opened.run<boolean>(`document.querySelector("#records-place .place-menu").hidden`), true);
+  // A plan chosen in the side bar is named by its id.
+  await opened.run(`document.querySelector('#records-plans [data-plan="${PLAN}"]').click()`);
+  assert.equal((await state()).shown, PLAN);
+  await opened.run(`document.getElementById("menu-icon").click()`);
+  assert.equal((await state()).visible, false);
+  await opened.run(`document.getElementById("menu-icon").click()`);
+});

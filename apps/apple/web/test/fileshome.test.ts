@@ -130,3 +130,31 @@ test("an open file's path names its root apart by space, and a right-click on it
   assert.deepEqual(found.menu.slice(0, 2), ["/work/demo/a.py", "Copy path"]);
   assert.deepEqual(found.copied, [{ text: "/work/demo/a.py" }]);
 });
+
+test("the Files home's dropdown chooses the root and holds Show dotfiles; the drawer holds it too, and the line under the search is gone (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await openFiles();
+  const state = () => opened.run<{ shown: string; root: string; dots: string; posted: unknown[]; bar: boolean; sideDots: boolean }>(`({
+    shown: document.querySelector("#files-place .place-sizer .shown").textContent,
+    root: document.querySelector("#files-locations .current").dataset.root,
+    dots: document.querySelector("#files-place .place-dots").getAttribute("aria-checked"),
+    posted: window.posted.filter((p) => p.name === "files" && p.body.want === "tree").map((p) => p.body.root),
+    bar: Boolean(document.querySelector("#files-landing .files-bar, #files-home-root")),
+    sideDots: getComputedStyle(document.querySelector("#files-side .files-home-side .files-dots")).display !== "none",
+  })`);
+  let now = await state();
+  assert.deepEqual([now.shown, now.root, now.dots, now.bar, now.sideDots], ["Code", "code", "false", false, true]);
+  await opened.run(`(() => {
+    window.posted.length = 0;
+    document.querySelector("#files-place .place-button").click();
+    document.querySelector('#files-place .place-menu [data-root="store"]').click();
+  })()`);
+  now = await state();
+  assert.deepEqual([now.shown, now.root], ["Kyosei", "store"]);
+  await opened.run(`(() => {
+    document.querySelector("#files-place .place-button").click();
+    document.querySelector("#files-place .place-dots").click();
+  })()`);
+  assert.equal((await state()).dots, "true");
+  assert.equal(await opened.run<string>(`document.querySelector("#files-side .files-home-side .files-dots").textContent`), "Hide dotfiles");
+});
