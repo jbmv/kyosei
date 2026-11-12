@@ -16,7 +16,7 @@ import pytest
 from kyosei import cmd_turns
 from kyosei.cli import build_parser
 
-from .conftest import TEST_PERSON, declare_person, opt_in_transcripts
+from .conftest import TEST_PERSON, declare_person, new_record, opt_in_transcripts
 
 SESSION = "7c1d2e3f-1111-4a2b-9c3d-0123456789ab"
 PROMPT_1 = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -517,3 +517,72 @@ def test_keep_open_with_no_discussion_is_refused(kyo, indexed: Path, tmp_path: P
     assert refused.code != 0 and "--keep-open" in refused.err
     discussion = kyo("discuss", "open", "--title", "x", "--json").json["id"]
     assert _spawn_task(kyo, discussion, tmp_path, "T", "--keep-open").code == 0
+
+
+# ------------------------------------------------------------------ KYO-878
+
+
+def _open(kyo) -> str:
+    return kyo("discuss", "open", "--title", "x", "--json").json["id"]
+
+
+def _task(kyo, title: str) -> str:
+    return new_record(kyo, kind="task", title=title, criteria=["it works"])
+
+
+def test_kyo878_c1_produced_links_each_record_and_show_says_what_it_produced(
+    kyo, indexed: Path
+) -> None:
+    opened = _open(kyo)
+    a, b = _task(kyo, "First"), _task(kyo, "Second")
+
+    closed = kyo("discuss", "close", opened, "--produced", a, b, "--json")
+
+    assert closed.code == 0, closed
+    assert closed.json["produced"] == [a, b]
+    doc = kyo("show", opened, "--json").json
+    links = {(x["other"], x["type"], x["direction"]) for x in doc["links"]}
+    assert {(a, "produced-by", "incoming"), (b, "produced-by", "incoming")} <= links
+    shown = kyo("show", opened).out
+    assert f"closed, produced {a}, {b}" in shown
+    assert "nothing produced" not in shown
+    for rid in (a, b):
+        assert any(
+            x["type"] == "produced-by" and x["other"] == opened
+            for x in kyo("show", rid, "--json").json["links"]
+        )
+
+
+def test_kyo878_c2_why_covers_what_is_not_a_record_and_the_two_flags_exclude_each_other(
+    kyo, indexed: Path
+) -> None:
+    opened = _open(kyo)
+    task = _task(kyo, "Built")
+    both = kyo("discuss", "close", opened, "--produced", task, "--dropped", "--why", "x")
+    assert both.code == 64 and "give one" in both.err
+    assert "open" in kyo("show", opened).out  # nothing was written
+    empty = kyo("discuss", "close", opened, "--produced")
+    assert empty.code == 64 and "--why" in empty.err
+
+    closed = kyo("discuss", "close", opened, "--produced", "--why", "ideas/idea-file.md")
+    assert closed.code == 0, closed
+    shown = kyo("show", opened).out
+    assert "closed, produced ideas/idea-file.md" in shown
+    assert "nothing produced" not in shown
+
+    other = _open(kyo)
+    both_why = kyo("discuss", "close", other, "--produced", task, "--why", "also a file")
+    assert both_why.code == 0, both_why
+    assert f"closed, produced {task}" in kyo("show", other).out
+
+
+def test_kyo878_c3_dropped_reads_as_it_did_and_an_unknown_record_writes_nothing(
+    kyo, indexed: Path
+) -> None:
+    opened = _open(kyo)
+    refused = kyo("discuss", "close", opened, "--produced", "TST-999")
+    assert refused.code != 0
+    assert "open" in kyo("show", opened).out.split("discussion:")[1].splitlines()[0]
+    closed = kyo("discuss", "close", opened, "--dropped", "--why", "nothing came of it")
+    assert closed.code == 0 and f"closed {opened} with nothing produced" in closed.out
+    assert "closed, nothing produced" in kyo("show", opened).out

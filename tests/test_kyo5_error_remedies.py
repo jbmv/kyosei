@@ -3973,6 +3973,10 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    "cmd_records.py:move_targets#0": (
+        "not provoked by this walk: a re-invocation naming a record before the status; proved by "
+        "test_kyo877_one_id_is_unchanged_and_a_status_alone_is_a_usage_error"
+    ),
     # KYO-660: `kyo excerpt`, which needs a sealed discussion in a transcript-reading project.
     "cmd_excerpt.py:_from_draft#0": (
         "a re-invocation naming a draft written with `kyo excerpt <credit> --draft`; proved by "
@@ -4860,6 +4864,21 @@ RECORDED: dict[str, str] = {
     "cmd_discuss.py:_close#0": (
         "a re-invocation naming the discussion; proved by "
         "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    "cmd_discuss.py:_close#1": (
+        "a re-invocation giving --produced with its records, or --dropped with --why; "
+        "proved by "
+        "test_kyo878_c2_why_covers_what_is_not_a_record_and_the_two_flags_exclude_each_other"
+    ),
+    "cmd_discuss.py:_close#4": (
+        "a re-invocation giving --produced with its records, or --dropped with --why; "
+        "proved by "
+        "test_kyo878_c2_why_covers_what_is_not_a_record_and_the_two_flags_exclude_each_other"
+    ),
+    "cmd_discuss.py:_close#5": (
+        "a re-invocation giving --produced with its records, or --dropped with --why; "
+        "proved by "
+        "test_kyo878_c2_why_covers_what_is_not_a_record_and_the_two_flags_exclude_each_other"
     ),
     # KYO-662: `kyo discuss skip` with no reason.
     "cmd_discuss.py:_skip#1": (

@@ -3711,7 +3711,32 @@ def _transition(
     )
 
 
+def move_targets(args: Namespace) -> list[str]:
+    """The records ``kyo move`` names, in first-named order and without repeats, with
+    ``args.id`` and ``args.status`` set from the positional words (KYO-877).
+
+    The parser takes ``kyo move ID [ID ...] STATUS`` as one list of words, so the last is
+    the status and the rest are records. A Namespace built by a composing command with
+    ``id`` and ``status`` already set has no words and names its one record."""
+    words = getattr(args, "words", None)
+    if words is None:
+        return [args.id]
+    if len(words) < 2:
+        raise UsageError(
+            "kyo move names at least one record and then a status: `kyo move KYO-1 [KYO-2 "
+            "...] STATUS`"
+        )
+    ids: list[str] = []
+    for named in words[:-1]:
+        if named not in ids:
+            ids.append(named)
+    args.id = ids[0]
+    args.status = words[-1]
+    return ids
+
+
 def cmd_move(ctx: Context, args: Namespace) -> Output:
+    move_targets(args)
     store = ctx.store()
     # An unknown enum value is a usage error (64); a *known* status the record may not
     # enter is a contract violation (2). Keeping those apart is what makes exit code 2

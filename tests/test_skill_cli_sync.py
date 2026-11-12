@@ -126,7 +126,10 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: 28,879): a write read off a terminal now prints a receipt, and KYO-874.c5 requires the
 #: workflow to say that it is read whole and never filtered, since filtering a write's output
 #: is the habit the receipt replaces. One sentence, beside the one on `--json`'s receipt.
-WORKFLOW_TIER_CEILING_BYTES = 29_130
+#: Raised deliberately by KYO-878 from 29,130 to 29,300 (+153 bytes, the tier was at
+#: 29,130): `kyo discuss close --produced` is how a discussion that led to records and no
+#: decision is closed, and only the orchestrator closes discussions, so one sentence says so.
+WORKFLOW_TIER_CEILING_BYTES = 29_300
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -1172,9 +1175,6 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "names it"
     ),
     # KYO-658: the discussion flags the workflow does not type by heart.
-    ("discuss", "--dropped"): (
-        "closes a discussion that produced nothing; the refusal of a bare `close` names it"
-    ),
     ("new", "--discussion"): (
         "names an open discussion; the workflow spawns from it, and the refusal names this"
     ),

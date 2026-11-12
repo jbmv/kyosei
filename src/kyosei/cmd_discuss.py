@@ -113,7 +113,7 @@ from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .kinds import DISCUSSION_KIND
 from .prose import read_prose, single_line
-from .render import echo_block, echo_value, turn_ref_lines
+from .render import PRODUCED_WHY_PREFIX, echo_block, echo_value, turn_ref_lines
 from .store import Store
 
 CONTRACT_DECISION_REQUIRES_DISCUSSION = "decision-requires-discussion"
@@ -787,35 +787,92 @@ def _note(ctx: Context, store: Store, args: Namespace) -> Output:
 
 def _close(ctx: Context, store: Store, args: Namespace) -> Output:
     if args.id is None:
-        raise UsageError('close names the discussion: give its id, --dropped and --why "<reason>"')
-    if not getattr(args, "dropped", False):
+        raise UsageError(
+            "close names the discussion: give its id, and --produced RECORD_ID [RECORD_ID ...] "
+            'or --dropped --why "<reason>"'
+        )
+    dropped = bool(getattr(args, "dropped", False))
+    produced = getattr(args, "produced", None)
+    if dropped and produced is not None:
+        raise UsageError(
+            "--dropped says nothing was produced and --produced says what was: give one"
+        )
+    if not dropped and produced is None:
         raise UsageError(
             "a discussion closes when a decision, proposal, plan or task is spawned from it; "
-            'close is for one that produced nothing, and says so with --dropped --why "<reason>"'
+            "close is for one that led elsewhere, and says what with --produced RECORD_ID "
+            '[RECORD_ID ...] (--why for what is not a record), or that produced nothing, '
+            'with --dropped --why "<reason>"'
         )
     why = getattr(args, "why", None)
-    if not (why or "").strip():
-        raise UsageError("--dropped records that nothing was produced; the reason goes in --why")
-    why = single_line(why, what="--why")
+    if dropped:
+        if not (why or "").strip():
+            raise UsageError(
+                "--dropped records that nothing was produced; the reason goes in --why"
+            )
+    elif why is not None and not why.strip():
+        raise UsageError("--why is empty: give what the discussion produced, or leave it out")
+    why = single_line(why, what="--why") if why else None
+    produced = list(dict.fromkeys(produced or []))
+    if not dropped and not produced and not why:
+        raise UsageError(
+            "--produced names the records the discussion led to; give one or more, or --why "
+            "for what is not a record, such as an idea file"
+        )
     require_discussion(store, args.id)
     if not discussion_state(_refs(store, args.id))["open"]:
         raise UsageError(f"{args.id} is already closed")
+    for record_id in produced:
+        if record_id == args.id:
+            raise UsageError(f"{args.id} cannot have produced itself")
+        store.record(record_id)  # an unknown id refuses here, before anything is written
     stamp = current_stamp(ctx, store, getattr(args, "at", None))
+    touched = [args.id, *produced]
     with store.transaction():
-        before = {args.id: export.record_document(store, args.id)}
-        ref_id = close_on(ctx, store, args.id, stamp, why=why, created_at=now())
-        after, events = commands._commit_and_export(
-            store, command="discuss close", actor=ctx.actor, record_ids=[args.id], before=before
+        before = {rid: export.record_document(store, rid) for rid in touched}
+        created = now()
+        links = [_link(store, rid, args.id, created) for rid in produced]
+        stored_why = why
+        if not dropped and not produced:
+            stored_why = PRODUCED_WHY_PREFIX + (why or "")
+        ref_id = close_on(
+            ctx,
+            store,
+            args.id,
+            stamp,
+            produced_id=produced[0] if produced else None,
+            why=stored_why,
+            created_at=created,
         )
-    commands._finish_mutation(store, [args.id], events)
+        after, events = commands._commit_and_export(
+            store,
+            command="discuss close",
+            actor=ctx.actor,
+            record_ids=touched,
+            before=before,
+        )
+    commands._finish_mutation(store, touched, events)
+    if dropped:
+        head = f"closed {args.id} with nothing produced"
+    elif produced:
+        head = f"closed {args.id}, produced {', '.join(produced)}"
+    else:
+        head = f"closed {args.id}, produced {why}"
+    lines = _receipt(store, args.id, head)
+    lines += [
+        f"  link: {link}  {rid} produced-by {args.id}"
+        for rid, link in zip(produced, links, strict=True)
+        if link
+    ]
     return Output(
-        _receipt(store, args.id, f"closed {args.id} with nothing produced"),
+        lines,
         {
             "ok": True,
             "command": "discuss close",
             "id": args.id,
             "record_id": args.id,
             "turn_ref": ref_id,
+            "produced": produced,
             "record": after[args.id],
         },
     )

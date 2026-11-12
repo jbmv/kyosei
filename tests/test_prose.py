@@ -236,6 +236,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # KYO-660: `kyo excerpt --approved-by` is a credit id, checked to be a current
         # `authorized` credit on the excerpted credit's record; the id is what is kept.
         "--approved-by",
+        # KYO-878: `kyo discuss close --produced` names record ids, each checked to exist
+        # before anything is written; the prose of what is not a record is `--why`.
+        "--produced",
     }
     assert value_flags <= text_bearing | file_bearing | structural, value_flags
 

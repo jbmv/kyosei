@@ -833,6 +833,18 @@ def refresh_after_completion(
     return result
 
 
+class MovesIncomplete(KyoseiError):
+    """Some of the records ``kyo move`` was given were left where they were (KYO-877).
+
+    The message is the whole report, the moves and the refusals, so that the lines a
+    reader would have had on success are not lost with the exit status. ``data`` is
+    merged into the ``--json`` error envelope by ``cli.main``."""
+
+    def __init__(self, message: str, data: dict) -> None:
+        super().__init__(message)
+        self.data = data
+
+
 def cmd_move(ctx: Context, args: Namespace) -> Output:
     """``kyo move`` as typed: :func:`kyosei.cmd_records.cmd_move`, then the refresh.
 
@@ -849,11 +861,28 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
     and regenerate once for the whole act. The move's own output, exit status and
     ``--json`` are unchanged; ``refresh`` is added to the payload only when the project
     declares generate steps, so a project that declares none sees nothing new.
+
+    KYO-877: ``kyo move ID [ID ...] STATUS`` moves each record named, and the refresh
+    runs once for the invocation, its commit naming every record that moved. A record
+    whose transition refuses is left as it was; the rest are moved, and the refusals are
+    named with their unmet items in the report of an invocation that exits 1.
     """
+    ids = cmd_records.move_targets(args)
+    if len(ids) > 1:
+        return _move_several(ctx, args, ids)
+    output = _move_one(ctx, args)
+    return output
+
+
+def _status_of(ctx: Context, record_id: str) -> str | None:
     try:
-        before: str | None = ctx.store().record(args.id)["status"]
+        return ctx.store().record(record_id)["status"]
     except KyoseiError:
-        before = None  # the move refuses below, in its own words
+        return None  # the move refuses below, in its own words
+
+
+def _move_one(ctx: Context, args: Namespace) -> Output:
+    before = _status_of(ctx, args.id)
     output = cmd_records.cmd_move(ctx, args)
     if not output.data.get("changed"):
         return output
@@ -875,6 +904,90 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
     output.lines += refresh["lines"]
     output.data["refresh"] = {key: value for key, value in refresh.items() if key != "lines"}
     return output
+
+
+def _move_several(ctx: Context, args: Namespace, ids: list[str]) -> Output:
+    """One ``kyo move`` over several records: each moved on its own terms, then one
+    refresh. A refusal of one record (a contract, an unknown id) leaves that record as
+    it was and does not stop the others; a usage error (an unknown status, a missing
+    ``--why``) is the same for all of them and stops the first."""
+    complete = _load_status_ladder(ctx.store()).complete
+    moved: list[dict] = []  # {"id", "before", "after", "lines"}
+    unchanged: list[str] = []
+    refused: list[dict] = []
+    lines: list[str] = []
+    for record_id in ids:
+        one = Namespace(**{**vars(args), "words": None, "id": record_id})
+        before = _status_of(ctx, record_id)
+        try:
+            output = cmd_records.cmd_move(ctx, one)
+        except UsageError:
+            raise
+        except KyoseiError as exc:
+            reason = str(exc).splitlines()
+            contract = getattr(exc, "contract", None)
+            refused.append({"id": record_id, "contract": contract, "unmet": reason})
+            lines += [f"refused {record_id}, left as it was:", *(f"  {x}" for x in reason)]
+            continue
+        lines += output.lines
+        if output.data.get("changed"):
+            moved.append(
+                {
+                    "id": record_id,
+                    "before": before,
+                    "after": output.data["record"]["status"],
+                    "record": output.data["record"],
+                }
+            )
+        else:
+            unchanged.append(record_id)
+    header = f"{len(moved)} of {len(ids)} records moved to {args.status}"
+    if unchanged:
+        header += f"; {len(unchanged)} already there"
+    if refused:
+        header += f"; {len(refused)} refused"
+    lines.insert(0, header)
+    touching = [m for m in moved if complete in (m["before"], m["after"])]
+    refresh: dict | None = None
+    if touching:
+        store = ctx.store()
+        into = [m["id"] for m in touching if m["after"] == complete]
+        if into:
+            remedy_ids = into
+        else:
+            latest = _latest_completed(store, complete)
+            remedy_ids = [latest] if latest else []
+        refresh = refresh_after_completion(
+            ctx,
+            [m["id"] for m in touching],
+            by="kyo move",
+            status=args.status,
+            remedy_ids=remedy_ids,
+        )
+        if refresh["status"] != REFRESH_NONE_DECLARED:
+            lines += refresh["lines"]
+        else:
+            refresh = None
+    data: dict = {
+        "ok": not refused,
+        "command": "move",
+        "status": args.status,
+        "record_ids": ids,
+        "moved": [m["id"] for m in moved],
+        "unchanged": unchanged,
+        "refused": refused,
+        "changed": bool(moved),
+        "records": [m["record"] for m in moved],
+    }
+    if refresh is not None:
+        data["refresh"] = {key: value for key, value in refresh.items() if key != "lines"}
+    if refused:
+        lines.append(
+            f"INCOMPLETE: {len(refused)} of {len(ids)} records were not moved; each is left "
+            "as it was, and the unmet items above are what to settle before moving it"
+        )
+        raise MovesIncomplete("\n".join(lines), data)
+    return Output(lines, data, receipt=True)
 
 
 def _refresh_not_done(result: dict, status: str, why: str, remedy: str | None) -> dict:
