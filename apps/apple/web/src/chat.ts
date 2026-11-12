@@ -2315,7 +2315,7 @@ function drawLanding(): void {
   const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
   const marks = area ? marksOf.get(area) : undefined;
   if (!area || !marks) return;
-  const arrow = span("mark mark-landing", "➜");
+  const arrow = span("mark mark-landing", "→");
   arrow.title = "An anchor or an attachment made now lands on this paragraph";
   arrow.style.top = `${lineTop(marks, caretLine(area))}px`;
   marks.gutter.append(arrow);
