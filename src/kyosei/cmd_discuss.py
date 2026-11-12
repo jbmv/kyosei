@@ -818,7 +818,7 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
 # ------------------------------------------------------------------ the Stop check (KYO-662)
 
 #: The cues, as the check names them in its message and under ``--json``.
-CUE_PERSON = "the person's message asks a question or opens a choice"
+CUE_PERSON = "the person's message opens a choice"
 CUE_REPLY = "your reply puts a choice to the person"
 CUE_ASKED = "the turn used AskUserQuestion"
 
@@ -844,13 +844,15 @@ _PERSON_PHRASES = re.compile(
 
 #: Phrases in the agent's final message that put a choice to the person. Offers and
 #: reports of waiting ("if you'd like", "waiting on you", "needs your") were measured and
-#: left out: they added turn ends outside any discussion and no opening of one.
+#: left out: they added turn ends outside any discussion and no opening of one. "do you
+#: want", "would you like", "want me to", "shall i", "should i" and "say the word" were
+#: offers of the same kind and were left out with KYO-859.
 _REPLY_PHRASES = re.compile(
     r"\b(?:i recommend|my recommendation|recommendation:|i(?:'d| would) (?:recommend"
     r"|suggest|go with|lean|pick|choose)|i suggest|which (?:do|would|should) you|which one"
-    r"|do you want|would you like|want me to|shall i|should i|your call|up to you"
+    r"|your call|up to you"
     r"|your decision|for you to decide|yours to decide|you decide|let me know (?:which|if"
-    r"|whether|how|what)|tell me (?:which|if|whether|how|what)|say (?:which|go|the word)"
+    r"|whether|how|what)|tell me (?:which|if|whether|how|what)|say which"
     r"|your choice|options?:)\b",
     re.I,
 )
@@ -867,9 +869,10 @@ def _prose(text: str) -> str:
 
 
 def person_cue(words: str) -> bool:
-    """Whether the person's words contain a question or a phrase that opens a choice."""
+    """Whether the person's words contain a phrase that opens a choice. A question mark
+    alone is not one (KYO-859)."""
     prose = _prose(words)
-    return bool(_QUESTION_MARK.search(prose) or _PERSON_PHRASES.search(prose))
+    return bool(_PERSON_PHRASES.search(prose))
 
 
 def reply_cue(reply: str) -> bool:
@@ -1001,7 +1004,8 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
         '`kyo discuss open --title "<topic>"`, which stamps the person\'s latest turn, or '
         "record that it is not one with `kyo discuss skip --at-prompt "
         f"{turn.prompt_id} --why "
-        '"<one line>"`. This is asked once for this turn and does not block the stop.'
+        '"<one line>"`. A skip is recorded, so write nothing about it to the person. '
+        "This is asked once for this turn and does not block the stop."
     )
     return result | {"fire": True, "why": state, "message": message}
 

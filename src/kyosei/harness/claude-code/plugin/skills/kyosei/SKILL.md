@@ -148,11 +148,11 @@ individually (`kyo edit <id> --plan <plan-id>`, `--plan` on `kyo new`, `--no-pla
 
 Consult `kyosei/kinds.yml` for what a kind accepts and produces. All three write paths enforce
 it: `kyo promote` requires `idea`, `kyo new` requires `intake` (KYO-43), `kyo spawn` the source
-record's own kind (KYO-50). Before answering a turn that puts a choice to the person, run
+record's own kind (KYO-50). Before answering a choice put to the person, run
 `kyo discuss open --title "<topic>"` (KYO-658); file the decision from it, `kyo
 spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
-(KYO-644; `--keep-open` for more). If the Stop hook asks (KYO-662), open it or
-`kyo discuss skip --why "<why>"`. With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
+(KYO-644; `--keep-open`). If the Stop hook asks (KYO-662), open it or
+`kyo discuss skip --why "<why>"`; do not report it. With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
 needing design work first is a proposal.
 
 **To share a discussion**, `kyo excerpt <credit> --draft`; the person cuts the draft (private-word hits

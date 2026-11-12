@@ -197,7 +197,8 @@ writes nothing.
    transcripts confirms the turn index and archives the transcript (KYO-657, KYO-683);
    `kyo discuss check --hook`, which there asks the orchestrator, for one more turn, to
    open a discussion with `kyo discuss open` or to record with `kyo discuss skip` why
-   the turn is not one (KYO-662); and `kyo sessions --hook`, which shows the person the
+   the turn is not one, a cue being a phrase in the person's words that opens a choice or
+   a recommendation, options or closing question in the reply (KYO-662, KYO-859); and `kyo sessions --hook`, which shows the person the
    unchecked items of the session's task list (KYO-770). `SessionEnd` runs
    `kyo turns --hook` and `kyo sessions --hook` only. The order of sweep and doctor is load-bearing
    (KYO-31): the healing step runs before the check that would otherwise

@@ -57,7 +57,7 @@ def indexed(kyo, project: Path, session: str) -> Path:
     opt_in_transcripts(project)
     write_transcript(
         [
-            person("p-1", PROMPT_1, "should the cache stay?", "2026-11-06T10:00:00.000Z"),
+            person("p-1", PROMPT_1, "what if the cache stays?", "2026-11-06T10:00:00.000Z"),
             agent_text("a-1", "I recommend keeping it.", "2026-11-06T10:00:30.000Z"),
             notification("n-2", PROMPT_2, "2026-11-06T10:00:40.000Z"),
             agent_text("a-2", "The run finished.", "2026-11-06T10:00:50.000Z"),
@@ -108,14 +108,13 @@ def silent(run) -> bool:
 @pytest.mark.parametrize(
     "words",
     [
-        "is the cache worth keeping?",
         "how about dropping the cache",
         "I'm leaning toward the second one",
         "let's discuss the layout before building",
         "what are the options here",
     ],
 )
-def test_the_person_cue_fires_on_a_question_or_a_phrase_that_opens_a_choice(words: str) -> None:
+def test_the_person_cue_fires_on_a_phrase_that_opens_a_choice(words: str) -> None:
     assert person_cue(words)
 
 
@@ -123,6 +122,8 @@ def test_the_person_cue_fires_on_a_question_or_a_phrase_that_opens_a_choice(word
     "words",
     [
         "go ahead and merge it",
+        "what does it say is next?",
+        "is the cache worth keeping?",
         "run `grep -c '?' notes.txt` and commit",
         "see https://example.org/search?q=cache and fix it",
         "```\nwhat = options or None  # ?\n```\nmerge it",
@@ -140,6 +141,7 @@ def test_the_person_cue_ignores_instructions_code_and_urls(words: str) -> None:
         "Done.\n\n- D1: keep the cache\n- D2: drop it\n\nNothing else changed.",
         "**Option A** — keep it.\n**Option B** — drop it.\n",
         "The cache is stale after a restart.\n\nDo we keep it?",
+        "Which one do you pick?",
     ],
 )
 def test_the_reply_cue_fires_on_a_recommendation_options_or_a_closing_question(reply: str) -> None:
@@ -152,6 +154,11 @@ def test_the_reply_cue_fires_on_a_recommendation_options_or_a_closing_question(r
         "Merged. The suite passes.",
         "Why did it fail? The port was taken.\n\nI changed the port.\n\nThe run is green.",
         "D1 was implemented as decided.",
+        "Say the word and I will dispatch.",
+        "Want me to merge it. I can start now.\n\nThe run is green.",
+        "Shall I continue with the next record.\n\nDone for now.",
+        "Would you like the log. Should I also rebase.\n\nThe run is green.",
+        "Do you want it merged.\n\nThe run is green.",
     ],
 )
 def test_the_reply_cue_ignores_a_report(reply: str) -> None:
@@ -159,7 +166,7 @@ def test_the_reply_cue_ignores_a_report(reply: str) -> None:
 
 
 def test_detect_names_each_cue() -> None:
-    assert detect(("keep it?",), "I recommend keeping it.", True) == [
+    assert detect(("what about keeping it",), "I recommend keeping it.", True) == [
         CUE_PERSON,
         CUE_REPLY,
         CUE_ASKED,
@@ -206,7 +213,7 @@ def test_read_turn_finds_a_turn_that_starts_before_the_first_window(tmp_path: Pa
     records = [
         person("p-0", PROMPT_2, "an earlier prompt", "2026-11-06T09:00:00.000Z"),
         agent_text("a-0", "An earlier answer.", "2026-11-06T09:00:30.000Z"),
-        person("p-1", PROMPT_1, "should the cache stay?", "2026-11-06T10:00:00.000Z"),
+        person("p-1", PROMPT_1, "what if the cache stays?", "2026-11-06T10:00:00.000Z"),
         *(
             agent_text(f"a-{n}", padding, "2026-11-06T10:00:10.000Z")
             for n in range(1, 2 * transcript._TAIL_BYTES // 4096)
@@ -216,7 +223,7 @@ def test_read_turn_finds_a_turn_that_starts_before_the_first_window(tmp_path: Pa
     path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     assert path.stat().st_size > 2 * transcript._TAIL_BYTES
     turn = transcript.read_turn(path, PROMPT_1)
-    assert turn is not None and turn.person == ("should the cache stay?",)
+    assert turn is not None and turn.person == ("what if the cache stays?",)
     assert turn.reply == "Kept."
     assert transcript.read_turn(path, None).prompt_id == PROMPT_1
     assert transcript.read_turn(path, PROMPT_3) is None
@@ -364,9 +371,9 @@ def test_a_turn_naming_a_record_no_open_discussion_is_about_fires_again(
     first, second = f"{prefix}-901", f"{prefix}-902"  # named, and need not exist
     write_transcript(
         [
-            person("p-1", PROMPT_1, f"should {first} stay?", "2026-11-06T10:00:00.000Z"),
+            person("p-1", PROMPT_1, f"what if {first} stays?", "2026-11-06T10:00:00.000Z"),
             agent_text("a-1", "Yes.", "2026-11-06T10:00:30.000Z"),
-            person("p-2", PROMPT_2, f"and what about {second}?", "2026-11-06T10:01:00.000Z"),
+            person("p-2", PROMPT_2, f"and what about {second}", "2026-11-06T10:01:00.000Z"),
             agent_text("a-2", "It can go.", "2026-11-06T10:01:30.000Z"),
         ]
     )
@@ -402,7 +409,7 @@ def test_the_check_is_silent_in_a_project_that_has_not_opted_in(
 ) -> None:
     write_transcript(
         [
-            person("p-1", PROMPT_1, "should the cache stay?", "2026-11-06T10:00:00.000Z"),
+            person("p-1", PROMPT_1, "what if the cache stays?", "2026-11-06T10:00:00.000Z"),
             agent_text("a-1", "I recommend keeping it.", "2026-11-06T10:00:30.000Z"),
         ]
     )
@@ -570,7 +577,7 @@ def test_the_measuring_script_counts_recall_and_fires_outside_spans(tmp_path: Pa
     path = tmp_path / "t" / f"{SESSION}.jsonl"
     path.parent.mkdir()
     turns = [
-        ("p-1", PROMPT_1, "should the cache stay?", "Yes."),  # span one: caught
+        ("p-1", PROMPT_1, "what if the cache stays?", "Yes."),  # span one: caught
         ("p-2", PROMPT_2, "keep it", "Kept."),  # span one's last turn
         ("p-3", PROMPT_3, "drop the queue", "Dropped."),  # span two: missed
         ("p-4", "aaaaaaaa-0000-4000-8000-000000000004", "what about the log?", "Rotated."),
@@ -610,3 +617,13 @@ def test_the_detector_meets_its_recall_and_firing_bounds_on_the_private_transcri
     assert result["spans_eligible"] > 0
     assert result["recall"] >= 0.84, result
     assert result["fires_outside_every_span"] <= 260, result
+
+
+def test_the_message_says_a_skip_is_recorded_and_nothing_is_written_to_the_person(
+    kyo, indexed: Path
+) -> None:
+    """KYO-859.c1: the wording the agent reads names the skip command and says it is not
+    reported to the person."""
+    words = feedback(stop(kyo, PROMPT_1, "I recommend keeping it."))
+    assert "A skip is recorded, so write nothing about it to the person." in words
+    assert "kyo discuss skip --at-prompt" in words

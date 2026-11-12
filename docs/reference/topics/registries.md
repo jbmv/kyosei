@@ -50,14 +50,16 @@ closes one that produced nothing.
 **The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
 ended: the person's words and any use of AskUserQuestion from the transcript, and the
 agent's final message from the hook payload. A cue fires when the person's words hold a
-question or a phrase that opens a choice, when the reply holds a recommendation, a request
-for their choice, two or more labelled options or a closing question, or when the turn
+phrase that opens a choice (a question mark alone does not fire it), when the reply holds a
+recommendation, a request for their choice, two or more labelled options or a closing
+question (an offer to act, such as "want me to" or "shall I", does not), or when the turn
 used AskUserQuestion. The turn is attached when a discussion opened in this session is
 still open, or a turn reference already names the turn; a turn whose words name a record
 that no open discussion's title, description, notes or links mention is not attached. When
 a cue fires on an unattached turn, the check prints one line of hook JSON whose
 `hookSpecificOutput.additionalContext` asks the agent to run `kyo discuss open` or `kyo
-discuss skip --why "<one line>"`. Claude Code gives that text to the agent as Stop hook
+discuss skip --why "<one line>"`, and says that a skip is recorded and not reported to the
+person. Claude Code gives that text to the agent as Stop hook
 feedback and continues the conversation once so the agent can act on it; it is not a
 block and is not reported as a hook error. The check says nothing on the stop that follows
 its own feedback (`stop_hook_active`), so it asks at most once per turn. It is also silent
