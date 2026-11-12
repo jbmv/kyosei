@@ -640,6 +640,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-12** — `KYO-845` (bug) — Mac app: in the History drawer an anchor on a reply opens nothing, and a prompt's images are not shown
 - **2026-11-12** — `KYO-841` (task) — Mac app: a Finder-like Files home with stars, and an open markdown file's outline
 - **2026-11-12** — `KYO-840` (task) — Mac app: the Records home as groups, search in the left drawer, the record's outline in the right
+- **2026-11-12** — `KYO-839` (task) — Mac app: History opens a session in its own pane, groups results by session, and drawers dock
 - **2026-11-12** — `KYO-838` (bug) — Mac app: Command-F marks nothing in the chat of an ended session, which is drawn dimmed
 - **2026-11-12** — `KYO-833` (bug) — Mac app: turning the Records Open chip on or off is slow while the list redraws
 - **2026-11-12** — `KYO-827` (task) — Mac app: the History view, searching what was said in this project
