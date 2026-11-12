@@ -129,7 +129,29 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: Raised deliberately by KYO-878 from 29,130 to 29,300 (+153 bytes, the tier was at
 #: 29,130): `kyo discuss close --produced` is how a discussion that led to records and no
 #: decision is closed, and only the orchestrator closes discussions, so one sentence says so.
-WORKFLOW_TIER_CEILING_BYTES = 29_300
+#:
+#: Lowered deliberately by KYO-881 from 29,300 to 24,000 (the tier was at 29,283 and is
+#: 23,866 after it). Each raise recorded above bought a sentence and took nothing out.
+#: What left the tier, and where it went:
+#:
+#: * Section 0 (setup, the blocked push, upgrading and the reruns) is a pointer; its four
+#:   paragraphs are in REFERENCE.md, section 0, which a session reads once per project and
+#:   once per upgrade.
+#: * Section 2's paragraphs on scopes and on sharing a discussion with `kyo excerpt`, and
+#:   the flags of `kyo promote`, are in REFERENCE.md, section 2.
+#: * Section 4's paragraph on `kyo docs assemble` is in REFERENCE.md, section 4; the tier
+#:   keeps one sentence for a project with a `numbered:` document.
+#: * Section 5's paragraphs on `kyo restate`, `kyo split`, `kyo redo` and `kyo retag`, and
+#:   the writers `kyo redact`'s id shapes name, are in REFERENCE.md, section 5; the tier
+#:   names each command in a clause saying when it applies.
+#: * Sentences that only described a command (what `kyo dispatch` prints flag by flag, the
+#:   prune flags, `kyo prior-art`) are in the REFERENCE.md section of the same number.
+#:
+#: Each command and flag that left is listed in ``MOVED_TO_SKILL_REFERENCE_*`` below with
+#: the REFERENCE.md section that names it, and a test reads that section. A sentence added
+#: from here on is paid for by one taken out; raise the number only by a record that says
+#: what could not move.
+WORKFLOW_TIER_CEILING_BYTES = 24_000
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -410,9 +432,10 @@ def test_the_workflow_tier_stays_under_its_ceiling(path: Path) -> None:
     size = path.stat().st_size
     assert size <= WORKFLOW_TIER_CEILING_BYTES, (
         f"{path.name} is {size:,} bytes, over the {WORKFLOW_TIER_CEILING_BYTES:,}-byte "
-        "ceiling KYO-328 set (half what the skill was before the split). Move the "
-        "history to REFERENCE.md and keep the instruction here, or raise the ceiling "
-        "deliberately in this file and say why"
+        "ceiling (KYO-328 set one, KYO-881 lowered it). Take a sentence out for the one "
+        "that went in: move a step a session seldom takes to REFERENCE.md and list it in "
+        "MOVED_TO_SKILL_REFERENCE_*, or raise the ceiling deliberately in this file and "
+        "say why"
     )
 
 
@@ -1084,8 +1107,8 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
     "rebuild": (
         "rebuilds kyosei.db from kyosei/export/ — a checkout-level act (a fresh clone, a "
         "schema bump, a corrupted db) that the tool's own refusal message names on the "
-        "spot, and that section 0 reaches through `kyo where` for the store that will not "
-        "open. A controller does not choose to rebuild; it is told to"
+        "spot, and that REFERENCE.md's section 0 reaches through `kyo where` for the store "
+        "that will not open. A controller does not choose to rebuild; it is told to"
     ),
     "pre-tool-use": (
         "a hook entry point, not a controller step: it runs check-push and check-command "
@@ -1160,6 +1183,16 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-881: two flags the trimmed tier stopped spelling, neither an orchestrator's step.
+    ("reference", "--output"): (
+        "writes the whole command reference to a file; `kyo reference` and "
+        "`kyo reference <command>` are what the workflow reaches, and REFERENCE.md's "
+        "preamble names this form"
+    ),
+    ("docs", "--against"): (
+        "`kyo docs preview --against <ref>` is a worker's read in its own worktree, which "
+        "every brief states; the orchestrator's docs step is `kyo docs settle`"
+    ),
     # KYO-660: where the draft or pack is written.
     ("excerpt", "--out"): (
         "names the file when the session has no recorded scratch directory, which the "
@@ -1287,23 +1320,23 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ),
     ("brief", "--compact"): (
         "a hook's own flag: written into .claude/settings.json by `kyo install-hooks` and "
-        "never typed by a controller, so section 0 names the hook by what it does and "
-        "REFERENCE.md carries the exact command (KYO-339's editing pass)"
+        "never typed by a controller, so REFERENCE.md's section 0 names the hook by what "
+        "it does and carries the exact command (KYO-339's editing pass, KYO-881)"
     ),
     ("brief", "--session-start"): (
         "a hook's own flag: written into .claude/settings.json by `kyo install-hooks` and "
-        "never typed by a controller, so section 0 names the hook by what it does and "
-        "REFERENCE.md carries the exact command (KYO-339's editing pass)"
+        "never typed by a controller, so REFERENCE.md's section 0 names the hook by what "
+        "it does and carries the exact command (KYO-339's editing pass, KYO-881)"
     ),
     ("check-branch", "--subagent-stop"): (
         "a hook's own flag: written into .claude/settings.json by `kyo install-hooks` and "
-        "never typed by a controller, so section 0 names the hook by what it does and "
-        "REFERENCE.md carries the exact command (KYO-339's editing pass)"
+        "never typed by a controller, so REFERENCE.md's section 0 names the hook by what "
+        "it does and carries the exact command (KYO-339's editing pass, KYO-881)"
     ),
     ("check-clean", "--subagent-stop"): (
         "a hook's own flag: written into .claude/settings.json by `kyo install-hooks` and "
-        "never typed by a controller, so section 0 names the hook by what it does and "
-        "REFERENCE.md carries the exact command (KYO-339's editing pass)"
+        "never typed by a controller, so REFERENCE.md's section 0 names the hook by what "
+        "it does and carries the exact command (KYO-339's editing pass, KYO-881)"
     ),
     ("attach", "--supports"): (
         "points an evidence artifact at the claim or criterion it supports; the workflow's "
@@ -1320,7 +1353,7 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("check-push", "--advisory"): (
         "what the git pre-push hook runs so a human pushing their own repository is warned "
         "rather than blocked; the controller-facing half is the PreToolUse block and "
-        "`--acknowledge`, and both are in section 0"
+        "`--acknowledge`, and both are in REFERENCE.md's section 0 (KYO-881)"
     ),
     ("check-push", "--pre-push"): (
         "what the generated git pre-push hook runs with git's own ref lines on stdin; nobody "
@@ -1335,7 +1368,7 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("init", "--in-repo"): (
         "`kyo init` runs once, before there is a controller session to read this file, and "
         "its layout flags are a maintainer's decision documented in "
-        "docs/reference/topics/store.md ('Where the store lives'); section 0 begins after init"
+        "docs/reference/topics/store.md ('Where the store lives'); the workflow begins after init"
     ),
     ("init", "--defaults"): (
         "same as --in-repo: the scripted route through the init-time layout choice "
@@ -1373,6 +1406,178 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
         "stops either way"
     ),
 }
+
+
+# ------------------------------------------------------------------ KYO-881
+#
+# A third answer for a command or flag, beside "named in the workflow" and "left to
+# `kyo reference`": the workflow tier stopped spelling it, and the skill's own second tier
+# carries the instruction. These are steps an orchestrator does take, but seldom (once per
+# project, once per upgrade, or for one kind of project), so they are read on demand.
+#
+# The value is the REFERENCE.md section, by its heading, that names the command or flag.
+# `test_what_left_the_workflow_is_in_the_reference_section_it_names` reads that section,
+# and requires the workflow to cite the same heading, so an entry cannot outlive the
+# passage it stands for. An entry is deleted when the workflow names the item again.
+
+_REF_0 = "0. Setup, once per consumer project"
+_REF_1 = "1. Start of session"
+_REF_2 = "2. Filing vs. promotion"
+_REF_3 = "3. Dispatching"
+_REF_5 = "5. Verifying criteria and moving state"
+
+#: Commands the workflow tier no longer names, with the REFERENCE.md section that does.
+MOVED_TO_SKILL_REFERENCE_COMMANDS: dict[str, str] = {
+    "changelog": _REF_0,
+    "check-build": _REF_0,
+    "check-push": _REF_0,
+    "init": _REF_0,
+    "install-hooks": _REF_0,
+    "install-procedures": _REF_0,
+    "install-skill": _REF_0,
+    "prior-art": _REF_1,
+}
+
+#: Flags the workflow tier no longer names, with the REFERENCE.md section that names the
+#: flag and its command. The first group's commands left the tier with them; the rest are
+#: flags of commands the tier still names.
+MOVED_TO_SKILL_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    ("changelog", "--since"): _REF_0,
+    ("check-push", "--acknowledge"): _REF_0,
+    ("install-hooks", "--print"): _REF_0,
+    ("install-procedures", "--adopt"): _REF_0,
+    ("install-procedures", "--adopt-preamble"): _REF_0,
+    ("install-procedures", "--print"): _REF_0,
+    ("install-skill", "--print"): _REF_0,
+    ("check-branch", "--against"): _REF_0,
+    ("new", "--no-prior-art"): _REF_1,
+    ("promote", "--no-prior-art"): _REF_1,
+    ("spawn", "--no-prior-art"): _REF_1,
+    ("edit", "--no-plan"): _REF_2,
+    ("edit", "--no-scope"): _REF_2,
+    ("excerpt", "--approved-by"): _REF_2,
+    ("excerpt", "--draft"): _REF_2,
+    ("excerpt", "--pack"): _REF_2,
+    ("excerpt", "--preview"): _REF_2,
+    ("promote", "--keep"): _REF_2,
+    ("promote", "--section"): _REF_2,
+    ("dispatch", "--brief-out"): _REF_3,
+    ("dispatch", "--print-brief"): _REF_3,
+    ("worktrees", "--against"): _REF_3,
+    ("list", "--status"): _REF_5,
+    ("retag", "--no-tags"): _REF_5,
+    ("split", "--to-successor"): _REF_5,
+    ("touch-drift", "--against"): _REF_5,
+}
+
+
+def _reference_sections(text: str) -> dict[str, str]:
+    """``{heading: body}`` for each ``## `` section of a skill tier."""
+    return {
+        section.splitlines()[0].strip(): section
+        for section in re.split(r"(?m)^## ", text)[1:]
+    }
+
+
+def _moved_items_the_reference_does_not_carry(
+    workflow: str,
+    reference: str,
+    commands: dict[str, str],
+    flags: dict[tuple[str, str], str],
+) -> list[str]:
+    """Each moved command or flag whose stated REFERENCE.md section does not exist, is not
+    cited by the workflow, or does not name it. Boundary-aware, like :func:`_names`."""
+    sections = _reference_sections(reference)
+    problems: list[str] = []
+    items = [(command, None, heading) for command, heading in commands.items()]
+    items += [(command, flag, heading) for (command, flag), heading in flags.items()]
+    for command, flag, heading in items:
+        label = f"kyo {command}" + (f" {flag}" if flag else "")
+        body = sections.get(heading)
+        if body is None:
+            problems.append(f"{label}: REFERENCE.md has no section {heading!r}")
+            continue
+        if f'"{heading}"' not in workflow:
+            problems.append(f"{label}: the workflow never cites section {heading!r}")
+        if not _names(body, f"kyo {command}"):
+            problems.append(f"{label}: section {heading!r} does not name `kyo {command}`")
+        if flag is not None and not _names(body, flag):
+            problems.append(f"{label}: section {heading!r} does not name {flag}")
+    return problems
+
+
+def test_what_left_the_workflow_is_in_the_reference_section_it_names() -> None:
+    """KYO-881.c2. Every command and flag the workflow tier stopped naming is named in the
+    REFERENCE.md section recorded for it, and the workflow cites that section by its
+    heading. With the two checks below, every command of the parser is then named in the
+    workflow, named in the skill's reference under a cited section, or left to
+    `kyo reference` with a stated reason, so none the tier once named is named nowhere."""
+    problems = _moved_items_the_reference_does_not_carry(
+        PACKAGED_SKILL_PATH.read_text(encoding="utf-8"),
+        PACKAGED_REFERENCE_PATH.read_text(encoding="utf-8"),
+        MOVED_TO_SKILL_REFERENCE_COMMANDS,
+        MOVED_TO_SKILL_REFERENCE_FLAGS,
+    )
+    assert not problems, (
+        "a step that left the workflow tier is not where the tier says it is: "
+        f"{problems}. Write the instruction into that REFERENCE.md section, or name the "
+        "command in the workflow again and delete the entry (KYO-881)"
+    )
+
+
+def test_the_moved_sets_carry_no_stale_entry() -> None:
+    """The upkeep of the moved sets, on the terms of the leave-to-reference sets: an entry
+    for a command or flag that no longer exists, one the workflow names again, and one
+    answered twice (moved and also left to `kyo reference`) each fail."""
+    choices = _subcommand_choices()
+    text = PACKAGED_SKILL_PATH.read_text(encoding="utf-8")
+    universal = _universal_flags()
+    for command in MOVED_TO_SKILL_REFERENCE_COMMANDS:
+        assert command in choices, f"`kyo {command}` does not exist"
+        assert not _names(text, f"kyo {command}"), (
+            f"the workflow names `kyo {command}` again, so its moved entry is false; delete it"
+        )
+        assert command not in LEAVE_TO_REFERENCE_COMMANDS, command
+    for command, flag in MOVED_TO_SKILL_REFERENCE_FLAGS:
+        assert command in choices, f"`kyo {command}` does not exist"
+        assert flag in _flags_for(choices[command]) - universal, (
+            f"`kyo {command} {flag}` is not a real non-global flag of that command"
+        )
+        assert not _names(text, flag), (
+            f"the workflow names {flag} again, so the moved entry for `kyo {command} {flag}` "
+            "is false; delete it"
+        )
+        assert (command, flag) not in LEAVE_TO_REFERENCE_FLAGS, (command, flag)
+
+
+def test_the_moved_check_catches_a_step_the_reference_lost() -> None:
+    """The canary: the check fails for a section that does not name the command, for a
+    section that does not name the flag, for a section that does not exist, and for a
+    section the workflow does not cite; and it passes on the sentence that carries both."""
+    workflow = 'Stories: `REFERENCE.md`, "5. Verifying".\n'
+    reference = "## 5. Verifying\n\n`kyo split <id> --to-successor <cid>` files a successor.\n"
+    assert not _moved_items_the_reference_does_not_carry(
+        workflow,
+        reference,
+        {"split": "5. Verifying"},
+        {("split", "--to-successor"): "5. Verifying"},
+    )
+    lost = reference.replace("`kyo split <id> --to-successor <cid>`", "Splitting")
+    assert len(
+        _moved_items_the_reference_does_not_carry(
+            workflow, lost, {"split": "5. Verifying"}, {("split", "--to-successor"): "5. Verifying"}
+        )
+    ) == 3
+    no_flag = reference.replace(" --to-successor <cid>", "")
+    assert _moved_items_the_reference_does_not_carry(
+        workflow, no_flag, {}, {("split", "--to-successor"): "5. Verifying"}
+    ) == ["kyo split --to-successor: section '5. Verifying' does not name --to-successor"]
+    assert _moved_items_the_reference_does_not_carry(
+        workflow, reference, {"split": "9. Absent"}, {}
+    ) == ["kyo split: REFERENCE.md has no section '9. Absent'"]
+    assert _moved_items_the_reference_does_not_carry(
+        "no pointer", reference, {"split": "5. Verifying"}, {}
+    ) == ["kyo split: the workflow never cites section '5. Verifying'"]
 
 
 def _subcommand_choices(parser=None):
@@ -1449,12 +1654,15 @@ def test_every_command_is_named_or_deliberately_left_to_the_reference(path: Path
         name
         for name in _unnamed_commands(text, _subcommand_choices())
         if name not in LEAVE_TO_REFERENCE_COMMANDS
+        and name not in MOVED_TO_SKILL_REFERENCE_COMMANDS
     ]
     assert not undecided, (
         f"{path.name} never names {undecided}, and LEAVE_TO_REFERENCE_COMMANDS in "
         f"{Path(__file__).name} does not say why. Do one of the two: name the command in "
         "the workflow paragraph where a controller would reach for it, or add it to that "
-        "dict with a one-line reason. `kyo reference` is complete by construction, so "
+        "dict with a one-line reason (a step written into REFERENCE.md goes in "
+        "MOVED_TO_SKILL_REFERENCE_COMMANDS instead, KYO-881). "
+        "`kyo reference` is complete by construction, so "
         "'leave it to the reference' is a legitimate answer — it is just not one that "
         "gets to be silent (KYO-302)"
     )
@@ -1475,7 +1683,7 @@ def test_every_flag_of_a_named_command_is_named_or_deliberately_left(path: Path)
     undecided = [
         pair
         for pair in _unnamed_flags(text, _subcommand_choices())
-        if pair not in LEAVE_TO_REFERENCE_FLAGS
+        if pair not in LEAVE_TO_REFERENCE_FLAGS and pair not in MOVED_TO_SKILL_REFERENCE_FLAGS
     ]
     assert not undecided, (
         f"{path.name} names these commands but never their flags: "
@@ -1555,6 +1763,8 @@ def test_the_two_way_check_catches_a_new_command_and_a_new_flag() -> None:
     # And neither is excused by the escape hatch, which is what makes the suite fail.
     assert "frobnicate" not in LEAVE_TO_REFERENCE_COMMANDS
     assert ("edit", "--newly-grown") not in LEAVE_TO_REFERENCE_FLAGS
+    assert "frobnicate" not in MOVED_TO_SKILL_REFERENCE_COMMANDS
+    assert ("edit", "--newly-grown") not in MOVED_TO_SKILL_REFERENCE_FLAGS
     # The real tree is untouched: a fresh parser still has neither.
     fresh = _subcommand_choices()
     assert "frobnicate" not in fresh
