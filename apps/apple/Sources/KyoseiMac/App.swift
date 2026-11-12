@@ -33,7 +33,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// The executable's entry. Run as `Kyosei seal-key read|add|delete` it makes one keychain
+/// call and exits before any window is made (KYO-789, `SealKeyItem`); otherwise it is the app.
 @main
+enum Entry {
+    static func main() {
+        let arguments = CommandLine.arguments
+        if arguments.count >= 2, arguments[1] == "seal-key" {
+            let outcome = SealKeyItem.run(Array(arguments.dropFirst(2))) {
+                String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+            }
+            FileHandle.standardOutput.write(Data(outcome.output.utf8))
+            FileHandle.standardError.write(Data(outcome.error.utf8))
+            exit(outcome.exit.rawValue)
+        }
+        KyoseiMacApp.main()
+    }
+}
+
 struct KyoseiMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     private var feed: SessionFeed { delegate.feed }

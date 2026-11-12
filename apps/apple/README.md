@@ -45,6 +45,7 @@ how the app draws each and where its code is.
 
 <!-- governs:
 - apps/apple/Package.swift
+- apps/apple/Sources/KyoseiClient/SealKeyItem.swift
 - apps/apple/Sources/KyoseiClient/ServeClient.swift
 - apps/apple/Sources/KyoseiMac/App.swift
 - apps/apple/Sources/KyoseiMac/SessionFeed.swift
@@ -75,7 +76,8 @@ The files that the later sections do not name, with what each holds:
 |---|---|
 | `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
 | `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
-| `Sources/KyoseiMac/App.swift` | the application delegate, the one window, the File menu's Projects… item and the Settings scene |
+| `Sources/KyoseiClient/SealKeyItem.swift` | the seal key as a synchronizable keychain item, and the `seal-key` mode's contract with `kyo` |
+| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
@@ -448,3 +450,13 @@ Files and file links need it to hold the `files` permission.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.
+
+With `KYOSEI_PROVISIONING_PROFILE`, the path of a Developer ID provisioning profile issued for
+the app's identifier, and `KYOSEI_TEAM_ID`, the script embeds the profile and signs with three
+entitlements: the application identifier, the team identifier and a keychain access group of
+the same name. They let the app's executable keep the seal key as a synchronizable keychain
+item, which iCloud Keychain carries (KYO-789). The executable does that only when it is run as
+`Kyosei seal-key read`, `add` or `delete`: it makes one keychain call and exits before any
+window is made. `kyo` is to run it that way when a person chooses the `icloud-keychain` key
+store; that part of `kyo` is planned and not built. Without the two variables the package
+carries no entitlement.
