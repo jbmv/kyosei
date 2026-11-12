@@ -741,6 +741,11 @@ TURN_REF_ROLES: tuple[str, ...] = ("opened", "note", "closed")
 TURN_REF_INDEXED = "indexed"
 TURN_REF_ABSENT = "absent"
 TURN_REF_INDEX_STATES: tuple[str, ...] = (TURN_REF_INDEXED, TURN_REF_ABSENT)
+#: ``turn_refs.outcome`` (KYO-882), on a ``closed`` reference alone: the discussion
+#: produced something (a record, or what ``why`` names), or was dropped.
+TURN_REF_PRODUCED = "produced"
+TURN_REF_DROPPED = "dropped"
+TURN_REF_OUTCOMES: tuple[str, ...] = (TURN_REF_PRODUCED, TURN_REF_DROPPED)
 
 #: ``gates.cleared_as``: ``answered`` (the person answered and a credit names the gate) or
 #: ``withdrawn`` (the wait stopped mattering). NULL on a clearing written before schema 28.

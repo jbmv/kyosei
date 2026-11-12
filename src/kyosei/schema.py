@@ -360,7 +360,18 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: A record document written at 33 or earlier carries no such key on its dispatches
 #: (:data:`DISPATCH_FIELD_DEFAULTS` [34]); NULL is what was true of it, and a prompt is never
 #: derived at load time from a dispatch's time. A real DDL change, so a real new hash.
-SCHEMA_VERSION = 34
+#: Bumped to 35 for KYO-882: ``turn_refs.outcome``, on a ``closed`` reference, whether the
+#: discussion produced something or was dropped. Until then the row had no column for it:
+#: a closing with a ``produced_id`` was produced, and ``kyo discuss close --produced --why``
+#: with no record stored its reason under the prefix ``produced: `` (KYO-878) to tell it
+#: from a reason given with ``--dropped``. A record document written at 34 or earlier
+#: carries no ``outcome`` on its turn references, and this is the one default that is
+#: derived, because the prior format did state the outcome, in those two places
+#: (:func:`legacy_turn_ref_outcome`): a closing with a ``produced_id``, or whose ``why``
+#: begins with the prefix, is ``produced`` and the prefix is taken off the reason; any
+#: other closing is ``dropped``; a reference that is not a closing has none
+#: (:data:`TURN_REF_FIELD_DEFAULTS` [35]). A real DDL change, so a real new hash.
+SCHEMA_VERSION = 35
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -932,8 +943,12 @@ CREATE TABLE credits (
 --   late         1 on an `opened` reference written after the decision it led to
 --                (`--opened-late`); never cleared
 --   note_id      for `note`, the record note holding what was put to the person
---   produced_id  for `closed` by spawning, the record spawned from the discussion
---   why          for `closed` with nothing produced (`--dropped`), the reason
+--   outcome      for `closed`, produced | dropped (KYO-882): whether the discussion
+--                produced something or was closed with nothing; NULL on every other role
+--   produced_id  for `closed` with outcome produced, the record spawned from the
+--                discussion or the first one `kyo discuss close --produced` named
+--   why          for `closed`, the reason: with outcome dropped, why nothing was
+--                produced; with outcome produced, what was produced that is not a record
 CREATE TABLE turn_refs (
     id          TEXT PRIMARY KEY,
     record_id   TEXT NOT NULL REFERENCES records(id),
@@ -947,11 +962,13 @@ CREATE TABLE turn_refs (
     index_state TEXT NOT NULL CHECK (index_state IN ('indexed', 'absent')),
     late        INTEGER NOT NULL DEFAULT 0 CHECK (late IN (0, 1)),
     note_id     TEXT,
+    outcome     TEXT CHECK (outcome IS NULL OR outcome IN ('produced', 'dropped')),
     produced_id TEXT,
     why         TEXT,
     author      TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    UNIQUE (record_id, seq)
+    UNIQUE (record_id, seq),
+    CHECK ((role = 'closed') = (outcome IS NOT NULL))
 );
 
 -- KYO-642: the rows one credit answers. `subject_kind` is verification | gate | record
@@ -1443,6 +1460,13 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "index_state": ("export.record_document", "render.turn_ref_lines"),
         "late": ("export.record_document", "cmd_discuss.discussion_state"),
         "note_id": ("export.record_document", "render.turn_ref_lines"),
+        # KYO-882: what `kyo show` reads to say produced or dropped, in the header line
+        # and beside the closing reference's reason.
+        "outcome": (
+            "export.record_document",
+            "render.discussion_header_lines",
+            "render.turn_ref_lines",
+        ),
         "produced_id": ("export.record_document", "cmd_discuss.discussion_state"),
         "why": ("export.record_document", "render.turn_ref_lines"),
         "author": ("export.record_document",),
@@ -2394,6 +2418,46 @@ CREDIT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     33: {"span_seal": None},
 }
 
+#: KYO-882: a field *within* each turn reference, the per-child shape again. A reference
+#: that is not a closing has no outcome, and NULL says so. A closing written before the
+#: field existed takes its outcome from :func:`legacy_turn_ref_outcome` instead, which
+#: :func:`apply_export_defaults` applies before this table.
+TURN_REF_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
+    35: {"outcome": None},
+}
+
+#: The version at which a closing reference states its outcome in a field (KYO-882).
+OUTCOME_FIELD_SCHEMA_VERSION = 35
+
+#: What ``kyo discuss close --produced --why`` put before its reason at schema_version 34
+#: (KYO-878), when no record was named. Read only by :func:`legacy_turn_ref_outcome`, on a
+#: document written before :data:`OUTCOME_FIELD_SCHEMA_VERSION`; nothing writes it and no
+#: reader of the store looks for it.
+LEGACY_PRODUCED_WHY_PREFIX = "produced: "
+
+
+def legacy_turn_ref_outcome(ref: dict) -> None:
+    """Give a closing reference of the prior export format its ``outcome`` (KYO-882).
+
+    Mutates ``ref``. The prior format stated the outcome in two places, and this reads
+    them: a ``produced_id`` (a spawn, or ``close --produced`` with a record) is produced;
+    a ``why`` beginning :data:`LEGACY_PRODUCED_WHY_PREFIX` with no record is produced, and
+    the prefix is taken off, since it was never part of the person's reason; any other
+    closing is dropped. A reference with a ``produced_id`` keeps its ``why`` whole: the
+    prefix was written only where no record was named, so those words are the person's.
+    """
+    if ref.get("role") != "closed" or "outcome" in ref:
+        return
+    why = ref.get("why")
+    if ref.get("produced_id"):
+        ref["outcome"] = "produced"
+    elif isinstance(why, str) and why.startswith(LEGACY_PRODUCED_WHY_PREFIX):
+        ref["outcome"] = "produced"
+        ref["why"] = why[len(LEGACY_PRODUCED_WHY_PREFIX) :] or None
+    else:
+        ref["outcome"] = "dropped"
+
+
 #: KYO-709: a field of a ``_person_notes.jsonl`` line, keyed by the line's own stamp. A
 #: note filed before the sent state was a field carries no ``sent`` on its line, and None
 #: is what its filing said; a ``sent`` tag it had is migrated separately, by the rebuild,
@@ -2625,4 +2689,11 @@ def apply_export_defaults(doc: dict) -> dict:
             if doc_version < version:
                 for field, default in CREDIT_FIELD_DEFAULTS[version].items():
                     credit.setdefault(field, default)
+    for ref in doc.get("turn_refs", []):
+        if doc_version < OUTCOME_FIELD_SCHEMA_VERSION:
+            legacy_turn_ref_outcome(ref)
+        for version in sorted(TURN_REF_FIELD_DEFAULTS):
+            if doc_version < version:
+                for field, default in TURN_REF_FIELD_DEFAULTS[version].items():
+                    ref.setdefault(field, default)
     return doc

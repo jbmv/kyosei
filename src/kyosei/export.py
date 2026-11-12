@@ -428,6 +428,7 @@ def _turn_ref(row: sqlite3.Row) -> dict:
         "index_state": row["index_state"],
         "late": bool(row["late"]),
         "note_id": row["note_id"],
+        "outcome": row["outcome"],
         "produced_id": row["produced_id"],
         "why": row["why"],
         "author": row["author"],

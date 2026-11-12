@@ -551,8 +551,9 @@ governs: src/kyosei/schema.py
 - **turn_refs** (schema_version 32, KYO-658): a discussion's references to the person's turns,
   `KYO-n.sN`, with a role (`opened | note | closed`), the session, prompt id, transcript record
   uuid, time and source copied from the turn index line, `index_state` (`indexed | absent`),
-  `late` on an opening written after its decision, and the note, the produced record or the
-  reason a closing carries. No transcript text is stored. A turn reference is not a note's
+  `late` on an opening written after its decision, and the note a `note` reference carries.
+  A closing states its `outcome` (`produced | dropped`, schema_version 35, KYO-882) beside
+  the produced record and the reason. No transcript text is stored. A turn reference is not a note's
   turn anchor: an anchor addresses characters inside one record and digests them from the
   transcript, while a turn reference addresses a whole prompt from the index, which holds no
   text and outlives the transcript.

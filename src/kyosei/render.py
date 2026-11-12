@@ -14,6 +14,7 @@ from .contracts import (
     SCOPE_UNKNOWN_REMEDY,
     TOUCH_ADDITIVE_SYMBOL,
     TOUCH_NEW_FILE_SYMBOL,
+    TURN_REF_PRODUCED,
     amended_by,
     dispatch_close_reason_label,
     replaced_by,
@@ -752,12 +753,6 @@ def lag_seconds(ref: dict) -> int | None:
     return int(round(made - at))
 
 
-#: ``kyo discuss close --produced --why`` stores its words under this prefix, so that a
-#: closing reference with a reason and no record reads as what it produced and not as
-#: ``--dropped`` (KYO-878). The store has no field for the difference and gains none.
-PRODUCED_WHY_PREFIX = "produced: "
-
-
 def turn_ref_lines(refs: list[dict]) -> list[str]:
     """One line for each of a discussion's turn references (export shape), plus the note or
     reason it carries. A reference that names a turn says which and when the index stamped
@@ -785,14 +780,16 @@ def turn_ref_lines(refs: list[dict]) -> list[str]:
             out.append(f"    what was put to the person: {ref['note_id']}")
         if ref.get("produced_id"):
             out.append(f"    produced {ref['produced_id']}")
+        # KYO-882: the closing's `outcome` says whether its reason is what was produced
+        # or why nothing was; the reason's own words are never read for it.
         if ref.get("why"):
             why = ref["why"]
-            if why.startswith(PRODUCED_WHY_PREFIX):
-                out.append(f"    produced, not a record: {why[len(PRODUCED_WHY_PREFIX):]}")
+            if ref.get("outcome") != TURN_REF_PRODUCED:
+                out.append(f"    dropped: {why}")
             elif ref.get("produced_id"):
                 out.append(f"    why: {why}")
             else:
-                out.append(f"    dropped: {why}")
+                out.append(f"    produced, not a record: {why}")
     return out
 
 
@@ -803,10 +800,13 @@ def discussion_header_lines(doc: dict, discussion: dict | None) -> list[str]:
         closed = [r for r in doc["turn_refs"] if r["role"] == "closed"]
         opened = next((r for r in doc["turn_refs"] if r["role"] == "opened"), None)
         state = "closed" if closed else "open"
+        # KYO-882: produced or dropped is the closing reference's `outcome`, and nothing
+        # else decides it.
+        produced = bool(closed) and closed[0].get("outcome") == TURN_REF_PRODUCED
         made: list[str] = []
-        if closed and closed[0].get("produced_id"):
+        if produced and closed[0].get("produced_id"):
             made.append(closed[0]["produced_id"])
-        if closed:
+        if produced:
             # KYO-878: a discussion closed with several records has one in the reference
             # and the rest as `produced-by` links to it.
             made += [
@@ -816,11 +816,10 @@ def discussion_header_lines(doc: dict, discussion: dict | None) -> list[str]:
                 and link["type"] == "produced-by"
                 and link["other"] not in made
             ]
-        closed_why = (closed[0].get("why") or "") if closed else ""
         if made:
             state += ", produced " + ", ".join(made)
-        elif closed_why.startswith(PRODUCED_WHY_PREFIX):
-            state += ", produced " + closed_why[len(PRODUCED_WHY_PREFIX):]
+        elif produced:
+            state += ", produced " + (closed[0].get("why") or "something not recorded")
         elif closed:
             state += ", nothing produced"
         if opened and opened.get("late"):

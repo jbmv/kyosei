@@ -107,14 +107,19 @@ from .cmd_turns import (
 )
 from .commands import Context, Output, _load_registry, _load_status_ladder, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
-from .contracts import TURN_REF_ABSENT, TURN_REF_INDEXED
+from .contracts import (
+    TURN_REF_ABSENT,
+    TURN_REF_DROPPED,
+    TURN_REF_INDEXED,
+    TURN_REF_PRODUCED,
+)
 from .credits import ENV_SESSION, enforced
 from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .kinds import DISCUSSION_KIND
 from .prose import read_prose, single_line
 from .receipt import detail
-from .render import PRODUCED_WHY_PREFIX, echo_block, echo_value, turn_ref_lines
+from .render import echo_block, echo_value, turn_ref_lines
 from .store import Store
 
 CONTRACT_DECISION_REQUIRES_DISCUSSION = "decision-requires-discussion"
@@ -414,18 +419,23 @@ def close_on(
     discussion_id: str,
     stamp: TurnStamp,
     *,
+    outcome: str,
     produced_id: str | None = None,
     why: str | None = None,
     created_at: str,
 ) -> str | None:
     """Write the ``closed`` reference, inside the caller's transaction, unless the
-    discussion is already closed. Returns the reference id, or None."""
+    discussion is already closed. Returns the reference id, or None.
+
+    ``outcome`` is ``produced`` or ``dropped`` (KYO-882) and is stored as given; ``why``
+    is the person's reason as they gave it, under either outcome."""
     if not discussion_state(_refs(store, discussion_id))["open"]:
         return None
     ref_id = store.add_turn_ref(
         discussion_id,
         role=ROLE_CLOSED,
         author=ctx.actor,
+        outcome=outcome,
         produced_id=produced_id,
         why=why,
         created_at=created_at,
@@ -491,7 +501,13 @@ class FilingDiscussion:
         done["kept_open"] = self.keep_open
         if not self.keep_open:
             done["closed_ref"] = close_on(
-                ctx, store, discussion_id, self.current, produced_id=record_id, created_at=stamp
+                ctx,
+                store,
+                discussion_id,
+                self.current,
+                outcome=TURN_REF_PRODUCED,
+                produced_id=record_id,
+                created_at=stamp,
             )
         return done
 
@@ -848,16 +864,15 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
         before = {rid: export.record_document(store, rid) for rid in touched}
         created = now()
         links = [_link(store, rid, args.id, created) for rid in produced]
-        stored_why = why
-        if not dropped and not produced:
-            stored_why = PRODUCED_WHY_PREFIX + (why or "")
+        outcome = TURN_REF_DROPPED if dropped else TURN_REF_PRODUCED
         ref_id = close_on(
             ctx,
             store,
             args.id,
             stamp,
+            outcome=outcome,
             produced_id=produced[0] if produced else None,
-            why=stored_why,
+            why=why,
             created_at=created,
         )
         after, events = commands._commit_and_export(
@@ -891,6 +906,7 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
             "id": args.id,
             "record_id": args.id,
             "turn_ref": ref_id,
+            "outcome": outcome,
             "produced": produced,
             "record": after[args.id],
         },

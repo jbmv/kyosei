@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -586,3 +587,96 @@ def test_kyo878_c3_dropped_reads_as_it_did_and_an_unknown_record_writes_nothing(
     closed = kyo("discuss", "close", opened, "--dropped", "--why", "nothing came of it")
     assert closed.code == 0 and f"closed {opened} with nothing produced" in closed.out
     assert "closed, nothing produced" in kyo("show", opened).out
+
+
+# ------------------------------------------------------------------ KYO-882
+
+
+def _closing(kyo, record: str) -> dict:
+    refs = kyo("show", record, "--json").json["turn_refs"]
+    assert refs[-1]["role"] == "closed"
+    return refs[-1]
+
+
+def test_kyo882_c1_a_closing_reference_states_its_outcome_and_the_reason_has_no_prefix(
+    kyo, indexed: Path
+) -> None:
+    by_reason = _open(kyo)
+    closed = kyo(
+        "discuss", "close", by_reason, "--produced", "--why", "ideas/idea-file.md", "--json"
+    )
+    assert closed.code == 0, closed
+    assert closed.json["outcome"] == "produced"
+    ref = _closing(kyo, by_reason)
+    assert (ref["outcome"], ref["produced_id"], ref["why"]) == (
+        "produced",
+        None,
+        "ideas/idea-file.md",
+    )
+    conn = sqlite3.connect(indexed / "kyosei" / "kyosei.db")
+    try:
+        row = conn.execute(
+            "SELECT outcome, produced_id, why FROM turn_refs WHERE id = ?", (ref["id"],)
+        ).fetchone()
+        others = conn.execute(
+            "SELECT DISTINCT outcome FROM turn_refs WHERE role != 'closed'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert row == ("produced", None, "ideas/idea-file.md")
+    assert others == [(None,)]
+
+    task = _task(kyo, "Built")
+    by_record = _open(kyo)
+    assert kyo("discuss", "close", by_record, "--produced", task).code == 0
+    ref = _closing(kyo, by_record)
+    assert (ref["outcome"], ref["produced_id"], ref["why"]) == ("produced", task, None)
+
+    dropped = _open(kyo)
+    closed = kyo("discuss", "close", dropped, "--dropped", "--why", "no need", "--json")
+    assert closed.code == 0 and closed.json["outcome"] == "dropped"
+    ref = _closing(kyo, dropped)
+    assert (ref["outcome"], ref["produced_id"], ref["why"]) == ("dropped", None, "no need")
+
+
+def test_kyo882_c1_a_discussion_closed_by_spawn_is_produced(
+    kyo, indexed: Path, tmp_path: Path
+) -> None:
+    opened = _open(kyo)
+    spawned = _spawn_task(kyo, opened, tmp_path, "Do it")
+    assert spawned.code == 0, spawned
+    ref = _closing(kyo, opened)
+    assert ref["outcome"] == "produced" and ref["produced_id"] == spawned.json["id"]
+
+
+def test_kyo882_c3_a_dropped_reason_that_begins_with_the_old_prefix_is_shown_as_dropped(
+    kyo, indexed: Path
+) -> None:
+    opened = _open(kyo)
+    closed = kyo("discuss", "close", opened, "--dropped", "--why", "produced: nothing usable")
+    assert closed.code == 0, closed
+    assert f"closed {opened} with nothing produced" in closed.out
+    assert "    dropped: produced: nothing usable" in closed.out
+    shown = kyo("show", opened).out
+    assert "closed, nothing produced" in shown
+    assert "    dropped: produced: nothing usable" in shown
+    assert "produced, not a record" not in shown
+    assert _closing(kyo, opened)["outcome"] == "dropped"
+
+
+def test_kyo882_c3_the_prefix_is_gone_from_every_reader() -> None:
+    """The prefix survives in one place, the migration of the prior export format in
+    `schema.py`; no other module holds the literal or a name for it."""
+    import kyosei
+
+    package = Path(kyosei.__file__).parent
+    holders = sorted(
+        path.name
+        for path in package.rglob("*.py")
+        if '"produced: "' in path.read_text(encoding="utf-8")
+        or "PRODUCED_WHY_PREFIX" in path.read_text(encoding="utf-8")
+    )
+    assert holders == ["schema.py"]
+    from kyosei import render
+
+    assert not hasattr(render, "PRODUCED_WHY_PREFIX")

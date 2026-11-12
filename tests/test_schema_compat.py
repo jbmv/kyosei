@@ -745,6 +745,9 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # KYO-661: dispatches gains answered_prompt_json -- the prompt the dispatch was
         # made in reply to. A real DDL change, so a real new hash.
         34: "70b5951201caf8e8fbdf72ffa7d3e399c18eb69525ca99bccab630808e14bda9",
+        # KYO-882: turn_refs gains outcome -- on a closing reference, whether the discussion
+        # produced something or was dropped. A real DDL change, so a real new hash.
+        35: "2605ef4744082bd9e2fb99ad0b0227127b19895b6d677d090d44e9c1d299e0e5",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2681,7 +2684,7 @@ def test_every_new_column_has_a_consumer_and_the_doctor_check_passes(kyo, projec
     # KYO-670 adds the three withdrawn_*, KYO-663 span_seal.
     assert len(COLUMN_CONSUMERS["credits"]) == 36
     assert len(COLUMN_CONSUMERS["credit_subjects"]) == 3
-    assert len(COLUMN_CONSUMERS["turn_refs"]) == 16  # KYO-658
+    assert len(COLUMN_CONSUMERS["turn_refs"]) == 17  # KYO-658, and KYO-882's outcome
     assert COLUMN_CONSUMERS["gates"]["cleared_as"]
     assert CONFIG_CONSUMERS["people"]
     store = open_store(project)
@@ -2858,10 +2861,16 @@ def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -
 
 def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
     """KYO-658 was built on schema 31 (KYO-709) and bumped it by one, to 32; KYO-663 was
-    built on 32 and bumps it by one, to 33; KYO-661 was built on 33 and bumps it to 34."""
-    from kyosei.schema import CREDIT_FIELD_DEFAULTS, EXPORT_FIELD_DEFAULTS
+    built on 32 and bumps it by one, to 33; KYO-661 was built on 33 and bumps it to 34;
+    KYO-882 was built on 34 and bumps it to 35."""
+    from kyosei.schema import (
+        CREDIT_FIELD_DEFAULTS,
+        EXPORT_FIELD_DEFAULTS,
+        TURN_REF_FIELD_DEFAULTS,
+    )
 
-    assert SCHEMA_VERSION == 34
+    assert SCHEMA_VERSION == 35
+    assert TURN_REF_FIELD_DEFAULTS[35] == {"outcome": None}
     assert EXPORT_FIELD_DEFAULTS[32] == {"turn_refs": []}
     assert CREDIT_FIELD_DEFAULTS[33] == {"span_seal": None}
     from kyosei.schema import DISPATCH_FIELD_DEFAULTS
@@ -2944,3 +2953,124 @@ def test_a_discussion_round_trips_through_export_and_rebuild(
     assert noted.code == 0, noted
     assert noted.json["turn_ref"] == f"{record}.s3"
     assert kyo("doctor").code in (0, 1)
+
+
+# ------------------------------------------------------------------------- KYO-882
+
+
+def _as_schema_34(project: Path, record: str, *, closing_why: str | None = None) -> None:
+    """Rewrite ``record``'s export document as schema_version 34 wrote it: no ``outcome``
+    on any turn reference, and the closing's ``why`` as given when one is."""
+    export_path = project / "kyosei" / "export" / f"{record}.json"
+    doc = json.loads(export_path.read_text(encoding="utf-8"))
+    doc["schema_version"] = 34
+    for ref in doc["turn_refs"]:
+        assert "outcome" in ref, "this build writes the key"
+        del ref["outcome"]
+        if ref["role"] == "closed" and closing_why is not None:
+            ref["why"] = closing_why
+    export_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _rebuilt_refs(kyo, project: Path, record: str) -> list[dict]:
+    (project / "kyosei" / "kyosei.db").unlink()
+    result = kyo("rebuild")
+    assert result.code == 0, result
+    return kyo("show", record, "--json").json["turn_refs"]
+
+
+def test_a_schema_34_closing_whose_reason_has_the_prefix_rebuilds_as_produced_without_it(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At 34 `kyo discuss close --produced --why` with no record stored its reason as
+    `produced: <reason>` (KYO-878). The rebuild reads that as produced, takes the prefix
+    off, and `kyo export --refresh` then writes the field and the bare reason."""
+    record = _a_discussion(kyo, project, monkeypatch)
+    _as_schema_34(project, record, closing_why="produced: ideas/idea-file.md")
+
+    opened, closed = _rebuilt_refs(kyo, project, record)
+
+    assert opened["outcome"] is None
+    assert closed["outcome"] == "produced" and closed["why"] == "ideas/idea-file.md"
+    assert closed["produced_id"] is None
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        rows = conn.execute("SELECT role, outcome, why FROM turn_refs ORDER BY seq").fetchall()
+    finally:
+        conn.close()
+    assert rows == [("opened", None, None), ("closed", "produced", "ideas/idea-file.md")]
+    shown = kyo("show", record).out
+    assert "closed, produced ideas/idea-file.md" in shown
+    assert "produced: " not in shown
+    assert kyo("export", "--refresh").code == 0
+    written = json.loads(
+        (project / "kyosei" / "export" / f"{record}.json").read_text(encoding="utf-8")
+    )
+    assert written["schema_version"] == SCHEMA_VERSION
+    assert written["turn_refs"][1]["outcome"] == "produced"
+    assert written["turn_refs"][1]["why"] == "ideas/idea-file.md"
+
+
+def test_a_schema_34_closing_with_a_produced_record_rebuilds_as_produced(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A closing that names a record, by `kyo spawn` or by `close --produced <record>`, was
+    produced, and its reason is kept whole: the prefix was written only where no record
+    was named."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "7c1d2e3f-1111-4a2b-9c3d-0123456789ab")
+    task = new_record(kyo, kind="task", title="Built", criteria=["it works"])
+    record = kyo("discuss", "open", "--title", "Whether to build it", "--json").json["id"]
+    closed = kyo("discuss", "close", record, "--produced", task, "--why", "and a file")
+    assert closed.code == 0, closed
+    _as_schema_34(project, record)
+
+    refs = _rebuilt_refs(kyo, project, record)
+
+    assert refs[-1]["outcome"] == "produced"
+    assert refs[-1]["produced_id"] == task and refs[-1]["why"] == "and a file"
+    assert f"closed, produced {task}" in kyo("show", record).out
+
+
+def test_any_other_schema_34_closing_rebuilds_as_dropped(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _a_discussion(kyo, project, monkeypatch)
+    _as_schema_34(project, record)
+
+    refs = _rebuilt_refs(kyo, project, record)
+
+    assert refs[-1]["outcome"] == "dropped" and refs[-1]["why"] == "decided elsewhere"
+    assert "closed, nothing produced" in kyo("show", record).out
+
+
+def test_the_prefix_is_read_from_the_prior_format_alone(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document this build wrote states its outcome, so a dropped closing whose reason
+    begins `produced: ` rebuilds as it was stored: the migration does not run on it."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "7c1d2e3f-1111-4a2b-9c3d-0123456789ab")
+    record = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    closed = kyo("discuss", "close", record, "--dropped", "--why", "produced: nothing")
+    assert closed.code == 0, closed
+
+    refs = _rebuilt_refs(kyo, project, record)
+
+    assert refs[-1]["outcome"] == "dropped" and refs[-1]["why"] == "produced: nothing"
+
+
+def test_a_closing_reference_cannot_be_stored_without_its_outcome(
+    kyo, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The table refuses a `closed` row with no outcome and any other row with one, so the
+    field cannot be left for a reader to guess."""
+    _a_discussion(kyo, project, monkeypatch)
+    conn = sqlite3.connect(project / "kyosei" / "kyosei.db")
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE turn_refs SET outcome = NULL WHERE role = 'closed'")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE turn_refs SET outcome = 'dropped' WHERE role = 'opened'")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE turn_refs SET outcome = 'unsure' WHERE role = 'closed'")
+    finally:
+        conn.close()

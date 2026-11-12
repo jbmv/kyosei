@@ -26,6 +26,7 @@ from .contracts import (
     TURN_REF_ABSENT,
     TURN_REF_INDEX_STATES,
     TURN_REF_INDEXED,
+    TURN_REF_OUTCOMES,
     TURN_REF_ROLES,
     installed_build_clause,
     stale_build_clause,
@@ -496,6 +497,7 @@ class Store:
         source: str | None = None,
         late: bool = False,
         note_id: str | None = None,
+        outcome: str | None = None,
         produced_id: str | None = None,
         why: str | None = None,
         created_at: str | None = None,
@@ -505,7 +507,8 @@ class Store:
         The one writer of ``turn_refs``. An ``absent`` reference stamps nothing from the
         index, so it carries no prompt, turn, time or source; an ``indexed`` one carries the
         index line's time. ``late`` belongs to an ``opened`` reference alone, ``note_id`` to
-        a ``note`` and ``produced_id`` and ``why`` to a ``closed`` one.
+        a ``note``, and ``outcome``, ``produced_id`` and ``why`` to a ``closed`` one, which
+        always states its ``outcome`` (KYO-882; the table's own check refuses one without).
         """
         _one_of("turn reference role", role, TURN_REF_ROLES)
         _one_of("turn reference index state", index_state, TURN_REF_INDEX_STATES)
@@ -521,15 +524,18 @@ class Store:
             raise KyoseiError(f"late marks an opening, not a {role!r} turn reference")
         if note_id is not None and role != "note":
             raise KyoseiError(f"note_id belongs to a 'note' turn reference, not {role!r}")
-        if (produced_id is not None or why is not None) and role != "closed":
+        if outcome is not None:
+            _one_of("turn reference outcome", outcome, TURN_REF_OUTCOMES)
+        closing = (outcome, produced_id, why)
+        if any(v is not None for v in closing) and role != "closed":
             raise KyoseiError(
-                f"produced_id and why belong to a 'closed' turn reference, not {role!r}"
+                f"outcome, produced_id and why belong to a 'closed' turn reference, not {role!r}"
             )
         ref_id, seq = self.new_child_id(record_id, "turn-ref")
         self.conn.execute(
             "INSERT INTO turn_refs (id, record_id, seq, role, session, prompt_id, turn, at,"
-            " source, index_state, late, note_id, produced_id, why, author, created_at)"
-            " VALUES (" + ", ".join("?" * 16) + ")",
+            " source, index_state, late, note_id, outcome, produced_id, why, author,"
+            " created_at) VALUES (" + ", ".join("?" * 17) + ")",
             (
                 ref_id,
                 record_id,
@@ -543,6 +549,7 @@ class Store:
                 index_state,
                 1 if late else 0,
                 note_id,
+                outcome,
                 produced_id,
                 why,
                 author,

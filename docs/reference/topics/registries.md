@@ -48,7 +48,13 @@ or task from the discussion closes it. `kyo discuss close <id> --produced <recor
 ...]` closes one that led to records without a decision: each is linked to the discussion as
 produced by it, and `kyo show` reads `closed, produced <ids>`. `--why` there names what is
 not a record, such as an idea file. `kyo discuss close <id> --dropped --why "..."` closes one
-that produced nothing; the two flags are not accepted together (KYO-878).
+that produced nothing; the two flags are not accepted together (KYO-878). The closing
+reference stores which of the two it was in its `outcome` field, `produced` or `dropped`, and
+the reason in `why` as it was given; a discussion closed by a spawn is `produced`. `kyo show`
+reads the field and never the reason's wording (KYO-882). A store written before
+schema_version 35 has no such field, and `kyo rebuild --force` supplies it from what that
+format held: a closing with a produced record, or with a reason stored under the earlier
+`produced: ` prefix, is `produced` and loses the prefix, and any other is `dropped`.
 
 **The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
 ended: the person's words and any use of AskUserQuestion from the transcript, and the

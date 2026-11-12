@@ -894,12 +894,15 @@ def _load(
                         (credit["id"], subject["kind"], subject["id"]),
                     )
             # KYO-658: a discussion's turn references, verbatim. A document written before
-            # schema 32 has none (schema.EXPORT_FIELD_DEFAULTS[32]).
+            # schema 32 has none (schema.EXPORT_FIELD_DEFAULTS[32]), and one written before
+            # 35 was given each closing's outcome when it was read
+            # (schema.legacy_turn_ref_outcome, KYO-882).
             for ref in doc["turn_refs"]:
                 conn.execute(
                     "INSERT INTO turn_refs (id, record_id, seq, role, session, prompt_id, turn,"
-                    " at, source, index_state, late, note_id, produced_id, why, author,"
-                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " at, source, index_state, late, note_id, outcome, produced_id, why,"
+                    " author, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         ref["id"],
                         doc["id"],
@@ -913,6 +916,7 @@ def _load(
                         ref["index_state"],
                         1 if ref["late"] else 0,
                         ref["note_id"],
+                        ref["outcome"],
                         ref["produced_id"],
                         ref["why"],
                         ref["author"],
