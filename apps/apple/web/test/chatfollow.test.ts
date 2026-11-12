@@ -118,6 +118,26 @@ test("a prompt's turn takes the preview's place though the server wrote anchor l
   assert.deepEqual(turns, { previews: 0, turns: 2 });
 });
 
+test("a previewed prompt not delivered within the grace period is held: the preview goes and Edit and Send now are offered", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await openSession(page);
+  await page.run(`window.kyo.draft({ boxes: [{ id: "a", text: "Sent as a turn began" }], etag: "e1" })`);
+  await page.run(`document.querySelector("#boxes .box .box-send").click()`);
+  await page.run(`window.kyo.sent({ id: "m1" })`);
+  // The session began a turn, and the server waits for it to end, with no reason given.
+  await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+  await page.run(`window.kyo.held({ outcome: "held", id: "m1", held: { id: "m1", retrying: true, reason: null, detail: null } })`);
+  const state = `({
+    previews: document.querySelectorAll("#chat .turn:not([data-key])").length,
+    box: !document.getElementById("held").hidden,
+    edit: !document.getElementById("held-edit").hidden,
+    sendNow: !document.getElementById("held-send-now").hidden,
+  })`;
+  assert.deepEqual(await page.run(state), { previews: 1, box: false, edit: true, sendNow: true });
+  await new Promise((done) => setTimeout(done, 2700));
+  assert.deepEqual(await page.run(state), { previews: 0, box: true, edit: true, sendNow: true });
+});
+
 test("a prompt sent while the session works is held, and is not drawn in the chat", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   await openSession(page);

@@ -1780,8 +1780,10 @@ const kyo = {
     composerNote.textContent = "";
     // The server queues every prompt and answers with its id; the preview waits for the
     // queue's word that it was delivered (KYO-883). An answer with no id was delivered.
-    if (sentPreview && frame.id) sentPreview.id = frame.id;
-    else if (!frame.id) confirmSentPreview();
+    if (sentPreview && frame.id) {
+      sentPreview.id = frame.id;
+      sentPreview.grace = window.setTimeout(heldAfterAll, PREVIEW_GRACE_MS);
+    } else if (!frame.id) confirmSentPreview();
     showHeld(frame.id ? { id: frame.id } : null);
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();
@@ -4008,7 +4010,14 @@ function attemptSend(area: HTMLTextAreaElement): void {
  * dimmed, rather than when the transcript has it about half a second later. The server's
  * answer undims it, and the transcript's own turn takes its place when it lands.
  */
-let sentPreview: { element: HTMLElement; text: string; id?: string; drop?: number } | null = null;
+let sentPreview: { element: HTMLElement; text: string; id?: string; drop?: number; grace?: number } | null = null;
+/**
+ * How long a queued prompt may wait to be delivered and still count as sent straight away.
+ * The server says nothing that tells a prompt about to be typed into an idle session from
+ * one waiting for the turn to end, so one not delivered by then is held: its preview goes,
+ * and the held box offers Edit and Send now (KYO-883).
+ */
+const PREVIEW_GRACE_MS = 2500;
 
 /** A queued prompt the server says waits on something, or will not try again: a real hold. */
 function waitsOnSomething(message: Held | null | undefined): boolean {
@@ -4031,13 +4040,23 @@ function showSentPreview(text: string): void {
 
 function confirmSentPreview(): void {
   if (!sentPreview) return;
+  if (sentPreview.grace !== undefined) clearTimeout(sentPreview.grace);
+  sentPreview.grace = undefined;
   sentPreview.element.classList.remove("sending");
   sentPreview.drop = window.setTimeout(dropSentPreview, SENT_PREVIEW_MS);
+}
+
+/** The previewed prompt was not delivered in the grace period: it is held, and shown as held. */
+function heldAfterAll(): void {
+  if (!sentPreview?.element.classList.contains("sending")) return;
+  dropSentPreview();
+  if (held) showHeld(held);
 }
 
 function dropSentPreview(): void {
   if (!sentPreview) return;
   if (sentPreview.drop !== undefined) clearTimeout(sentPreview.drop);
+  if (sentPreview.grace !== undefined) clearTimeout(sentPreview.grace);
   sentPreview.element.remove();
   sentPreview = null;
 }
