@@ -361,6 +361,11 @@ stdlib, no `jsonschema` dependency), refuses a mismatched
 `dispatch_id`/`record_id`, and stores every array (`criteria_verdicts`,
 `premise_false`, `disagreements`, `corrected_numbers`, `commits`, and the
 optional `docs_verdicts`) structurally.
+What this section says the command prints is its whole output. Off a terminal it prints
+[its receipt](operating.md#a-writes-text-output-off-a-terminal-is-a-receipt-kyo-874): the
+summary line, every finding that is not a pass, each entry of `premise_false`,
+`disagreements` and `corrected_numbers`, each proposed verdict other than `met`, and one
+settle line for each document; `--full` prints the rest.
 `kyo report <dispatch-id> --file .kyosei-report.json --check` (KYO-477) is the
 worker's dry run: every check the ingest runs before it writes — the schema, the
 ids, the dispatch's state, `criteria_verdicts` scoping, the branch check over
@@ -448,7 +453,10 @@ needed a second pass). `kyo accept` runs three of them as one act: `kyo verify
 --touches-from-drift` on the dispatch's own record. It is a composition and not
 a second implementation — each step is reached through the same parser and the
 same handler the typed command uses, the argv is printed beside the step's own
-output, and a refusal any of them makes is made here in its words. So it applies
+output, and a refusal any of them makes is made here in its words. (Off a terminal
+the command prints [its receipt](operating.md#a-writes-text-output-off-a-terminal-is-a-receipt-kyo-874),
+which keeps the argv line of a step that was refused or skipped and each step's
+own receipt lines.) So it applies
 nothing they would not: a `void-*` verdict, a criterion restated since the
 report was written, an obligation that already carries a verdict and an entry
 matching no obligation are each reported and left, exactly as the separate
@@ -524,7 +532,8 @@ minutes). Approving a proposal is the same act with no gate in it.
 `kyo confirm <record-id> --quote-file q.txt` (or `--quote TEXT` for one line,
 `--quote-file -` for stdin) is that act, composed the way `kyo accept` is: each
 write is `kyo verify`, `kyo attach`, `kyo ungate` or `kyo move`, reached through
-the same parser and handler, printed with its argv, refusing in its own words.
+the same parser and handler, printed with its argv, refusing in its own words
+(off a terminal, as [its receipt](operating.md#a-writes-text-output-off-a-terminal-is-a-receipt-kyo-874)).
 It records `met` with method `human-observed` and nothing else; there is no
 `--verdict` or `--method` flag. A "no" is `kyo verify <cid> --verdict
 unmet-unbuilt`, a measurement the orchestrator took is `machine-checked` and stays
