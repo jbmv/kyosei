@@ -420,6 +420,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-843` (proposal) — How kyo reaches a seal key that the signed Mac app keeps in iCloud Keychain
 - **2026-11-12** — `KYO-660` (task) — Excerpt packs, the person's review, and a standalone verifier
 - **2026-11-11** — `KYO-663` (task) — Commitments and span_seal: salted per-line roots chained per session
 - **2026-11-11** — `KYO-662` (task) — The Stop-hook discussion check and doctor's live, late and unindexed shares
