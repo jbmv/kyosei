@@ -516,16 +516,30 @@ def _seal_key(ctx: Context, args: Namespace) -> Output:
             raise UsageError("--key-leaves-this-machine goes with --seal-key icloud-keychain")
         recorded = seal.recorded_choice(ctx.environ)
         store = seal.chosen_store(ctx.environ)
-        how = "chosen" if recorded else "nothing chosen, so the local file is used"
+        local = seal.local_store(ctx.environ)
+        if store == seal.STORE_ICLOUD:
+            head = (
+                f"seal key: kept in iCloud Keychain, with a copy in the {local} store on "
+                "this machine, which the hooks read"
+            )
+        else:
+            how = "chosen" if recorded else "nothing chosen, so the local file is used"
+            head = f"seal key: kept in the {store} store ({how})"
         return Output(
             lines=[
-                f"seal key: kept in the {store} store ({how})",
+                head,
                 f"  file             {seal.key_path(ctx.environ)}, mode 0600",
                 "  keychain         a generic password in the macOS login keychain",
-                "  icloud-keychain  a synchronizable keychain item. " + seal.ICLOUD_DISCLOSURE,
+                "  icloud-keychain  a synchronizable keychain item, reached through the "
+                "signed Mac app. " + seal.ICLOUD_DISCLOSURE,
                 "choose with `kyo turns --seal-key <store>`; the key moves with the choice",
             ],
-            data={"ok": True, "key_store": store, "chosen": recorded is not None},
+            data={
+                "ok": True,
+                "key_store": store,
+                "local_store": local,
+                "chosen": recorded is not None,
+            },
         )
     if target == seal.STORE_ICLOUD and not acknowledged:
         raise UsageError(
@@ -538,10 +552,16 @@ def _seal_key(ctx: Context, args: Namespace) -> Output:
         done = seal.move_key(target, ctx.environ)
     except seal.SealKeyError as exc:
         raise KyoseiError(f"the seal key stays where it was: {exc}") from exc
-    lines = [f"seal key: now kept in the {target} store; {done}"]
+    local = seal.local_store(ctx.environ)
     if target == seal.STORE_ICLOUD:
+        lines = [f"seal key: now kept in iCloud Keychain, with a copy in the {local} store; {done}"]
         lines.append(seal.ICLOUD_DISCLOSURE)
-    return Output(lines=lines, data={"ok": True, "key_store": target, "chosen": True})
+    else:
+        lines = [f"seal key: now kept in the {target} store; {done}"]
+    return Output(
+        lines=lines,
+        data={"ok": True, "key_store": target, "local_store": local, "chosen": True},
+    )
 
 
 def _verify(ctx: Context, lines: list[dict], opted_in: bool, wanted: str | None) -> Output:

@@ -517,10 +517,14 @@ were written then and are unchanged, without seeing the rest (KYO-663).
 - **The seal key:** 32 random bytes made on first use, in `$KYOSEI_HOME/seal.key` with mode
   0600. It is the one secret to back up: without it no committed message can be shown to
   match. `kyo turns --seal-key keychain` moves it to the macOS login keychain, and `kyo
-  turns --seal-key icloud-keychain --key-leaves-this-machine` to a synchronizable keychain
-  item that iCloud Keychain copies to your other Apple devices. With that last choice the
-  key leaves this machine, end-to-end encrypted by iCloud Keychain; it is never chosen for
-  you, and the command is refused without the second flag, which states that you chose it.
+  turns --seal-key icloud-keychain --key-leaves-this-machine` also keeps it as a
+  synchronizable keychain item that iCloud Keychain copies to your other Apple devices. A
+  copy stays in the file or the login keychain on each machine, and the hooks read only
+  that copy. The item is reached through the signed Kyosei Mac app's executable, so the
+  choice needs that app installed. With that last choice the key leaves this machine,
+  end-to-end encrypted by iCloud Keychain; it is never chosen for you, and the command is
+  refused without the second flag, which states that you chose it. On a second machine the
+  same command fetches the key into its local store.
 - **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, which `kyo doctor` holds to lie outside every
   git repository, and which a credit is checked against when the original is absent. A

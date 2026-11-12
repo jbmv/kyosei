@@ -2186,7 +2186,9 @@ def build_parser() -> KyoseiParser:
         "on, moving the existing key. file is $KYOSEI_HOME/seal.key with mode 0600, and is "
         "used until another is chosen; keychain is the macOS login keychain; "
         "icloud-keychain is a synchronizable keychain item, which iCloud Keychain copies "
-        "to the person's other Apple devices (KYO-663)",
+        "to the person's other Apple devices; it is reached through the signed Mac app's "
+        "executable, and a copy stays in the file or the login keychain, which the hooks "
+        "read. Run on a second machine it fetches the key (KYO-663, KYO-789)",
     )
     p_turns.add_argument(
         "--key-leaves-this-machine",

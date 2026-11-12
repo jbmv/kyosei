@@ -126,9 +126,10 @@ Ask these together, in one message.
   no text. The commitment lets you later show chosen lines of a message and have a reader
   confirm them; it reveals nothing without the seal key. **The seal key:** 32 random bytes
   in `$KYOSEI_HOME/seal.key`, mode 0600, the one secret to back up. `kyo turns --seal-key`
-  can move it to the macOS login keychain, or to a synchronizable item that iCloud
-  Keychain copies to your other Apple devices; with that choice the key leaves this
-  machine, end-to-end encrypted by iCloud Keychain, and it is never chosen for you.
+  can move it to the macOS login keychain, or also keep it as a synchronizable item that
+  iCloud Keychain copies to your other Apple devices (through the signed Kyosei Mac app,
+  with a copy kept locally for the hooks); with that choice the key leaves this machine,
+  end-to-end encrypted by iCloud Keychain, and it is never chosen for you.
   **What is copied locally:** the session's transcript and subagent transcripts, to
   `$KYOSEI_HOME/transcript-archive/<project>/`, outside every git repository, which a credit
   is checked against when the original is absent; and, once a search of what was said is
