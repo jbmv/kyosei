@@ -1251,6 +1251,8 @@ shape flags `--full`, `--pretty` and `--compact-json`.
 
 ### A write's text output off a terminal is a receipt (KYO-874)
 
+governs: src/kyosei/receipt.py
+
 A write echoes back what it stored, so that a text the shell altered is seen. An agent reads
 every byte of that echo and reads it again on each later turn, and one that filters the output
 to shorten it keeps the lines it expected and drops a warning it did not. When stdout is not a

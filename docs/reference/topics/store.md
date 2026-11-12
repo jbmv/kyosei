@@ -4,7 +4,7 @@ Where the store lives, what `kyo init` creates, the store's database and export,
 
 ## Where the store lives
 
-governs: src/kyosei/config.py, src/kyosei/scaffold.py, src/kyosei/install_prose.py, src/kyosei/currency.py
+governs: src/kyosei/config.py, src/kyosei/scaffold.py, src/kyosei/install_prose.py, src/kyosei/currency.py, src/kyosei/stop_commit.py
 
 `kyo init` has one question that is hard to reverse later: **is this project's
 store committed to the same git repository as its code?** In a folder with no store,
