@@ -635,6 +635,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-12** — `KYO-847` (task) — Mac app: an icon, 共生 in a brush hand on white
 - **2026-11-12** — `KYO-846` (task) — Mac app: a record's outline is open by default, and Awaiting you is listed in the Records side bar above History
 - **2026-11-12** — `KYO-845` (bug) — Mac app: in the History drawer an anchor on a reply opens nothing, and a prompt's images are not shown
 - **2026-11-12** — `KYO-841` (task) — Mac app: a Finder-like Files home with stars, and an open markdown file's outline
