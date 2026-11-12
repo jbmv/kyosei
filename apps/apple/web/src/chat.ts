@@ -630,20 +630,30 @@ function workingWords(): string {
       ? `${TOOL_VERBS[call.name] ?? `Using ${call.name}`}  ${elapsed(call.at)}`
       : workingLine ?? `Working${latestAt ? `  ${elapsed(latestAt)}` : ""}`;
   }
-  return [words, backgroundWords()].filter(Boolean).join("  ·  ");
+  return words;
 }
 
 /** What the line under the composer says while the session waits on the person. */
 const WAITING = "Waiting for you…";
 
 /**
- * The line under the composer: what the session is doing, or that it waits on the person
- * when it is live and doing nothing. Nothing is said of an ended session, nor before the
+ * The line under the composer: what the session itself is doing, or that it waits on the
+ * person when it is live and nothing runs, in the background either. Nothing is said of an ended session, nor before the
  * server has read a pane.
  */
 function drawWorking(): void {
   const doing = workingWords();
-  const idle = !doing && !sessionEnded && screenState !== null;
+  // What runs in the background is said at the foot of the chat, where there is room for it.
+  const behind = sessionEnded ? "" : backgroundWords();
+  const backgroundLine = document.getElementById("background")!;
+  const backgroundText = document.getElementById("background-text")!;
+  if (backgroundLine.hidden !== !behind || backgroundText.textContent !== behind) {
+    keepingPlace(() => {
+      backgroundText.textContent = behind;
+      backgroundLine.hidden = !behind;
+    });
+  }
+  const idle = !doing && !behind && !sessionEnded && screenState !== null;
   const words = doing || (idle ? WAITING : "");
   working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;

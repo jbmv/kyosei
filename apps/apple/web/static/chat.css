@@ -393,7 +393,7 @@ body.terminal-open #jump-bottom { display: none; }
 .mark[hidden] { display: none; }
 /* The paragraph the next anchor lands on, shown while the composer has no caret. It covers
    the paragraph's own mark and takes no press, so the mark under it still opens. */
-.mark.mark-landing { z-index: 1; background: var(--background); color: var(--apple-green); font-size: 14px; font-weight: 700; pointer-events: none; }
+.mark.mark-landing { z-index: 1; background: var(--background); color: var(--link); font-size: 14px; font-weight: 700; pointer-events: none; }
 .mark.ghost { opacity: 0.45; }
 .mark.ghost:hover { opacity: 1; background: var(--line); }
 .mark.held { color: var(--pastel-blue); font-size: 13px; font-weight: 700; }
@@ -658,6 +658,8 @@ body.terminal-open #terminal { display: flex; }
 .diff .add { background: rgba(47, 143, 78, 0.18); }
 .diff .del { background: rgba(194, 65, 58, 0.18); }
 
+#background { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); font-size: 13.5px; }
+#background[hidden] { display: none; }
 /* Under the composer: what the session is doing at the left, Interrupt beside it while it
    works, and the running subagents at the right, under Send. */
 #composer-status { flex: none; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 2px 2px; font-size: 12.5px; }

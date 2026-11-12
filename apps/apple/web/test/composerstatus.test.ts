@@ -44,6 +44,19 @@ test("the working line, Interrupt and the subagent count stand under the compose
   assert.equal(now.idle, false);
   assert.match(now.text, /^Working/);
   assert.equal(now.interrupt, true);
+  // What runs in the background is said in the chat, and the composer's line stays short.
+  await page.run(`window.kyo.screen({ screen: { state: "working", background: { running: true, shells: 1, agents: [{ type: "w", description: "x" }] } } })`);
+  const split = await page.run<{ under: string; chat: string; inChat: boolean }>(`({
+    under: document.getElementById("working-text").textContent,
+    chat: document.getElementById("background-text").textContent,
+    inChat: Boolean(document.querySelector("#page #background:not([hidden])")),
+  })`);
+  assert.match(split.under, /^Working/);
+  assert.doesNotMatch(split.under, /background/);
+  assert.deepEqual([split.chat, split.inChat], ["1 agent, 1 shell in the background", true]);
+  // Idle with work still in the background is not a wait on the person.
+  await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);
+  assert.equal((await page.run<Status>(status)).shown, false);
   // Idle and live: it waits for the person, in italics, with no Interrupt.
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   now = await page.run<Status>(status);

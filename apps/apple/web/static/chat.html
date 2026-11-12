@@ -220,6 +220,9 @@
         <div id="chat"></div>
         <div id="empty-chat" hidden>Session active&hellip; waiting for first input</div>
         <article id="live" class="reply"></article>
+        <!-- What runs in the background stays with the chat; what the session itself is doing
+             is said under the composer. -->
+        <div id="background" hidden><span class="pulse"></span><span id="background-text"></span></div>
         <div id="start" hidden>
           <span id="start-text"></span>
           <button id="start-button">Start orchestrator</button>
