@@ -1734,10 +1734,11 @@ def _cmd_docs_settle_from_report(ctx: Context, args: Namespace) -> Output:
     }
     for record_id in record_ids:
         open_now = still_open[record_id]
-        lines.append(
+        now_open = (
             f"{record_id} now has {open_now} open docs obligation(s)"
             + ("" if open_now else f" — {explanations.say('docs-nothing-blocks')}")
         )
+        lines.append(now_open if open_now else receipt.detail(now_open))
     return Output(
         lines,
         receipt=True,

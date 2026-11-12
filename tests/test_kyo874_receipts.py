@@ -14,18 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from kyosei import cli, receipt, render
+from kyosei import cli, clock, receipt, render
 from kyosei.prose import fingerprint
 
 from .conftest import Run, declare_person, git_init, invoke, valid_report
-from .test_output_flags import (  # noqa: F401 - fixed_clock is a fixture
-    FIXTURES,
-    _pinned_text,
-    _scenario_in,
-    assert_pinned,
-    fixed_clock,
-    pin_name,
-)
 from .test_kyo137_docs_obligations import (
     GOVERNED_DOC,
     _branch_editing,
@@ -33,6 +25,14 @@ from .test_kyo137_docs_obligations import (
     _commit_anything,
     _git,
     _write,
+)
+from .test_output_flags import (
+    FIXTURES,
+    _FixedDatetime,
+    _pinned_text,
+    _scenario_in,
+    assert_pinned,
+    pin_name,
 )
 
 #: The eight commands of KYO-874.c1, in the order the script runs them.
@@ -79,11 +79,19 @@ def _project(tmp_path: Path, name: str) -> Path:
     return root
 
 
-def script(root: Path, scratch: Path, flags: tuple[str, ...] = ()) -> dict[str, Run]:
+PATH = "/Users/someone/project/build"
+
+
+def script(
+    root: Path, scratch: Path, flags: tuple[str, ...] = (), *, warns: bool = True
+) -> dict[str, Run]:
     """Run the eight commands in the project at ``root``; ``{command: Run}``.
 
     Setup commands (a blocking record, the touches, the branch a worker would commit
-    on) run under ``--json`` and are not part of what is measured.
+    on) run under ``--json`` and are not part of what is measured. With ``warns``
+    every command is given an input that warns, which is what c2 compares. Without it
+    the same eight run on inputs that raise nothing, which is the routine case and is
+    measured beside the other.
     """
 
     def kyo(*args: str, stdin: str | None = None) -> Run:
@@ -108,7 +116,16 @@ def script(root: Path, scratch: Path, flags: tuple[str, ...] = ()) -> dict[str, 
     _commit(root, "baseline")
 
     criteria = scratch / "criteria.txt"
-    criteria.write_text("\n".join(CRITERIA) + "\n", "utf-8")
+    criteria.write_text(
+        ("\n".join(CRITERIA) if warns else "\n".join(CRITERIA).replace("; a test", ", and a test"))
+        + "\n",
+        "utf-8",
+    )
+    if not warns:
+        config = root / "kyosei" / "config.yml"
+        config.write_text(
+            config.read_text("utf-8") + "worktree_setup:\n  - make venv\n", "utf-8"
+        )
     touches = scratch / "touches.txt"
     touches.write_text("src/app.py\n", "utf-8")
     # 1. new: the title is long, a criterion holds a semicolon, and the description
@@ -117,20 +134,33 @@ def script(root: Path, scratch: Path, flags: tuple[str, ...] = ()) -> dict[str, 
         "new", "task",
         "--title",
         "The stop check names files a declared build wrote, which the worker did not "
-        "make and cannot remove without breaking the build it was told to run",
+        "make and cannot remove without breaking the build it was told to run"
+        if warns
+        else "The stop check leaves out what a declared build wrote",
         "--description-file", "-",
         "--criteria-file", str(criteria),
         "--touches-file", str(touches),
         "--force", "--no-prior-art",
-        stdin=DESCRIPTION,
+        stdin=DESCRIPTION if warns else DESCRIPTION.replace(PATH, "its build directory"),
     )  # fmt: skip
     record = "TST-1"
     blocker = setup("new", "task", "--title", "A record that blocks", "--force")["record"]["id"]
-    setup("link", blocker, "blocks", record)
+    if warns:
+        setup("link", blocker, "blocks", record)
+
+    def gate() -> None:
+        # The payload names an absolute path when the script warns.
+        run(
+            "gate", record, "awaiting:human-review", "--do-file", "-",
+            stdin=GATE_PAYLOAD if warns else GATE_PAYLOAD.replace(PATH, "the build directory"),
+        )  # fmt: skip
+
+    if not warns:
+        gate()  # before the verdict, so the wait it records is findable
 
     # 2. attach: a test log that names an absolute path.
     log = scratch / "test-log.txt"
-    log.write_text(EVIDENCE, "utf-8")
+    log.write_text(EVIDENCE if warns else EVIDENCE.rsplit("log written", 1)[0], "utf-8")
     run("attach", record, "--file", str(log), "--supports", f"{record}.c1")
 
     # 3. verify: unobserved before any gate is open, so nothing makes the wait findable,
@@ -138,23 +168,38 @@ def script(root: Path, scratch: Path, flags: tuple[str, ...] = ()) -> dict[str, 
     run(
         "verify", f"{record}.c4", "--verdict", "unmet-unobserved", "--method",
         "reasoned-about", "--why",
-        "needs a person to read the page built at /Users/someone/project/site",
+        "needs a person to read the page built at /Users/someone/project/site"
+        if warns
+        else "needs a person to read the page the build writes",
     )  # fmt: skip
 
-    # 4. gate: the payload names an absolute path.
-    run("gate", record, "awaiting:human-review", "--do-file", "-", stdin=GATE_PAYLOAD)
+    # 4. gate.
+    if warns:
+        gate()
 
     # 5. dispatch: blocked by the other record, so --force; no worktree_setup declared.
     _commit_anything(root, "the store, before anything branches")
     _branch_editing(root, "kyo-874", {"src/app.py": "x = 2\n"})
-    run("dispatch", record, "--no-create-worktree", "--branch", "kyo-874", "--force")
+    base = _git(root, "rev-parse", "HEAD")
+    run(
+        "dispatch", record, "--no-create-worktree", "--branch", "kyo-874",
+        *(["--force"] if warns else []),
+    )  # fmt: skip
     dispatch_id = f"{record}.d1"
 
     # 6. report: no commits named and a branch that did not advance past the sha given.
     sha = _git(root, "rev-parse", "kyo-874")
+    report = scratch / "report.json"
+    if not warns:
+        report.write_text(json.dumps(_routine_report(dispatch_id, record, base, sha)), "utf-8")
+        run("report", dispatch_id, "--file", str(report))
+        run("accept", dispatch_id)
+        words = scratch / "words.txt"
+        words.write_text(WORDS, "utf-8")
+        run("confirm", record, "--quote-file", str(words), "--source-other", "said in the review")
+        return runs
     _commit_anything(root, "the store, before the merge")
     _git(root, "merge", "--no-ff", "-m", "merge kyo-874", "kyo-874")
-    report = scratch / "report.json"
     report.write_text(
         json.dumps(
             valid_report(
@@ -206,6 +251,44 @@ def script(root: Path, scratch: Path, flags: tuple[str, ...] = ()) -> dict[str, 
         "--source-other", "said in the review",
     )  # fmt: skip
     return runs
+
+
+def _routine_report(dispatch_id: str, record: str, base: str, tip: str) -> dict:
+    """A report with nothing to flag: its commit is on the branch, every file it names
+    is claimed, three criteria are met and the one docs obligation is answered."""
+    return valid_report(
+        dispatch_id=dispatch_id,
+        record_id=record,
+        worked_from_sha=base,
+        criteria_verdicts=[
+            {
+                "criterion_id": f"{record}.c{n}",
+                "verdict": "met",
+                "method": "machine-checked",
+                "evidence": "tests/test_stop_check.py: 60 passed",
+            }
+            for n in (1, 2, 3)
+        ],
+        commits=[{"sha": tip, "subject": "work on kyo-874"}],
+        touched_files=["src/app.py"],
+        docs_verdicts=[
+            {
+                "doc_path": "docs/architecture.md",
+                "section": "How the CLI is wired",
+                "verdict": "not-affected",
+                "method": "read the section against the diff",
+                "reason": "the wiring is unchanged",
+            }
+        ],
+    )
+
+
+@pytest.fixture
+def fixed_clock(monkeypatch) -> None:
+    """tests/test_output_flags.py's clock, which its pinned outputs were captured under."""
+    monkeypatch.setattr(clock, "datetime", _FixedDatetime)
+    for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
+        monkeypatch.setenv(name, "2026-01-02T03:04:05Z")
 
 
 @pytest.fixture
@@ -346,9 +429,9 @@ def test_new_measures_the_criteria_it_no_longer_prints(both) -> None:
     (joined by newlines, in the order stored) stands for them."""
     receipts, _full = both
     text = "\n".join(CRITERIA)
-    digest = __import__("hashlib").sha256(text.encode()).hexdigest()[:12]
     assert (
-        f"stored criteria: 4, TST-1.c1 to TST-1.c4 ({len(text)} chars, sha256:{digest})"
+        f"stored criteria: 4, TST-1.c1 to TST-1.c4 ({len(text)} chars, "
+        f"sha256:{fingerprint(text)})"
         in _lines(receipts["new"])
     )
     assert "stored description (" + str(len(DESCRIPTION.rstrip("\n"))) + " chars" in receipts[
@@ -400,8 +483,9 @@ def test_an_unmarked_line_is_in_the_receipt() -> None:
         "  warning: added next year",
     ]
     # A composing command indents a step's lines; the marks survive it.
-    assert receipt.receipt_lines(receipt.indented("  ", lines))[-1] == "    warning: added next year"
-    assert len(receipt.receipt_lines(receipt.indented("  ", lines))) == 3
+    indented = receipt.receipt_lines(receipt.indented("  ", lines))
+    assert indented[-1] == "    warning: added next year"
+    assert len(indented) == 3
     # The full form is the string itself, so every other reader is unchanged.
     assert [str(line) for line in lines][:2] == ["did it", lines[1]]
     assert json.dumps(lines[:1]) == '["did it"]'
@@ -418,7 +502,7 @@ def _pinned(tmp_path: Path, mode: str, flags: list[str], labels=None) -> None:
 
 
 #: The scenario's commands that print a receipt.
-SCENARIO_RECEIPTS = {"attach", "verify", "dispatch", "report", "accept"}
+SCENARIO_RECEIPTS = {"attach", "move", "verify", "dispatch", "report", "accept"}
 
 
 def test_the_flag_restores_the_full_output(tmp_path: Path, fixed_clock, monkeypatch) -> None:
@@ -500,13 +584,44 @@ def test_what_a_hook_reads_is_never_a_receipt(kyo, git_project: Path, monkeypatc
 # ------------------------------------------------------------------------ KYO-874.c4
 
 
-def test_measure(both) -> None:
-    receipts, full = both
+def _sizes(runs: dict[str, Run]) -> tuple[int, int]:
+    return (
+        sum(len(runs[c].out.encode()) for c in COMMANDS),
+        sum(runs[c].out.count("\n") for c in COMMANDS),
+    )
+
+
+@pytest.mark.parametrize("warns", [True, False], ids=["warning", "routine"])
+def test_the_script_prints_fewer_bytes_as_receipts(
+    tmp_path: Path, monkeypatch, capsys, warns: bool
+) -> None:
+    """c4. The bytes and lines the eight commands print, before (`--full`, which is the
+    output before this change byte for byte) and after. ``pytest -s`` prints the table;
+    ``KYO874_DUMP_DIR`` writes each output to a file."""
+    monkeypatch.delenv(cli.OUTPUT_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "0b0c6a1e-1111-4a2b-9c3d-0123456789ab")
+    receipts = script(_project(tmp_path, "piped"), tmp_path / "piped", warns=warns)
+    full = script(_project(tmp_path, "whole"), tmp_path / "whole", (cli.FULL_FLAG,), warns=warns)
     dump = os.environ.get("KYO874_DUMP_DIR")
+    kind = "warning" if warns else "routine"
+    with capsys.disabled():
+        print(f"\n{kind} inputs      before (--full)        after (receipt)")
+        for command in COMMANDS:
+            r, f = receipts[command].out, full[command].out
+            print(
+                f"  {command:9} {len(f.encode()):6} bytes {f.count(chr(10)):3} lines   "
+                f"{len(r.encode()):6} bytes {r.count(chr(10)):3} lines"
+            )
+            if dump:
+                (Path(dump) / f"{kind}.{command}.full.txt").write_text(f, "utf-8")
+                (Path(dump) / f"{kind}.{command}.receipt.txt").write_text(r, "utf-8")
+        (fb, fl), (rb, rl) = _sizes(full), _sizes(receipts)
+        print(f"  {'total':9} {fb:6} bytes {fl:3} lines   {rb:6} bytes {rl:3} lines")
     for command in COMMANDS:
-        r, f = receipts[command].out, full[command].out
-        print(f"{command:9} full {len(f.encode()):6} bytes {f.count(chr(10)):4} lines   "
-              f"receipt {len(r.encode()):6} bytes {r.count(chr(10)):4} lines")
-        if dump:
-            (Path(dump) / f"{command}.full.txt").write_text(f, "utf-8")
-            (Path(dump) / f"{command}.receipt.txt").write_text(r, "utf-8")
+        assert len(receipts[command].out.encode()) < len(full[command].out.encode()), command
+    if not warns:
+        # With nothing to warn about a receipt is a few lines. A report always leaves
+        # something to do (its verdicts and docs verdicts are proposals), so it is longer.
+        for command in COMMANDS:
+            most = {"report": 9, "dispatch": 6, "confirm": 14}.get(command, 5)
+            assert receipts[command].out.count("\n") <= most, receipts[command].out

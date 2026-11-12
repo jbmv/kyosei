@@ -61,7 +61,15 @@ verifies, moves, and maintains everything else. The human *views* the board; age
    *nothing* — but a substitution whose command printed output is invisible to it, an open hole
    kept named rather than closed by assertion. Everything longer is file/stdin only, the path the
    shell never touches. `procedures.md` holds the enumerated mechanics and the tests that keep
-   them from drifting.
+   them from drifting. What the echo guarantees is the measure, and the text is its long form:
+   when stdout is not a terminal a write prints its *receipt* (KYO-874), which states each
+   stored text as its label, length and sha256 prefix (`stored description (792 chars,
+   sha256:62fdeec317ac)`) and leaves the text out, so a paste the shell mangled still shows as
+   a length that is not the one sent. The receipt carries what was done with the ids made or
+   changed, those measures, and every warning, refusal and remedy of the full output. A
+   command marks the lines a receipt leaves out, and an unmarked line is kept, so a warning
+   added later is in the receipt by default. `--full` (or `KYOSEI_OUTPUT=full`) restores the
+   echo of every text, and a terminal always prints it.
 6. **Fail loudly.** An edit naming a nonexistent ID errors. An empty list means empty.
    Dependency writes refuse cycles at write time. "Success" must mean the thing happened.
 7. **Transition contracts are enforced at transition time**, naming the unmet item — not by a

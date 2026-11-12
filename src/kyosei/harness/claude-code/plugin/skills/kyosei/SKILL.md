@@ -71,6 +71,10 @@ Plan your coming turns on the session's list (`kyo agenda add --text "..."`,
 `--json` is one line (`--pretty` indents). For a short listing, `kyo list --unsettled --limit 20`;
 bare `kyo list` prints every record.
 
+**A write's text output is a receipt too: read it whole, never through `grep` or `tail`**
+(KYO-874). Off a terminal it is what the write did with the ids, each stored text's length and
+digest, and every warning and remedy; `--full` echoes the texts.
+
 **Flag every `terminated-no-report` dispatch the brief shows you, immediately**: a died-mid-work
 state, unanswered until its record settles or a later dispatch speaks for it (KYO-314); there is
 no acknowledge step, and `kyo show <record-id>` prints the full dispatch history. Close a dead

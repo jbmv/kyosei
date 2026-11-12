@@ -34,7 +34,7 @@ from .errors import ContractViolation, KyoseiError, UsageError
 from .git_queries import _git_commit_reachability, _git_is_ancestor
 from .receipt import detail, details
 from .render import commit_label, echo_value
-from .touch_drift import _drift_for_dispatch, drift_lines
+from .touch_drift import DRIFT_NONE, _drift_for_dispatch, drift_lines
 
 #: KYO-32: the four states of the whole branch check, distinct from the per-commit
 #: :data:`contracts.BRANCH_REACH_OUTCOMES`. ``not-declared`` and ``no-commits`` are
@@ -980,7 +980,9 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
     # thing on the screen, which is where the next action is read from.
     lines += _docs_obligation_lines(obligations)
     lines += _recx_trailer_lines(recx_trailers)
-    lines += drift_lines(drift)
+    drifted = drift_lines(drift)
+    # "none", with no stale form of claim and no symbol-level finding under it.
+    lines += details(drifted) if drift["outcome"] == DRIFT_NONE and len(drifted) == 1 else drifted
     # KYO-592: every stop of this dispatch's worker that a stop guard reported without
     # blocking (stop_hook_active), so the finding it did not enforce reaches the review.
     unblocked = stop_audit.unblocked_stops(store, dispatch_id)

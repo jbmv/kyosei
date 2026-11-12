@@ -509,7 +509,14 @@ def _docs_obligation_lines(obligations: dict) -> list[str]:
     # for a merged branch whose three-dot diff was empty by construction, and the line
     # that would have told a controller so did not exist.
     if obligations.get("changed_says"):
-        lines.append(f"  changed paths: {_changed_paths_says(obligations)}")
+        says = f"  changed paths: {_changed_paths_says(obligations)}"
+        # KYO-874: the live-branch diff is what every ordinary report reads, so it is
+        # detail of a receipt; any other source is the finding itself and stays plain.
+        lines.append(
+            receipt.detail(says)
+            if obligations.get("changed_source") == DOCS_CHANGED_SOURCE_BRANCH_DIFF
+            else says
+        )
     return lines + _docs_verdict_lines(obligations)
 
 

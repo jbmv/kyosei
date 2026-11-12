@@ -122,7 +122,11 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: Raised deliberately by KYO-660 from 28,592 to 28,883 (+291 bytes, the tier was at
 #: 28,590): `kyo excerpt` writes a pack that leaves the machine only after the person's
 #: go-ahead, and only the orchestrator records that go-ahead, so section 2 says the steps once.
-WORKFLOW_TIER_CEILING_BYTES = 28_883
+#: Raised deliberately by KYO-874 from 28,883 to 29,130 (+247 bytes, the tier was at
+#: 28,879): a write read off a terminal now prints a receipt, and KYO-874.c5 requires the
+#: workflow to say that it is read whole and never filtered, since filtering a write's output
+#: is the habit the receipt replaces. One sentence, beside the one on `--json`'s receipt.
+WORKFLOW_TIER_CEILING_BYTES = 29_130
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")

@@ -3045,10 +3045,12 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
             # above): an empty touches file means an empty list, not "no change".
             replaced, dropped = _replace_touches(store, record_id, new_touches)
             lines.append(f"touches: {len(dropped)} -> {len(replaced)}")
+            # KYO-874: the rows are detail where this command's lines are printed as
+            # part of a receipt (`kyo accept` composes it); the count line stays.
             for path, symbol in dropped:
-                lines.append(f"  - {path}" + (f"#{symbol}" if symbol else ""))
+                lines.append(detail(f"  - {path}" + (f"#{symbol}" if symbol else "")))
             for tid, path, symbol in replaced:
-                lines.append(f"  + {tid}  {path}" + (f"#{symbol}" if symbol else ""))
+                lines.append(detail(f"  + {tid}  {path}" + (f"#{symbol}" if symbol else "")))
             if correction is not None:
                 # KYO-307.c1: which lines this converted, named at the moment it
                 # converts them, in `kyo touch-drift`'s own words. A `+path` the merge
@@ -3065,8 +3067,10 @@ def cmd_edit(ctx: Context, args: Namespace) -> Output:
                 # finished; the guard reads the record not yet dispatched.
                 # KYO-489: the measurement is explained once, in `kyo reference edit`.
                 lines.append(
-                    f"  (from {from_drift}'s touch drift: "
-                    f"{explanations.say('drift-fed-back')})"
+                    detail(
+                        f"  (from {from_drift}'s touch drift: "
+                        f"{explanations.say('drift-fed-back')})"
+                    )
                 )
 
         if new_doc_refs is not None:
@@ -3828,7 +3832,12 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
     commands._finish_mutation(
         store, _settled_export_ids(args.id, closed_flags), events
     )
-    lines = [f"moved {args.id}", echo_value("status", f"{old_status} -> {args.status}")]
+    # KYO-874: one line in a receipt, the transition on it.
+    moved = f"moved {args.id}"
+    lines: list[str] = [
+        receipt_form(moved, f"{moved}: {old_status} -> {args.status}"),
+        detail(echo_value("status", f"{old_status} -> {args.status}")),
+    ]
     if reason is not None:
         lines += echo_block("reason", reason)
     lines += _forced_gates_line(args.status, forced_gates)
@@ -3854,7 +3863,8 @@ def cmd_move(ctx: Context, args: Namespace) -> Output:
                 lines.append(f"  recorded as {forced_note_id}")
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "move",
             "record_id": args.id,

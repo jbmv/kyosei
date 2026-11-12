@@ -905,6 +905,11 @@ kyo move KYO-1 working --json              # a write's --json is its receipt: ea
                                            # changed_fields, not the whole document
 kyo move KYO-1 working --json --full       # the same with every record document whole;
                                            # `kyo show KYO-1 --json` is the read, always whole
+kyo new task --title T --description-file d.md   # piped or captured, a write prints its
+                                           # receipt: what it did and the ids, each stored
+                                           # text as its length and digest, every warning
+kyo new task --title T --description-file d.md --full   # the whole output, as a terminal
+                                           # prints it: every stored text echoed back
 kyo list --json --pretty                   # --json is one line when stdout is not a terminal
                                            # and indented on one; --pretty / --compact-json
                                            # force either (--slim: accepted, a no-op)
@@ -1234,6 +1239,40 @@ kyo install-hooks [--print] [--copies]     # merge Claude Code hook templates in
 
 `--json` works on every command, before or after the subcommand, and so do its
 shape flags `--full`, `--pretty` and `--compact-json`.
+
+### A write's text output off a terminal is a receipt (KYO-874)
+
+A write echoes back what it stored, so that a text the shell altered is seen. An agent reads
+every byte of that echo and reads it again on each later turn, and one that filters the output
+to shorten it keeps the lines it expected and drops a warning it did not. When stdout is not a
+terminal, `kyo new`, `kyo dispatch`, `kyo report`, `kyo accept`, `kyo verify`, `kyo gate`,
+`kyo attach`, `kyo confirm` and `kyo docs settle --from-report` therefore print a receipt in
+place of the full output. Every other command, including each one a hook runs, prints the same
+text to every reader.
+
+A receipt carries:
+
+- one line saying what the command did, with the ids it made or changed. `kyo dispatch` adds
+  the branch, the base sha and the resolved worktree path to it; `kyo verify` adds the
+  transition and the method; `kyo report` and `kyo accept` open with their `summary:` line;
+- one line for each stored text, giving its label, its length in characters and the first
+  twelve hex digits of its sha256, without the text: `stored description (792 chars,
+  sha256:62fdeec317ac)`. `kyo new` gives one such measure for its criteria, taken over their
+  texts joined by newlines in the order stored, and prints the title as stored;
+- every line of the full output that warns, refuses, reports an outcome that is not a pass,
+  or names a command to run, unchanged and whole. A report's `premise_false`, `disagreements`
+  and `corrected_numbers` entries and each proposed verdict other than `met` are among them.
+
+It leaves out the stored texts, the fields that restate a flag (kind, scope, method), the
+blocks of a report that are empty, and what `kyo dispatch` says on every run: its disjointness
+statement when nothing was compared, the files historically dragged in, and the brief's length
+by section. A command marks the lines a receipt leaves out and an unmarked line is kept, so
+the receipt is read whole and needs no filter.
+
+`--full` prints the whole output for one invocation, and `KYOSEI_OUTPUT=full` in the
+environment does so for every invocation, for a script that reads a write's text. A terminal
+prints the whole output without either. `--json` is not affected: its receipt is the slim
+envelope described above, and `--full` there embeds each record document whole.
 
 ### One record, one file: `--from` (KYO-330)
 
