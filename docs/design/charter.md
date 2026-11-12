@@ -705,7 +705,9 @@ replaces both halves with mechanisms:
   like everything else; the next brief opens with the previous shift log, dated.
 - **Closeout is a hook, not a ritual.** The `Stop` hook runs `kyo sweep` and then `kyo
   doctor`, with its report-completeness checks, after every turn. Nothing about ending a
-  shift is remembered. `SessionEnd` does not carry the chain, because Claude Code cancels it
+  shift is remembered. A store that is its own repository is then committed, one commit a
+  turn, so that committing it is not remembered either; a store inside the code repository
+  is the person's to commit and is only named (KYO-879). `SessionEnd` does not carry the chain, because Claude Code cancels it
   on exit and `Stop` has already run it (KYO-774).
 - **A session's task list is carried by the brief, and is not a record** (KYO-770). The list
   holds the orchestrator's plan for its coming turns and the person's reminders for the
