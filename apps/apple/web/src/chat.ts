@@ -120,15 +120,38 @@ function atBottom(): boolean {
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < STICK_DISTANCE;
 }
 
-// A way back to the end of a chat that has been scrolled up, or landed in by a search.
+/** True when the reader sees the very end of the chat; less than `atBottom`'s band. */
+function atEnd(): boolean {
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 8;
+}
+
+/**
+ * KYO-883: the chat does not follow new output down. Messages placed below the reader since
+ * they last saw the end are counted on the arrow back to it, and the count clears there.
+ */
+let unseen = 0;
+
+// A way back to the end of a chat that has been scrolled up, or landed in by a search, or
+// that new messages have arrived below.
 const jumpBottom = document.getElementById("jump-bottom")!;
+const jumpCount = document.getElementById("jump-count")!;
 function drawJump(): void {
-  jumpBottom.classList.toggle("shown", !atBottom());
+  const end = atEnd();
+  if (end) unseen = 0;
+  jumpBottom.classList.toggle("shown", !end);
+  jumpBottom.classList.toggle("counted", unseen > 0);
+  jumpCount.textContent = unseen ? `New messages: ${unseen}` : "";
 }
 scroller.addEventListener("scroll", drawJump, { passive: true });
 jumpBottom.addEventListener("click", () => {
   scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
 });
+
+/** Shows the end of the chat at once, as for a prompt the person has just sent. */
+function toEnd(): void {
+  scroller.scrollTop = scroller.scrollHeight;
+  drawJump();
+}
 
 /**
  * When the main conversation last replied or called a tool. A subagent's work and a
@@ -217,12 +240,20 @@ function drawActivity(): void {
 }
 setInterval(drawActivity, 1000);
 
-/** Runs a change to the page, following it down only if the reader was at the end. */
+/**
+ * Runs a change to the page and leaves the reader where they are (KYO-883): new output
+ * below is offered by the arrow at the chat's foot, and is not scrolled to.
+ */
 function keepingPlace(change: () => void): void {
-  const follow = atBottom();
   change();
-  if (follow) scroller.scrollTop = scroller.scrollHeight;
+  drawJump();
 }
+
+/** Keys of the objects counted as messages on the arrow: prompts, replies, deliveries, output. */
+const MESSAGE_KEY = /^[trdo]:/;
+
+/** Whether objects placed now are new output, counted on the arrow, and not a session's first load. */
+let countingNew = false;
 
 function place(key: string, at: string, version: string, build: () => HTMLElement): void {
   if (rendered.get(key) === version) return;
@@ -233,6 +264,7 @@ function place(key: string, at: string, version: string, build: () => HTMLElemen
   if (existing) {
     existing.replaceWith(element);
   } else {
+    if (countingNew && MESSAGE_KEY.test(key)) unseen++;
     // Objects arrive nearly in order, so look from the end.
     let next: Element | null = null;
     for (let node = chat.lastElementChild; node; node = node.previousElementSibling) {
@@ -631,30 +663,20 @@ function workingWords(): string {
       ? `${TOOL_VERBS[call.name] ?? `Using ${call.name}`}  ${elapsed(call.at)}`
       : workingLine ?? `Working${latestAt ? `  ${elapsed(latestAt)}` : ""}`;
   }
-  return words;
+  return [words, backgroundWords()].filter(Boolean).join("  ·  ");
 }
 
 /** What the line under the composer says while the session waits on the person. */
 const WAITING = "Waiting for you…";
 
 /**
- * The line under the composer: what the session itself is doing, or that it waits on the
- * person when it is live and nothing runs, in the background either. Nothing is said of an ended session, nor before the
- * server has read a pane.
+ * The line under the composer, whole: what the session is doing and what runs in the
+ * background, or that it waits on the person when it is live and nothing runs. Nothing is
+ * said of an ended session, nor before the server has read a pane.
  */
 function drawWorking(): void {
   const doing = workingWords();
-  // What runs in the background is said at the foot of the chat, where there is room for it.
-  const behind = sessionEnded ? "" : backgroundWords();
-  const backgroundLine = document.getElementById("background")!;
-  const backgroundText = document.getElementById("background-text")!;
-  if (backgroundLine.hidden !== !behind || backgroundText.textContent !== behind) {
-    keepingPlace(() => {
-      backgroundText.textContent = behind;
-      backgroundLine.hidden = !behind;
-    });
-  }
-  const idle = !doing && !behind && !sessionEnded && screenState !== null;
+  const idle = !doing && !sessionEnded && screenState !== null;
   const words = doing || (idle ? WAITING : "");
   working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;
@@ -1525,6 +1547,8 @@ const kyo = {
   clear(): void {
     endAnchorMode();
     turnsLoaded = false;
+    dropSentPreview();
+    unseen = 0;
     drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();
@@ -1624,6 +1648,11 @@ const kyo = {
   },
 
   apply(batch: Batch): void {
+    // A session's first read lands at its end, as before; after that, output is not followed.
+    const loading = batch.reset || !turnsLoaded;
+    const follow = loading && atBottom();
+    countingNew = !loading;
+    let prompted = false;
     keepingPlace(() => {
       if (batch.reset) kyo.clear();
       for (const { at } of [...(batch.replies ?? []), ...(batch.tool_calls ?? [])]) {
@@ -1632,6 +1661,10 @@ const kyo = {
       for (const turn of batch.turns ?? []) {
         const version = `${turn.text}|${turn.images?.length ?? 0}`;
         sources.set(`t:${turn.id}`, turn.text ?? "");
+        if (!elements.has(`t:${turn.id}`)) {
+          prompted = true;
+          landSent(turn);
+        }
         place(`t:${turn.id}`, turn.at, version, () => drawTurn(turn));
         linkPlaced(`t:${turn.id}`);
       }
@@ -1666,6 +1699,12 @@ const kyo = {
       paintAnchors();
       refreshSearch();
     });
+    countingNew = false;
+    // The person's own prompt is shown when it lands, as it was when they sent it.
+    if (follow || (prompted && !loading)) {
+      unseen = 0;
+      toEnd();
+    }
     if (batch.facts) facts = batch.facts;
     // The final text has arrived, so the in-progress copy goes at once.
     if (liveText !== null && alreadyLanded(liveText)) clearLive();
@@ -1716,6 +1755,7 @@ const kyo = {
   sent(frame: { id?: string; error?: string }): void {
     if (frame.error) {
       composerNote.textContent = frame.error;
+      dropSentPreview();
       // A refusal ends the send, so the prompt stays and Send can be pressed again.
       sendGate.end();
       drawSending();
@@ -1724,6 +1764,9 @@ const kyo = {
     }
     composerNote.textContent = "";
     showHeld(frame.id ? { id: frame.id } : null);
+    // A held prompt is shown in the held box and not in the chat; a delivered one is confirmed.
+    if (frame.id) dropSentPreview();
+    else confirmSentPreview();
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();
     drawSending();
@@ -3939,7 +3982,50 @@ function attemptSend(area: HTMLTextAreaElement): void {
   if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
   composerNote.textContent = "Sending…";
   drawSending();
+  // A prompt sent while the session works is held, and is shown in the held box instead.
+  if (screenState !== "working") showSentPreview(segments.map((segment) => segment.text).join(""));
   post("send", { segments, marks: sentMarks(area) });
+}
+
+/**
+ * KYO-883: a prompt sent straight to an idle session is drawn in the chat at the press,
+ * dimmed, rather than when the transcript has it about half a second later. The server's
+ * answer undims it, and the transcript's own turn takes its place when it lands.
+ */
+let sentPreview: { element: HTMLElement; text: string; drop?: number } | null = null;
+/** How long a confirmed preview waits for its turn before it is taken away. */
+const SENT_PREVIEW_MS = 60_000;
+
+function showSentPreview(text: string): void {
+  dropSentPreview();
+  const at = new Date().toISOString();
+  const element = drawTurn({ id: "sending", at, text });
+  element.classList.add("sending");
+  element.dataset.at = at;
+  chat.append(element);
+  sentPreview = { element, text };
+  drawEmptyChat();
+  toEnd();
+}
+
+function confirmSentPreview(): void {
+  if (!sentPreview) return;
+  sentPreview.element.classList.remove("sending");
+  sentPreview.drop = window.setTimeout(dropSentPreview, SENT_PREVIEW_MS);
+}
+
+function dropSentPreview(): void {
+  if (!sentPreview) return;
+  if (sentPreview.drop !== undefined) clearTimeout(sentPreview.drop);
+  sentPreview.element.remove();
+  sentPreview = null;
+}
+
+/** The transcript's turn for the previewed prompt has arrived, so the preview goes. */
+function landSent(turn: Turn): void {
+  if (!sentPreview) return;
+  const sent = lettersAndDigits(sentPreview.text).slice(0, LIVE_COMPARED_CHARS);
+  if (lettersAndDigits(turn.text ?? "").includes(sent)) dropSentPreview();
 }
 
 const heldBox = document.getElementById("held")!;

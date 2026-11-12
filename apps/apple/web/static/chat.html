@@ -214,15 +214,12 @@
       </div>
     </aside>
 
-    <button id="jump-bottom" title="Jump to the end" aria-label="Jump to the end"><svg viewBox="0 0 24 24" class="icon"><path d="M12 5v13M6 12.5l6 6 6-6"/></svg></button>
+    <button id="jump-bottom" title="Jump to the end" aria-label="Jump to the end"><svg viewBox="0 0 24 24" class="icon"><path d="M12 5v13M6 12.5l6 6 6-6"/></svg><span id="jump-count"></span></button>
     <div id="page">
       <main>
         <div id="chat"></div>
         <div id="empty-chat" hidden>Session active&hellip; waiting for first input</div>
         <article id="live" class="reply"></article>
-        <!-- What runs in the background stays with the chat; what the session itself is doing
-             is said under the composer. -->
-        <div id="background" hidden><span class="pulse"></span><span id="background-text"></span></div>
         <div id="start" hidden>
           <span id="start-text"></span>
           <button id="start-button">Start orchestrator</button>

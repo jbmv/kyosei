@@ -70,6 +70,8 @@ main {
 
 a { color: var(--link); }
 
+/* KYO-883: a prompt sent and not yet confirmed by the server. */
+.turn.sending { opacity: 0.5; }
 .turn {
   width: fit-content;
   max-width: 85%;
@@ -208,8 +210,8 @@ a { color: var(--link); }
 html, body { overflow: hidden; }
 #jump-bottom {
   position: fixed; z-index: 3; bottom: 18px;
-  left: calc((100vw - var(--composer-width) - 6px) / 2 - 17px);
-  width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+  left: calc((100vw - var(--composer-width) - 6px) / 2); transform: translateX(-50%);
+  min-width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 17px;
   background: var(--background); color: var(--muted); cursor: pointer;
   display: none; align-items: center; justify-content: center;
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.08);
@@ -217,6 +219,9 @@ html, body { overflow: hidden; }
 #jump-bottom .icon { width: 17px; height: 17px; }
 #jump-bottom:hover { color: var(--link); }
 #jump-bottom.shown { display: flex; }
+/* KYO-883: with new messages below, the arrow reads how many. */
+#jump-bottom.counted { gap: 6px; padding: 0 14px 0 11px; color: var(--link); font-size: 13px; }
+#jump-count:empty { display: none; }
 body.view-records #jump-bottom, body.view-files #jump-bottom { display: none; }
 body.terminal-open #jump-bottom { display: none; }
 
@@ -658,13 +663,12 @@ body.terminal-open #terminal { display: flex; }
 .diff .add { background: rgba(47, 143, 78, 0.18); }
 .diff .del { background: rgba(194, 65, 58, 0.18); }
 
-#background { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); font-size: 13.5px; }
-#background[hidden] { display: none; }
 /* Under the composer: what the session is doing at the left, Interrupt beside it while it
    works, and the running subagents at the right, under Send. */
 #composer-status { flex: none; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 2px 2px; font-size: 12.5px; }
 #working { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); }
-#working-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* KYO-883: the line is shown whole, wrapping under itself when the column is narrow. */
+#working-text { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
 #working[hidden] { display: flex; visibility: hidden; }
 #working.idle { font-style: italic; }
 #working.idle .pulse { display: none; }
