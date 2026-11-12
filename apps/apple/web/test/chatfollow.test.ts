@@ -82,8 +82,15 @@ test("a prompt sent to an idle session shows at once, dimmed, and is replaced by
   let shown = await page.run<{ text: string; dim: boolean; turns: number }>(preview);
   assert.deepEqual([shown.text, shown.dim, shown.turns], ["Please look at the arrow", true, 2]);
   assert.equal((await page.run<Place>(where)).end, true);
-  // The server delivered it directly: the preview loses its dimming.
-  await page.run(`window.kyo.sent({})`);
+  // The server queues every prompt and answers with its id: the preview stays, dimmed, and
+  // the held box is not shown for it.
+  const heldShown = `!document.getElementById("held").hidden`;
+  await page.run(`window.kyo.sent({ id: "m1" })`);
+  await page.run(`window.kyo.held({ outcome: "held", id: "m1", held: { id: "m1", retrying: true, reason: null, detail: null } })`);
+  shown = await page.run(preview);
+  assert.deepEqual([shown.dim, shown.turns, await page.run<boolean>(heldShown)], [true, 2, false]);
+  // The queue delivered it: the preview loses its dimming.
+  await page.run(`window.kyo.held({ outcome: "delivered", id: "m1", held: null })`);
   shown = await page.run(preview);
   assert.deepEqual([shown.dim, shown.turns], [false, 2]);
   // The transcript's turn takes its place, and the chat shows it.
@@ -101,11 +108,20 @@ test("a prompt sent while the session works is held, and is not drawn in the cha
   await page.run(`window.kyo.draft({ boxes: [{ id: "a", text: "Held for later" }], etag: "e1" })`);
   await page.run(`document.querySelector("#boxes .box .box-send").click()`);
   assert.equal(await page.run<number>(`document.querySelectorAll("#chat .turn.sending").length`), 0);
-  // A preview the server held after all, or refused, is taken away.
-  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   await page.run(`window.kyo.sent({ id: "held-1" })`);
-  await page.run(`window.kyo.draft({ boxes: [{ id: "b", text: "Refused" }], etag: "e2" })`);
   await page.run(`window.kyo.held({ outcome: "delivered", id: "held-1", held: null })`);
+  // A preview whose prompt the queue says waits on something is taken away, and the held box says why.
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  await page.run(`window.kyo.draft({ boxes: [{ id: "c", text: "Waits" }], etag: "e3" })`);
+  await page.run(`document.querySelector("#boxes .box .box-send").click()`);
+  await page.run(`window.kyo.sent({ id: "held-2" })`);
+  assert.equal(await page.run<number>(`document.querySelectorAll("#chat .turn.sending").length`), 1);
+  await page.run(`window.kyo.held({ outcome: "held", id: "held-2", held: { id: "held-2", retrying: true, reason: "input-box-in-use", detail: "text is in the terminal's input box" } })`);
+  assert.equal(await page.run<number>(`document.querySelectorAll("#chat .turn.sending").length`), 0);
+  assert.equal(await page.run<boolean>(`!document.getElementById("held").hidden`), true);
+  await page.run(`window.kyo.held({ outcome: "delivered", id: "held-2", held: null })`);
+  // A refused send takes its preview away.
+  await page.run(`window.kyo.draft({ boxes: [{ id: "b", text: "Refused" }], etag: "e2" })`);
   await page.run(`document.querySelector("#boxes .box .box-send").click()`);
   assert.equal(await page.run<number>(`document.querySelectorAll("#chat .turn.sending").length`), 1);
   await page.run(`window.kyo.sent({ error: "No session is live." })`);

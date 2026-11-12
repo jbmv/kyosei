@@ -1749,6 +1749,11 @@ const kyo = {
    * `held` is the message as the server keeps it, with why it has not been delivered.
    */
   held(frame: { outcome?: string; id?: string; held?: Held | null }): void {
+    if (sentPreview && frame.id && sentPreview.id === frame.id) {
+      // Every prompt goes by the server's queue; the preview stands while it is delivered.
+      if (frame.outcome === "delivered") confirmSentPreview();
+      else if (frame.outcome !== "held" || waitsOnSomething(frame.held)) dropSentPreview();
+    }
     showHeld(frame.outcome === "held" ? frame.held ?? (frame.id ? { id: frame.id } : null) : null);
     if (frame.outcome === "delivered") composerNote.textContent = "";
   },
@@ -1765,10 +1770,11 @@ const kyo = {
       return;
     }
     composerNote.textContent = "";
+    // The server queues every prompt and answers with its id; the preview waits for the
+    // queue's word that it was delivered (KYO-883). An answer with no id was delivered.
+    if (sentPreview && frame.id) sentPreview.id = frame.id;
+    else if (!frame.id) confirmSentPreview();
     showHeld(frame.id ? { id: frame.id } : null);
-    // A held prompt is shown in the held box and not in the chat; a delivered one is confirmed.
-    if (frame.id) dropSentPreview();
-    else confirmSentPreview();
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();
     drawSending();
@@ -3994,7 +4000,12 @@ function attemptSend(area: HTMLTextAreaElement): void {
  * dimmed, rather than when the transcript has it about half a second later. The server's
  * answer undims it, and the transcript's own turn takes its place when it lands.
  */
-let sentPreview: { element: HTMLElement; text: string; drop?: number } | null = null;
+let sentPreview: { element: HTMLElement; text: string; id?: string; drop?: number } | null = null;
+
+/** A queued prompt the server says waits on something, or will not try again: a real hold. */
+function waitsOnSomething(message: Held | null | undefined): boolean {
+  return !!message && (message.retrying === false || Boolean(message.reason && message.detail));
+}
 /** How long a confirmed preview waits for its turn before it is taken away. */
 const SENT_PREVIEW_MS = 60_000;
 
@@ -4060,7 +4071,9 @@ function heldWords(message: Held): string {
 function showHeld(message: Held | null): void {
   held = message;
   heldId = message?.id ?? null;
-  heldBox.hidden = !message;
+  // A prompt drawn in the chat at the press is not shown as held too, unless it waits (KYO-883).
+  const previewed = !!message && sentPreview?.id === message.id && !waitsOnSomething(message);
+  heldBox.hidden = !message || previewed;
   const stopped = message?.retrying === false;
   // Send now (KYO-722) is offered only while the turn runs; an idle screen delivers by itself.
   document.getElementById("held-send-now")!.hidden = !message || stopped || screenState !== "working";
