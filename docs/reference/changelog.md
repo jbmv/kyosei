@@ -422,6 +422,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-864` (task) — kyo list --json rows carry the record's plan
 - **2026-11-12** — `KYO-859` (task) — The discussion check's skip is silent and its cues no longer fire on a bare question or an offer
 - **2026-11-12** — `KYO-856` (task) — A record's evidence can name a screenshot kept as a composer attachment, shown by kyo show and the Mac app
 - **2026-11-12** — `KYO-853` (bug) — kyo attach --file ends in an uncaught UnicodeDecodeError on an image
