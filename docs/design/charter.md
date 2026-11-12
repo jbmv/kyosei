@@ -416,8 +416,9 @@ kinds:
   (its `accepts_from` is empty), which stamps a turn reference at the person's latest confirmed
   turn in the turn index: session, prompt id, transcript record uuid and the hook's time, none
   of it typed by an agent (law 16). `kyo discuss note` keeps what was put to the person.
-  Spawning a decision, proposal, plan or task from it closes it, and `kyo discuss close
-  --dropped --why` closes one that produced nothing; open and closed are read from its turn
+  Spawning a decision, proposal, plan or task from it closes it. `kyo discuss close
+  --produced` closes one that led to records without a decision and links each to it, and
+  `--dropped --why` closes one that produced nothing (KYO-878); open and closed are read from its turn
   references, since a knowledge kind has no status flow. `requires_discussion`, set on the
   shipped `decision`, is consumed by `kyo new` and `kyo spawn`: a decision is filed from its
   discussion (spawned from it, from a record it produced, or `--discussion`), or with
@@ -598,7 +599,8 @@ kyo spawn <id> --kind <k>         # a record of another kind from an existing on
 kyo show <id> [--json]
 kyo edit <id> --note-file f.md    # or stdin; echoes stored result; supersede-marks prior notes
 kyo promote <idea-file> --kind <k>   # validates flows + touches against repo; authors criteria
-kyo move <id> <status>            # enforces transition contracts AT the transition, names unmet items
+kyo move <id>... <status>         # enforces transition contracts AT the transition, names unmet items;
+                                  #   several ids are one act with one commit (KYO-877)
 kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload the dashboard"
 kyo ungate <id> [--why]          # a gate waiting on a person: their credit, or --withdrawn (KYO-644)
 kyo credit <id>... --basis <credit>   # a credit for rows that already exist (KYO-644)
