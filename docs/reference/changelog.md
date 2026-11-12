@@ -422,6 +422,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-881` (task) — Trim the orchestrator skill's workflow tier to 24,000 bytes
+- **2026-11-12** — `KYO-880` (task) — Receipts for spawn, edit, discuss, note and close-wave
 - **2026-11-12** — `KYO-879` (task) — The Stop hook commits a split store, one commit a turn
 - **2026-11-12** — `KYO-878` (task) — kyo discuss close --produced names what a discussion led to
 - **2026-11-12** — `KYO-877` (task) — kyo move takes several records as one act with one commit
