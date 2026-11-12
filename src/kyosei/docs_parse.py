@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -508,6 +508,22 @@ class Section:
     #: recomputing the rule — the same reason :attr:`resolved` is computed once instead
     #: of re-derived by each of its three consumers.
     dead: bool = False
+    #: KYO-844. The heading with the headings above it, set only for a section whose
+    #: heading another section of the same document shares while both can raise an
+    #: obligation (:func:`_qualify_shared_headings`). Empty otherwise; read :attr:`name`.
+    qualified: str = ""
+
+    @property
+    def name(self) -> str:
+        """What an obligation calls this section: :attr:`heading`, or :attr:`qualified`
+        where the heading alone would name two sections (KYO-844)."""
+        return self.qualified or self.heading
+
+    @property
+    def raises(self) -> bool:
+        """Whether a ``governs:`` join can raise on this section: it has a heading, it is
+        not dead, and it declares at least one target."""
+        return bool(self.level) and not self.dead and bool(self.metadata.get("governs"))
 
     @property
     def governs(self) -> list[str]:
@@ -629,7 +645,69 @@ def _sections(text: str, resolve: TargetResolver | None = None) -> list[Section]
             if not in_code:
                 prose.append(line)
     close()
-    return sections
+    return _qualify_shared_headings(sections)
+
+
+#: KYO-844: what joins the headings in :attr:`Section.qualified`, outermost first.
+HEADING_PATH_SEPARATOR = " > "
+
+
+def _qualify_shared_headings(sections: list[Section]) -> list[Section]:
+    """Name apart the sections of one document that share a heading (KYO-844).
+
+    An obligation is identified by its document and its section's name, and the name was
+    the heading text alone, so two sections with one heading were one obligation. Where
+    two or more sections that can raise (:attr:`Section.raises`) share a heading, each is
+    named with the headings above it, nearest first, taking as many levels as it takes to
+    tell apart every pair whose ancestry differs at all. Sections with the same heading
+    under the same headings keep one name between them; :func:`shared_names` reports
+    those, and the join raises one obligation for the name.
+
+    Only colliding sections are renamed, so an obligation stored under a plain heading
+    keeps matching the section it was raised for in every document without a collision.
+    """
+    chains: list[tuple[str, ...]] = []
+    above: list[tuple[int, str]] = []
+    for section in sections:
+        while above and above[-1][0] >= section.level:
+            above.pop()
+        chains.append(tuple(heading for _, heading in above))
+        if section.level:
+            above.append((section.level, section.heading))
+    groups: dict[str, list[int]] = {}
+    for index, section in enumerate(sections):
+        if section.raises:
+            groups.setdefault(section.heading, []).append(index)
+    named = list(sections)
+    for heading, members in groups.items():
+        if len(members) < 2:
+            continue
+        distinct = len({chains[index] for index in members})
+        deepest = max(len(chains[index]) for index in members)
+        for depth in range(deepest + 1):
+            names = {
+                index: HEADING_PATH_SEPARATOR.join(
+                    [*(chains[index][-depth:] if depth else ()), heading]
+                )
+                for index in members
+            }
+            if len(set(names.values())) == distinct:
+                break
+        for index, name in names.items():
+            if name != heading:
+                named[index] = replace(sections[index], qualified=name)
+    return named
+
+
+def shared_names(sections: Sequence[Section]) -> dict[str, int]:
+    """Each :attr:`Section.name` that more than one raising section of a document still
+    carries, with how many (KYO-844): same heading, same headings above. One obligation
+    stands for all of them, and ``kyo docs check`` names the document."""
+    counts: dict[str, int] = {}
+    for section in sections:
+        if section.raises:
+            counts[section.name] = counts.get(section.name, 0) + 1
+    return {name: count for name, count in counts.items() if count > 1}
 
 
 def read_document(
@@ -1070,6 +1148,7 @@ class Document:
 __all__ = [
     "DEAD_STATUSES",
     "DEFAULT",
+    "HEADING_PATH_SEPARATOR",
     "PREAMBLE",
     "SECTION_METADATA_KEYS",
     "Document",
@@ -1083,4 +1162,5 @@ __all__ = [
     "read_document",
     "section_is_dead",
     "section_metadata",
+    "shared_names",
 ]

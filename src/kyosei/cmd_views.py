@@ -207,6 +207,17 @@ def cmd_docs(ctx: Context, args: Namespace) -> Output:
             }
             for n in result.notices
         ],
+        # KYO-844: a section name several governs:-declaring sections of one document
+        # carry, so one obligation stands for all of them. Reported, never a failure.
+        "shared_headings": [
+            {
+                "doc_path": shared.doc_path,
+                "section": shared.section,
+                "sections": shared.sections,
+                "says": shared.says,
+            }
+            for shared in result.shared_headings
+        ],
         "region_suffixes": list(docs_regions.REGION_SUFFIXES),
         # KYO-139: the documents themselves, each as the docs query source's row plus
         # its sections.
@@ -265,6 +276,7 @@ def cmd_docs(ctx: Context, args: Namespace) -> Output:
             ),
             f"  {_dead_sections_line(result)}",
             *_narrowing_notice_lines(result),
+            *_shared_heading_lines(result),
         ],
         data,
     )
@@ -356,6 +368,18 @@ def _narrowing_notice_lines(result: docs_check.DocsCheck) -> list[str]:
             f"{notice.says}"
             for notice in result.notices
         ),
+    ]
+
+
+def _shared_heading_lines(result: docs_check.DocsCheck) -> list[str]:
+    """KYO-844's text half: the section names more than one ``governs:``-declaring
+    section of a document carries. Printed on the clean path, as the notices above are."""
+    if not result.shared_headings:
+        return []
+    return [
+        f"  {len(result.shared_headings)} section name(s) are shared by sections that "
+        f"declare governs: — reported, not failures; `kyo docs check` exits 0:",
+        *(f"    {shared.says}" for shared in result.shared_headings),
     ]
 
 

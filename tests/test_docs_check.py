@@ -3560,3 +3560,233 @@ def test_the_documentation_states_what_a_bare_number_names_and_each_cite_back_sp
     assert "numbered.heading" in region, path
     for spelling in docs_check.NUMBERED_CITE_SPELLINGS:
         assert f"`{spelling.replace('N', number)}`" in region, f"{path} must name {spelling}"
+
+
+# ------------------------------------------- KYO-844: sections that share a heading
+#
+# The obligation's identity is (document, section name), and the name was the heading
+# text alone. Two sections of one document with the same heading, each declaring
+# `governs:` and both reached by one change, collided on that key and the second was
+# dropped. A shared heading is now named with the headings above it wherever those
+# differ; where they do not, one obligation asks about every section that shares the
+# name, and `kyo docs check` names the document.
+
+_NOTES_UNDER_TWO_PARENTS = (
+    "# Design\n\n"
+    "## Server\n\nProse.\n\n### Notes\n\ngoverns: src/server.py\n\nServer notes.\n\n"
+    "## Client\n\nProse.\n\n### Notes\n\ngoverns: src/client.py\n\nClient notes.\n"
+)
+_NOTES_UNDER_ONE_PARENT = (
+    "# Design\n\n"
+    "## Server\n\nProse.\n\n### Notes\n\ngoverns: src/server.py\n\nServer notes.\n\n"
+    "### Notes\n\ngoverns: src/client.py\n\nClient notes.\n"
+)
+
+
+def _two_notes_project(kyo, project: Path, doc: str, edits: dict[str, str] | None = None):
+    """A document with two `### Notes` sections and a branch `kyo-844` that edits code."""
+    from .conftest import new_record
+    from .test_kyo137_docs_obligations import _branch_editing, _commit, _declare_touches, _write
+
+    _write(project, "docs/design.md", doc)
+    _write(project, "src/server.py", "x = 1\n")
+    _write(project, "src/client.py", "y = 1\n")
+    base = _commit(project, "baseline")
+    record = new_record(kyo, criteria=["both sides change"])
+    _declare_touches(kyo, project, record, "src/server.py", "src/client.py")
+    _commit(project, "the store, before the branch")
+    _branch_editing(
+        project,
+        "kyo-844",
+        edits or {"src/server.py": "x = 2\n", "src/client.py": "y = 2\n"},
+    )
+    return record, base
+
+
+def test_two_same_named_sections_under_different_parents_each_raise(
+    kyo, git_project: Path
+) -> None:
+    """KYO-844.c1 and c3: a change reaching both `### Notes` sections raises one
+    obligation for each, named apart by the heading above it, in the preview, in the
+    report's ingest, in `kyo show`, and in the matching of `docs_verdicts[]`."""
+    import json
+
+    from .conftest import valid_report
+    from .test_kyo137_docs_obligations import _git
+
+    record, base = _two_notes_project(kyo, git_project, _NOTES_UNDER_TWO_PARENTS)
+    expected = {
+        ("docs/design.md", "Server > Notes"): ["src/server.py"],
+        ("docs/design.md", "Client > Notes"): ["src/client.py"],
+    }
+
+    _git(git_project, "checkout", "-q", "kyo-844")
+    preview = kyo("docs", "preview", "--against", base, "--json")
+    assert preview.code == 0, preview
+    previewed = {
+        (row["doc_path"], row["section"]): row["targets"] for row in preview.json["obligations"]
+    }
+    assert previewed == expected, "the second section's obligation was dropped"
+    text = kyo("docs", "preview", "--against", base).out
+    assert "Server > Notes" in text and "Client > Notes" in text
+    _git(git_project, "checkout", "-q", "main")
+
+    dispatch_id = kyo("dispatch", record, "--branch", "kyo-844", "--json").json["dispatch_id"]
+    path = git_project / "report.json"
+    verdict = {"verdict": "not-affected", "method": "read it", "reason": "unchanged behaviour"}
+    path.write_text(
+        json.dumps(
+            valid_report(
+                dispatch_id=dispatch_id,
+                record_id=record,
+                worked_from_sha=_git(git_project, "rev-parse", "kyo-844"),
+                docs_verdicts=[
+                    {"doc_path": "docs/design.md", "section": "Server > Notes", **verdict},
+                    {"doc_path": "docs/design.md", "section": "Client > Notes", **verdict},
+                    # The heading alone names neither obligation.
+                    {"doc_path": "docs/design.md", "section": "Notes", **verdict},
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+    reported = kyo("report", dispatch_id, "--file", str(path))
+    assert reported.code == 0, reported
+    assert "2 matched an obligation this dispatch raised, 1 matched none" in reported.out
+    listed = kyo("docs", "obligations", "--json").json
+    assert {
+        (row["doc_path"], row["section"]) for row in listed["obligations"]
+    } == set(expected)
+
+    shown = kyo("show", record).out
+    assert "Server > Notes" in shown and "Client > Notes" in shown
+    assert listed["open"] == 2
+
+    # c2: the headings above tell these two apart, so the check has nothing to name.
+    checked = kyo("docs", "check", "--json")
+    assert checked.code == 0, checked
+    assert checked.json["shared_headings"] == []
+
+
+def test_same_named_sections_under_one_parent_raise_one_obligation_that_says_so(
+    kyo, git_project: Path
+) -> None:
+    """Where the headings above are the same too, nothing stored can tell the sections
+    apart. One obligation is raised for the name, it carries every section's matched
+    target, and it says it stands for more than one section; nothing is dropped."""
+    from .test_kyo137_docs_obligations import _git
+
+    _, base = _two_notes_project(kyo, git_project, _NOTES_UNDER_ONE_PARENT)
+    _git(git_project, "checkout", "-q", "kyo-844")
+    preview = kyo("docs", "preview", "--against", base, "--json")
+    assert preview.code == 0, preview
+    (row,) = preview.json["obligations"]
+    assert row["section"] == "Notes"
+    assert row["targets"] == ["src/server.py", "src/client.py"]
+    assert row["changed"] == ["src/client.py", "src/server.py"]
+    assert "2 sections" in row["detail"]
+
+
+def test_one_reached_section_of_an_ambiguous_pair_still_says_it_is_one_of_two(
+    kyo, git_project: Path
+) -> None:
+    from .test_kyo137_docs_obligations import _git
+
+    _, base = _two_notes_project(
+        kyo, git_project, _NOTES_UNDER_ONE_PARENT, {"src/client.py": "y = 2\n"}
+    )
+    _git(git_project, "checkout", "-q", "kyo-844")
+    (row,) = kyo("docs", "preview", "--against", base, "--json").json["obligations"]
+    assert row["targets"] == ["src/client.py"]
+    assert "2 sections" in row["detail"]
+
+
+def test_docs_check_names_a_heading_shared_under_one_parent_and_renaming_clears_it(
+    kyo, project: Path
+) -> None:
+    """KYO-844.c2. Reported and not a failure: the document is valid and its obligation
+    is still raised. The remedy the line names, renaming one section, clears it."""
+    _write_doc(project, "src/server.py", "x = 1\n")
+    _write_doc(project, "src/client.py", "y = 1\n")
+    _write_doc(project, "docs/design.md", _NOTES_UNDER_ONE_PARENT)
+    result = kyo("docs", "check", "--json")
+    assert result.code == 0, result
+    assert result.json["ok"] is True
+    assert result.json["shared_headings"] == [
+        {
+            "doc_path": "docs/design.md",
+            "section": "Notes",
+            "sections": 2,
+            "says": result.json["shared_headings"][0]["says"],
+        }
+    ]
+    text = kyo("docs", "check")
+    assert text.code == 0, text
+    assert "docs/design.md [Notes]" in text.out
+    assert "rename" in text.out
+
+    _write_doc(
+        project,
+        "docs/design.md",
+        _NOTES_UNDER_ONE_PARENT.replace(
+            "### Notes\n\ngoverns: src/client.py", "### Client notes\n\ngoverns: src/client.py"
+        ),
+    )
+    cleared = kyo("docs", "check", "--json")
+    assert cleared.json["shared_headings"] == []
+    assert "[Notes]" not in kyo("docs", "check").out
+
+
+def test_a_shared_heading_is_qualified_only_where_two_sections_can_raise() -> None:
+    """The name changes only for sections that would otherwise collide, so every
+    obligation stored under a plain heading keeps the name it was stored under."""
+    from kyosei.docs_parse import _sections
+
+    def names(text: str) -> list[str]:
+        return [section.name for section in _sections(text) if section.level]
+
+    # One of the two declares no governs: line, so nothing collides.
+    assert names("## A\n\n### Notes\n\ngoverns: x.py\n\n## B\n\n### Notes\n\nProse.\n") == [
+        "A", "Notes", "B", "Notes",
+    ]
+    # A dead section raises nothing, so it does not collide either.
+    assert names(
+        "## A\n\n### Notes\n\ngoverns: x.py\n\n## B\n\n### Notes\n\n"
+        "status: historical\ngoverns: y.py\n"
+    ) == ["A", "Notes", "B", "Notes"]
+    # The nearest heading above is used first, and a further one only where it is needed.
+    assert names(
+        "# One\n\n## Detail\n\n### Notes\n\ngoverns: x.py\n\n"
+        "# Two\n\n## Detail\n\n### Notes\n\ngoverns: y.py\n"
+    ) == ["One", "Detail", "One > Detail > Notes", "Two", "Detail", "Two > Detail > Notes"]
+    # Three sections, two under one parent: those two keep one name between them.
+    assert names(
+        "## A\n\n### Notes\n\ngoverns: x.py\n\n### Notes\n\ngoverns: y.py\n\n"
+        "## B\n\n### Notes\n\ngoverns: z.py\n"
+    ) == ["A", "A > Notes", "A > Notes", "B", "B > Notes"]
+
+
+def test_an_obligation_stored_under_the_plain_heading_is_still_shown_and_settled(
+    kyo, git_project: Path
+) -> None:
+    """An obligation raised while its heading was unique keeps that name in the store.
+    When the document later gains a second section of the same name, the stored row is
+    listed and settled exactly as before."""
+    from .test_kyo137_docs_obligations import _commit, _dispatch_and_report, _write
+
+    single = _NOTES_UNDER_TWO_PARENTS.replace("governs: src/client.py\n\n", "")
+    record, _ = _two_notes_project(kyo, git_project, single)
+    _, reported = _dispatch_and_report(kyo, git_project, record, branch="kyo-844")
+    (raised,) = reported.json["docs_obligations"]["raised"]
+    assert raised["section"] == "Notes"
+
+    _write(git_project, "docs/design.md", _NOTES_UNDER_TWO_PARENTS)
+    _commit(git_project, "a second Notes section")
+    listed = kyo("docs", "obligations", "--json").json
+    assert listed["open"] == 1
+    assert "Notes" in kyo("docs", "obligations").out
+    settled = kyo(
+        "docs", "settle", raised["id"], "--verdict", "not-affected", "--method", "read it"
+    )
+    assert settled.code == 0, settled
+    assert kyo("docs", "obligations", "--json").json["open"] == 0

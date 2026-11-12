@@ -784,7 +784,10 @@ governs: src/kyosei/docs_check.py, src/kyosei/docs_numbered.py, src/kyosei/docs_
   - *Enforced, at report time.* A **docs obligation** (KYO-137, from the seven decisions on
     KYO-136). `kyo report` intersects what the dispatch's branch actually changed (KYO-71) with
     every `governs:` section's targets, and raises one obligation **per section** — a README with
-    one stale paragraph is not a stale README. An obligation is settled only by
+    one stale paragraph is not a stale README. Sections of one document that share a heading
+    are named with the headings above them, so each raises its own; where those are the same
+    too, one obligation carries the matches of all of them and `kyo docs check` names the
+    document (KYO-844). An obligation is settled only by
     `kyo docs settle <id> --verdict updated|not-affected --method <how>`: a document counts as
     updated when an orchestrator asserts it with a method, never when its timestamp moves, so the docs
     answer is deliberately no longer derivable from git alone. **Who does the reading moved once**
