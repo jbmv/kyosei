@@ -639,6 +639,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-12** — `KYO-852` (bug) — Mac app: a checked item of the session's list stays half drawn behind the list's foot until the next turn
 - **2026-11-12** — `KYO-851` (bug) — Mac app: the History and Files search fields set the Records search
 - **2026-11-12** — `KYO-850` (bug) — Mac app: a file attached to a paragraph is missing from History's Attachments, and its image is not shown in the reader
+- **2026-11-12** — `KYO-849` (task) — Mac app: History lists the project's sessions, each with its number of prompts
 - **2026-11-12** — `KYO-847` (task) — Mac app: an icon, 共生 in a brush hand on white
 - **2026-11-12** — `KYO-846` (task) — Mac app: a record's outline is open by default, and Awaiting you is listed in the Records side bar above History
 - **2026-11-12** — `KYO-845` (bug) — Mac app: in the History drawer an anchor on a reply opens nothing, and a prompt's images are not shown
