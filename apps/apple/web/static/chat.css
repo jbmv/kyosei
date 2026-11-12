@@ -475,7 +475,11 @@ body.terminal-open #terminal-toggle { background: var(--line); }
    over the chat's first lines; the chat and the terminal start under the views bar. */
 body.view-chat #menu { display: none; }
 body.view-chat #top { display: none; }
-body.view-chat.finding #top { display: flex; z-index: 3; }
+body.view-chat.finding #top { display: flex; z-index: 3; right: calc(var(--composer-width) + 6px); padding-right: 16px; }
+body.view-chat #top-title, body.view-chat #top-activity { display: none; }
+/* KYO-883: the window's own project is named by the dropdown; its live session's link would
+   repeat it, so only the other projects' links are shown. */
+#session-links .session-link[aria-current="true"] { display: none; }
 body.view-chat #page, body.view-chat #terminal { top: var(--views-height); }
 body.no-project #terminal-toggle, body.pick-project #terminal-toggle { display: none; }
 
