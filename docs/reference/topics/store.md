@@ -105,6 +105,18 @@ no recovery path, since `kyo rebuild` reconstructs the database *from* the
 export. The split store keeps all of that: it is committed, diffable and
 rebuildable, in a repository of its own.
 
+**Who commits the store (KYO-879).** `kyo confirm` and `kyo close-wave` commit a split
+store's export as they finish. The other commands that write it (`kyo attach`, `kyo new`,
+`kyo gate`, `kyo discuss`, `kyo dispatch`) do not, so the Stop hook does the rest: after
+`kyo sweep --hook` and the checks of `kyo doctor --hook`, `kyo doctor --hook` commits
+whatever is uncommitted under the store's `kyosei/` and `ideas/` as one commit, at most
+one per stop, with a generated message naming the records whose export file changed. The
+message holds no text a person wrote. A stop with nothing uncommitted makes no commit, a
+failed commit is reported in one line and does not fail the stop, and a dispatched
+worker's session, in a linked worktree, commits nothing. A store inside the code
+repository is never committed this way, because its paths belong to the code
+repository's own commits; the stop names the uncommitted store paths in one line.
+
 **The in-repo layout is fully supported**, and `kyo init --in-repo` chooses it. It
 suits a project whose records are not sensitive and where a record change should be
 reviewed in the same pull request as the code change that motivated it, which the

@@ -757,6 +757,15 @@ def cmd_doctor(ctx: Context, args: Namespace) -> Output:
         else:
             _clear_doctor_report(report)
         data[DOCTOR_REPORT_PATH_KEY] = str(written) if written is not None else None
+    if hook:
+        # KYO-879: sweep and doctor have both written what they will write; commit the
+        # split store now, and name an in-repository one. Never fails the stop.
+        import sys
+
+        from . import stop_commit
+
+        for line in stop_commit.commit_at_stop(ctx):
+            print(line, file=sys.stderr)
     if problems:
         # `data=` so `--json` still reports which checks failed. KYO-187: required,
         # not assigned above the raise — an assignment can be forgotten with nothing
