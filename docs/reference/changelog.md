@@ -643,6 +643,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-12** — `KYO-863` (task) — Mac app Records: the home as a sortable table with Locations, and the drawer's three lists
 - **2026-11-12** — `KYO-852` (bug) — Mac app: a checked item of the session's list stays half drawn behind the list's foot until the next turn
 - **2026-11-12** — `KYO-851` (bug) — Mac app: the History and Files search fields set the Records search
 - **2026-11-12** — `KYO-850` (bug) — Mac app: a file attached to a paragraph is missing from History's Attachments, and its image is not shown in the reader
