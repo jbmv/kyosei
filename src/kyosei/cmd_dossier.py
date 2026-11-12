@@ -11,8 +11,8 @@ holds ids and times and no words. It opens no transcript. The only words of a co
 on the page are the quotes credits already store as evidence artifacts, and those are
 printed verbatim: an id inside a person's quoted words is left as they wrote it.
 
-WHAT IT DOES NOT YET SHOW. Excerpt packs (KYO-660) are not built, so no page attaches one.
-Part eight reads the credit's ``span_seal`` (KYO-663) and says "not sealed" for a credit
+EXCERPT PACKS. ``kyo excerpt`` (KYO-660) makes them, apart from this page, and no page
+attaches one. Part eight reads the credit's ``span_seal`` (KYO-663) and says "not sealed" for a credit
 without one (:func:`seal_sentence`).
 
 WHO PROPOSED AN OPTION (KYO-786). An alternative of a decided credit may name its proposer.
@@ -57,7 +57,7 @@ RELATED_LIMIT = 12
 #: Part eight's two sentences about the seal. ``span_seal`` is the credit field the accepted
 #: design names for it (KYO-651 section 7.1, built by KYO-663); a credit without one, which
 #: is every credit until that lands and every reconstructed credit after it, is not sealed.
-#: Excerpt packs (KYO-660) do not exist, so neither sentence offers one.
+#: No page attaches an excerpt pack (KYO-660), so neither sentence offers one.
 NOT_SEALED = (
     "Not sealed: the credit stores no seal of the conversation, so no excerpt of it can "
     "be verified against this record, and none is attached."

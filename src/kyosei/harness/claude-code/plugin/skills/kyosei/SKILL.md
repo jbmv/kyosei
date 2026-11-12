@@ -155,6 +155,10 @@ spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`,
 `kyo discuss skip --why "<why>"`. With none, `kyo new decision` takes `--opened-late --at-prompt <prompt>`. One
 needing design work first is a proposal.
 
+**To share a discussion**, `kyo excerpt <credit> --draft`; the person cuts the draft (private-word hits
+are listed), `--preview --from <draft>`, record their go-ahead as an `authorized` credit, then
+`--pack --from <draft> --approved-by <credit>` (KYO-660). Without that credit it is refused.
+
 **Structure is authored where you actually know it**: if you are inventing criteria for a thing
 still a want or a question, leave it in `ideas/`.
 

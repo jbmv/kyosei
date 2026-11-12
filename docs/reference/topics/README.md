@@ -13,6 +13,7 @@ start with the guide in [`docs/guide/`](../../guide/).
 | [dispatch.md](dispatch.md) | Dispatching work to workers, ingesting reports, closing a wave, and sweep, next and the session briefing | The dispatch loop; Closing a wave; Sweep, next, and the session briefing |
 | [docs-governance.md](docs-governance.md) | Layer 3: `governs:` sections, `kyo docs check`, documentation obligations, a recx manifest as a governed document | Layer 3: the docs-SOT skeleton validator; RECX.yaml as a governed document |
 | [serve-and-desktop.md](serve-and-desktop.md) | `kyo serve` and its routes for sessions, sending, notes, a terminal and files, `kyo orchestrator`, reaching a machine from another one, the desktop app | Starting an orchestrator from another machine; Serving a store; Reading sessions; Sending input; Saved drafts and held messages; A session's task list; Attachments; Notes; Starting an orchestrator session; A terminal on a session's pane; Reading a project's files; Reaching it from another machine; The desktop app |
+| [excerpt-packs.md](excerpt-packs.md) | `kyo excerpt` and the standalone verifier: sharing part of the discussion behind a credit, and checking it against the credit's seal | Excerpt packs |
 | [rules-and-exit-codes.md](rules-and-exit-codes.md) | The rules with machinery behind them, and what each exit code means | Rules with machinery behind them; Exit codes |
 
 Elsewhere in the repository:
