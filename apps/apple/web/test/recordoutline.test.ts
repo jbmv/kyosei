@@ -32,7 +32,7 @@ test("the outline names the record's sections, lists a section's items on its ca
   })()`);
   assert.equal(before, false, "no outline on the home page");
   const outline = await page.run<{ shown: boolean; rows: string[]; items: string[]; open: boolean; folded: boolean; kept: boolean }>(`(() => {
-    const row = document.querySelector('#records-groups [data-open="KYO-9"]');
+    const row = document.querySelector('#records-table [data-open="KYO-9"]');
     row.click();
     window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
     const section = [...document.querySelectorAll("#record-outline .outline-section")]

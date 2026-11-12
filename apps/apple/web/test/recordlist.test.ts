@@ -1,5 +1,5 @@
 // Run with `npm test`. What the Records view's lists cost on a store of several hundred
-// records (KYO-833), as laid out by KYO-835: the drawer's results and the home page's groups, in a headless Chrome fed the frames the app would send; a machine
+// records (KYO-833), as laid out by KYO-862: the drawer's lists and the home's table, in a headless Chrome fed the frames the app would send; a machine
 // with no Chrome skips these.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -122,48 +122,83 @@ test("a press puts back the rows already drawn, and a row out of the window is n
   assert.equal(found.rule, "auto", "a row out of the window is not laid out");
 });
 
-test("the home page groups every record by what it waits on, Closed folded and drawn a hundred at a time", async (t) => {
+test("the home is a table of the chosen Location, sorted by a pressed column, with counts beside the Locations", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
-  const groups = () => opened.run<{ name: string; count: string; rows: number; open: boolean }[]>(`
-    [...document.querySelectorAll("#records-groups .home-group")].map((group) => ({
-      name: group.dataset.group,
-      count: group.querySelector(".home-group-count").textContent,
-      rows: group.querySelectorAll("[data-open]").length,
-      open: group.classList.contains("open"),
-    }))`);
   const awaiting = AWAITING.length;
   const ready = READY.filter((id) => !AWAITING.includes(id)).length;
   const otherOpen = OPEN.filter((id) => !AWAITING.includes(id) && !READY.includes(id)).length;
   const closed = SIZE - awaiting - ready - otherOpen;
-  assert.deepEqual(await groups(), [
-    { name: "Awaiting you", count: String(awaiting), rows: awaiting, open: true },
-    { name: "Dispatchable", count: String(ready), rows: ready, open: true },
-    { name: "Other open", count: String(otherOpen), rows: otherOpen, open: true },
-    { name: "Closed", count: String(closed), rows: 0, open: false },
-  ]);
-  await opened.run(`document.querySelector('[data-home-group="Closed"]').click()`);
-  assert.equal((await groups())[3].rows, 100);
-  await opened.run(`document.querySelector('[data-home-more="Closed"]').click()`);
-  assert.equal((await groups())[3].rows, 200);
-  // The drawer's list holds the records viewed, not the home page's rows, until a search.
-  const drawer = await opened.run<{ results: boolean; history: boolean }>(`({
-    results: !document.getElementById("records-list").hidden,
-    history: !document.getElementById("records-history").hidden,
+  const home = () => opened.run<{ locations: [string, string, boolean][]; rows: string[]; sorted: string }>(`({
+    locations: [...document.querySelectorAll("#records-locations [data-location]")].map((row) =>
+      [row.dataset.location, row.querySelector(".location-count").textContent, row.classList.contains("current")]),
+    rows: [...document.querySelectorAll("#records-table [data-open]")].map((row) => row.dataset.open),
+    sorted: [...document.querySelectorAll(".records-head [aria-sort]")]
+      .map((button) => button.dataset.recordSort + " " + button.getAttribute("aria-sort")).join(),
   })`);
-  assert.deepEqual(drawer, { results: false, history: true });
-  // KYO-846: the records awaiting the person are listed in the drawer too, above History,
-  // and a press opens one.
-  const waiting = await opened.run<{ rows: number; above: boolean; opened: boolean }>(`(() => {
-    const list = document.getElementById("records-awaiting");
-    const rows = [...list.querySelectorAll("[data-open]")];
-    const head = document.getElementById("records-history-head");
-    const above = !list.hidden && Boolean(list.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const before = window.posted.length;
-    rows[0].click();
-    return { rows: rows.length, above, opened: window.posted.slice(before).some((p) => JSON.stringify(p.body).includes(rows[0].dataset.open)) };
+  // It opens on All, newest first.
+  let found = await home();
+  assert.deepEqual(found.locations, [
+    ["Awaiting you", String(awaiting), false], ["Dispatchable", String(ready), false],
+    ["Other open", String(otherOpen), false], ["Closed", String(closed), false], ["All", String(SIZE), true],
+  ]);
+  assert.deepEqual(found.rows, ALL);
+  assert.equal(found.sorted, "created descending");
+  // A Location is a filter of the table.
+  await opened.run(`document.querySelector('#records-locations [data-location="Awaiting you"]').click()`);
+  found = await home();
+  assert.deepEqual(found.rows, AWAITING);
+  assert.equal(found.locations[0][2], true);
+  // A column's head sorts by it, and a second press reverses it.
+  await opened.run(`document.querySelector('.records-head [data-record-sort="created"]').click()`);
+  found = await home();
+  assert.deepEqual(found.rows, [...AWAITING].reverse());
+  assert.equal(found.sorted, "created ascending");
+  // The field above the table narrows the Location's rows, and knows `kind:`.
+  await opened.run(`(() => {
+    document.querySelector('#records-locations [data-location="All"]').click();
+    const field = document.getElementById("records-home-search");
+    field.value = "kind:plan numbered 83";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
-  assert.deepEqual(waiting, { rows: awaiting, above: true, opened: true });
+  found = await home();
+  const plans = ROWS.filter((row) => row.kind === "plan" && row.title.includes("numbered 83")).map((row) => row.id);
+  assert.ok(plans.length > 0);
+  assert.deepEqual(found.rows, plans);
+  // The home's field is its own: the drawer's lists are not narrowed by it.
+  const drawer = await opened.run<number>(`document.querySelectorAll("#records-list [data-open]").length`);
+  assert.equal(drawer, SIZE);
+});
+
+test("the drawer is away on the home and holds Awaiting you, Recents and All beside an open record, all narrowed together", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  const shown = () => opened.run<{ menu: string; home: boolean }>(`({
+    menu: getComputedStyle(document.getElementById("menu")).display,
+    home: document.body.classList.contains("home-page"),
+  })`);
+  assert.deepEqual(await shown(), { menu: "none", home: true });
+  // A record opened from the table brings the drawer back.
+  const first = AWAITING[0];
+  await opened.run(`document.querySelector('#records-table [data-open="${first}"]').click()`);
+  assert.equal((await shown()).home, false);
+  assert.notEqual((await shown()).menu, "none");
+  const lists = () => opened.run<{ heads: string[]; awaiting: string[]; recents: string[]; all: number }>(`({
+    heads: [...document.querySelectorAll("#records-side > h4")].filter((head) => !head.hidden).map((head) => head.textContent),
+    awaiting: [...document.querySelectorAll("#records-awaiting [data-open]")].map((row) => row.dataset.open),
+    recents: [...document.querySelectorAll("#records-history [data-open]")].map((row) => row.dataset.open),
+    all: document.querySelectorAll("#records-list [data-open]").length,
+  })`);
+  assert.deepEqual(await lists(), { heads: ["Awaiting you", "Recents", "All"], awaiting: AWAITING, recents: [first], all: SIZE });
+  // The field narrows all three lists, and a list it empties of Awaiting you is not shown.
+  const second = AWAITING[1];
+  await search(opened, second.replace("KYO-", "numbered ") + ":");
+  assert.deepEqual(await lists(), { heads: ["Awaiting you", "Recents", "All"], awaiting: [second], recents: [], all: 1 });
+  await search(opened, "no-such-word");
+  assert.deepEqual(await lists(), { heads: ["Recents", "All"], awaiting: [], recents: [], all: 0 });
+  // Home puts the drawer away again.
+  await opened.run(`document.getElementById("records-home").click()`);
+  assert.deepEqual(await shown(), { menu: "none", home: true });
 });
 
 test("a kept row follows the record that is open, and a new list from the server is drawn anew", async (t) => {

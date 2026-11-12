@@ -76,7 +76,7 @@ test("the Kind control lists the kinds the store holds, and the list shows only 
   await landing(opened);
   let now = await seen(opened);
   assert.deepEqual(now.boxes, ["decision", "plan", "task"]);
-  assert.equal(now.ids.length, 0, "with none checked the drawer lists the records viewed, not results");
+  assert.equal(now.ids.length, 4, "with none checked the drawer's All lists every record (KYO-862)");
   await opened.run(`document.querySelector("#records-side .kind-button").click()`);
   assert.equal((await seen(opened)).menuShut, false);
   await check(opened, "plan");
@@ -88,7 +88,7 @@ test("the Kind control lists the kinds the store holds, and the list shows only 
   await check(opened, "plan");
   await check(opened, "task");
   now = await seen(opened);
-  assert.equal(now.ids.length, 0);
+  assert.equal(now.ids.length, 4);
   assert.equal(now.field.trim(), "", "unchecking the last kind removes the token");
 });
 
@@ -110,7 +110,7 @@ test("the control reads Kind in the ordinary colour, and names the kinds in the 
   const cleared = await seen(opened);
   assert.equal(cleared.label, "Kind");
   assert.equal(cleared.clearShown, false);
-  assert.equal(cleared.ids.length, 0);
+  assert.equal(cleared.ids.length, 4);
   assert.equal(cleared.field, "");
 });
 

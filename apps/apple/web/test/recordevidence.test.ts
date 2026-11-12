@@ -61,7 +61,7 @@ test("the record's page draws a referenced image and asks for it through the att
     window.kyo.records({ project: "p" });
     [...document.querySelectorAll(".view-item")].find((item) => item.textContent.includes("Records")).click();
     window.kyo.recordLists({ list: { records: [{ id: "KYO-9", kind: "bug", title: "A defect with a screenshot", status: "open" }] } });
-    document.querySelector('#records-groups [data-open="KYO-9"]').click();
+    document.querySelector('#records-table [data-open="KYO-9"]').click();
     window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
     const item = (ref) => document.querySelector('.rec-item[data-ref="' + ref + '"]');
     const asked = window.posted.filter((p) => p.name === "image").map((p) => p.body);

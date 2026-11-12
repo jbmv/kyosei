@@ -10,8 +10,20 @@ export interface RecordRow {
   kind: string;
   title: string;
   status: string;
+  /** The status as `kyo list` states it: `current` or `void` for a knowledge record. */
+  standing?: string;
   seq?: number;
   created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * The status a record is shown and filtered by: its standing where the list gives one. A
+ * decision is stored `open` and stands `current`, so by its stored status it would count as
+ * open work (KYO-862).
+ */
+export function standingOf(row: RecordRow): string {
+  return row.standing || row.status || "";
 }
 
 /** What narrows a list: the three filters and the search box. */
@@ -151,7 +163,7 @@ export function narrow<T extends RecordRow>(
   const kinds = kindsOf(narrowing.search);
   return rows.filter((row) =>
     (!kinds.length || kinds.includes(row.kind.toLowerCase()))
-    && (!narrowing.open || row.status === "open")
+    && (!narrowing.open || standingOf(row) === "open")
     && (!narrowing.dispatchable || ready.has(row.id))
     && (!narrowing.awaiting || awaiting.has(row.id))
     && matchesSearch(row, narrowing.search));
@@ -760,8 +772,87 @@ export function homeGroups<T extends RecordRow>(
     { name: "Other open", rows: [] }, { name: "Closed", rows: [] },
   ];
   for (const row of rows) {
-    const at = awaiting.has(row.id) ? 0 : ready.has(row.id) ? 1 : UNDER_WAY.has(row.status ?? "") ? 2 : 3;
+    const at = awaiting.has(row.id) ? 0 : ready.has(row.id) ? 1 : UNDER_WAY.has(standingOf(row)) ? 2 : 3;
     groups[at].rows.push(row);
   }
   return groups;
+}
+
+// ------------------------------------------------- the Records home as a table (KYO-862)
+
+/** The Locations of the Records home's side bar, each a filter of the table. */
+export const LOCATIONS = ["Awaiting you", "Dispatchable", "Other open", "Closed", "All"] as const;
+export type RecordLocation = typeof LOCATIONS[number];
+
+/** A stored Location, or All when what was stored names none. */
+export function locationFrom(stored: unknown): RecordLocation {
+  return LOCATIONS.find((name) => name === stored) ?? "All";
+}
+
+/** The rows of each Location, in the order of `rows`; All is every row. */
+export function located<T extends RecordRow>(
+  rows: T[], ready: ReadonlySet<string>, awaiting: ReadonlySet<string>,
+): Record<RecordLocation, T[]> {
+  const [waiting, dispatchable, open, closed] = homeGroups(rows, ready, awaiting).map((group) => group.rows);
+  return { "Awaiting you": waiting, Dispatchable: dispatchable, "Other open": open, Closed: closed, All: rows };
+}
+
+/** The table's columns that sort it. */
+export const RECORD_SORTS = ["name", "kind", "status", "created", "modified"] as const;
+export type RecordSortBy = typeof RECORD_SORTS[number];
+export interface RecordSort { by: RecordSortBy; descending: boolean }
+
+/** The table as it first stands: the newest record first. */
+export const NEWEST: RecordSort = { by: "created", descending: true };
+
+/** A stored sort, or newest first when what was stored is none. */
+export function recordSortFrom(stored: unknown): RecordSort {
+  const given = stored as Partial<RecordSort> | null;
+  const by = RECORD_SORTS.find((name) => name === given?.by);
+  return by ? { by, descending: given?.descending === true } : NEWEST;
+}
+
+/** The sort after a column's head is pressed: the other way round, or that column, dates newest first. */
+export function pressedSort(sort: RecordSort, by: RecordSortBy): RecordSort {
+  if (sort.by === by) return { by, descending: !sort.descending };
+  return { by, descending: by === "created" || by === "modified" };
+}
+
+/** The order a Status column runs in: work from open to settled, then the knowledge states. */
+const STATUS_ORDER = ["open", "working", "built", "verified", "done", "wont-do", "current", "void"];
+
+function statusRank(status: string): number {
+  const at = STATUS_ORDER.indexOf(status);
+  return at === -1 ? STATUS_ORDER.length : at;
+}
+
+/** `rows` in the order a sort gives, as a new list. Records equal under it stand newest first. */
+export function sortRecords<T extends RecordRow>(rows: T[], sort: RecordSort): T[] {
+  const age = (row: T) => row.seq ?? 0;
+  const compare: Record<RecordSortBy, (a: T, b: T) => number> = {
+    name: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+    kind: (a, b) => a.kind.localeCompare(b.kind),
+    status: (a, b) => statusRank(standingOf(a)) - statusRank(standingOf(b)) || standingOf(a).localeCompare(standingOf(b)),
+    created: (a, b) => age(a) - age(b) || (a.created_at ?? "").localeCompare(b.created_at ?? ""),
+    modified: (a, b) => (a.updated_at ?? a.created_at ?? "").localeCompare(b.updated_at ?? b.created_at ?? ""),
+  };
+  const by = compare[sort.by];
+  return [...rows].sort((a, b) => (sort.descending ? by(b, a) : by(a, b)) || age(b) - age(a));
+}
+
+/**
+ * The drawer's filters from what was stored (KYO-861). Open only is the one filter the page
+ * has a control for; a Dispatchable or Awaiting you value stored by an earlier build has no
+ * control to turn it off, so it is never read.
+ */
+export function storedFilters(stored: unknown): { open: boolean; dispatchable: false; awaiting: false } {
+  return { open: (stored as { open?: unknown } | null)?.open === true, dispatchable: false, awaiting: false };
+}
+
+/** The day a record was created or changed, as the table states it; empty when unknown. */
+export function dayOf(at: unknown, now = new Date()): string {
+  if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return "";
+  const when = new Date(at);
+  return when.toLocaleDateString([], when.getFullYear() === now.getFullYear()
+    ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
 }

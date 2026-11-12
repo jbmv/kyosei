@@ -153,7 +153,7 @@ const search = (opened: Page, query: string) => opened.run<Found>(`new Promise((
       marked: marked.length,
       markedInShutFold: marked.filter(shut).length,
       openFolds: document.querySelectorAll("#record details[open]").length,
-      listRows: document.querySelectorAll("#records-groups [data-open]").length,
+      listRows: document.querySelectorAll("#records-table [data-open]").length,
       filter: document.querySelector("#records-side .records-search").value,
       took,
     });

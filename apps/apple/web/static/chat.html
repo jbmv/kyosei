@@ -95,12 +95,13 @@
           <div class="records-filters">
             <button class="chip" data-filter="open" aria-pressed="false">Open only</button>
           </div>
-          <!-- KYO-835: one list, the records viewed while the field is empty, the results while it is not. -->
-          <div id="records-list" hidden></div>
+          <!-- KYO-862: three lists, each narrowed by the field, Kind and Open only above. -->
           <h4 id="records-awaiting-head" hidden>Awaiting you</h4>
           <div id="records-awaiting" hidden></div>
-          <h4 id="records-history-head">History</h4>
+          <h4 id="records-history-head">Recents</h4>
           <div id="records-history"></div>
+          <h4 id="records-all-head">All</h4>
+          <div id="records-list"></div>
         </div>
         <!-- Files (KYO-736): a chip for each root the server serves, the chosen root's tree,
              and the files the session's replies and prompts have named. -->
@@ -221,7 +222,28 @@
       <div class="records-inner">
         <div id="records-note" hidden></div>
         <div id="records-landing">
-          <div id="records-groups"></div>
+          <!-- KYO-862: the Records home, a fixed column of Locations beside a table, as Files has. -->
+          <nav class="files-home-side records-home-side">
+            <h5>Locations</h5>
+            <div id="records-locations"></div>
+            <h5>Recents</h5>
+            <div id="records-home-recent"></div>
+            <h5>Mentioned</h5>
+            <div id="records-home-mentioned"></div>
+          </nav>
+          <div class="files-home-main">
+            <input id="records-home-search" class="records-search" type="search" placeholder="Search records" aria-label="Search the records of this Location" />
+            <div class="files-list">
+              <div class="records-head">
+                <button data-record-sort="name">Name</button>
+                <button data-record-sort="kind">Kind</button>
+                <button data-record-sort="status">Status</button>
+                <button data-record-sort="created">Created</button>
+                <button data-record-sort="modified">Modified</button>
+              </div>
+              <div id="records-table"></div>
+            </div>
+          </div>
         </div>
         <article id="record" hidden></article>
       </div>

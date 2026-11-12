@@ -942,7 +942,7 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
    most of what the press cost. The size stated is the row's content while it is not drawn:
    one line of the title on the landing page, the head and two lines of it in the side bar. */
 #records-list .rec-row { content-visibility: auto; contain-intrinsic-size: auto 54px; }
-#records-groups .rec-row { content-visibility: auto; contain-intrinsic-size: auto 18.9px; }
+#records-table .rec-row { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .rec-row:hover { background: var(--panel); }
 .rec-row.current { background: var(--line); }
 .rec-row.closed .rec-title { color: var(--muted); }
@@ -958,17 +958,15 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 #records-side { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 #records-side > .records-searchrow { flex: none; margin: 0 4px; }
 #records-side > .records-filters { flex: none; margin: 0 4px; }
-#records-list { flex: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#records-list { flex: 3; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #records-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
-#records-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#records-side > h4[hidden], #records-awaiting[hidden] { display: none; }
+#records-awaiting { flex: 0 1 auto; max-height: 30%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#records-history { flex: 0 1 auto; max-height: 30%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 /* The landing page: one line for each record, newest first, with its kind beside its id. */
 .records-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
 .records-tools .records-searchrow { flex: 1; min-width: 200px; }
-#records-groups .rec-row { display: flex; align-items: baseline; gap: 12px; }
-#records-groups .rec-id { flex: none; min-width: 64px; }
-#records-groups .kind { flex: none; min-width: 84px; }
-#records-groups .rec-title { flex: 1; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
 #records-note { margin-bottom: 14px; color: var(--muted); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 #records-note[hidden] { display: none; }
 
@@ -1164,12 +1162,6 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 .outline-row.current { background: var(--line); }
 
 /* The Records home (KYO-835): folding groups by what each record waits on. */
-.home-group { margin: 0 0 14px; }
-.home-group-head { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0 0 6px; padding: 6px 2px; border: 0; border-bottom: 1px solid var(--soft-line); background: none; color: var(--text); font: 600 15px/1.4 -apple-system, system-ui, sans-serif; text-align: left; cursor: default; }
-.home-group-head .chevron { flex: none; width: 10px; color: var(--muted); transition: transform 0.12s; }
-.home-group.open .home-group-head .chevron { transform: rotate(90deg); }
-.home-group-count { color: var(--muted); font-weight: 400; font-size: 13px; }
-.home-group:not(.open) .home-group-body { display: none; }
 .home-more { margin: 4px 0 0; }
 #records-list[hidden], #records-history[hidden], #records-history-head[hidden] { display: none; }
 #records-awaiting { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -1268,3 +1260,35 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 
 #empty-chat { margin: 48px 0; color: var(--muted); font-style: italic; text-align: center; }
 .turn-anchor code { font-size: 0.95em; }
+
+/* ------------------------------------------------------------- The Records home (KYO-862) */
+/* A fixed column of Locations beside a table with columns, laid out as the Files home is. */
+#view-records #records-landing { max-width: none; }
+#records-landing:not([hidden]) { display: flex; gap: 22px; align-items: flex-start; }
+#records-home-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.location-count { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.records-home-side .rec-row { padding: 3px 8px; font-size: 13px; }
+.records-home-side .rec-row .kind { display: none; }
+.records-home-side .rec-row { display: flex; align-items: baseline; gap: 7px; }
+.records-home-side .rec-id { flex: none; }
+.records-home-side .rec-title { flex: 1; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
+/* The home's table takes the pane's width; a record's page keeps its reading width. */
+body.home-page.view-records .records-inner { max-width: none; }
+.records-home-side .rec-empty { padding: 3px 8px; font-size: 12.5px; }
+.records-head, #records-table .rec-row {
+  display: grid; grid-template-columns: 76px minmax(160px, 1fr) 96px 86px 84px 84px; column-gap: 12px; min-width: 620px;
+}
+.records-head { padding: 0 8px 4px; border-bottom: 1px solid var(--soft-line); }
+.records-head button { padding: 0; border: 0; background: none; color: var(--muted); font: 600 12px -apple-system, system-ui, sans-serif; text-align: left; cursor: default; }
+.records-head button[data-record-sort="name"] { grid-column: 1 / span 2; }
+.records-head button[aria-sort="ascending"]::after { content: " ▴"; }
+.records-head button[aria-sort="descending"]::after { content: " ▾"; }
+#records-table .rec-row { align-items: center; min-height: 28px; padding: 0 8px; border-radius: 0; font-size: 13.5px; }
+#records-table .rec-row:nth-child(even) { background: color-mix(in srgb, var(--panel) 55%, transparent); }
+#records-table .rec-row:hover { background: var(--line); }
+#records-table .rec-title { display: block; white-space: nowrap; text-overflow: ellipsis; }
+#records-table .rec-status, #records-table .rec-day { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+
+/* On a home page the fixed column stands in the drawer's place, so the drawer and its icon
+   are away and the two never stand side by side (KYO-862). */
+body.home-page #menu { display: none; }

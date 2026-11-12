@@ -16,8 +16,10 @@ import {
 import { highlight, render } from "./pipeline";
 import { chipPieces } from "./chipwords";
 import {
-  type Item, type Line, type LinkTarget, type Narrowing, type RecordRow, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
-  dispatchableIds, historyFrom, historyRows, homeGroups, narrow, newestFirst, parseLink, prefixOf,
+  type Item, type Line, type LinkTarget, type Narrowing, type RecordLocation, type RecordRow, type RecordSort,
+  type RecordSortBy, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
+  dayOf, dispatchableIds, historyFrom, historyRows, located, locationFrom, LOCATIONS, narrow, newestFirst,
+  parseLink, prefixOf, pressedSort, recordSortFrom, sortRecords, standingOf, storedFilters,
   recordOf, recordPage, refParts, visit, when, withKinds,
 } from "./records";
 import {
@@ -4445,7 +4447,8 @@ const recordsLanding = document.getElementById("records-landing")!;
 const recordArticle = document.getElementById("record")!;
 const recordsList = document.getElementById("records-list")!;
 const recordsHistoryList = document.getElementById("records-history")!;
-const recordsGroups = document.getElementById("records-groups")!;
+const recordsTable = document.getElementById("records-table")!;
+const recordsHomeSearch = document.getElementById("records-home-search") as HTMLInputElement;
 
 let recordRows: RecordRow[] = [];
 let readyRecords = new Set<string>();
@@ -4454,11 +4457,14 @@ let awaitingRecords = new Set<string>();
 let listsAsked = false;
 let listsRead = false;
 let listsProblem: string | null = null;
-const narrowing: Narrowing = {
-  open: false, dispatchable: false, awaiting: false, search: "",
-  ...stored<Partial<Narrowing>>(FILTERS_KEY, {}),
-};
-narrowing.search = "";
+// KYO-861: only the filter the drawer has a control for is read from what was stored.
+const narrowing: Narrowing = { ...storedFilters(stored<unknown>(FILTERS_KEY, null)), search: "" };
+const HOME_LOCATION_KEY = "records-home-location";
+const HOME_SORT_KEY = "records-home-sort";
+/** The Records home (KYO-862): the Location chosen, the column sorted by, and its own search. */
+let homeLocation: RecordLocation = locationFrom(stored<unknown>(HOME_LOCATION_KEY, null));
+let homeSort: RecordSort = recordSortFrom(stored<unknown>(HOME_SORT_KEY, null));
+let homeSearch = "";
 let viewedRecords: string[] = [];
 /** The records opened, in order, with the landing page as home (KYO-738). */
 let recordPlaces: History<string> = fresh();
@@ -4548,7 +4554,7 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
   const item = document.createElement("div");
   item.className = "rec-row";
   if (row.id === openRecordId) item.classList.add("current");
-  if (row.status && row.status !== "open") item.classList.add("closed");
+  if (standingOf(row) !== "open") item.classList.add("closed");
   item.dataset.open = row.id;
   const id = span("rec-id", row.id);
   const title = span("rec-title", row.title);
@@ -4558,8 +4564,10 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
     head.append(id, kindLabel(row.kind));
     item.append(head, title);
   } else {
-    item.append(id, kindLabel(row.kind), title);
-    if (row.status && row.status !== "open") item.append(span("rec-status", row.status));
+    // A row of the home's table (KYO-862): id and title under Name, then one cell a column.
+    item.append(
+      id, title, kindLabel(row.kind), span("rec-status", standingOf(row)),
+      span("rec-day", dayOf(row.created_at)), span("rec-day", dayOf(row.updated_at ?? row.created_at)));
   }
   return item;
 }
@@ -4659,15 +4667,9 @@ function drawRecordLists(): void {
   drawKindControls();
   const shown = narrow(rowsNewestFirst(), narrowing, readyRecords, awaitingRecords);
   const nothing = !listsRead ? "Reading the records." : "No record matches.";
-  // KYO-835: the drawer's one list is the results while the field holds anything, and the
-  // records viewed while it is empty, so that it never repeats the home page.
-  const searching = narrowing.search.trim() !== "";
-  recordsList.hidden = !searching;
-  recordsHistoryList.hidden = searching;
-  document.getElementById("records-history-head")!.hidden = searching;
-  // KYO-846: the records awaiting the person, above History, so they can be gone through
-  // without returning to the home page. Nothing is shown for the group when none waits.
-  const waiting = searching ? [] : rowsNewestFirst().filter((row) => awaitingRecords.has(row.id));
+  // KYO-862: the drawer holds Awaiting you, Recents and All, and the field, Kind and Open
+  // only narrow all three. Awaiting you is not shown when nothing in it is left.
+  const waiting = shown.filter((row) => awaitingRecords.has(row.id));
   const awaitingList = document.getElementById("records-awaiting")!;
   awaitingList.hidden = !waiting.length;
   document.getElementById("records-awaiting-head")!.hidden = !waiting.length;
@@ -4676,89 +4678,107 @@ function drawRecordLists(): void {
     item.classList.toggle("current", row.id === openRecordId);
     return item;
   }));
-  if (searching) fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
-  else {
-    fill(
-      recordsHistoryList,
-      viewedRecords.length
-        ? historyRows(viewedRecords, recordRows).map((row) => recordRow(row, "side"))
-        : [emptyRow("No record has been viewed.")]);
-  }
+  const narrowed = narrowing.open || narrowing.search.trim() !== "";
+  const recent = narrow(historyRows(viewedRecords, recordRows), narrowing, readyRecords, awaitingRecords);
+  fill(
+    recordsHistoryList,
+    recent.length
+      ? recent.map((row) => recordRow(row, "side"))
+      : [emptyRow(viewedRecords.length && narrowed ? nothing : "No record has been viewed.")]);
+  fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
 
-  // The home page: every record in one folding group by what it waits on (KYO-835).
-  drawHomeGroups(nothing);
+  drawRecordsHome(nothing);
 
   recordsNote.hidden = !listsProblem;
   recordsNote.textContent = listsProblem ? `The records could not be read. ${listsProblem}` : "";
   drawNav("records", openRecordId === null, recordPlaces);
   document.getElementById("records-count")!.textContent = openRecordId !== null || !listsRead
     ? ""
-    : shown.length === recordRows.length
+    : homeRows().length === recordRows.length
       ? plural(recordRows.length, "record")
-      : `${shown.length} of ${plural(recordRows.length, "record")}`;
+      : `${homeRows().length} of ${plural(recordRows.length, "record")}`;
 }
 
-const HOME_FOLDED_KEY = "records-home-folded";
-/** The groups folded on the home page; Closed starts folded, being most of the store. */
-let homeFolded = new Set<string>(stored<string[]>(HOME_FOLDED_KEY, ["Closed"]) ?? ["Closed"]);
-/** How many rows of each long group are drawn, a hundred more at each press. */
-const homeShown = new Map<string, number>();
-const HOME_STEP = 100;
+/** The table's rows: the chosen Location's records that the home's search leaves, sorted. */
+function homeRows(): RecordRow[] {
+  const inLocation = located(rowsNewestFirst(), readyRecords, awaitingRecords)[homeLocation];
+  const found = narrow(
+    inLocation, { open: false, dispatchable: false, awaiting: false, search: homeSearch }, readyRecords);
+  return sortRecords(found, homeSort);
+}
 
-function drawHomeGroups(nothing: string): void {
-  if (!listsRead || !recordRows.length) {
-    fill(recordsGroups, [emptyRow(nothing)]);
-    return;
+/** A record named in a short list of the home's side bar: its id over nothing, then its title. */
+function homeSideRow(row: RecordRow): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "rec-row";
+  item.dataset.open = row.id;
+  item.title = row.title ? `${row.id} ${row.title}` : row.id;
+  item.append(span("rec-id", row.id), " ", span("rec-title", row.title));
+  return item;
+}
+
+const HOME_SIDE_ROWS = 10;
+
+/** The records the chat names, newest mention first, each once. */
+function mentionedRecords(): RecordRow[] {
+  const ids: string[] = [];
+  for (const link of chatLinks) {
+    const id = link.kind === "record" ? parseLink(link.href)?.record : null;
+    if (id && !ids.includes(id)) ids.push(id);
   }
-  const groups = homeGroups(rowsNewestFirst(), readyRecords, awaitingRecords);
-  fill(recordsGroups, groups.map((group) => {
-    const box = document.createElement("section");
-    box.className = "home-group";
-    box.dataset.group = group.name;
-    const open = !homeFolded.has(group.name);
-    if (open) box.classList.add("open");
-    const head = document.createElement("button");
-    head.className = "home-group-head";
-    head.dataset.homeGroup = group.name;
-    head.append(span("chevron", "›"), group.name, span("home-group-count", String(group.rows.length)));
-    const body = document.createElement("div");
-    body.className = "home-group-body";
-    // A folded group's rows are not drawn, so that the thousand closed records cost nothing.
-    if (open) {
-      const limit = homeShown.get(group.name) ?? HOME_STEP;
-      body.append(...(group.rows.length
-        ? group.rows.slice(0, limit).map((row) => keptRow(row, "landing"))
-        : [emptyRow("None.")]));
-      if (group.rows.length > limit) {
-        const more = document.createElement("button");
-        more.className = "text-button home-more";
-        more.dataset.homeMore = group.name;
-        more.textContent = `Show ${Math.min(HOME_STEP, group.rows.length - limit)} more of ${group.rows.length - limit}`;
-        body.append(more);
-      }
-    }
-    box.append(head, body);
-    return box;
+  return historyRows(ids, recordRows);
+}
+
+/** The Records home (KYO-862): Locations with their counts, Recents, Mentioned and the table. */
+function drawRecordsHome(nothing: string): void {
+  const places = located(rowsNewestFirst(), readyRecords, awaitingRecords);
+  fill(document.getElementById("records-locations")!, LOCATIONS.map((name) => {
+    const row = document.createElement("div");
+    row.className = name === homeLocation ? "location-row current" : "location-row";
+    row.dataset.location = name;
+    row.append(span("tree-name", name), span("location-count", listsRead ? String(places[name].length) : ""));
+    return row;
   }));
+  const short = (rows: RecordRow[], none: string) => rows.length
+    ? rows.slice(0, HOME_SIDE_ROWS).map(homeSideRow) : [emptyRow(none)];
+  fill(document.getElementById("records-home-recent")!,
+    short(historyRows(viewedRecords, recordRows), "None yet."));
+  fill(document.getElementById("records-home-mentioned")!, short(mentionedRecords(), "None yet."));
+  document.querySelectorAll<HTMLElement>(".records-head [data-record-sort]").forEach((button) => {
+    if (button.dataset.recordSort === homeSort.by) {
+      button.setAttribute("aria-sort", homeSort.descending ? "descending" : "ascending");
+    } else button.removeAttribute("aria-sort");
+  });
+  if (recordsHomeSearch.value !== homeSearch) recordsHomeSearch.value = homeSearch;
+  const rows = listsRead ? homeRows() : [];
+  fill(recordsTable, rows.length
+    ? rows.map((row) => keptRow(row, "landing"))
+    : [emptyRow(!listsRead ? nothing : homeSearch.trim() ? "No record matches." : "None.")]);
 }
 
-recordsGroups.addEventListener("click", (event) => {
-  const target = event.target as Element;
-  const head = target.closest<HTMLElement>("[data-home-group]");
-  if (head) {
-    const name = head.dataset.homeGroup!;
-    if (homeFolded.has(name)) homeFolded.delete(name);
-    else homeFolded.add(name);
-    store(HOME_FOLDED_KEY, [...homeFolded]);
-    drawHomeGroups("");
-    return;
-  }
-  const more = target.closest<HTMLElement>("[data-home-more]");
-  if (more) {
-    const name = more.dataset.homeMore!;
-    homeShown.set(name, (homeShown.get(name) ?? HOME_STEP) + HOME_STEP);
-    drawHomeGroups("");
-  }
+document.getElementById("records-locations")!.addEventListener("click", (event) => {
+  const row = (event.target as Element).closest<HTMLElement>("[data-location]");
+  if (!row) return;
+  homeLocation = locationFrom(row.dataset.location);
+  store(HOME_LOCATION_KEY, homeLocation);
+  drawRecordLists();
+  recordsPane.scrollTop = 0;
+});
+
+document.querySelector(".records-head")!.addEventListener("click", (event) => {
+  const button = (event.target as Element).closest<HTMLElement>("[data-record-sort]");
+  if (!button) return;
+  homeSort = pressedSort(homeSort, button.dataset.recordSort as RecordSortBy);
+  store(HOME_SORT_KEY, homeSort);
+  drawRecordLists();
+});
+
+recordsHomeSearch.addEventListener("input", () => {
+  homeSearch = recordsHomeSearch.value;
+  drawRecordLists();
+});
+recordsHomeSearch.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") recordsHomeSearch.blur();
 });
 
 /** The open record's outline in the right drawer: its sections, each listing its items. */
@@ -4927,10 +4947,11 @@ const unfilled = new WeakMap<Element, () => void>();
 function drawRecord(): void {
   recordsLanding.hidden = openRecordId !== null;
   recordArticle.hidden = openRecordId === null;
+  // The drawer is away on the home and back beside a record, read or still being read (KYO-862).
+  applyDocks();
   if (openRecordId === null) {
     recordArticle.replaceChildren();
     drawRecordOutline();
-    applyDocks();
     return;
   }
   const place = recordsPane.scrollTop;
@@ -5697,6 +5718,8 @@ function drawChatLinks(): void {
   const more = document.getElementById("side-linked-more")!;
   more.hidden = chatLinks.length <= LINKS_SHOWN;
   more.textContent = allLinks ? "Show fewer" : `See all ${chatLinks.length}`;
+  // The Records home lists the records the chat names (KYO-862).
+  if (listsRead) drawRecordsHome("");
 }
 
 let linksTimer: number | undefined;
@@ -6892,7 +6915,11 @@ function drawOpened(): void {
 
 function applyDocks(): void {
   document.body.classList.toggle("view-chat", currentView === "chat");
-  document.body.classList.toggle("dock-left", docked[`left:${currentView}`] === true);
+  // KYO-862: a home page has its own fixed column, so the drawer is away there, docked or not.
+  const home = (currentView === "records" && openRecordId === null)
+    || (currentView === "files" && openFile === null);
+  document.body.classList.toggle("home-page", home);
+  document.body.classList.toggle("dock-left", !home && docked[`left:${currentView}`] === true);
   document.body.classList.toggle("dock-right", docked[`right:${currentView}`] === true);
   document.body.classList.toggle("has-outline",
     (currentView === "history" && !historyReader.hidden)

@@ -321,13 +321,21 @@ millisecond for each marked range that lies in a shut fold. The matching is in
 - apps/apple/web/src/chat.ts#recordFrames
 -->
 
-Records shows the project's records, one at a time. With none open it lists them all,
-newest first and without groups (KYO-759); the side bar lists them in the same order above
-the records viewed most recently. Search
-and the three filters (Open, Dispatchable, Awaiting you) apply to both lists, as does a Kind
-control beside the search field (KYO-785): a dropdown of the kinds the store holds, with a
-checkbox each. A `kind:plan` or `kind:plan,task` token typed in the search field checks the
-same kinds, and the rest of the query is searched as text. While a kind is checked the control
+Records shows the project's records, one at a time. With none open it shows a home laid out
+as the Files home is (KYO-862): a fixed column beside a table. The column lists five
+Locations, each a filter of the table and each with its count: Awaiting you, Dispatchable,
+Other open, Closed and All. Below them are Recents, the records viewed last, and Mentioned,
+the records the chat names. The table's columns are Name, Kind, Status, Created and
+Modified; a press on a column's head sorts by it and a second press reverses it. A search
+field above the table narrows the chosen Location's rows. A record is placed and shown by
+its standing, so a current decision is in Closed and not among the open work.
+
+The drawer is away on the home, where the fixed column stands in its place, and is back
+beside an open record. It holds three lists, Awaiting you, Recents and All, and its search
+field, its Open only filter and its Kind control (KYO-785) narrow all three. The Kind
+control is a dropdown of the kinds the store holds, with a checkbox each. A `kind:plan` or
+`kind:plan,task` token typed in either search field names the same kinds, and the rest of the
+query is searched as text. While a kind is checked the control
 names it in the accent colour, with an x that clears it. A
 `kyosei://` link in the chat opens its record there. The view reads `cmd/list`, `cmd/next`,
 `cmd/gates` and `cmd/show/<id>`, which need no device token, and reads them again when the
