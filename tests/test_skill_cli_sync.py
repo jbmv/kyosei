@@ -119,7 +119,10 @@ PACKAGED_REFERENCE_PATH = PACKAGED_SKILL_DIR / "REFERENCE.md"
 #: 28,478): `kyo serve` shows a session's scratchpad files only for the directory the
 #: session reports, and only the orchestrator knows its scratchpad directory, so section 1
 #: says once to run `kyo sessions scratch <dir>`.
-WORKFLOW_TIER_CEILING_BYTES = 28_592
+#: Raised deliberately by KYO-660 from 28,592 to 28,883 (+291 bytes, the tier was at
+#: 28,590): `kyo excerpt` writes a pack that leaves the machine only after the person's
+#: go-ahead, and only the orchestrator records that go-ahead, so section 2 says the steps once.
+WORKFLOW_TIER_CEILING_BYTES = 28_883
 
 #: One backtick-quoted inline-code span.
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -1150,6 +1153,11 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-660: where the draft or pack is written.
+    ("excerpt", "--out"): (
+        "names the file when the session has no recorded scratch directory, which the "
+        "refusal says; the default is where the session's scratch files already go"
+    ),
     # KYO-770: the list's less common flags; a refusal names each where it is needed.
     ("agenda", "--session"): (
         "names a session other than the one the command runs in, which an orchestrator's "

@@ -233,6 +233,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # KYO-669: `kyo check-push --pre-push` is the git remote's name, which the hook
         # passes on; it is compared and printed and never stored.
         "--pre-push",
+        # KYO-660: `kyo excerpt --approved-by` is a credit id, checked to be a current
+        # `authorized` credit on the excerpted credit's record; the id is what is kept.
+        "--approved-by",
     }
     assert value_flags <= text_bearing | file_bearing | structural, value_flags
 

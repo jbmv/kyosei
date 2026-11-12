@@ -777,7 +777,8 @@ decision. An alternative in the decision file may name who proposed it (`propose
 proposer of each option. An option whose proposer the credit does not name is credited to
 the agent, and the page says that it applied that rule (KYO-786). Where the store lacks
 something the page says so: a span that was never measured has no depth, and a credit
-without a `span_seal` is "not sealed". Excerpt packs are not built, so no page attaches one.
+without a `span_seal` is "not sealed". No page attaches an excerpt pack; `kyo excerpt` makes one
+separately ([excerpt-packs.md](excerpt-packs.md)).
 Markdown is the one form: it reads as text in a terminal and converts to HTML or PDF with
 ordinary tools. `--json` carries the parts as data (`parts[]`, each with `heading`,
 `blocks` and `source`), the `references[]`, and the page itself as `markdown`.

@@ -3973,6 +3973,17 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-660: `kyo excerpt`, which needs a sealed discussion in a transcript-reading project.
+    "cmd_excerpt.py:_from_draft#0": (
+        "a re-invocation naming a draft written with `kyo excerpt <credit> --draft`; proved by "
+        "tests/test_kyo660_excerpt.py::"
+        "test_a_draft_whose_lines_are_not_the_spans_is_refused_and_a_new_draft_clears_it"
+    ),
+    "cmd_excerpt.py:read_selection#1": (
+        "a new draft written with `kyo excerpt <credit> --draft`, from which lines are only "
+        "deleted; proved by tests/test_kyo660_excerpt.py::"
+        "test_a_draft_whose_lines_are_not_the_spans_is_refused_and_a_new_draft_clears_it"
+    ),
     # KYO-764: refusals the walk found once it followed `raise helper(...)`.
     "cmd_views.py:_show#0": (
         "not provoked by this walk: the error is built inside `_refuse_shape`, so the "
@@ -4716,6 +4727,12 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-660: the draft or pack is written to the session's recorded scratch directory,
+    # or to the file --out names.
+    "cmd_excerpt.py:_scratch#0": (
+        "a re-invocation naming a file with --out; proved by tests/test_kyo660_excerpt.py::"
+        "test_with_no_scratch_directory_the_draft_names_a_file_and_that_clears_it"
+    ),
     # KYO-764: refusals the walk found once it followed `raise helper(...)`; the remedy of each
     # is a hand edit or removal of a file, run by the test the reason names.
     "cmd_projects.py:read_entries#0": (
