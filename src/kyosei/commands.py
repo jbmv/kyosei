@@ -109,6 +109,11 @@ class Output:
     #: KYO-747: print the lines joined by newlines with none after the last, and no
     #: footer, so that the output can be piped as a value (`kyo devices issue --token-only`).
     bare: bool = False
+    #: KYO-874: this is the output of a write, and when stdout is not a terminal it is
+    #: printed as its receipt (:func:`kyosei.receipt.receipt_lines` over ``lines``)
+    #: unless `--full` or ``KYOSEI_OUTPUT=full`` asks for all of it. False for a read
+    #: and for a check, which print the same to every reader.
+    receipt: bool = False
 
 
 @dataclass

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import commands, docs_numbered, docs_obligations, docs_parse, explanations
+from . import commands, docs_numbered, docs_obligations, docs_parse, explanations, receipt
 from . import config as config_module
 from . import registry as registry_module
 from .commands import Context
@@ -497,7 +497,7 @@ def _docs_obligation_lines(obligations: dict) -> list[str]:
     if outcome == DOCS_OBLIGATIONS_NOT_CHECKED:
         lines = [f"docs obligations: NOT CHECKED — {obligations['detail']}"]
     elif outcome == DOCS_OBLIGATIONS_NONE:
-        lines = [f"docs obligations: none — {obligations['detail']}"]
+        lines = [receipt.detail(f"docs obligations: none — {obligations['detail']}")]
     else:
         groups = docs_obligations.group_obligations_per_document(obligations["raised"])
         lines = [
@@ -509,7 +509,14 @@ def _docs_obligation_lines(obligations: dict) -> list[str]:
     # for a merged branch whose three-dot diff was empty by construction, and the line
     # that would have told a controller so did not exist.
     if obligations.get("changed_says"):
-        lines.append(f"  changed paths: {_changed_paths_says(obligations)}")
+        says = f"  changed paths: {_changed_paths_says(obligations)}"
+        # KYO-874: the live-branch diff is what every ordinary report reads, so it is
+        # detail of a receipt; any other source is the finding itself and stays plain.
+        lines.append(
+            receipt.detail(says)
+            if obligations.get("changed_source") == DOCS_CHANGED_SOURCE_BRANCH_DIFF
+            else says
+        )
     return lines + _docs_verdict_lines(obligations)
 
 

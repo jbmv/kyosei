@@ -87,6 +87,7 @@ from . import (
     commands,
     docs_numbered,
     explanations,
+    receipt,
 )
 from .commands import (
     Context,
@@ -248,6 +249,13 @@ def _run(ctx: Context, argv: list[str], handler, *, tolerate: tuple[type, ...] =
     step.lines = list(output.lines)
     step.data = output.data
     return step
+
+
+def _step_head(head: str, step: _Step) -> str:
+    """A composed step's ``[n/m] kyo ...`` line (KYO-874): detail of a receipt for a step
+    that ran, whose own first line says what it did, and plain for one that was refused
+    or skipped, where the command is what the reader re-runs."""
+    return head if step.refused or step.skipped else receipt.detail(head)
 
 
 def _step_text_lines(step: _Step, *, summarised: set[str]) -> list[str]:
@@ -795,8 +803,14 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
         f"disagreements {len(disagreements)}, "
         f"verdicts: {verdict_counts_text(verdicts)}, "
         f"open docs obligations {open_obligations}",
-        f"accepted report {report_id} of dispatch {dispatch_id} on {record_id}, as {ctx.actor}"
-        + (f" (covering {', '.join(covered)})" if len(covered) > 1 else ""),
+        # KYO-874: detail of a receipt for one record, where the summary names the
+        # report and the dispatch; plain when the dispatch covers others, which the
+        # summary does not name.
+        (receipt.detail if len(covered) <= 1 else str)(
+            f"accepted report {report_id} of dispatch {dispatch_id} on {record_id}, "
+            f"as {ctx.actor}"
+            + (f" (covering {', '.join(covered)})" if len(covered) > 1 else "")
+        ),
     ]
     if not complete:
         lines.append(
@@ -810,7 +824,8 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
                 ),
             )
         )
-    lines.append(_review_line(premise_false, disagreements))
+    review = _review_line(premise_false, disagreements)
+    lines.append(review if premise_false or disagreements else receipt.detail(review))
     summarised = {found["id"] for found in waiting}
     for n, step in enumerate(steps, start=1):
         suffix = (
@@ -820,8 +835,8 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
             if step.skipped
             else ""
         )
-        lines.append(f"[{n}/{len(steps)}] {step.command}" + suffix)
-        lines += [f"  {line}" for line in _step_text_lines(step, summarised=summarised)]
+        lines.append(_step_head(f"[{n}/{len(steps)}] {step.command}" + suffix, step))
+        lines += receipt.indented("  ", _step_text_lines(step, summarised=summarised))
     if excepted:
         lines.append(
             f"--except: {len(excepted)} of {len(verdicts)} reported verdict(s) held back — "
@@ -856,16 +871,21 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
         lines.append(f"--close: {len(closed)} of {len(covered)} covered record(s) moved")
         for row in closed:
             lines.append(f"  {row['record_id']}  {row['was']} -> {' -> '.join(row['walked'])}")
-        lines.append(f"left ({len(left)}):")
+        if left:
+            lines.append(f"left ({len(left)}):")
         for row in left:
             lines.append(f"  - {row['record_id']} is {row['status']}:")
             lines += [f"      {line.strip()}" for line in row["why"]]
         if not left:
-            lines.append("  (none)")
+            lines += receipt.details([f"left ({len(left)}):", "  (none)"])
         if refresh is not None:
             lines += refresh["lines"]
     else:
-        lines.append(f"--close was not passed: {explanations.say('accept-not-closed')}")
+        lines.append(
+            receipt.detail(
+                f"--close was not passed: {explanations.say('accept-not-closed')}"
+            )
+        )
     if unmatched_docs:
         # KYO-393.c3: LAST, because it is the line the consumer's sixty did not end on.
         # The settle step printed each entry above; this is the count and the command
@@ -878,7 +898,8 @@ def cmd_accept(ctx: Context, args: Namespace) -> Output:
 
     output = Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "accept",
             # KYO-415.c1: additive. `ok` keeps its meaning (the command ran and raised

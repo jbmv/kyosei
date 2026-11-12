@@ -59,8 +59,8 @@ import tempfile
 from argparse import Namespace
 from pathlib import Path
 
-from . import cmd_close_wave, cmd_evidence, cmd_links, credits
-from .cmd_accept import _close, _incomplete_line, _incompleteness, _run, _Step
+from . import cmd_close_wave, cmd_evidence, cmd_links, credits, receipt
+from .cmd_accept import _close, _incomplete_line, _incompleteness, _run, _Step, _step_head
 from .commands import Context, Output, _load_status_ladder
 from .config import person_label
 from .contracts import ROLE_RETIRED, SETTLED_CRITERION_STATES, VOID_CRITERION_STATES
@@ -720,7 +720,9 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
                 ),
             )
         )
-    lines.append(_resolution_line(record_id, resolved, gate))
+    # KYO-874: how the targets were resolved and what each was are detail of a receipt;
+    # the composed steps say what was verified, and what is left is plain below.
+    lines.append(receipt.detail(_resolution_line(record_id, resolved, gate)))
     remaining = [
         c["id"] for c in store.criteria(record_id) if c["state"] == "unmet-unobserved"
     ]
@@ -733,7 +735,9 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     for cid in resolved["ignored"]:
         lines.append(f"ignored: {cid} in {gate['id']}'s payload is not {record_id}'s")
     for target in targets:
-        lines.append(f"target: {target['criterion_id']} (was {target['prior_state']})")
+        lines.append(
+            receipt.detail(f"target: {target['criterion_id']} (was {target['prior_state']})")
+        )
     for item in skipped:
         lines.append(
             f"skipped: {item.get('criterion_id') or item.get('evidence_id')} — {item['reason']}"
@@ -746,8 +750,8 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         )
     for n, step in enumerate(steps, start=1):
         suffix = "  — REFUSED" if step.refused else ""
-        lines.append(f"[{n}/{len(steps)}] {step.command}" + suffix)
-        lines += [f"  {line}" for line in step.lines]
+        lines.append(_step_head(f"[{n}/{len(steps)}] {step.command}" + suffix, step))
+        lines += receipt.indented("  ", step.lines)
     for item in gates_left:
         lines.append(f"left open: {item['gate_id']} ({item['gate_type']}) — {item['why']}")
     if close:
@@ -757,13 +761,18 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
             lines.append(f"{record_id} stays {row_['status']}:")
             lines += [f"    {line.strip()}" for line in row_["why"]]
     else:
-        lines.append(f"--no-close: {record_id} is left at {store.record(record_id)['status']}")
+        lines.append(
+            receipt.detail(
+                f"--no-close: {record_id} is left at {store.record(record_id)['status']}"
+            )
+        )
     if refresh is not None:
         lines += refresh["lines"]
 
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "confirm",
             "complete": complete,

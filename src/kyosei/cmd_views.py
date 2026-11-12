@@ -37,6 +37,7 @@ from . import (
     kinds,
     prior_art,
     query,
+    receipt,
     report_entries,
     stop_audit,
     worker_tokens,
@@ -1703,9 +1704,13 @@ def _cmd_docs_settle_from_report(ctx: Context, args: Namespace) -> Output:
         f"{report_id} (dispatch {dispatch_id}), as {ctx.actor}"
     ]
     for row in applied:
+        # KYO-874: counted on the line above; one row per obligation is detail of a
+        # receipt, and a dispatch can settle sixty.
         lines.append(
-            f"  {row['obligation_id']}  {row['doc_path']} [{row['section']}] -> "
-            f"{row['verdict']}  ({row['method']})"
+            receipt.detail(
+                f"  {row['obligation_id']}  {row['doc_path']} [{row['section']}] -> "
+                f"{row['verdict']}  ({row['method']})"
+            )
         )
     if by_number:
         # KYO-393.c1: matched by section number, and named — the heading differs.
@@ -1716,23 +1721,28 @@ def _cmd_docs_settle_from_report(ctx: Context, args: Namespace) -> Output:
             f"--only: {len(selected)} of the report's {len(matched)} matched verdict(s) "
             "selected; the rest are unapplied and stay readable in the report"
         )
-    lines.append(f"not applied ({len(not_applied)}):")
-    lines += [
-        f"  - {row['obligation_id'] or row['doc_path']}: {row['why']}"
-        for row in not_applied
-    ] or ["  (none)"]
+    if not_applied:
+        lines.append(f"not applied ({len(not_applied)}):")
+        lines += [
+            f"  - {row['obligation_id'] or row['doc_path']}: {row['why']}"
+            for row in not_applied
+        ]
+    else:
+        lines += receipt.details([f"not applied ({len(not_applied)}):", "  (none)"])
     still_open = {
         record_id: len(store.open_docs_obligations(record_id)) for record_id in record_ids
     }
     for record_id in record_ids:
         open_now = still_open[record_id]
-        lines.append(
+        now_open = (
             f"{record_id} now has {open_now} open docs obligation(s)"
             + ("" if open_now else f" — {explanations.say('docs-nothing-blocks')}")
         )
+        lines.append(now_open if open_now else receipt.detail(now_open))
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "docs settle",
             "from_report": dispatch_id,
