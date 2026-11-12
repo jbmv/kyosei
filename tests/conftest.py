@@ -144,6 +144,22 @@ def store_home(tmp_path: Path):
     patch.undo()
 
 
+@pytest.fixture(autouse=True)
+def whole_write_output():
+    """Every write prints its whole output in this suite, as on a terminal (KYO-874).
+
+    A captured stdout is not a terminal, so a write would print its receipt, and most of
+    this suite asserts on lines a receipt leaves out. ``KYOSEI_OUTPUT=full`` is the
+    documented way to ask for the whole output from every invocation, and a subprocess
+    inherits it. ``tests/test_kyo874_receipts.py`` removes it to test the receipt. Its own
+    MonkeyPatch for :func:`store_home`'s reason.
+    """
+    patch = pytest.MonkeyPatch()
+    patch.setenv("KYOSEI_OUTPUT", "full")
+    yield
+    patch.undo()
+
+
 def _real_registry() -> Path:
     """The developer's own registry, found from the account, not the environment."""
     import pwd

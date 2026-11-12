@@ -65,8 +65,10 @@ from .git_queries import (
     worktree_remove,
 )
 from .prose import fingerprint, read_prose
+from .receipt import detail, details, receipt_form
 from .render import echo_block, echo_value, prompt_label
 from .touch_drift import (
+    DECLARATION_UNRECONCILED,
     _cooccurrence_lines,
     declaration_provenance,
     provenance_lines,
@@ -1049,11 +1051,28 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         ctx.code_root, dispatch_id, ctx.environ, stale=lambda other: _not_running(store, other)
     )
 
-    lines = [f"dispatched {record_id} as {dispatch_id}", echo_value("base sha", worked_from_sha)]
-    lines.append(f"  {baseline_line}")
+    # KYO-874: the receipt's first line carries what the lines under it echo -- the
+    # branch, the base sha and where the worktree is, which is what spawning the
+    # worker needs. Each line below is marked `detail` when it restates the command or
+    # says what every dispatch says, and left plain when it warns or names a step.
+    dispatched = f"dispatched {record_id} as {dispatch_id}"
+    lines: list[str] = [
+        receipt_form(
+            dispatched,
+            f"{dispatched}: branch {branch or '(not declared)'}, base sha "
+            f"{worked_from_sha}, worktree {worktree_resolved}"
+            + (" (created)" if creation is not None else ""),
+        ),
+        detail(echo_value("base sha", worked_from_sha)),
+    ]
+    # Plain when no baseline was taken: the line then says why, and the stop check
+    # has nothing to compare against.
+    lines.append(f"  {baseline_line}" if baseline_file is None else detail(f"  {baseline_line}"))
     # KYO-52: the stored value is relative; the human needs somewhere to `cd`, and a
     # terminal line is not git-canonical, so display resolves and storage does not.
-    lines.append(echo_value("worktree", f"{worktree}  (resolves to {worktree_resolved})"))
+    lines.append(
+        detail(echo_value("worktree", f"{worktree}  (resolves to {worktree_resolved})"))
+    )
     if creation is not None:
         # KYO-485 (proposal KYO-484): `kyo dispatch --branch` runs `git worktree add`
         # itself, in the code repository. KYO-70's stance — that creating a worktree
@@ -1063,7 +1082,7 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         # where hand-made collisions came from. `--no-create-worktree` keeps the old
         # printed line below.
         lines.append(
-            f"  created it: {creation.command()}  (run in {ctx.code_root})"
+            detail(f"  created it: {creation.command()}  (run in {ctx.code_root})")
         )
     elif reused_worktree:
         lines.append(
@@ -1092,8 +1111,11 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         # this line is for the controller, who is the one holding a shell here.
         if store.config.worktree_setup:
             # KYO-489: the reasoning is explained once, in `kyo reference dispatch`.
-            lines.append(f"  then provision it ({explanations.say('worktree-setup-not-run')}):")
-            lines.extend(f"    {command}" for command in store.config.worktree_setup)
+            # Detail in a receipt: the brief states the same commands to the worker.
+            lines.append(
+                detail(f"  then provision it ({explanations.say('worktree-setup-not-run')}):")
+            )
+            lines += details(f"    {command}" for command in store.config.worktree_setup)
         else:
             # KYO-143.c4: stated, not silent. A controller who reads this and
             # believes the worktree is ready is the failure this line prevents,
@@ -1108,36 +1130,44 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     # KYO-744: the same commands the brief states, for the orchestrator who will read
     # the worker's report. Printed only when a rule matched.
     if guard_commands:
-        lines.append("  guard tests the brief tells the worker to run (`guard_tests`):")
-        lines.extend(f"    {guard.command}" for guard in guard_commands)
+        lines.append(
+            detail("  guard tests the brief tells the worker to run (`guard_tests`):")
+        )
+        lines += details(f"    {guard.command}" for guard in guard_commands)
     # KYO-32: echoed either way. "(not declared — `kyo report` will not check where
     # this dispatch's commits landed)" is a statement, not a silence: the absence of
     # the check is the thing a controller most needs to know it is living without.
     lines.append(
-        echo_value(
+        detail(echo_value("branch", branch))
+        if branch
+        else echo_value(
             "branch",
-            branch
-            or "(not declared — `kyo report` will not check where this dispatch's "
+            "(not declared — `kyo report` will not check where this dispatch's "
             "commits landed; pass --branch NAME to have it checked)",
         )
     )
     # KYO-61: echoed either way, like the branch line above it. A dispatch that
     # declared no model says so — the absence is the fact worth reading, because it
     # is the state every dispatch ran in, before this field, without anyone noticing.
+    # A declared model and a recorded prompt are echoes; an absent one is plain, since
+    # the absence is the fact worth reading.
     lines.append(
-        echo_value(
-            "worker model",
-            f"{worker_model} ({MODEL_SOURCE_LABELS[model_source]}; "
-            f"{explanations.say('worker-model-not-enforced')})"
-            if worker_model
-            else f"(not declared — {MODEL_SOURCE_LABELS[MODEL_SOURCE_NONE]})",
+        detail(
+            echo_value(
+                "worker model",
+                f"{worker_model} ({MODEL_SOURCE_LABELS[model_source]}; "
+                f"{explanations.say('worker-model-not-enforced')})",
+            )
+        )
+        if worker_model
+        else echo_value(
+            "worker model", f"(not declared — {MODEL_SOURCE_LABELS[MODEL_SOURCE_NONE]})"
         )
     )
     lines.append(
-        echo_value(
-            "answered prompt",
-            prompt_said if prompt else f"(not recorded — {prompt_said})",
-        )
+        detail(echo_value("answered prompt", prompt_said))
+        if prompt
+        else echo_value("answered prompt", f"(not recorded — {prompt_said})")
     )
     if measurements:
         # Warns, never refuses. The brief froze a moment ago and the worker cannot
@@ -1183,7 +1213,14 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     # KYO-147.c1: printed on every dispatch, including — especially — the ones that
     # passed. A guard that says "I checked a prediction" is honest; one that says
     # nothing and lets the absence of a refusal mean "no collision" is not.
-    lines += provenance_lines(provenance)
+    # KYO-874: in a receipt only when a compared declaration is KNOWN INCOMPLETE, which
+    # is the one state of this check that names something to do.
+    checked = provenance_lines(provenance)
+    lines += (
+        checked
+        if any(entry["staleness"] == DECLARATION_UNRECONCILED for entry in provenance)
+        else details(checked)
+    )
     # KYO-147.c5: stated where the refusal it replaced would have been printed.
     warnings = commands.narrowing_warnings(narrowings)
     symbol_narrowings = [n for n in narrowings if n not in warnings]
@@ -1202,7 +1239,8 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         )
         lines += [f"  {commands.narrowing_detail(n)}" for n in warnings]
     lines += _broad_claim_lines(broad_claims)
-    lines += _cooccurrence_lines(cooccurrence)
+    # History that refuses nothing and predicts nothing; the brief carries it too.
+    lines += details(_cooccurrence_lines(cooccurrence))
     # KYO-326: the brief is the one thing here a controller does not act on — it stays
     # in context to be re-read every turn (34,870 bytes for KYO-263.d1)
     # although what a controller reads back out of it is `kyo show <dispatch-id>`,
@@ -1213,7 +1251,8 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     # were never affected either way.
     brief_sections = brief_module.brief_section_lengths(brief_text)
     if args.print_brief:
-        lines += echo_block("brief", brief_text)
+        # Plain strings: the brief was asked for by name, so a receipt prints it too.
+        lines += [str(line) for line in echo_block("brief", brief_text)]
     else:
         lines.append(
             f"stored brief ({len(brief_text)} chars, sha256:{fingerprint(brief_text)}) — "
@@ -1223,7 +1262,7 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
     # a brief is long and not where; with these an orchestrator sees which section
     # grew, and whether it is one it wrote (the task, the record's criteria) or one
     # every brief carries.
-    lines.append(_brief_sections_line(brief_sections))
+    lines.append(detail(_brief_sections_line(brief_sections)))
     if brief_out_path is not None:
         try:
             brief_out_path.write_text(brief_text, encoding="utf-8")
@@ -1240,7 +1279,8 @@ def _cmd_dispatch_create(ctx: Context, args: Namespace) -> Output:
         lines.append(echo_value("brief written to", str(brief_out_path)))
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "dispatch",
             "dispatch_id": dispatch_id,

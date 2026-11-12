@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
-from . import explanations
+from . import explanations, receipt
 from .contracts import (
     GUARDED_BRANCH_DIRS,
     OBLIGATION_NOT_AFFECTED,
@@ -1524,14 +1524,20 @@ def grouped_obligation_lines(
             head += f"[{row['section']}]"
             if row.get("verdict"):
                 head += f"  [{row['verdict']}]"
-            lines.append(head)
+            # KYO-874: in a write's receipt a document's block is its first line and
+            # its settle line, which names every id in the block. The sections, what
+            # raised each and the worker's proposals are detail there; a read prints
+            # every line, since only a write's output is ever reduced.
+            lines.append(receipt.detail(head))
             if row.get("detail"):
-                lines.append(f"{indent}        {row['detail']}")
+                lines.append(receipt.detail(f"{indent}        {row['detail']}"))
             proposed = row.get("proposed")
             if proposed:
                 lines.append(
-                    f"{indent}        worker proposes {proposed['verdict']} "
-                    f"({proposed['method']}): {proposed['reason']}"
+                    receipt.detail(
+                        f"{indent}        worker proposes {proposed['verdict']} "
+                        f"({proposed['method']}): {proposed['reason']}"
+                    )
                 )
         # KYO-351: the sentence decides whether it is printed. `whole_file_nudge`
         # returns "" when nothing it was handed can be narrowed, so a document whose

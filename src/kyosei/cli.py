@@ -74,6 +74,7 @@ from . import (
     touch_drift,
     transcript_search,
 )
+from . import receipt as receipt_module
 from . import serve as serve_module
 from . import store as store_module
 from .commands import PROJECT_NONE, PROJECT_OPTIONAL, PROJECT_REQUIRED
@@ -104,6 +105,12 @@ PROG = "kyo"
 #: traceback above the one-line report (KYO-421.c2). Named in that line, so the way
 #: back to the traceback is on the screen at the moment it is wanted.
 TRACEBACK_ENV = "KYOSEI_TRACEBACK"
+
+#: KYO-874: set to :data:`OUTPUT_FULL` and a write prints its whole output when stdout
+#: is not a terminal, as `--full` does for one invocation. For a script that reads the
+#: text of a write, and for this package's own tests of that text.
+OUTPUT_ENV = "KYOSEI_OUTPUT"
+OUTPUT_FULL = "full"
 
 Handler = Callable[[commands.Context, argparse.Namespace], commands.Output]
 
@@ -510,7 +517,10 @@ def _add_common_flags(parser: argparse.ArgumentParser, *, suppress: bool) -> Non
         FULL_FLAG,
         action="store_true",
         default=flag_default,
-        help="with --json: embed every record document a command returns whole "
+        help="without --json, when stdout is not a terminal: print a write's whole "
+        "output where the default is its receipt (what was done and the ids, the "
+        "length and digest of each stored text, and every warning). "
+        "With --json: embed every record document a command returns whole "
         "(`record`, `records`, and the same inside `kyo accept`'s steps[].data). "
         "Without it --json replaces each by its id, kind, status and updated_at plus "
         "the fields this invocation changed (`changed_fields`, and the new value of "
@@ -4190,6 +4200,29 @@ def _stdout_is_tty() -> bool:
         return False
 
 
+def prints_receipt(
+    args: argparse.Namespace,
+    output: commands.Output,
+    stdout_is_tty: bool,
+    environ: dict[str, str],
+) -> bool:
+    """Whether ``output`` prints as its receipt (KYO-874).
+
+    Only the output of a write (``Output.receipt``), only as text, and only when the
+    reader is not a terminal: an agent or a pipe re-reads every byte, and what it needs
+    from a write is what was done, the ids, the measure of each stored text and every
+    warning. A terminal prints the whole output, as do `--full` and
+    ``KYOSEI_OUTPUT=full``. A read or a check never sets ``Output.receipt``, so what a
+    hook reads (`kyo brief`, `kyo doctor --hook`, `kyo sweep --hook`, `kyo check-*`)
+    is the same for every reader.
+    """
+    if not output.receipt or stdout_is_tty or output.bare:
+        return False
+    if getattr(args, "json", False) or getattr(args, "full", False):
+        return False
+    return environ.get(OUTPUT_ENV, "").strip().lower() != OUTPUT_FULL
+
+
 def render_json(payload: dict, compact: bool) -> str:
     """One ``--json`` envelope as printed: one line when ``compact``, else indented.
     The same object either way — only the whitespace differs."""
@@ -4345,7 +4378,8 @@ def run(
     handler, project_mode = COMMAND_TABLE[args.command]
     # KYO-427: whether stdout is a terminal is read once, here, and decides the
     # whitespace of every envelope this invocation prints -- success and error alike.
-    compact = json_is_compact(args, _stdout_is_tty())
+    stdout_is_tty = _stdout_is_tty()
+    compact = json_is_compact(args, stdout_is_tty)
 
     ctx: commands.Context | None = None
     residue_warnings: list[str] = []
@@ -4512,7 +4546,15 @@ def run(
         # clause's full text ends with one line naming where the full text is -- here,
         # after every other line, so it is the last line and is printed exactly once
         # however many renderers contributed a short form.
-        print("\n".join(output.lines + explanations.footer(args.command, output.lines)))
+        # KYO-874: a write read off a terminal prints its receipt. The path and residue
+        # warnings appended above are plain lines, so they are in it; the footer is
+        # worked out over the lines actually printed, as it always was.
+        lines = (
+            receipt_module.receipt_lines(output.lines)
+            if prints_receipt(args, output, stdout_is_tty, environ)
+            else list(output.lines)
+        )
+        print("\n".join(lines + explanations.footer(args.command, lines)))
     return EXIT_OK, (output.data if args.json else None)
 
 

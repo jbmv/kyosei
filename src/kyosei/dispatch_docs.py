@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import commands, docs_numbered, docs_obligations, docs_parse, explanations
+from . import commands, docs_numbered, docs_obligations, docs_parse, explanations, receipt
 from . import config as config_module
 from . import registry as registry_module
 from .commands import Context
@@ -497,7 +497,7 @@ def _docs_obligation_lines(obligations: dict) -> list[str]:
     if outcome == DOCS_OBLIGATIONS_NOT_CHECKED:
         lines = [f"docs obligations: NOT CHECKED — {obligations['detail']}"]
     elif outcome == DOCS_OBLIGATIONS_NONE:
-        lines = [f"docs obligations: none — {obligations['detail']}"]
+        lines = [receipt.detail(f"docs obligations: none — {obligations['detail']}")]
     else:
         groups = docs_obligations.group_obligations_per_document(obligations["raised"])
         lines = [

@@ -22,6 +22,7 @@ from .contracts import (
     touch_target,
 )
 from .prose import fingerprint
+from .receipt import detail, receipt_form
 
 
 def echo_block(label: str, text: str) -> list[str]:
@@ -29,9 +30,13 @@ def echo_block(label: str, text: str) -> list[str]:
 
     Length and digest are printed because "looks right" is not a check: a dropped
     word changes the digest even when the sentence still reads fine.
+
+    KYO-874: in a receipt the measured line stays and the text is left out, so a paste
+    the shell mangled still shows as a length and a digest that are not the ones sent.
     """
-    lines = [f"stored {label} ({len(text)} chars, sha256:{fingerprint(text)}):"]
-    lines.extend(f"  | {line}" for line in text.split("\n"))
+    measured = f"stored {label} ({len(text)} chars, sha256:{fingerprint(text)})"
+    lines: list[str] = [receipt_form(f"{measured}:", measured)]
+    lines.extend(detail(f"  | {line}") for line in text.split("\n"))
     return lines
 
 

@@ -41,6 +41,7 @@ from .prose import (
     read_prose,
     single_line,
 )
+from .receipt import detail, details, receipt_form
 from .render import (
     echo_block,
     echo_value,
@@ -588,23 +589,40 @@ def _verify_from_report(ctx: Context, args: Namespace) -> Output:
         )
     commands._finish_mutation(store, record_ids, events)
 
-    lines.append(
+    # KYO-874: in a receipt the count line names each criterion and its new state, and
+    # the rows under it (the prior state, the verification and evidence ids) are detail.
+    summary = (
         f"applied {len(applied)} of {len(selected)} verdict(s) from report {report_id} "
         f"(dispatch {dispatch_id}), as {ctx.actor}"
     )
+    lines.append(
+        receipt_form(
+            summary,
+            summary
+            + ": "
+            + ", ".join(f"{row['criterion_id']} {row['verdict']}" for row in applied),
+        )
+        if applied
+        else summary
+    )
     for row in applied:
         lines.append(
-            f"  {row['criterion_id']}  {row['was']} -> {row['verdict']} "
-            f"({row['method']})  verification {row['verification_id']}"
-            + (f"  evidence {row['evidence_id']}" if row["evidence_id"] else "")
+            detail(
+                f"  {row['criterion_id']}  {row['was']} -> {row['verdict']} "
+                f"({row['method']})  verification {row['verification_id']}"
+                + (f"  evidence {row['evidence_id']}" if row["evidence_id"] else "")
+            )
         )
     if args.only:
         lines.append(
             f"--only: {len(selected)} of the report's {len(verdicts)} verdict(s) selected; "
             "the rest are unapplied and stay readable in the report"
         )
-    lines.append(f"not applied ({len(not_applied)}):")
-    lines += [f"  - {row['criterion_id']}: {row['why']}" for row in not_applied] or ["  (none)"]
+    if not_applied:
+        lines.append(f"not applied ({len(not_applied)}):")
+        lines += [f"  - {row['criterion_id']}: {row['why']}" for row in not_applied]
+    else:
+        lines += details([f"not applied ({len(not_applied)}):", "  (none)"])
     if already_applied:
         # KYO-415.c4/c5: named entry by entry, beside `not applied`, so a rerun that
         # wrote nothing says why rather than reading as a report with nothing in it.
@@ -669,7 +687,8 @@ def _verify_from_report(ctx: Context, args: Namespace) -> Output:
 
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "verify",
             "from_report": dispatch_id,
@@ -823,13 +842,20 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
         )
     commands._finish_mutation(store, [record_id], events)
 
-    lines = [
-        f"verified {args.criterion_id}",
-        echo_value("criterion state", f"{criterion['state']} -> {args.verdict}"),
-        echo_value("method", args.method),
+    # KYO-874: the receipt's first line carries the transition, the method and the
+    # evidence id that the three echoes under it state one to a line.
+    verified = f"verified {args.criterion_id}"
+    lines: list[str] = [
+        receipt_form(
+            verified,
+            f"{verified}: {criterion['state']} -> {args.verdict} ({args.method})"
+            + (f", evidence {evidence_id}" if evidence_id else ""),
+        ),
+        detail(echo_value("criterion state", f"{criterion['state']} -> {args.verdict}")),
+        detail(echo_value("method", args.method)),
     ]
     if evidence_id:
-        lines.append(echo_value("evidence", evidence_id))
+        lines.append(detail(echo_value("evidence", evidence_id)))
     if credit is not None and credit_id is not None:
         lines += credits.lines(store, credit_id, credit)
     elif joined is not None:
@@ -871,7 +897,8 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
         lines.append(completed_with_unmet_line(completed))
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "verify",
             "verification_id": verification_id,
@@ -1040,11 +1067,18 @@ def cmd_attach(ctx: Context, args: Namespace) -> Output:
         )
     commands._finish_mutation(store, [record_id], events)
 
-    lines = [f"attached {evidence_id} to {record_id}"]
+    # KYO-874: the receipt names what the evidence supports on its first line and keeps
+    # the measured line of the echo; the whole digest is in `kyo show`.
+    attached = f"attached {evidence_id} to {record_id}"
+    lines: list[str] = [
+        receipt_form(attached, f"{attached}, supporting {args.supports}")
+        if args.supports
+        else attached
+    ]
     if args.supports:
-        lines.append(echo_value("supports", args.supports))
+        lines.append(detail(echo_value("supports", args.supports)))
     lines += echo_block("evidence", text)
-    lines.append(echo_value("sha256", digest))
+    lines.append(detail(echo_value("sha256", digest)))
     if attachment is not None:
         lines.append(echo_value("file", attachment["path"]))
         lines.append(
@@ -1056,7 +1090,8 @@ def cmd_attach(ctx: Context, args: Namespace) -> Output:
         )
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "attach",
             "evidence_id": evidence_id,

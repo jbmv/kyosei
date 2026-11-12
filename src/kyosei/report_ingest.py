@@ -32,6 +32,7 @@ from .contracts import (
 from .dispatch_docs import _docs_obligation_lines, _raise_docs_obligations
 from .errors import ContractViolation, KyoseiError, UsageError
 from .git_queries import _git_commit_reachability, _git_is_ancestor
+from .receipt import detail, details
 from .render import commit_label, echo_value
 from .touch_drift import _drift_for_dispatch, drift_lines
 
@@ -896,7 +897,13 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
             )
     else:
         lines = [f"ingested report {report_id} for dispatch {dispatch_id}{sha_note}"]
-    lines += _branch_check_lines(branch_check, dispatch_id)
+    # KYO-874: each block below is detail in a receipt when it found nothing, and plain
+    # when it found something, so the receipt is the summary and what needs reading.
+    branch_lines = _branch_check_lines(branch_check, dispatch_id)
+    if branch_check["outcome"] == BRANCH_CHECK_VERIFIED and len(branch_lines) == 1:
+        # Verified with no warning under it.
+        branch_lines = details(branch_lines)
+    lines += branch_lines
     # KYO-540.c2: the one-line summary goes FIRST. The block below is long enough that a
     # reader filtered it, and filtering is how an outcome was misread; the counts that
     # decide what to do next are the first thing printed.
@@ -911,19 +918,17 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
     )
     if covers:
         lines.append(f"dispatch formally covers (KYO-13.c4): {', '.join(sorted(covers))}")
-    lines.append(f"premise_false ({len(parsed['premise_false'])}):")
-    lines += (
-        [f"  - {pf['claim']}\n    -> {pf['correction']}" for pf in parsed["premise_false"]]
-        or ["  (none)"]
+    lines += _block(
+        f"premise_false ({len(parsed['premise_false'])}):",
+        [f"  - {pf['claim']}\n    -> {pf['correction']}" for pf in parsed["premise_false"]],
     )
-    lines.append(f"disagreements ({len(parsed['disagreements'])}):")
-    lines += (
+    lines += _block(
+        f"disagreements ({len(parsed['disagreements'])}):",
         [
             f"  - {d['topic']}: brief said {d['brief_said']!r}; worker did "
             f"{d['worker_did']!r}\n    because: {d['rationale']}"
             for d in parsed["disagreements"]
-        ]
-        or ["  (none)"]
+        ],
     )
     if overrides:
         lines.append(
@@ -932,24 +937,30 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
             "an ssot document — review each before accepting:"
         )
         lines += [f"  - {override.line()}" for override in overrides]
-    lines.append(f"corrected_numbers ({len(parsed['corrected_numbers'])}):")
-    lines += (
+    lines += _block(
+        f"corrected_numbers ({len(parsed['corrected_numbers'])}):",
         [
             f"  - {cn['claim']}: {cn['brief_value']} -> {cn['actual_value']} ({cn['method']})"
             for cn in parsed["corrected_numbers"]
-        ]
-        or ["  (none)"]
+        ],
     )
-    lines.append(f"criteria_verdicts ({len(parsed['criteria_verdicts'])}):")
-    lines += (
-        [
-            f"  - {cv['criterion_id']}: {cv['verdict']} ({cv['method']})"
+    # A proposed `met` is counted in the summary; every other verdict is a line to read.
+    not_met = [cv for cv in parsed["criteria_verdicts"] if cv["verdict"] != "met"]
+    verdicts_head = f"criteria_verdicts ({len(parsed['criteria_verdicts'])}):"
+    lines.append(verdicts_head if not_met else detail(verdicts_head))
+    lines += [
+        line if cv["verdict"] != "met" else detail(line)
+        for cv, line in (
+            (cv, f"  - {cv['criterion_id']}: {cv['verdict']} ({cv['method']})")
             for cv in parsed["criteria_verdicts"]
+        )
+    ] or details(["  (none)"])
+    lines += details(
+        [
+            f"commits ({len(parsed['commits'])}):",
+            *([f"  - {commit_label(c)}" for c in parsed["commits"]] or ["  (none)"]),
         ]
-        or ["  (none)"]
     )
-    lines.append(f"commits ({len(parsed['commits'])}):")
-    lines += ([f"  - {commit_label(c)}" for c in parsed["commits"]] or ["  (none)"])
     # KYO-198.c4: the note that creates the need names the mechanism that meets it.
     # "Applying them is a controller act via `kyo verify`" was correct and left the
     # controller extracting each criterion's evidence from this JSON by hand and running
@@ -976,7 +987,8 @@ def cmd_report(ctx: Context, args: Namespace) -> Output:
     lines += stop_audit.unblocked_stop_lines(unblocked)
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "report",
             "report_id": report_id,
@@ -1037,6 +1049,12 @@ def _recx_trailer_finding(
     if docs_recx.project_manifest(ctx.root / config_module.KYOSEI_DIR) is None:
         return None
     return docs_recx.unchecked_modules(ctx.code_root, dispatch["branch"], docs_verdicts)
+
+
+def _block(head: str, entries: list[str]) -> list[str]:
+    """A counted block of a report as `kyo report` prints it: the head and its entries,
+    or the head and ``(none)`` as detail of a receipt when there are none (KYO-874)."""
+    return [head, *entries] if entries else details([head, "  (none)"])
 
 
 def _recx_trailer_lines(finding: dict | None) -> list[str]:

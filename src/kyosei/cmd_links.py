@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 
-from . import commands, credits, explanations, export, links
+from . import commands, credits, explanations, export, links, receipt
 from . import registry as registry_module
 from .clock import now
 from .commands import (
@@ -405,20 +405,29 @@ def cmd_gate(ctx: Context, args: Namespace) -> Output:
             before=before,
         )
     commands._finish_mutation(store, [record_id], events)
-    lines = [
-        f"gated {record_id} with {gate_id}",
-        echo_value("gate type", args.gate_type),
+    # KYO-874: the receipt's first line carries the type and the stored tags, and the
+    # payload is its measured line.
+    gated = f"gated {record_id} with {gate_id}"
+    lines: list[str] = [
+        receipt.receipt_form(
+            gated,
+            f"{gated} ({args.gate_type}" + (f"; tags {', '.join(tags)}" if tags else "") + ")",
+        ),
+        receipt.detail(echo_value("gate type", args.gate_type)),
     ]
     # Law 5: the tags that were STORED, not the ones that were typed — which is what
     # makes deduplicating a repeated `--tag` honest rather than silent.
     if tags:
-        lines.append(echo_value("tags", ", ".join(tags)))
+        lines.append(receipt.detail(echo_value("tags", ", ".join(tags))))
     if detail:
         lines += echo_block("do", detail)
-    lines.append(f"status is unchanged ({explanations.say('gates-orthogonal')})")
+    lines.append(
+        receipt.detail(f"status is unchanged ({explanations.say('gates-orthogonal')})")
+    )
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "gate",
             "gate_id": gate_id,

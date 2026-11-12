@@ -103,6 +103,7 @@ from .prose import (
     read_prose,
     single_line,
 )
+from .receipt import detail, details, receipt_form
 from .render import (
     current_credits,
     echo_block,
@@ -997,21 +998,42 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
     title_warning_lines, title_warning = _title_warning_output(title)
     criteria_warning_lines, criteria_warning_data = _criteria_warning_output(added)
 
-    lines = [
-        f"created {record_id}",
+    # KYO-874: the receipt keeps the id, the title as stored, the measure of the
+    # description and one measure over the criteria; the fields that restate a flag
+    # and the texts themselves are detail, and every warning is a plain line.
+    created = f"created {record_id}"
+    criteria_text = "\n".join(text for _cid, text in added)
+    stored_criteria = f"stored criteria: {len(added)}"
+    lines: list[str] = [
+        receipt_form(
+            created,
+            f"{created} ({kind}"
+            + (f", in plan {plan}" if plan else "")
+            + (f", scope {scope}" if scope else "")
+            + f", {len(added_touches)} touch(es))",
+        ),
         *warning_lines,
-        echo_value("kind", kind),
+        detail(echo_value("kind", kind)),
         echo_value("title", title),
         *title_warning_lines,
     ]
     if plan:
-        lines.append(echo_value("plan", plan))
-    lines.append(echo_value("scope", scope or "(none declared)"))
+        lines.append(detail(echo_value("plan", plan)))
+    lines.append(detail(echo_value("scope", scope or "(none declared)")))
     if since_note is not None:
-        lines.append(echo_value("since note", since_note))
+        lines.append(detail(echo_value("since note", since_note)))
     lines += echo_block("description", description)
-    lines.append(f"stored criteria: {len(added)}")
-    lines += [f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added]
+    lines.append(
+        receipt_form(
+            stored_criteria,
+            # One measure over the texts joined by newlines, in the order stored.
+            f"{stored_criteria}, {added[0][0]} to {added[-1][0]} "
+            f"({len(criteria_text)} chars, sha256:{fingerprint(criteria_text)})",
+        )
+        if added
+        else stored_criteria
+    )
+    lines += details(f"  {cid}  {DEFAULT_CRITERION_STATE}  {text}" for cid, text in added)
     lines += criteria_warning_lines
     if registry.require(kind).requires_criteria and not added:
         # KYO-26: this succeeded silently and produced a record
@@ -1023,16 +1045,16 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             "until criteria are authored — `kyo move` will refuse `working` and `kyo next` "
             f"will not list it. Add them with `kyo edit {record_id} --add-criteria-file f.txt`."
         )
-    lines.append(f"stored touches: {len(added_touches)}")
-    lines += [
+    lines.append(detail(f"stored touches: {len(added_touches)}"))
+    lines += details(
         f"  {tid}  {path}" + (f"#{symbol}" if symbol else "")
         for tid, path, symbol in added_touches
-    ]
+    )
     lines += _implements_line(implements_link)
     if evidence is not None:
         lines.append(f"attached {evidence[0]}")
         lines += echo_block("evidence", evidence_text)
-        lines.append(echo_value("sha256", evidence[1]))
+        lines.append(detail(echo_value("sha256", evidence[1])))
     if credit is not None and credit_id is not None:
         lines += credits.lines(store, credit_id, credit)
     lines += cmd_discuss.filing_lines(store, discussed)
@@ -1047,7 +1069,8 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
     lines += prior_art_lines
     return Output(
         lines,
-        {
+        receipt=True,
+        data={
             "ok": True,
             "command": "new",
             "prior_art": prior_art_data,
