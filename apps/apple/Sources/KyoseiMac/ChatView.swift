@@ -297,6 +297,8 @@ struct ChatWebView: NSViewRepresentable {
     func updateNSView(_ view: WKWebView, context: Context) {}
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        /// The Dock bounce asked for when the session came to wait, until it is answered.
+        private var attentionRequest: Int?
         let feed: SessionFeed
 
         init(feed: SessionFeed) {
@@ -344,10 +346,18 @@ struct ChatWebView: NSViewRepresentable {
                 feed.sendNow(id: id)
                 return
             }
-            // KYO-883: the session now waits on the person. The Dock icon bounces once when
-            // another app is in front, on whichever screen; in front, the red line says it.
+            // KYO-883: the session now waits on the person. The Dock icon bounces until the
+            // app is in front again, when another app is in front, on whichever screen; in
+            // front, the red line says it. A session that works again before then stops it.
             if message.name == "attention" {
-                if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
+                let waiting = (message.body as? [String: Any])?["waiting"] as? Bool ?? true
+                if let request = attentionRequest {
+                    NSApp.cancelUserAttentionRequest(request)
+                    attentionRequest = nil
+                }
+                if waiting, !NSApp.isActive {
+                    attentionRequest = NSApp.requestUserAttention(.criticalRequest)
+                }
                 return
             }
             if message.name == "copy", let body = message.body as? [String: Any],

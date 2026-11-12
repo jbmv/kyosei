@@ -148,19 +148,26 @@ test("only Waiting for you is red at rest: Delete and Interrupt are grey until t
 test("the session coming to wait on the person asks the app to bounce its Dock icon, and opening on a wait does not (KYO-883)", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   await page.reload();
-  const asked = () => page!.run<number>(`window.posted.filter((p) => p.name === "attention").length`);
+  const asked = () => page!.run<number>(`window.posted.filter((p) => p.name === "attention" && p.body.waiting).length`);
+  const ended = () => page!.run<number>(`window.posted.filter((p) => p.name === "attention" && !p.body.waiting).length`);
   await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
     window.kyo.screen({ screen: { state: "idle" } }); })()`);
   assert.equal(await asked(), 0);
   await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+  assert.equal(await ended(), 1);
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   assert.equal(await asked(), 1);
+  // Work begun again ends the bounce the app keeps up until it is in front.
+  await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+  assert.equal(await ended(), 2);
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  assert.equal(await asked(), 2);
   // A second idle frame, or the clock's redraw, is no new wait.
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   await new Promise((done) => setTimeout(done, 1100));
-  assert.equal(await asked(), 1);
+  assert.equal(await asked(), 2);
   // Idle over background work is not a wait; its end is.
   await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
-  assert.equal(await asked(), 2);
+  assert.equal(await asked(), 3);
 });

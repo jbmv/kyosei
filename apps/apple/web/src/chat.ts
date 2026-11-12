@@ -682,7 +682,9 @@ function drawWorking(): void {
   const words = doing || (idle ? WAITING : "");
   // KYO-883: when the session comes to wait on the person, the app bounces its Dock icon if
   // another app is in front. The first state read is not a change, so opening does not bounce.
-  if (idle && waitingSeen === false) post("attention", {});
+  if (idle && waitingSeen === false) post("attention", { waiting: true });
+  // Work begun again before the person came back ends the bounce.
+  if (!idle && waitingSeen === true && screenState !== null) post("attention", { waiting: false });
   if (screenState !== null) waitingSeen = idle;
   working.classList.toggle("idle", idle);
   if (working.hidden === !words && workingText.textContent === words) return;
