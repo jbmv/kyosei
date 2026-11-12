@@ -24,7 +24,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo accept`](#kyo-accept) | yes | yes | apply an ingested report you have read — its criteria verdicts, its docs verdicts and its touch-drift correction — as one act (KYO-331) |
 | [`kyo activity`](#kyo-activity) | yes | no | the dispatch activity rows: every running dispatch and the newest finished ones, with record, verdict counts, worker tokens, end time and what git says about each worktree; read-only (KYO-454) |
 | [`kyo agenda`](#kyo-agenda) | optional | no | this session's task list, shared with the person: print it, or add, edit, check, uncheck, remove or move an item as the orchestrator (KYO-770) |
-| [`kyo attach`](#kyo-attach) | yes | yes | attach an evidence artifact, stored verbatim (law 5, 9) |
+| [`kyo attach`](#kyo-attach) | yes | yes | attach an evidence artifact: text is stored verbatim (law 5, 9), and an image or PDF is kept as a composer attachment that the evidence names (KYO-856) |
 | [`kyo base`](#kyo-base) | yes | no | saved view definitions (kyosei/bases.yml) over records, ideas/ or docs/: list them, or run one read-only |
 | [`kyo brief`](#kyo-brief) | yes | yes | the session briefing, derived from the store (M6) |
 | [`kyo briefs`](#kyo-briefs) | yes | no | list the session briefs the store kept, newest first, or show one with the shift notes and ledger entries between it and the brief before; read-only, unlike `kyo brief` (KYO-454) |
@@ -181,7 +181,7 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 ## `kyo attach`
 
-attach an evidence artifact, stored verbatim (law 5, 9)
+attach an evidence artifact: text is stored verbatim (law 5, 9), and an image or PDF is kept as a composer attachment that the evidence names (KYO-856)
 
 Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
 
@@ -197,7 +197,7 @@ Usage: `kyo attach [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 
 ### Options
 
-- `--file FILE` — **required**. captured text from a file, or '-' for stdin
+- `--file FILE` — **required**. captured text in UTF-8 from a file, or '-' for stdin; or a PNG, JPEG, GIF, WebP or PDF file, which is kept under $KYOSEI_HOME/composer/attachments and named in the evidence by its sha256 and session, so the store holds none of its bytes
 - `--supports ID` — optional. the claim, criterion, or record id this supports
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

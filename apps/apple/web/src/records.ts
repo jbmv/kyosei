@@ -276,6 +276,32 @@ export interface Item {
   folded?: Line[];
   /** Set when the item's lines are drawn folded under this label, as a superseded report's. */
   collapsed?: string;
+  /** A file the item names in the attachment store, drawn where the item is (KYO-856). */
+  attached?: Attached;
+}
+
+/** A composer attachment that evidence names: its id, its session and its file's name. */
+export interface Attached {
+  id: string;
+  session: string;
+  name: string;
+  extension: string;
+  /** The evidence's own text, which is the line that names the file. */
+  line: string;
+}
+
+/**
+ * The attachment a piece of evidence names, from the `attachment` that `kyo show --json` adds
+ * to evidence whose text is a reference (KYO-856). Null for other evidence, and for a file
+ * the server says is no longer there, which is then named in words.
+ */
+export function attachedOf(artifact: Doc): Attached | null {
+  const found = artifact.attachment;
+  if (!found || typeof found !== "object" || found.present !== true) return null;
+  const name = /^([0-9a-f]{64})\.(png|jpg|gif|webp|pdf)$/.exec(String(found.name ?? ""));
+  const session = word(found.session);
+  if (!name || name[1] !== found.id || !session) return null;
+  return { id: name[1], session, name: name[0], extension: name[2], line: word(artifact.text) ?? name[0] };
 }
 
 export interface Section { name: string; count: string; items: Item[] }
@@ -667,14 +693,19 @@ export function recordPage(
       items: list(doc.evidence_artifacts).map((artifact) => {
         const text = word(artifact.text) ?? word(artifact.redacted_why) ?? "";
         const long = text.length > LONG_TEXT;
+        const attached = attachedOf(artifact);
+        const gone = !attached && artifact.attachment?.present === false;
         return {
           ref: word(artifact.id) ?? undefined,
           meta: words(
             artifact.author, when(artifact.created_at),
             artifact.sha256 && `sha256 ${String(artifact.sha256).slice(0, 12)}`,
-            artifact.supports_id && `supports ${artifact.supports_id}`),
-          text: long ? "" : text,
+            artifact.supports_id && `supports ${artifact.supports_id}`,
+            gone && "the file is no longer there"),
+          // The image stands where the line that names it would.
+          text: long || attached ? "" : text,
           folded: long ? [{ label: `${text.slice(0, 90).trimEnd()}…`, text }] : [],
+          ...(attached ? { attached } : {}),
         };
       }),
     },

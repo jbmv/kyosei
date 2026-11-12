@@ -1105,6 +1105,7 @@ def show_text(
             f"  {artifact['id']}  sha256:{artifact['sha256'][:12]}  "
             f"{artifact['author']}  {artifact['created_at']}{supports}"
         )
+        out.extend(f"    {line}" for line in attachment_lines(artifact.get("attachment")))
 
     out.append("")
     out.append(f"dispatches ({len(doc['dispatches'])}):")
@@ -1782,6 +1783,27 @@ def criterion_text(criterion: dict, *, record_id: str) -> str:
     return "\n".join(out)
 
 
+def attachment_lines(attachment: dict | None) -> list[str]:
+    """KYO-856: where the file a reference names is kept, and whether it is still there.
+
+    ``attachment`` is what ``cmd_views`` adds to evidence whose text names a composer
+    attachment; ``None`` for all other evidence, which prints nothing here.
+    """
+    if attachment is None:
+        return []
+    if attachment["path"] is None:
+        return [
+            f"attachment: {attachment['name']} of session {attachment['session']} "
+            "(that session's name cannot be a directory's, so no file is kept for it)"
+        ]
+    if attachment["present"]:
+        return [f"attachment: {attachment['path']}"]
+    return [
+        f"attachment: {attachment['path']} (the file is no longer there; the record keeps "
+        "its sha256 and none of its bytes)"
+    ]
+
+
 def evidence_text(evidence: dict, *, record_id: str) -> str:
     """``kyo show <evidence-id>`` — one evidence artifact, or its redaction (c2).
 
@@ -1806,6 +1828,7 @@ def evidence_text(evidence: dict, *, record_id: str) -> str:
         )
         return "\n".join(out)
     out.append(echo_value("sha256", evidence["sha256"]))
+    out += attachment_lines(evidence.get("attachment"))
     out.append("")
     out += echo_block("text", evidence["text"])
     return "\n".join(out)

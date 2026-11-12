@@ -869,6 +869,9 @@ kyo verify KYO-1.c1 --verdict met --method machine-checked \
 kyo claim KYO-1 --level derived --method "raw SQL: SELECT ..." --file claim.md
 kyo claim KYO-1 --level verified --method "re-ran it" --supersedes KYO-1.m1 --file claim2.md
 kyo attach KYO-1 --file console.log --supports KYO-1.c1
+                                           # an image or a PDF given to --file is kept as a
+                                           # composer attachment and named by the evidence;
+                                           # none of its bytes enter the store (KYO-856)
 kyo prior-art-setting on                    # with kyosei[recx]: search for prior art when a
                                            # proposal is created (`off` records a no)
 kyo prior-art KYO-1                        # ...or search for one record now, as evidence
