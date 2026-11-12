@@ -422,6 +422,9 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-876` (task) — The discussion check asks at the next prompt, not at the stop, and a closing question does not fire it
+- **2026-11-12** — `KYO-875` (task) — The session list's hook lines and the brief's rules print only when they change
+- **2026-11-12** — `KYO-874` (task) — Write commands print a receipt when output is not a terminal
 - **2026-11-12** — `KYO-865` (task) — The brief names an open plan with no unsettled member and a discussion left open from an earlier session
 - **2026-11-12** — `KYO-864` (task) — kyo list --json rows carry the record's plan
 - **2026-11-12** — `KYO-859` (task) — The discussion check's skip is silent and its cues no longer fire on a bare question or an offer
