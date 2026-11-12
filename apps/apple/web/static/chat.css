@@ -260,7 +260,12 @@ body.terminal-open #jump-bottom { display: none; }
 .box { flex: none; }
 
 /* The session's task list: a bubble shaped as a prompt's is and slightly dimmed, since it is
-   read more often than it is written. It comes to full strength under the pointer or the caret. */
+   read more often than it is written. It comes to full strength under the pointer or the caret.
+   The dimming is in the colours and not in `opacity`. An element that is not fully opaque is
+   painted as a layer of its own. This one stands on the bottom of its column, and when it
+   grew shorter in the Mac app the top of the taller bubble stayed drawn above it until
+   something else repainted the column (KYO-852); the layer is the suspected cause, which
+   was not reproduced outside the app. */
 #agenda {
   flex: none;
   display: flex;
@@ -273,11 +278,11 @@ body.terminal-open #jump-bottom { display: none; }
   background: var(--background);
   font-size: 13px;
   line-height: 1.4;
-  opacity: 0.72;
-  transition: opacity 0.12s;
+  color: color-mix(in srgb, var(--text) 68%, var(--background));
+  transition: color 0.12s;
 }
 #agenda[hidden] { display: none; }
-#agenda:hover, #agenda:focus-within { opacity: 1; }
+#agenda:hover, #agenda:focus-within { color: var(--text); }
 #agenda-why, #agenda-note { color: var(--muted); font-size: 12.5px; }
 #agenda-why[hidden], #agenda-note[hidden], #agenda-add[hidden] { display: none; }
 #agenda-items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
