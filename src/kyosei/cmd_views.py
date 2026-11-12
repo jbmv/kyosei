@@ -2172,10 +2172,26 @@ def _with_untrusted_notice(artifact: dict) -> dict:
     }
 
 
-def _show_evidence(store: Store, evidence_id: str) -> Output:
+def _with_attachment(ctx: Context, artifact: dict) -> dict:
+    """KYO-856: ``artifact`` with ``attachment`` added when its text names a composer
+    attachment, and unchanged otherwise. ``attachment`` holds the file's id, session,
+    name, type and path on this machine, and whether the file is there now. It is a read,
+    as ``untrusted_notice`` is: the export document holds the one line of text and no
+    schema version moves."""
+    text = artifact.get("text")
+    if not isinstance(text, str) or not text.startswith("attachment "):
+        return artifact
+    # Imported here: only a record that references a file reaches the server's module.
+    from . import serve_attachments
+
+    described = serve_attachments.describe(ctx.environ, ctx.worktree_project_name, text)
+    return artifact if described is None else {**artifact, "attachment": described}
+
+
+def _show_evidence(ctx: Context, store: Store, evidence_id: str) -> Output:
     """``kyo show <evidence-id>`` (KYO-220.c2)."""
     row = store.evidence_artifact(evidence_id)  # raises NotFound("no evidence ...")
-    artifact = export._evidence(row)
+    artifact = _with_attachment(ctx, export._evidence(row))
     # KYO-585: recx's search JSON is recognised by its own top-level
     # `recx_search` and `untrusted` keys, with no schema change. Kyosei's fixed line and
     # recx's notice come before the content, and control characters are escaped.
@@ -2445,7 +2461,7 @@ def _show(ctx: Context, args: Namespace) -> Output:
     if child_kind in ("criterion", "gate", "note", "claim"):
         return _show_element(store, args.id, child_kind)
     if child_kind == "evidence":
-        return _show_evidence(store, args.id)
+        return _show_evidence(ctx, store, args.id)
     if child_kind == "report":
         return _show_report(store, args.id)
     if report_entries.is_entry_id(args.id):
@@ -2458,6 +2474,12 @@ def _show(ctx: Context, args: Namespace) -> Output:
         raise _refuse_shape(args.id, child_kind)
     # KYO-647: the derived credit fields ride on the shown document, never on the export.
     doc = with_credit_fields(export.record_document(store, args.id), store.config.people)
+    # KYO-856: evidence that names a composer attachment says where the file is and whether
+    # it is there, in the text and in --json alike; a read, never on the export.
+    doc = {
+        **doc,
+        "evidence_artifacts": [_with_attachment(ctx, a) for a in doc["evidence_artifacts"]],
+    }
     members = _plan_members(store, args.id)
     standings = _standings(store, [doc, *members])
     covered_by = _covered_by_dispatches(store, args.id)

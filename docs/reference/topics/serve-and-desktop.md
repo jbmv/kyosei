@@ -1046,6 +1046,15 @@ one declared, with `declared` and `found`), `attachment-empty` (400), `attachmen
 `attachment-not-found` (404) for an id this session has no file for, besides those of the
 token. A refused file is not saved.
 
+**A record's files (KYO-856).** `kyo attach` given an image or a PDF keeps it as an attachment
+and stores evidence that names it by sha256 and session (see the `evidence_artifacts` row of the
+tables in [store.md](store.md)). A file that no session sent is kept under the name `records` in place
+of a session id. `GET sessions/records/attachments/<id>` reads such a file. It needs the
+device token and a served project, and since `records` names no session it does not ask for
+the opt-in to reading transcripts or for a recorded session. Nothing is saved under `records`
+through the POST route, which answers 404 for it as for any session the project does not
+record.
+
 ### Notes: the note routes (KYO-706)
 
 governs: src/kyosei/serve_notes.py, src/kyosei/cmd_notes.py, src/kyosei/report_entries.py

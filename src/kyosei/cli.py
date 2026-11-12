@@ -1552,11 +1552,19 @@ def build_parser() -> KyoseiParser:
     credits.add_credit_flags(p_credit, decision=True, span=True)
 
     p_attach = sub.add_parser(
-        "attach", parents=[common], help="attach an evidence artifact, stored verbatim (law 5, 9)"
+        "attach",
+        parents=[common],
+        help="attach an evidence artifact: text is stored verbatim (law 5, 9), and an image "
+        "or PDF is kept as a composer attachment that the evidence names (KYO-856)",
     )
     p_attach.add_argument("id", metavar="RECORD_ID")
     p_attach.add_argument(
-        "--file", required=True, metavar="FILE", help="captured text from a file, or '-' for stdin"
+        "--file",
+        required=True,
+        metavar="FILE",
+        help="captured text in UTF-8 from a file, or '-' for stdin; or a PNG, JPEG, GIF, WebP "
+        "or PDF file, which is kept under $KYOSEI_HOME/composer/attachments and named in the "
+        "evidence by its sha256 and session, so the store holds none of its bytes",
     )
     p_attach.add_argument(
         "--supports", metavar="ID", help="the claim, criterion, or record id this supports"

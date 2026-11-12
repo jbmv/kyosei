@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
+from pathlib import Path
 
 from . import commands, credits, events_ledger, export
 from .clock import now
@@ -36,6 +37,7 @@ from .contracts import (
 )
 from .errors import ContractViolation, KyoseiError, UsageError
 from .prose import (
+    STDIN,
     read_prose,
     single_line,
 )
@@ -931,18 +933,95 @@ def _credit_for_verdict(
     return credit, None
 
 
+def _attachment_for(ctx: Context, source: str) -> tuple[str, dict] | None:
+    """The reference text for ``--file`` when it is a file the attachment store accepts.
+
+    KYO-855: a record holds an image by reference, never as bytes. A file that is already
+    one of this project's attachments is referenced where it is, under the session that
+    sent it. Any other accepted file is first kept in the attachment store under
+    ``RECORDS_SESSION`` and then referenced the same way. ``None`` for stdin, for a path
+    that is not a file and for bytes of no accepted type, which are read as text.
+    """
+    path = Path(source)
+    if source == STDIN or not path.is_file():
+        return None
+    # Imported here: only an attached file reaches the server's attachment functions.
+    from . import serve_attachments
+    from .serve import Refusal
+
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(serve_attachments.SNIFF_BYTES)
+            if serve_attachments.sniffed(head) is None:
+                return None
+            size = path.stat().st_size
+            limit = serve_attachments.MAX_ATTACHMENT_BYTES
+            if size > limit:
+                raise KyoseiError(
+                    f"cannot attach {source}: it is {size} bytes, and the attachment store "
+                    f"keeps at most {limit} ({limit // (1024 * 1024)} MiB); attach a smaller "
+                    "copy of it"
+                )
+            data = head + handle.read()
+    except OSError as exc:
+        raise KyoseiError(f"cannot read --file: {source}: {exc}") from exc
+    project = ctx.worktree_project_name
+    try:
+        reference = serve_attachments.kept_as(ctx.environ, project, path, data)
+        copied = False
+        if reference is None:
+            kept = serve_attachments.keep(
+                ctx.environ, project, serve_attachments.RECORDS_SESSION, data
+            )
+            assert kept is not None  # the head was sniffed as an accepted type above
+            reference, _, copied = kept
+        text = serve_attachments.reference_line(
+            reference.id, reference.media_type, reference.session
+        )
+        described = serve_attachments.describe(ctx.environ, project, text)
+    except Refusal as exc:
+        raise KyoseiError(f"cannot attach {source}: {exc}") from exc
+    assert described is not None
+    return text, {**described, "copied": copied}
+
+
+def _capture_text(source: str) -> str:
+    """``--file`` read as text; bytes that are not UTF-8 are refused in a sentence (KYO-853)."""
+    try:
+        return read_prose(source, what="--file")
+    except UnicodeDecodeError as exc:
+        named = "stdin" if source == STDIN else source
+        raise KyoseiError(
+            f"cannot attach {named}: it is neither text in UTF-8 nor a file of a type the "
+            "attachment store keeps. --file takes text, which is stored "
+            "verbatim, or a PNG, JPEG, GIF, WebP or PDF file, which is kept as an "
+            "attachment and named in the evidence. Convert an image to one of those types "
+            "and attach the converted file"
+        ) from exc
+
+
 def cmd_attach(ctx: Context, args: Namespace) -> Output:
     """``kyo attach <record-id> --file <capture> [--supports <claim-or-criterion-id>]``.
 
     KYO-4.c4: stores the text verbatim with its sha256 (law 5's echo-back), linked
-    to whatever it supports.
+    to whatever it supports. KYO-856: an image or a PDF is not stored. It is kept as a
+    composer attachment and the evidence's text is one line naming it.
     """
     store = ctx.store()
-    text = read_prose(args.file, what="--file")
+    record_id = args.id
+    # Before a file is kept, so that a mistyped id leaves nothing behind.
+    _require_record(store, record_id)
+    if args.supports:
+        _require_supports_target(store, args.supports)
+    attachment: dict | None = None
+    referenced = _attachment_for(ctx, args.file)
+    if referenced is not None:
+        text, attachment = referenced
+    else:
+        text = _capture_text(args.file)
     if not text.strip():
         raise UsageError("an attached capture must not be empty")
 
-    record_id = args.id
     with store.transaction():
         _require_record(store, record_id)
         before = {record_id: export.record_document(store, record_id)}
@@ -966,6 +1045,15 @@ def cmd_attach(ctx: Context, args: Namespace) -> Output:
         lines.append(echo_value("supports", args.supports))
     lines += echo_block("evidence", text)
     lines.append(echo_value("sha256", digest))
+    if attachment is not None:
+        lines.append(echo_value("file", attachment["path"]))
+        lines.append(
+            "the file was copied into the attachment store; the record holds the line above "
+            "and none of the file's bytes"
+            if attachment["copied"]
+            else "the file was already kept there; the record holds the line above and none "
+            "of the file's bytes"
+        )
     return Output(
         lines,
         {
@@ -974,5 +1062,6 @@ def cmd_attach(ctx: Context, args: Namespace) -> Output:
             "evidence_id": evidence_id,
             "record_id": record_id,
             "record": after[record_id],
+            **({"attachment": attachment} if attachment is not None else {}),
         },
     )

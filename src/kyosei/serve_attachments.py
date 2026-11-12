@@ -28,11 +28,20 @@ private to this account and refused inside a git repository, through
 :func:`kyosei.serve_files.write_attachment`. The name is the hex digest of the bytes and the
 extension is the checked type's, and nothing the client names becomes part of a path, so the
 same file sent twice is one file with one id. Files are kept: nothing here deletes one.
+
+A RECORD'S REFERENCE (KYO-856). A record holds an image by reference to its attachment and
+never as bytes: `kyo attach` stores evidence whose whole text is the one line
+:func:`reference_line` writes, ``attachment <sha256>.<extension> of session <session id>``.
+The line names no directory, so it holds on any machine and under any ``$KYOSEI_HOME``;
+:func:`reference_path` gives the file it names for a project. A file that no session sent
+is kept by :func:`keep` under :data:`RECORDS_SESSION`, which names no session, so the GET
+route reads it for a device token without asking whether a session of that name is recorded.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -93,6 +102,129 @@ def declared_type(header: str | None) -> str:
 
 def _sniffed(data: bytes) -> str | None:
     return next((name for name, kind in MEDIA_TYPES.items() if kind.matches(data)), None)
+
+
+#: How many of a file's first bytes :func:`sniffed` needs to tell its type.
+SNIFF_BYTES = 16
+
+#: The types accepted, as a sentence names them.
+ACCEPTED_NAMES = "PNG, JPEG, GIF, WebP or PDF"
+
+
+def sniffed(data: bytes) -> str | None:
+    """The accepted media type these bytes begin as, or None when they begin as none."""
+    return _sniffed(data)
+
+
+# ------------------------------------------------- a record's reference (KYO-856)
+
+#: The session directory for a file `kyo attach` keeps that no session sent. It is not a
+#: session's id, which is a UUID, so it cannot collide with one.
+RECORDS_SESSION = "records"
+
+_EXTENSIONS = {kind.extension: name for name, kind in MEDIA_TYPES.items()}
+
+_REFERENCE = re.compile(
+    r"^attachment ([0-9a-f]{64})\.(" + "|".join(_EXTENSIONS) + r") of session ([^\s/\\]+)$"
+)
+
+
+@dataclass(frozen=True)
+class Reference:
+    """What a reference line names: an attachment's id, its type and its session."""
+
+    id: str
+    extension: str
+    session: str
+
+    @property
+    def name(self) -> str:
+        return f"{self.id}.{self.extension}"
+
+    @property
+    def media_type(self) -> str:
+        return _EXTENSIONS[self.extension]
+
+
+def reference_line(attachment_id: str, media_type: str, session_id: str) -> str:
+    """The one line of evidence text that names an attachment."""
+    return f"attachment {attachment_id}.{MEDIA_TYPES[media_type].extension} of session {session_id}"
+
+
+def parse_reference(text: object) -> Reference | None:
+    """The attachment a piece of evidence text names, when the whole text is a reference."""
+    found = _REFERENCE.match(text) if isinstance(text, str) else None
+    return Reference(found[1], found[2], found[3]) if found else None
+
+
+def reference_path(environ: dict[str, str], project: str, reference: Reference) -> Path:
+    """Where the referenced file is kept for ``project``, whether or not it is there."""
+    directory = serve_files.attachment_directory(
+        environ, project, reference.session, create=False
+    )
+    return directory / reference.name
+
+
+def describe(environ: dict[str, str], project: str, text: object) -> dict[str, Any] | None:
+    """What `kyo show` says of evidence whose text is a reference; None for any other text.
+
+    ``path`` is where the file is kept for ``project`` and ``present`` whether it is there
+    now. A reference whose session cannot name a directory has neither a path nor a file.
+    """
+    reference = parse_reference(text)
+    if reference is None:
+        return None
+    try:
+        path: Path | None = reference_path(environ, project, reference)
+    except Refusal:
+        path = None
+    return {
+        "id": reference.id,
+        "session": reference.session,
+        "name": reference.name,
+        "media_type": reference.media_type,
+        "path": str(path) if path is not None else None,
+        "present": path is not None and path.is_file() and not path.is_symlink(),
+    }
+
+
+def keep(
+    environ: dict[str, str], project: str, session_id: str, data: bytes
+) -> tuple[Reference, Path, bool] | None:
+    """Keep ``data`` as an attachment of ``session_id``; None when its type is not accepted.
+
+    Answers the reference, the file's path and whether the file was created by this call.
+    """
+    media_type = _sniffed(data)
+    if media_type is None:
+        return None
+    attachment_id = hashlib.sha256(data).hexdigest()
+    reference = Reference(attachment_id, MEDIA_TYPES[media_type].extension, session_id)
+    directory = serve_files.attachment_directory(environ, project, session_id, create=True)
+    created = serve_files.write_attachment(directory, reference.name, data)
+    return reference, directory / reference.name, created
+
+
+def kept_as(environ: dict[str, str], project: str, path: Path, data: bytes) -> Reference | None:
+    """The reference to ``path`` when it is already one of ``project``'s attachments.
+
+    It is one when it lies in a session's directory of the project's attachments under the
+    name its bytes give it. A file of that name whose bytes have another digest is not.
+    """
+    found = re.match(r"^([0-9a-f]{64})\.([a-z]+)$", path.name)
+    media_type = _sniffed(data)
+    if not found or media_type is None or MEDIA_TYPES[media_type].extension != found[2]:
+        return None
+    if hashlib.sha256(data).hexdigest() != found[1]:
+        return None
+    session_id = path.parent.name
+    try:
+        directory = serve_files.attachment_directory(environ, project, session_id, create=False)
+    except Refusal:
+        return None
+    if os.path.realpath(path.parent) != os.path.realpath(directory):
+        return None
+    return Reference(found[1], found[2], session_id)
 
 
 def _document(attachment_id: str, path: Path, media_type: str, size: int) -> dict[str, Any]:
@@ -207,8 +339,16 @@ def read(
     authorization: str | None,
     attachment_id: str,
 ) -> tuple[str, bytes]:
-    """One attachment's type and bytes."""
-    _authorized(environ, root_of, session_id, authorization)
+    """One attachment's type and bytes.
+
+    A file under :data:`RECORDS_SESSION` was kept by `kyo attach` for a record and belongs to
+    no session, so it needs the device token and a served project, and no session's record.
+    """
+    if session_id == RECORDS_SESSION:
+        serve_send.require_device(environ, authorization)
+        root_of()
+    else:
+        _authorized(environ, root_of, session_id, authorization)
     found = find(environ, project, session_id, attachment_id)
     if found is None:
         raise _not_found(attachment_id, session_id)

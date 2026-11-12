@@ -332,6 +332,10 @@ names it in the accent colour, with an x that clears it. A
 `kyosei://` link in the chat opens its record there. The view reads `cmd/list`, `cmd/next`,
 `cmd/gates` and `cmd/show/<id>`, which need no device token, and reads them again when the
 project's event stream reports a change to the store. Its logic is in `web/src/records.ts`.
+Evidence that names a composer attachment (`kyo attach` given an image) is drawn as the image
+where the evidence is listed, fetched through the attachment route with a device token, as a
+prompt's attachment is; a PDF is named in a chip, and a file the server no longer has is
+named in words.
 The viewing history is kept in the app's own defaults for each server and project, not in
 the store.
 

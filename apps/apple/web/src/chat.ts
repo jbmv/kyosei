@@ -4857,6 +4857,15 @@ function recordItem(section: string, item: Item): HTMLElement {
     if (plain) text.classList.add("plain");
     element.append(text);
   }
+  if (item.attached) {
+    // KYO-856: evidence that names a composer attachment draws the file, fetched by its id
+    // through the attachment route of the session it is kept under.
+    const { line, name, id, extension, session } = item.attached;
+    const holder = document.createElement("div");
+    holder.className = "rec-text rec-attached";
+    holder.append(drawAttached(line, name, id, extension, session));
+    element.append(holder);
+  }
   // A superseded report keeps its lines, folded under a label that says so.
   let into: HTMLElement = element;
   if (item.collapsed && item.lines?.length) {
