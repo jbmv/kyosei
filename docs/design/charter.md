@@ -990,6 +990,10 @@ and integrates via:
     reaches the agent makes it take another turn, so an announcement that must not hold
     the session open is addressed to the person and the agent reads the items on the next
     prompt.
+  - `Stop` → `kyo sweep --hook` and then `kyo doctor --hook`, the closeout described under
+    Layer 2. In hook mode doctor ends by committing what is uncommitted in a store that is
+    its own repository, as one commit named by the records changed; a store inside the code
+    repository is named and never committed, and a worker's session commits nothing (KYO-879).
   - `Stop` → `kyo discuss check --hook` (KYO-662, KYO-876). It prints nothing at Stop. When
     the turn that ended put a choice to the person and no discussion is open in the session,
     it writes a `candidate` mark on the turn's line of the turn index. The first build
