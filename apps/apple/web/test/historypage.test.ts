@@ -240,3 +240,22 @@ test("the History search field does not set the Records search, nor the Records 
   })()`);
   assert.deepEqual(fields, { records: "", history: "", files: "" });
 });
+
+test("the History drawer is headed and spaced as the homes' lists are (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  const looks = await opened.run<{ head: string[]; homeHead: string[]; row: string; gap: number }>(`(() => {
+    [...document.querySelectorAll(".view-item")].find((item) => item.textContent.includes("History")).click();
+    const style = (element) => { const s = getComputedStyle(element); return [s.fontSize, s.fontWeight, s.color]; };
+    const heads = [...document.querySelectorAll("#history-side > h4")];
+    return {
+      head: style(heads[1]),
+      homeHead: style(document.querySelector(".files-home-side h5")),
+      row: getComputedStyle(document.querySelector("#history-sessions .mention-row")).fontSize,
+      gap: parseFloat(getComputedStyle(heads[1]).marginTop),
+    };
+  })()`);
+  assert.deepEqual(looks.head, looks.homeHead);
+  assert.equal(looks.row, "13px");
+  assert.ok(looks.gap >= 14, String(looks.gap));
+});
