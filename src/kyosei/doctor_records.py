@@ -905,8 +905,8 @@ def discussion_shares(store: Store) -> dict[str, dict[str, int]]:
     the filing itself (``--opened-late``) at an indexed turn. ``unindexed``: its opening
     names no turn of the turn index, live or late, so its start is known only from the
     time the opening was written. ``none`` counts decisions filed from no discussion, which
-    the shares leave out. ``skips`` counts the turns of that week the Stop check asked
-    about and the agent dismissed with ``kyo discuss skip``.
+    the shares leave out. ``skips`` counts the turns of that week the discussion check named
+    and the agent dismissed with ``kyo discuss skip``.
     """
     from . import cmd_discuss, cmd_turns
 

@@ -238,8 +238,8 @@ def test_every_packaged_hook_carries_the_path_guard() -> None:
     commands = packaged_hook_commands()
     # KYO-398 added the eighth: UserPromptSubmit's `kyo check-build --hook`. KYO-657 added
     # `kyo turns --hook` on UserPromptSubmit and on Stop, and KYO-662 `kyo discuss check
-    # --hook` on Stop.
-    assert len(commands) == 11, commands
+    # --hook` on Stop, and KYO-876 the same command on UserPromptSubmit.
+    assert len(commands) == 12, commands
     for name, command in commands:
         assert command.startswith(PATH_GUARD_PREFIX), f"{name}: {command!r}"
         # ...and the guard is a prefix, never the whole thing: a hook that guards and

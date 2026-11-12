@@ -600,8 +600,9 @@ kyo dossier <id>                  # one decision as a Markdown page for a reader
                                   #   each part naming its source in the store (KYO-659)
 kyo excerpt <credit> --draft|--preview|--pack   # the lines of a credit's discussion the person shares,
                                   #   with salts and proofs a reader checks against span_seal (KYO-660)
-kyo discuss check --hook          # at Stop: asks the agent to open one, or `kyo discuss skip --why`,
-                                  #   when a turn put a choice to the person and none is open (KYO-662)
+kyo discuss check --hook          # at Stop: marks a turn that put a choice to the person while none
+                                  #   was open; at the next prompt: names it once, to open one or
+                                  #   `kyo discuss skip --why` (KYO-662, KYO-876)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --to-successor <criterion-id>...   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles
@@ -979,13 +980,15 @@ and integrates via:
     reaches the agent makes it take another turn, so an announcement that must not hold
     the session open is addressed to the person and the agent reads the items on the next
     prompt.
-  - `Stop` → `kyo discuss check --hook` (KYO-662), the one place that continuation is wanted:
-    when the turn that ended put a choice to the person and no discussion is open in the
-    session, it returns `hookSpecificOutput.additionalContext`, which Claude Code gives the
-    agent as Stop hook feedback while continuing the conversation, so the agent opens the
-    discussion or records with `kyo discuss skip --why` that it is not one. It is not a
-    block, it is silent when `stop_hook_active` is set and so asks once per turn, and it is
-    in its own group so a failing sweep or doctor does not skip it.
+  - `Stop` → `kyo discuss check --hook` (KYO-662, KYO-876). It prints nothing at Stop. When
+    the turn that ended put a choice to the person and no discussion is open in the session,
+    it writes a `candidate` mark on the turn's line of the turn index. The first build
+    printed hook feedback at Stop, which Claude Code answers by continuing the conversation;
+    the agent's reply to a skip was then visible text the person had to read, so the
+    continuation was removed. The same command under `UserPromptSubmit` names the newest
+    unanswered candidate once, as one line of context with the commands `kyo discuss open
+    --at-prompt` and `kyo discuss skip --at-prompt`, and the agent acts inside the turn it
+    is already taking. It is in its own group so a failing sweep or doctor does not skip it.
   - `Stop`, `SessionEnd` and `UserPromptSubmit` → `kyo turns --hook`, which appends to the turn
     index in a project that opted in to reading transcripts and does nothing elsewhere
     (KYO-657).
