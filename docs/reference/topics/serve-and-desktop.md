@@ -299,8 +299,11 @@ otherwise `null`. A row is:
 
 ```
 session_id, title, state ("running" | "ended"), live, first_seen, last_seen, ended_at, cwd,
-remote_control_url, has_pane, pane_why, work_running, screen_state, background
+remote_control_url, has_pane, pane_why, work_running, screen_state, background, prompts
 ```
+
+`prompts` is the number of prompts the project's turn index holds for the session, and `null`
+for a session the index does not hold.
 
 `title` is the title the session's transcript holds, the latest if it holds several, and
 `null` when it holds none or cannot be read; nothing is derived in its place.

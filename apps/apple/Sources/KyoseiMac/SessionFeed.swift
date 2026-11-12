@@ -1300,20 +1300,22 @@ final class SessionFeed {
     }
 
     /// A sent attachment's image, by its id, for the prompt it was sent in (KYO-720).
-    func loadAttachment(_ id: String) {
-        guard let session = current, let token = Self.deviceToken() else { return }
+    /// The History reader names the session it is reading (KYO-850): an attachment is kept
+    /// with the session it was sent to, which need not be the live one.
+    func loadAttachment(_ id: String, session named: String? = nil) {
+        guard let session = named ?? current, let token = Self.deviceToken() else { return }
         Task {
             guard
                 let reply = try? await client.authorised(
                     "GET", sessionPath(session, "attachments/\(id)"), token: token),
                 reply.status == 200
             else {
-                if session == current {
+                if named != nil || session == current {
                     send("image", #"{"key": \#(quoted("a:" + id)), "data": null}"#)
                 }
                 return
             }
-            guard session == current else { return }
+            guard named != nil || session == current else { return }
             let bytes = [UInt8](reply.data.prefix(4))
             let type =
                 bytes.starts(with: [0x89, 0x50]) ? "image/png"

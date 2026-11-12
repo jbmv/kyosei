@@ -80,6 +80,7 @@ joins between the two is sent the ``error`` after its ``ready``.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import queue
@@ -94,7 +95,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from . import serve_files, session_layer, transcript_search
+from . import cmd_turns, seal, serve_files, session_layer, transcript_search
 from .cmd_sessions import STATE_ENDED, read_sessions
 from .config import READ_TRANSCRIPTS_KEY, Config, load_config, transcripts_opted_in
 from .errors import KyoseiError, NotFound
@@ -132,6 +133,35 @@ _CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([0-9a-f]{12})
 
 #: The lists of a delta, in the order a cursor counts them.
 _LISTS = ("turns", "replies", "tool_calls", "subagents", "command_outputs", "deliveries")
+
+
+# ------------------------------------------------------------- prompts sent, per session
+
+
+def prompt_counts(store_root: Any) -> dict[str, int]:
+    """How many prompts the turn index holds for each session (KYO-849).
+
+    The index has one line per prompt sent and one per reply committed, so a session's
+    lines that are not replies are its prompts. A session the index does not hold, because
+    it ran before the project kept an index, has no entry, and the list gives it ``null``.
+    The file is read again only when its size or modification time has changed.
+    """
+    path = cmd_turns.turns_path(store_root)
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    return _prompt_counts_at(str(store_root), stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=8)
+def _prompt_counts_at(store_root: str, modified: int, size: int) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for line in cmd_turns.read_lines(store_root):
+        session = line.get("session")
+        if isinstance(session, str) and line.get("role") != seal.ROLE_ASSISTANT:
+            counts[session] = counts.get(session, 0) + 1
+    return counts
 
 
 # ------------------------------------------------------------------- the objects as JSON
@@ -662,6 +692,9 @@ class ProjectSessions:
     def list_sessions(self) -> dict:
         file = read_sessions(self.paths.sessions)
         rows = [self._row(entry) for entry in file.entries]
+        counts = prompt_counts(self.paths.store_root)
+        for row in rows:
+            row["prompts"] = counts.get(str(row["session_id"]))
         rows.sort(key=lambda row: not row["live"])  # stable: newest first within each
         return {"ok": True, "sessions": rows, "problem": file.problem}
 

@@ -20,7 +20,9 @@ async function open(): Promise<Page> {
   await opened.run(`(() => {
     window.kyo.project({ project: "p", scope: "server/p" });
     window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
-      { session_id: "S1", title: "Today", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
+      { session_id: "S1", title: "Today", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null, prompts: 3 },
+      { session_id: "S0", title: "Earlier", live: false, first_seen: "2025-12-31T00:00:00Z", remote_control_url: null, prompts: 1 },
+      { session_id: "S9", title: "Before the index", live: false, first_seen: "2025-12-01T00:00:00Z", remote_control_url: null, prompts: null },
     ] } });
     window.kyo.apply({ reset: true,
       turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?" }],
@@ -100,7 +102,8 @@ test("a press on a block opens the session in History, never in the chat, at the
   const read = await page.run<{ reader: boolean; lit: string | null; outline: string[]; tags: string[]; selected: boolean; nav: boolean }>(`(() => {
     const ask = window.posted.filter((p) => p.body.want === "turns").pop().body.ask;
     window.kyo.historyTurns({ ask, session: "S1", status: 200, document: {
-      turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?", images: [{ index: 0 }] }],
+      turns: [{ id: "u-1", at: "2026-01-01T00:00:00Z", text: "Can we spec the anchor mode?", images: [{ index: 0 }] },
+        { id: "u-2", at: "2026-01-01T00:00:03Z", text: "attached /home/composer/${"ab".repeat(32)}.png\\nSee the file" }],
       replies: [{ message_id: "msg_1", uuid: "x-1", at: "2026-01-01T00:00:01Z", text: "The anchor mode builds on right-click." }],
       tool_calls: [{ call_id: "c1", uuid: "y1", at: "2026-01-01T00:00:02Z", name: "Bash", input: {}, result: null }] } });
     window.kyo.historyMarks({ ask, session: "S1", status: 200, document: { marks: [
@@ -117,7 +120,7 @@ test("a press on a block opens the session in History, never in the chat, at the
   })()`);
   assert.equal(read.reader, true);
   assert.equal(read.lit, "r:msg_1");
-  assert.deepEqual(read.outline, ["person:Can we spec the anchor mode?", "assistant:The anchor mode builds on right-click."],
+  assert.deepEqual(read.outline, ["person:Can we spec the anchor mode?", "assistant:The anchor mode builds on right-click.", "person:See the file"],
     "prompts and replies only, the person's set in");
   assert.deepEqual(read.tags, ["#layout"]);
   assert.equal(read.selected, true, "the chat is untouched");
@@ -125,7 +128,7 @@ test("a press on a block opens the session in History, never in the chat, at the
   // KYO-845: the drawer's rows open their places, with the anchors as the server gives them
   // (a reply's by role agent and its message, a prompt's by its uuid), and the reader asks for
   // a prompt's image by the session it reads.
-  const drawer = await page.run<{ places: string[]; lit: (string | null)[]; image: unknown; shown: number; attachments: string[] }>(`(() => {
+  const drawer = await page.run<{ places: string[]; lit: (string | null)[]; image: unknown; attached: unknown; shown: number; attachments: string[] }>(`(() => {
     // The outline marks the one message last opened; several may still be fading.
     const lit = () => document.querySelector("#history-outline .outline-row.current")?.dataset.key ?? null;
     const rows = [...document.querySelectorAll("#history-anchors .mention-row")];
@@ -138,7 +141,8 @@ test("a press on a block opens the session in History, never in the chat, at the
     return {
       places: rows.map((row) => row.querySelector(".mention-place").textContent),
       lit: seen,
-      image: window.posted.filter((p) => p.name === "image").pop()?.body ?? null,
+      image: window.posted.filter((p) => p.name === "image" && p.body.turn).pop()?.body ?? null,
+      attached: window.posted.filter((p) => p.name === "image" && p.body.attachment).pop()?.body ?? null,
       shown: document.querySelectorAll("#history-reader .turn .turn-image").length,
       attachments: [...document.querySelectorAll("#history-attachments .mention-name")].map((e) => e.textContent),
     };
@@ -146,8 +150,10 @@ test("a press on a block opens the session in History, never in the chat, at the
   assert.deepEqual(drawer.places, ["on a reply", "on a prompt"]);
   assert.deepEqual(drawer.lit, ["t:u-1", "r:msg_1", "r:msg_1", "t:u-1"], "the prompt's anchor, the reply's, the tag, the attachment");
   assert.deepEqual(drawer.image, { turn: "u-1", index: 0, session: "S1" });
-  assert.equal(drawer.shown, 1, "the prompt's image is drawn in the reader");
-  assert.deepEqual(drawer.attachments, ["1 image"]);
+  assert.equal(drawer.shown, 2, "the pasted image and the attached one are drawn in the reader");
+  // KYO-850: a file attached to a paragraph is listed too, and asked for by the session read.
+  assert.deepEqual(drawer.attachments, ["1 image", "1 attached file"]);
+  assert.deepEqual(drawer.attached, { attachment: "ab".repeat(32), session: "S1" });
   const back = await page.run<{ results: number; reader: boolean }>(`(() => {
     document.getElementById("history-home").click();
     return {
@@ -194,4 +200,43 @@ test("the chips ask again for one party, and the opened results are listed", asy
   })()`);
   assert.equal(result.role, "person");
   assert.deepEqual(result.rows, ["Can we spec the anchor mode?"]);
+});
+
+
+test("the side bar lists the sessions with their prompts, and a press reads one from its start", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const listed = await page.run<{ names: string[]; places: string[]; asked: unknown; reader: boolean }>(`(() => {
+    const rows = [...document.querySelectorAll("#history-sessions .mention-row")];
+    window.posted.length = 0;
+    rows[1].click();
+    return {
+      names: rows.map((row) => row.querySelector(".mention-name").textContent),
+      places: rows.map((row) => row.querySelector(".mention-place").textContent.split(" · ")[0]),
+      asked: window.posted.filter((p) => p.name === "history" && p.body.want === "turns").map((p) => p.body.session),
+      reader: !document.getElementById("history-reader").hidden,
+    };
+  })()`);
+  assert.deepEqual(listed.names, ["Today", "Earlier", "Before the index"], "newest first");
+  assert.deepEqual(listed.places.slice(0, 2), ["3 prompts", "1 prompt"]);
+  assert.ok(!listed.places[2].includes("prompt"), "no count where the server gives none");
+  assert.deepEqual(listed.asked, ["S0"]);
+  assert.equal(listed.reader, true);
+});
+
+test("the History search field does not set the Records search, nor the Records field the others", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const fields = await page.run<{ records: string; history: string; files: string }>(`(() => {
+    const type = (field, text) => { field.value = text; field.dispatchEvent(new Event("input", { bubbles: true })); };
+    const history = document.querySelector(".history-search");
+    const records = document.querySelector("#records-side .records-search");
+    type(history, "anchor");
+    const first = records.value;
+    type(history, "");
+    type(records, "KYO");
+    window.kyo.recordLists({ list: { records: [{ id: "KYO-9", kind: "task", title: "A record", status: "open" }] } });
+    const result = { records: first, history: history.value, files: document.querySelector(".files-search").value };
+    type(records, "");
+    return result;
+  })()`);
+  assert.deepEqual(fields, { records: "", history: "", files: "" });
 });

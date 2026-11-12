@@ -74,10 +74,15 @@ interface Facts {
   /** The prompt cache as Claude Code last reported it for this session (KYO-715). */
   cache?: { warm: boolean | null; expires_at: string | null; recache_tokens_if_cold: number | null } | null;
 }
+/** The Records search field. Other search fields share its class for their looks only. */
+const RECORDS_SEARCH = "#records-side .records-search";
+
 interface SessionRow {
   session_id: string; title: string | null; live: boolean; first_seen: string;
   remote_control_url: string | null;
   last_seen?: string | null; ended_at?: string | null;
+  /** How many prompts the turn index holds for the session; null when it holds none. */
+  prompts?: number | null;
 }
 interface Changes { added: number; removed: number; untracked: { files: number } }
 interface Menu {
@@ -340,7 +345,7 @@ function drawImage(turn: Turn, index: number, session?: string): HTMLElement {
 const ATTACHED_LINE = /^attached (?:.*\/)?(([0-9a-f]{64})\.(png|jpe?g|gif|webp|pdf))$/;
 
 /** A sent attachment: the image itself, fetched by its id, or a chip naming any other file. */
-function drawAttached(line: string, name: string, id: string, extension: string): HTMLElement {
+function drawAttached(line: string, name: string, id: string, extension: string, session?: string): HTMLElement {
   if (extension === "pdf") {
     const chip = document.createElement("span");
     chip.className = "turn-anchor";
@@ -358,7 +363,8 @@ function drawAttached(line: string, name: string, id: string, extension: string)
     image.src = data;
   } else {
     image.dataset.image = key;
-    (window as any).webkit?.messageHandlers?.image?.postMessage({ attachment: id });
+    // An attachment is kept with its session, so the History reader names the one it reads.
+    post("image", session ? { attachment: id, session } : { attachment: id });
   }
   return image;
 }
@@ -462,7 +468,7 @@ function drawTurn(turn: Turn, session?: string): HTMLElement {
     const attached = anchor ? null : line.match(ATTACHED_LINE);
     if (attached) {
       flush(false);
-      element.append(drawAttached(line, attached[1], attached[2], attached[3]));
+      element.append(drawAttached(line, attached[1], attached[2], attached[3], session));
       continue;
     }
     if (!anchor) {
@@ -965,6 +971,7 @@ function sessionLabel(row: SessionRow): string {
 
 function drawMenu(): void {
   if (!menu) return;
+  drawHistorySessions();
   const { current, sessions: { sessions } } = menu;
   const shown = allSessions ? sessions : sessions.slice(0, SESSIONS_SHOWN);
   const more = document.getElementById("sessions-more")!;
@@ -4646,7 +4653,7 @@ function drawRecordLists(): void {
     const name = chip.dataset.filter as "open" | "dispatchable" | "awaiting";
     chip.setAttribute("aria-pressed", String(narrowing[name]));
   });
-  document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").forEach((field) => {
+  document.querySelectorAll<HTMLInputElement>(RECORDS_SEARCH).forEach((field) => {
     if (field.value !== narrowing.search) field.value = narrowing.search;
   });
   drawKindControls();
@@ -5116,8 +5123,9 @@ const recordFrames = {
   },
 };
 
-// The search bar's field is drawn as these are and is no filter of the lists (KYO-754).
-document.querySelectorAll<HTMLInputElement>(".records-search:not(#find-field)").forEach((field) => {
+// The find bar's field and the History and Files search fields are drawn as this one is and
+// are no filter of the record lists (KYO-754, KYO-851).
+document.querySelectorAll<HTMLInputElement>(RECORDS_SEARCH).forEach((field) => {
   field.addEventListener("input", () => {
     narrowing.search = field.value;
     drawRecordLists();
@@ -6946,6 +6954,8 @@ function showReaderPlace(): void {
 
 /** The reader's element for a message, by the chat's key or, for a reply, its record uuid. */
 function readerElement(place: Pick<ReaderPlace, "message" | "key">): HTMLElement | undefined {
+  // A session opened from the list names no message, and is read from its start.
+  if (!place.message) return undefined;
   return readerElements.get(place.key) ?? readerElements.get(`t:${place.message}`)
     ?? [...readerElements.values()].find((element) => element.dataset.uuid === place.message);
 }
@@ -6981,7 +6991,9 @@ function drawReader(turns: Turn[], replies: Reply[]): void {
     const row = document.createElement("div");
     row.className = `outline-row ${item.person ? "person" : "assistant"}`;
     row.dataset.key = item.key;
-    row.textContent = firstWords(item.text.replace(/\s+/g, " ").trim(), 8);
+    // An attached file's line is the server's, not the person's words.
+    const words = item.text.split("\n").filter((line) => !ATTACHED_LINE.test(line)).join(" ");
+    row.textContent = firstWords(words.replace(/\s+/g, " ").trim(), 8) || "(attachment)";
     row.title = when(item.at) ?? "";
     outline.push(row);
     return element;
@@ -7005,11 +7017,36 @@ function setKind(id: string, rows: HTMLElement[]): void {
 }
 
 function drawAttachments(): void {
-  const rows = readerTurns.filter((turn) => turn.images?.length).map((turn) => sideRow(
-    `${turn.images!.length} ${turn.images!.length === 1 ? "image" : "images"}`,
-    `in your prompt · ${when(turn.at) ?? ""}`,
-    () => revealInReader({ message: turn.id, key: `t:${turn.id}` })));
+  const rows: HTMLElement[] = [];
+  for (const turn of readerTurns) {
+    // A pasted image is the turn's own; a file attached to a paragraph is a line of its text.
+    const images = turn.images?.length ?? 0;
+    const files = (turn.text ?? "").split("\n").filter((line) => ATTACHED_LINE.test(line)).length;
+    if (!images && !files) continue;
+    const parts = [
+      ...(images ? [`${images} ${images === 1 ? "image" : "images"}`] : []),
+      ...(files ? [`${files} attached ${files === 1 ? "file" : "files"}`] : []),
+    ];
+    rows.push(sideRow(parts.join(", "), `in your prompt · ${when(turn.at) ?? ""}`,
+      () => revealInReader({ message: turn.id, key: `t:${turn.id}` })));
+  }
   setKind("history-attachments", rows);
+}
+
+/** The project's sessions in the History side bar, newest first, each opening in the reader. */
+function drawHistorySessions(): void {
+  const sessions = [...(menu?.sessions.sessions ?? [])]
+    .sort((a, b) => (a.first_seen < b.first_seen ? 1 : a.first_seen > b.first_seen ? -1 : 0));
+  const rows = sessions.map((row) => {
+    const count = typeof row.prompts === "number"
+      ? `${row.prompts} ${row.prompts === 1 ? "prompt" : "prompts"} · ` : "";
+    const item = sideRow(sessionLabel(row), `${count}${when(row.first_seen) ?? ""}`,
+      () => openMessage(row.session_id, "", ""));
+    item.dataset.session = row.session_id;
+    if (row.live) item.classList.add("live");
+    return item;
+  });
+  fill(document.getElementById("history-sessions")!, rows.length ? rows : [emptyRow("No session yet.")]);
 }
 
 /**
@@ -7137,7 +7174,10 @@ const historyFrames = {
     const document_ = frame.document as { turns?: Turn[]; replies?: Reply[] };
     drawReader(document_.turns ?? [], document_.replies ?? []);
     const place = current(readerPlaces);
-    if (place && place.session === frame.session) revealInReader(place);
+    if (place && place.session === frame.session) {
+      if (place.message) revealInReader(place);
+      else historyPane.scrollTop = 0;
+    }
   },
 
   historyMarks(frame: { ask: number; session: string; status?: number; document?: unknown }): void {

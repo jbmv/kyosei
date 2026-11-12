@@ -294,6 +294,28 @@ def test_the_list_names_each_session_with_its_pane_and_whether_work_runs(bed: Be
     assert ended["has_pane"] is False and ended["work_running"] is False
 
 
+def test_the_list_counts_each_sessions_prompts_from_the_turn_index(bed: Bed) -> None:
+    """KYO-849: a prompt is an index line that is not a reply; a session the index does not
+    hold has no count, and a line added later is counted on the next read."""
+    from kyosei import cmd_turns
+
+    assert all(row["prompts"] is None for row in json_body(bed.get(SESSIONS))["sessions"])
+    index = cmd_turns.turns_path(bed.project)
+    index.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        {"session": OLD, "role": "user", "prompt_id": "p1"},
+        {"session": OLD, "role": "assistant", "prompt_id": "p1"},
+        {"session": OLD, "prompt_id": "p2"},
+    ]
+    index.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    rows = {row["session_id"]: row for row in json_body(bed.get(SESSIONS))["sessions"]}
+    assert rows[OLD]["prompts"] == 2 and rows[ENDED]["prompts"] is None
+    with index.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"session": ENDED, "role": "user", "prompt_id": "p3"}) + "\n")
+    rows = {row["session_id"]: row for row in json_body(bed.get(SESSIONS))["sessions"]}
+    assert rows[OLD]["prompts"] == 2 and rows[ENDED]["prompts"] == 1
+
+
 def test_the_list_reports_work_running_from_the_screen(bed: Bed) -> None:
     bed.show_frame("frame-05.txt")
     row = next(r for r in json_body(bed.get(SESSIONS))["sessions"] if r["session_id"] == OLD)
