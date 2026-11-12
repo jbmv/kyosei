@@ -680,3 +680,19 @@ def test_kyo882_c3_the_prefix_is_gone_from_every_reader() -> None:
     from kyosei import render
 
     assert not hasattr(render, "PRODUCED_WHY_PREFIX")
+
+
+def test_kyo882_a_discussion_dropped_after_a_kept_open_spawn_names_what_the_spawn_filed(
+    kyo, indexed: Path, tmp_path: Path
+) -> None:
+    """The closing produced nothing, and the header does not say the discussion did not:
+    a record spawned with ``--keep-open`` is still what the discussion led to."""
+    opened = kyo("discuss", "open", "--title", "x", "--json").json["id"]
+    first = _spawn_task(kyo, opened, tmp_path, "Server side", "--keep-open")
+    assert first.code == 0, first
+    closed = kyo("discuss", "close", opened, "--dropped", "--why", "the rest was not needed")
+    assert closed.code == 0, closed
+    assert _refs(kyo, opened)[-1]["outcome"] == "dropped"
+    shown = kyo("show", opened).out
+    assert f"closed, nothing more produced after {first.json['record_id']}" in shown
+    assert "closed, nothing produced" not in shown

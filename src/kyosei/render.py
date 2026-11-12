@@ -821,7 +821,18 @@ def discussion_header_lines(doc: dict, discussion: dict | None) -> list[str]:
         elif produced:
             state += ", produced " + (closed[0].get("why") or "something not recorded")
         elif closed:
-            state += ", nothing produced"
+            # A discussion kept open after a spawn and then dropped did produce what the
+            # spawn filed; the closing produced nothing more, and the header says both.
+            earlier = [
+                link["other"]
+                for link in doc.get("links", [])
+                if link["direction"] == "incoming" and link["type"] == "produced-by"
+            ]
+            state += (
+                ", nothing more produced after " + ", ".join(earlier)
+                if earlier
+                else ", nothing produced"
+            )
         if opened and opened.get("late"):
             state += "; opened late, after its decision"
         return [f"  discussion: {state}"]
