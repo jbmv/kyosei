@@ -1291,6 +1291,10 @@ ERROR_CLASS_NAMES = frozenset(
         # KYO-502: `kyo docs index --check` on a stale committed index. Exit 1 rather
         # than BrokenInvariants' 3, carrying its `--json` envelope the same way.
         "IndexStale",
+        # KYO-877: `kyo move` given several records, when a contract refused some of them.
+        # Exit 1 with the whole report of moves and refusals as the message, and its
+        # `--json` envelope carried the way `IndexStale` carries its own.
+        "MovesIncomplete",
     }
 )
 
