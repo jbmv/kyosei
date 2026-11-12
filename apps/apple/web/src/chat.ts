@@ -5735,6 +5735,15 @@ function showPathMenu(x: number, y: number, path: string): void {
 document.addEventListener("mousedown", (event) => {
   if (!(event.target instanceof Node) || !pathMenu.contains(event.target)) pathMenu.remove();
 }, true);
+
+// KYO-883: the open file's path in the top bar offers the path's menu: Copy path, and Reveal
+// in Finder when the file is on this machine.
+document.getElementById("files-path")!.addEventListener("contextmenu", (event) => {
+  if (!openFile) return;
+  event.preventDefault();
+  showPathMenu(event.clientX, event.clientY,
+    serverPath(fileRoots, openFile.root, openFile.path) ?? openFile.path);
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") pathMenu.remove();
 });
@@ -6084,8 +6093,16 @@ function drawFilesSide(): void {
   });
   drawFilesHome(root);
   drawNav("files", !openFile, fileHistory);
-  setText("files-path", openFile ? `${rootLabel(openFile.root)} / ${openFile.path}` : "");
-  document.getElementById("files-path")!.title = openFile
+  // KYO-883: the root and the path inside it are set apart by space, not a slash that reads
+  // as part of the path.
+  const pathBar = document.getElementById("files-path")!;
+  const pathWords = openFile ? `${rootLabel(openFile.root)}\u0000${openFile.path}` : "";
+  if (pathBar.dataset.shown !== pathWords) {
+    pathBar.dataset.shown = pathWords;
+    pathBar.replaceChildren(...(openFile
+      ? [span("files-path-root", rootLabel(openFile.root)), span("files-path-file", openFile.path)] : []));
+  }
+  pathBar.title = openFile
     ? serverPath(fileRoots, openFile.root, openFile.path) ?? openFile.path : "";
   const entry = openFile?.entry ?? null;
   setText("files-meta", openFile

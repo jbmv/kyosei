@@ -104,3 +104,29 @@ test("an open markdown file is outlined by its headings in the right drawer, eac
   assert.equal(outline.shown, true);
   assert.deepEqual(outline.folded, ["Title"], "folding the title hides everything under it");
 });
+
+test("an open file's path names its root apart by space, and a right-click on it offers Copy path (KYO-883)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const found = await page!.run<{ parts: string[]; text: string; gap: string; menu: string[]; copied: unknown[] }>(`(() => {
+    document.querySelector('.files-columns .tree-row[data-file="a.py"]').click();
+    window.kyo.filesBlob({ root: "code", path: "a.py", session: null, status: 200, etag: '"e"', media_type: "text/x-python",
+      size: 5, text: "x = 1\\n", data: null, error: null });
+    const bar = document.getElementById("files-path");
+    bar.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 200, clientY: 60 }));
+    const menu = [...document.querySelectorAll("#path-menu .anchor-heading, #path-menu button")].map((item) => item.textContent);
+    window.posted.length = 0;
+    [...document.querySelectorAll("#path-menu button")].find((button) => button.textContent === "Copy path").click();
+    return {
+      parts: [...bar.children].map((part) => part.textContent),
+      text: bar.textContent,
+      gap: getComputedStyle(bar.querySelector(".files-path-root")).marginRight,
+      menu,
+      copied: window.posted.filter((p) => p.name === "copy").map((p) => p.body),
+    };
+  })()`);
+  assert.deepEqual(found.parts, ["Code", "a.py"]);
+  assert.doesNotMatch(found.text, /\//);
+  assert.equal(found.gap, "14px");
+  assert.deepEqual(found.menu.slice(0, 2), ["/work/demo/a.py", "Copy path"]);
+  assert.deepEqual(found.copied, [{ text: "/work/demo/a.py" }]);
+});
