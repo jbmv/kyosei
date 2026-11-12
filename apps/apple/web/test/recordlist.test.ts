@@ -148,17 +148,19 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
     ["Other open", String(otherOpen), false], ["Closed", String(closed), false], ["All", String(SIZE), true],
   ]);
   assert.deepEqual(found.rows, ALL);
-  assert.equal(found.sorted, "created descending");
+  assert.equal(found.sorted, "name descending");
+  const heads = await opened.run<string[]>(`[...document.querySelectorAll(".records-head button")].map((b) => b.textContent)`);
+  assert.deepEqual(heads, ["Name", "Kind", "Status", "Modified"]);
   // A Location is a filter of the table.
   await opened.run(`document.querySelector('#records-locations [data-location="Awaiting you"]').click()`);
   found = await home();
   assert.deepEqual(found.rows, AWAITING);
   assert.equal(found.locations[0][2], true);
   // A column's head sorts by it, and a second press reverses it.
-  await opened.run(`document.querySelector('.records-head [data-record-sort="created"]').click()`);
+  await opened.run(`document.querySelector('.records-head [data-record-sort="name"]').click()`);
   found = await home();
   assert.deepEqual(found.rows, [...AWAITING].reverse());
-  assert.equal(found.sorted, "created ascending");
+  assert.equal(found.sorted, "name ascending");
   // The field above the table narrows the Location's rows, and knows `kind:`.
   await opened.run(`(() => {
     document.querySelector('#records-locations [data-location="All"]').click();
@@ -170,6 +172,23 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   const plans = ROWS.filter((row) => row.kind === "plan" && row.title.includes("numbered 83")).map((row) => row.id);
   assert.ok(plans.length > 0);
   assert.deepEqual(found.rows, plans);
+  // The Kind control beside the home's field is the field's `kind:` token, and is the home's own.
+  const kinds = await opened.run<{ label: string; drawer: string; field: string; rows: number }>(`(() => {
+    const control = document.querySelector("#records-landing .kind-control");
+    const field = document.getElementById("records-home-search");
+    field.value = "";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    [...control.querySelectorAll(".kind-menu input")].find((box) => box.value === "plan").click();
+    return {
+      label: control.querySelector(".kind-button").textContent,
+      drawer: document.querySelector("#records-side .kind-button").textContent,
+      field: field.value.trim(),
+      rows: document.querySelectorAll("#records-table [data-open]").length,
+    };
+  })()`);
+  assert.deepEqual(kinds, {
+    label: "Kind: plan", drawer: "Kind", field: "kind:plan", rows: ROWS.filter((row) => row.kind === "plan").length,
+  });
   // A plan in the side bar filters the table to its members, and a Location puts it back.
   await opened.run(`(() => {
     const field = document.getElementById("records-home-search");
@@ -210,6 +229,18 @@ test("the drawer is away on the home and holds Awaiting you, Recents and All bes
     all: document.querySelectorAll("#records-list [data-open]").length,
   })`);
   assert.deepEqual(await lists(), { heads: ["Awaiting you", "Recents", "All"], awaiting: AWAITING, recents: [first], all: SIZE });
+  // The three lists share the drawer's height and each scrolls by itself.
+  const heights = await opened.run<{ heights: number[]; scrolls: string[] }>(`(() => {
+    document.getElementById("menu-icon").click();
+    const lists = ["records-awaiting", "records-history", "records-list"].map((id) => document.getElementById(id));
+    return {
+      heights: lists.map((list) => Math.round(list.getBoundingClientRect().height)),
+      scrolls: lists.map((list) => getComputedStyle(list).overflowY),
+    };
+  })()`);
+  assert.ok(heights.heights[0] > 60, String(heights.heights));
+  assert.ok(Math.max(...heights.heights) - Math.min(...heights.heights) <= 2, String(heights.heights));
+  assert.deepEqual(heights.scrolls, ["auto", "auto", "auto"]);
   // The field narrows all three lists, and a list it empties of Awaiting you is not shown.
   const second = AWAITING[1];
   await search(opened, second.replace("KYO-", "numbered ") + ":");

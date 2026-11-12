@@ -234,13 +234,19 @@
             <div id="records-home-mentioned"></div>
           </nav>
           <div class="files-home-main">
-            <input id="records-home-search" class="records-search" type="search" placeholder="Search records" aria-label="Search the records of this Location" />
+            <div class="records-searchrow records-home-searchrow">
+              <input id="records-home-search" class="records-search" type="search" placeholder="Search records" aria-label="Search the records of this Location" />
+              <div class="kind-control">
+                <button class="kind-button" type="button" aria-haspopup="true" aria-expanded="false">Kind</button>
+                <button class="kind-clear" type="button" aria-label="Clear the kind filter" title="Clear the kind filter" hidden>&times;</button>
+                <div class="kind-menu" role="group" aria-label="Kinds" hidden></div>
+              </div>
+            </div>
             <div class="files-list">
               <div class="records-head">
                 <button data-record-sort="name">Name</button>
                 <button data-record-sort="kind">Kind</button>
                 <button data-record-sort="status">Status</button>
-                <button data-record-sort="created">Created</button>
                 <button data-record-sort="modified">Modified</button>
               </div>
               <div id="records-table"></div>

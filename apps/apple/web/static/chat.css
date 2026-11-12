@@ -958,11 +958,11 @@ body.view-records #menu-panel { display: flex; flex-direction: column; overflow:
 #records-side { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 #records-side > .records-searchrow { flex: none; margin: 0 4px; }
 #records-side > .records-filters { flex: none; margin: 0 4px; }
-#records-list { flex: 3; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* The drawer's three lists share its height equally and each scrolls by itself, so that a
+   long Awaiting you never buries Recents or All (KYO-862). */
+#records-awaiting, #records-history, #records-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #records-side > h4 { flex: none; margin: 4px 10px 0; padding-top: 10px; border-top: 1px solid var(--soft-line); }
 #records-side > h4[hidden], #records-awaiting[hidden] { display: none; }
-#records-awaiting { flex: 0 1 auto; max-height: 30%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-#records-history { flex: 0 1 auto; max-height: 30%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 /* The landing page: one line for each record, newest first, with its kind beside its id. */
 .records-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
@@ -1164,7 +1164,6 @@ body.view-history #menu-panel { display: flex; flex-direction: column; overflow:
 /* The Records home (KYO-835): folding groups by what each record waits on. */
 .home-more { margin: 4px 0 0; }
 #records-list[hidden], #records-history[hidden], #records-history-head[hidden] { display: none; }
-#records-awaiting { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #records-awaiting[hidden], #records-awaiting-head[hidden] { display: none; }
 /* The outline of an open record: its sections, each with a caret that lists its items. */
 .outline-section { display: flex; align-items: baseline; gap: 6px; }
@@ -1265,7 +1264,7 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 /* A fixed column of Locations beside a table with columns, laid out as the Files home is. */
 #view-records #records-landing { max-width: none; }
 #records-landing:not([hidden]) { display: flex; gap: 22px; align-items: flex-start; }
-#records-home-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.records-home-searchrow { margin-bottom: 12px; }
 .location-row .tree-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .location-count { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .records-home-side .rec-row { padding: 3px 8px; font-size: 13px; }
@@ -1277,7 +1276,7 @@ body.dock-right.has-outline:not(.view-chat) #outline-panel { box-shadow: none; }
 body.home-page.view-records .records-inner { max-width: none; }
 .records-home-side .rec-empty { padding: 3px 8px; font-size: 12.5px; }
 .records-head, #records-table .rec-row {
-  display: grid; grid-template-columns: 76px minmax(160px, 1fr) 96px 86px 84px 84px; column-gap: 12px; min-width: 620px;
+  display: grid; grid-template-columns: 76px minmax(160px, 1fr) 96px 86px 84px; column-gap: 12px; min-width: 540px;
 }
 .records-head { padding: 0 8px 4px; border-bottom: 1px solid var(--soft-line); }
 .records-head button { padding: 0; border: 0; background: none; color: var(--muted); font: 600 12px -apple-system, system-ui, sans-serif; text-align: left; cursor: default; }

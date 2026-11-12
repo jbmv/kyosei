@@ -4571,7 +4571,7 @@ function recordRow(row: RecordRow, place: "side" | "landing"): HTMLElement {
     // A row of the home's table (KYO-862): id and title under Name, then one cell a column.
     item.append(
       id, title, kindLabel(row.kind), span("rec-status", standingOf(row)),
-      span("rec-day", dayOf(row.created_at)), span("rec-day", dayOf(row.updated_at ?? row.created_at)));
+      span("rec-day", dayOf(row.updated_at ?? row.created_at)));
   }
   return item;
 }
@@ -4625,11 +4625,19 @@ function rowsNewestFirst(): RecordRow[] {
  * The Kind controls beside the two search fields (KYO-785). The checked kinds are the ones
  * the search text names with `kind:`, so the field and the dropdown are one state.
  */
+/** The search text a Kind control stands beside: the home's, or the drawer's (KYO-862). */
+function kindSearch(control: Element): { get: () => string; set: (text: string) => void } {
+  return control.closest("#records-landing")
+    ? { get: () => homeSearch, set: (text) => { homeSearch = text; } }
+    : { get: () => narrowing.search, set: (text) => { narrowing.search = text; } };
+}
+
 function drawKindControls(): void {
   const present = kindsPresent(recordRows);
-  const label = kindControlText(narrowing.search, present);
-  const checked = kindsOf(narrowing.search);
   document.querySelectorAll<HTMLElement>(".kind-control").forEach((control) => {
+    const search = kindSearch(control);
+    const label = kindControlText(search.get(), present);
+    const checked = kindsOf(search.get());
     const button = control.querySelector<HTMLButtonElement>(".kind-button")!;
     button.textContent = label.text;
     button.title = label.unknown.length
@@ -4645,9 +4653,9 @@ function drawKindControls(): void {
         box.type = "checkbox";
         box.value = kind;
         box.addEventListener("change", () => {
-          const now = kindsOf(narrowing.search);
-          narrowing.search = withKinds(
-            narrowing.search, box.checked ? [...now.filter((k) => k !== kind), kind] : now.filter((k) => k !== kind));
+          const now = kindsOf(search.get());
+          search.set(withKinds(
+            search.get(), box.checked ? [...now.filter((k) => k !== kind), kind] : now.filter((k) => k !== kind)));
           drawRecordLists();
         });
         row.append(box, span("kind", kind));
@@ -5206,7 +5214,8 @@ document.querySelectorAll<HTMLElement>(".kind-control").forEach((control) => {
     button.setAttribute("aria-expanded", String(!menu.hidden));
   });
   control.querySelector(".kind-clear")!.addEventListener("click", () => {
-    narrowing.search = withKinds(narrowing.search, []);
+    const search = kindSearch(control);
+    search.set(withKinds(search.get(), []));
     shut();
     drawRecordLists();
   });

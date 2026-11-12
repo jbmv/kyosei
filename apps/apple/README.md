@@ -326,13 +326,15 @@ as the Files home is (KYO-862): a fixed column beside a table. The column lists 
 Locations, each a filter of the table and each with its count: Awaiting you, Dispatchable,
 Other open, Closed and All. Below them are Plans, the open plans, each a filter of the table
 to the records that belong to it (the list's `plan` field, KYO-864), then Recents, the
-records viewed last, and Mentioned, the records the chat names. The table's columns are Name, Kind, Status, Created and
-Modified; a press on a column's head sorts by it and a second press reverses it. A search
-field above the table narrows the chosen Location's rows. A record is placed and shown by
+records viewed last, and Mentioned, the records the chat names. The table's columns are Name, Kind, Status and Modified; a
+press on a column's head sorts by it and a second press reverses it. Name sorts by the
+record's number, which is the order of creation. A search field above the table, with a
+Kind control of its own, narrows the chosen Location's rows. A record is placed and shown by
 its standing, so a current decision is in Closed and not among the open work.
 
 The drawer is away on the home, where the fixed column stands in its place, and is back
-beside an open record. It holds three lists, Awaiting you, Recents and All, and its search
+beside an open record. It holds three lists, Awaiting you, Recents and All, which share its
+height and scroll separately, and its search
 field, its Open only filter and its Kind control (KYO-785) narrow all three. The Kind
 control is a dropdown of the kinds the store holds, with a checkbox each. A `kind:plan` or
 `kind:plan,task` token typed in either search field names the same kinds, and the rest of the

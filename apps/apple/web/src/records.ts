@@ -810,12 +810,15 @@ export function membersOf<T extends RecordRow>(rows: T[], plan: string): T[] {
 }
 
 /** The table's columns that sort it. */
-export const RECORD_SORTS = ["name", "kind", "status", "created", "modified"] as const;
+export const RECORD_SORTS = ["name", "kind", "status", "modified"] as const;
 export type RecordSortBy = typeof RECORD_SORTS[number];
 export interface RecordSort { by: RecordSortBy; descending: boolean }
 
-/** The table as it first stands: the newest record first. */
-export const NEWEST: RecordSort = { by: "created", descending: true };
+/**
+ * The table as it first stands: the newest record first. Name sorts by the record's number,
+ * which is the order of creation, so the table needs no Created column.
+ */
+export const NEWEST: RecordSort = { by: "name", descending: true };
 
 /** A stored sort, or newest first when what was stored is none. */
 export function recordSortFrom(stored: unknown): RecordSort {
@@ -824,10 +827,10 @@ export function recordSortFrom(stored: unknown): RecordSort {
   return by ? { by, descending: given?.descending === true } : NEWEST;
 }
 
-/** The sort after a column's head is pressed: the other way round, or that column, dates newest first. */
+/** The sort after a column's head is pressed: the other way round, or that column, the newest first where it is by age. */
 export function pressedSort(sort: RecordSort, by: RecordSortBy): RecordSort {
   if (sort.by === by) return { by, descending: !sort.descending };
-  return { by, descending: by === "created" || by === "modified" };
+  return { by, descending: by === "name" || by === "modified" };
 }
 
 /** The order a Status column runs in: work from open to settled, then the knowledge states. */
@@ -842,10 +845,9 @@ function statusRank(status: string): number {
 export function sortRecords<T extends RecordRow>(rows: T[], sort: RecordSort): T[] {
   const age = (row: T) => row.seq ?? 0;
   const compare: Record<RecordSortBy, (a: T, b: T) => number> = {
-    name: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+    name: (a, b) => age(a) - age(b) || (a.created_at ?? "").localeCompare(b.created_at ?? ""),
     kind: (a, b) => a.kind.localeCompare(b.kind),
     status: (a, b) => statusRank(standingOf(a)) - statusRank(standingOf(b)) || standingOf(a).localeCompare(standingOf(b)),
-    created: (a, b) => age(a) - age(b) || (a.created_at ?? "").localeCompare(b.created_at ?? ""),
     modified: (a, b) => (a.updated_at ?? a.created_at ?? "").localeCompare(b.updated_at ?? b.created_at ?? ""),
   };
   const by = compare[sort.by];

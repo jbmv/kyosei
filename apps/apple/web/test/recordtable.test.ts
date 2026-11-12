@@ -55,11 +55,13 @@ test("a stored Location that names none is All", () => {
 });
 
 test("a column sorts the records, and a second press of it reverses them", () => {
+  // Name is the record's number, the order of creation, and starts newest first.
+  assert.deepEqual(NEWEST, { by: "name", descending: true });
   assert.deepEqual(ids(sortRecords(rows, NEWEST)), ["K-5", "K-4", "K-3", "K-2", "K-1"]);
   const byName = pressedSort(NEWEST, "name");
   assert.deepEqual(byName, { by: "name", descending: false });
-  assert.deepEqual(ids(sortRecords(rows, byName)), ["K-2", "K-1", "K-3", "K-4", "K-5"], "case is ignored");
-  assert.deepEqual(ids(sortRecords(rows, pressedSort(byName, "name"))), ["K-5", "K-4", "K-3", "K-1", "K-2"]);
+  assert.deepEqual(ids(sortRecords(rows, byName)), ["K-1", "K-2", "K-3", "K-4", "K-5"]);
+  assert.deepEqual(pressedSort({ by: "kind", descending: false }, "name"), NEWEST);
   // Records of one kind stand newest first within it.
   assert.deepEqual(ids(sortRecords(rows, { by: "kind", descending: false })), ["K-2", "K-5", "K-3", "K-4", "K-1"]);
   // Status runs from open through the work states to the knowledge states.
@@ -73,6 +75,7 @@ test("a column sorts the records, and a second press of it reverses them", () =>
 test("a stored sort that names no column is newest first", () => {
   assert.deepEqual(recordSortFrom({ by: "status", descending: true }), { by: "status", descending: true });
   assert.deepEqual(recordSortFrom({ by: "size" }), NEWEST);
+  assert.deepEqual(recordSortFrom({ by: "created", descending: false }), NEWEST, "a column the table no longer has");
   assert.deepEqual(recordSortFrom(null), NEWEST);
 });
 
