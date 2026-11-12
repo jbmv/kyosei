@@ -78,6 +78,10 @@ decides, and how a setup agent can find the answer before asking.
   the code repository would publish all of it. A separate store keeps it private by default.
 - **When to pick in-repo:** records are not sensitive and you want them reviewed in the same
   pull request as the code.
+- **Who commits it:** a store of its own is committed by Kyosei: by `kyo confirm` and
+  `kyo close-wave`, and at each stop of the orchestrator's session for whatever else changed
+  (KYO-879). An in-repo store is yours to commit with the code, and the stop names what is
+  uncommitted.
 - **Change later:** moving an in-repo store out is documented, but the history it already
   pushed stays published. `kyo redact` cannot reach a pushed commit.
 - **Decides:** the operator.
@@ -96,6 +100,8 @@ decides, and how a setup agent can find the answer before asking.
 - **Default:** none. `kyo init` creates it locally and commits the scaffold.
 - **Why it matters:** with no remote, the store exists on one disk only. A private remote
   serves as a backup, and any remote holds a copy of the store's verbatim text on another host.
+  Kyosei commits the store and never pushes it, so a remote is a backup only as often as
+  someone pushes.
 - **Decides:** the operator.
 
 ### B3. What is the record id prefix?

@@ -74,6 +74,19 @@ The rules are yours. `kyo init` copies the defaults in, you can edit or add to t
 asking the orchestrator, and `kyo install-procedures` adds new default rules after an
 upgrade without overwriting yours.
 
+## What a command prints to an agent
+
+A command that writes to the store echoes back what it stored, with the length and digest
+of each text, so that a paste the shell altered is noticed. At a terminal it prints that
+echo in full. When its output is captured, as an agent's is, a write prints a receipt in
+its place: what it did, the ids, each stored text's length and digest, and every warning,
+refusal and remedy. An agent reads all of what a command prints and reads it again on later
+turns, and one that filters long output to shorten it can drop the warning it did not
+expect. `--full` prints the whole echo, and `KYOSEI_OUTPUT=full` does so for a script.
+Commands that only read, and those the hooks run, print the same either way.
+[The operating reference](../reference/topics/operating.md) lists the commands that print a
+receipt.
+
 ## The hooks
 
 governs: src/kyosei/defaults/hooks/session-start.json, src/kyosei/defaults/hooks/prompt-submit.json, src/kyosei/defaults/hooks/pre-tool-use.json, src/kyosei/defaults/hooks/subagent-stop.json, src/kyosei/defaults/hooks/stop.json, src/kyosei/defaults/hooks/sessions.json
@@ -95,7 +108,7 @@ own. Outside a Kyosei project every one of them exits silently.
 | A worker stops | `kyo check-clean --subagent-stop` | Refuses to let a worker stop with uncommitted work. |
 | A worker stops | `kyo check-branch --subagent-stop --against main` | Refuses a worker branch that changed anything under `kyosei/` or `ideas/`. `main` here means the project's trunk, whatever it is called. |
 | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. Where the store is its own repository, what is uncommitted in it is then committed as one commit; a store inside the code repository is never committed for you, and its uncommitted paths are named. |
-| The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the session's task list (`kyo agenda`) when items of yours are still unchecked on it, or when dispatches are running and the orchestrator has listed nothing of its own, without holding the session open. |
+| The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the session's task list (`kyo agenda`) when items of yours are unchecked on it and differ from what the last stop showed, or when dispatches are running and the orchestrator has listed nothing of its own, without holding the session open. |
 | The session stops | `kyo turns --hook` | Where D14 is yes, confirms the turn index from the transcript, commits the agent's final reply to it, and copies the transcript and its subagent transcripts to the local archive. Silent. |
 | The session stops | `kyo discuss check --hook` | Where D14 is yes, and the turn put a choice to you while no discussion was open, marks the turn as a candidate. Silent. |
 | You send a prompt | `kyo discuss check --hook` | Names the newest candidate turn once, so that the orchestrator opens a discussion or records why the turn is not one within the turn it is already taking; you are not asked anything. |
@@ -106,6 +119,11 @@ The two worker checks block a worker's first attempt to stop and name the remedy
 worker stops again without fixing it, they report the finding without blocking, and the
 unblocked stop is recorded where `kyo show <dispatch-id>` and `kyo report` show it, so a
 worker that cannot act is not held indefinitely.
+
+Where the store is its own repository, the stop also commits it, so nobody has to remember
+to. The commit is made by Kyosei with a generated message that names the records changed,
+and it is never pushed. A store kept inside the code repository is left for you to commit
+with the code, and the stop names its uncommitted paths.
 
 `kyo sweep` flags; it never edits a record. A flag says, for example, that files a record
 touches have changed since the record was written. It appears in every brief until the

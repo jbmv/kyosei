@@ -155,6 +155,14 @@ moved-but-not-merged flags, aging asserted claims, doc-stale `governs:` sections
 criteria — `docs/design/charter.md`, "Sweep"), and then runs the tool's own invariant checks at
 the end of every session.
 
+**In hook mode doctor ends by committing a split store (KYO-879).** Most commands that write
+the store leave its export uncommitted. Once the checks have run, `kyo doctor --hook` commits
+what is uncommitted under the store's `kyosei/` and `ideas/` when the store is its own
+repository: one commit, with a generated message naming the records changed, made whether
+or not a check failed. A store inside the code repository is not committed; one line names
+its uncommitted paths. A worker's session commits nothing. A commit that fails is one line
+and does not fail the stop. Bare `kyo doctor` never commits.
+
 **`--hook` is about the PRINTING (KYO-362), and about not redoing work (KYO-408).** The same
 checks run, in the same order, and the exit status is the one bare `kyo doctor` would have given
 over the same export. The one check whose hook form differs is `export_roundtrip`: bare `kyo doctor`
