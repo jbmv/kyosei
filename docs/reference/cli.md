@@ -525,11 +525,11 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`; `kyo discuss skip --json` carries `prompt_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--why WHY] [--hook] {open,note,close,skip,check} [id]`
+Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--produced [RECORD_ID ...]] [--why WHY] [--hook] {open,note,close,skip,check} [id]`
 
 ### Positional arguments
 
-- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the check asked about is not a discussion; check --hook is that check, run at Stop and at the next prompt (KYO-662, KYO-876)
+- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --produced names what it led to and --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the check asked about is not a discussion; check --hook is that check, run at Stop and at the next prompt (KYO-662, KYO-876)
 - `[ID]` — optional. note and close: the discussion, PREFIX-N
 
 ### Options
@@ -538,7 +538,8 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--at-prompt PROMPT` — optional. the person's turn to stamp, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults to their latest confirmed turn
 - `--file FILE` — optional. note: what was put to the person, the options and the recommendation, from a file or '-' for stdin (law 5)
 - `--dropped` — optional. close: the discussion produced nothing; needs --why
-- `--why WHY` — optional. close --dropped: why nothing was produced; skip: why the turn is not a discussion. One line
+- `--produced [RECORD_ID ...]` — optional. close: the records the discussion led to, each linked to it as produced by it; with --why, what is not a record, such as an idea file. Not with --dropped (KYO-878)
+- `--why WHY` — optional. close --dropped: why nothing was produced; close --produced: what the discussion produced that is not a record; skip: why the turn is not a discussion. One line
 - `--hook` — optional. check: read Claude Code's hook payload on stdin. At Stop, when the turn put a choice to the person and no discussion is open in this session, mark the turn as a candidate and print nothing. At UserPromptSubmit, print one line of context naming the newest candidate not yet asked about, once, for the agent to open a discussion or skip. Never blocks and always exits 0; how the packaged hooks invoke this (KYO-662, KYO-876)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -1033,12 +1034,11 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--withdrawn] [--force] id STATUS`
+Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn UUID] [--source-other WHERE] [--withdrawn] [--force] ID [ID ...]`
 
 ### Positional arguments
 
-- `ID` — **required**.
-- `STATUS` — **required**. a status declared in kyosei/statuses.yml; the default ladder is open | working | built | verified | done | wont-do
+- `ID [ID ...]` — **required**. one or more record ids, then the status to move them to, which is a status declared in kyosei/statuses.yml (the default ladder is open | working | built | verified | done | wont-do). Several records are moved as one act with one --why, and the generated documents are regenerated and committed once; a record the transition contract refuses is left as it was, named with what is unmet, and the exit status is 1
 
 ### Options
 

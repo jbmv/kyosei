@@ -752,6 +752,12 @@ def lag_seconds(ref: dict) -> int | None:
     return int(round(made - at))
 
 
+#: ``kyo discuss close --produced --why`` stores its words under this prefix, so that a
+#: closing reference with a reason and no record reads as what it produced and not as
+#: ``--dropped`` (KYO-878). The store has no field for the difference and gains none.
+PRODUCED_WHY_PREFIX = "produced: "
+
+
 def turn_ref_lines(refs: list[dict]) -> list[str]:
     """One line for each of a discussion's turn references (export shape), plus the note or
     reason it carries. A reference that names a turn says which and when the index stamped
@@ -780,7 +786,13 @@ def turn_ref_lines(refs: list[dict]) -> list[str]:
         if ref.get("produced_id"):
             out.append(f"    produced {ref['produced_id']}")
         if ref.get("why"):
-            out.append(f"    dropped: {ref['why']}")
+            why = ref["why"]
+            if why.startswith(PRODUCED_WHY_PREFIX):
+                out.append(f"    produced, not a record: {why[len(PRODUCED_WHY_PREFIX):]}")
+            elif ref.get("produced_id"):
+                out.append(f"    why: {why}")
+            else:
+                out.append(f"    dropped: {why}")
     return out
 
 
@@ -791,8 +803,24 @@ def discussion_header_lines(doc: dict, discussion: dict | None) -> list[str]:
         closed = [r for r in doc["turn_refs"] if r["role"] == "closed"]
         opened = next((r for r in doc["turn_refs"] if r["role"] == "opened"), None)
         state = "closed" if closed else "open"
+        made: list[str] = []
         if closed and closed[0].get("produced_id"):
-            state += f", produced {closed[0]['produced_id']}"
+            made.append(closed[0]["produced_id"])
+        if closed:
+            # KYO-878: a discussion closed with several records has one in the reference
+            # and the rest as `produced-by` links to it.
+            made += [
+                link["other"]
+                for link in doc.get("links", [])
+                if link["direction"] == "incoming"
+                and link["type"] == "produced-by"
+                and link["other"] not in made
+            ]
+        closed_why = (closed[0].get("why") or "") if closed else ""
+        if made:
+            state += ", produced " + ", ".join(made)
+        elif closed_why.startswith(PRODUCED_WHY_PREFIX):
+            state += ", produced " + closed_why[len(PRODUCED_WHY_PREFIX):]
         elif closed:
             state += ", nothing produced"
         if opened and opened.get("late"):

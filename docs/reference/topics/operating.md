@@ -187,8 +187,12 @@ writes nothing.
    work without committing its report (KYO-206).
 5. **Apply verdicts and move status**: `kyo verify <criterion-id> --verdict
    met --method ... --evidence-file ...` records what was actually checked;
-   `kyo move <id> <status>` enforces its transition contract at the moment of
-   the move, naming the unmet item if it fails. A report's verdicts are never
+   `kyo move <id> [<id> ...] <status>` enforces its transition contract at the
+   moment of the move, naming the unmet item if it fails. Several ids are moved as one
+   act with one `--why`, and the generated documents are regenerated and committed once
+   for the invocation, the commit message naming each record moved. A record whose
+   contract refuses is left as it was and named with its unmet item, the others are
+   moved, and the exit status is 1 (KYO-877). A report's verdicts are never
    auto-applied — that stays a reviewed, deliberate act.
 6. **Close out through the hooks**: `Stop` runs
    `kyo sweep --hook` (staleness flags — touch-changed, touch-missing, near-duplicate

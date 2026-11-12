@@ -156,7 +156,8 @@ record's own kind. Before answering a choice put to the person, run
 `kyo discuss open --title "<topic>"` (KYO-658); file the decision from it, `kyo
 spawn <discussion> --kind decision --quote-file words.md --decision-file d.yml`, credited
 (KYO-644; `--keep-open`). A prompt's candidate turn: `kyo discuss open --at-prompt <id> --title "<topic>"`
-or `skip --at-prompt <id> --why "<why>"`, unreported. Else `kyo new decision --opened-late --at-prompt <prompt>`. One
+or `skip --at-prompt <id> --why "<why>"`, unreported. One that led to records but no decision:
+`kyo discuss close <id> --produced <record>...` (`--why` for an idea file); `--dropped` is for none. Else `kyo new decision --opened-late --at-prompt <prompt>`. One
 needing design work first is a proposal.
 
 **To share a discussion**, `kyo excerpt <credit> --draft`; the person cuts the draft (private-word hits
@@ -371,8 +372,8 @@ a credit after the fact `kyo credit <id> --basis <approval>`.
 (or `--no-tags`) its tags. `ungate`-then-`gate` instead writes a *clearing* for a condition that
 never cleared (KYO-130, KYO-148).
 
-`kyo move <id> <status>` enforces transition contracts at the moment of the transition and names
-the unmet item if it fails. Do not edit around a blocked transition; `--force` is no substitute
+`kyo move <id> [<id> ...] <status>` enforces transition contracts at the moment of the transition and
+names the unmet item if it fails. Do not edit around a blocked transition; `--force` is no substitute
 for reading the item.
 
 If a record's premise died entirely, retire it -- never leave a dead-premise record open "to be

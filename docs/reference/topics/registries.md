@@ -44,8 +44,11 @@ writes a turn reference (`KYO-n.sN`) to the person's latest confirmed turn of
 there is no index (no session, or a project that has not opted in to reading transcripts)
 the reference says `index_state: absent`. `kyo discuss note <id> --file F` keeps what was put
 to the person as a record note with a turn reference. Spawning a decision, proposal, plan
-or task from the discussion closes it, and `kyo discuss close <id> --dropped --why "..."`
-closes one that produced nothing.
+or task from the discussion closes it. `kyo discuss close <id> --produced <record> [<record>
+...]` closes one that led to records without a decision: each is linked to the discussion as
+produced by it, and `kyo show` reads `closed, produced <ids>`. `--why` there names what is
+not a record, such as an idea file. `kyo discuss close <id> --dropped --why "..."` closes one
+that produced nothing; the two flags are not accepted together (KYO-878).
 
 **The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
 ended: the person's words and any use of AskUserQuestion from the transcript, and the

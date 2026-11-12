@@ -1209,17 +1209,18 @@ def build_parser() -> KyoseiParser:
     p_move = sub.add_parser(
         "move", parents=[common], help="change status; contracts are enforced here"
     )
-    p_move.add_argument("id")
-    # KYO-101: the parser is built before any project is resolved, so it cannot list
-    # this project's statuses — they live in kyosei/statuses.yml and are per-project
-    # from this release on. It says where they are instead, and the refusal (which does
-    # have the store open) names every declared one. Same treatment `--kind` has always
-    # had, for the same reason.
+    # KYO-877: every word but the last names a record, the last is the status, and the
+    # whole is one act with one --why. `cmd_records.move_targets` splits them.
     p_move.add_argument(
-        "status",
-        metavar="STATUS",
-        help="a status declared in kyosei/statuses.yml; the default ladder is "
-        + " | ".join(default_ladder().names),
+        "words",
+        metavar="ID",
+        nargs="+",
+        help="one or more record ids, then the status to move them to, which is a status "
+        "declared in kyosei/statuses.yml (the default ladder is "
+        + " | ".join(default_ladder().names)
+        + "). Several records are moved as one act with one --why, and the generated "
+        "documents are regenerated and committed once; a record the transition contract "
+        "refuses is left as it was, named with what is unmet, and the exit status is 1",
     )
     _add_reason_flags(p_move, "(required to enter wont-do)")
     # KYO-644: a carried record's settle clears its open gates; one waiting on a person
@@ -3310,8 +3311,9 @@ def build_parser() -> KyoseiParser:
         "action",
         choices=["open", "note", "close", "skip", "check"],
         help="open files a discussion at the person's latest confirmed turn; note keeps what "
-        "was put to the person; close --dropped closes one with nothing produced; skip "
-        "records, on the turn's index line, why a turn the check asked about is not a "
+        "was put to the person; close --produced names what it led to and --dropped closes one "
+        "with nothing produced; skip records, on the turn's index line, why a turn the check "
+        "asked about is not a "
         "discussion; check --hook is that check, run at Stop and at the next prompt "
         "(KYO-662, KYO-876)",
     )
@@ -3336,8 +3338,17 @@ def build_parser() -> KyoseiParser:
         help="close: the discussion produced nothing; needs --why",
     )
     p_discuss.add_argument(
+        "--produced",
+        nargs="*",
+        metavar="RECORD_ID",
+        help="close: the records the discussion led to, each linked to it as produced by "
+        "it; with --why, what is not a record, such as an idea file. Not with --dropped "
+        "(KYO-878)",
+    )
+    p_discuss.add_argument(
         "--why",
-        help="close --dropped: why nothing was produced; skip: why the turn is not a "
+        help="close --dropped: why nothing was produced; close --produced: what the "
+        "discussion produced that is not a record; skip: why the turn is not a "
         "discussion. One line",
     )
     p_discuss.add_argument(
