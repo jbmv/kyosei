@@ -1223,20 +1223,28 @@ body.has-outline:not(.view-chat) #outline { display: block; }
   border: 0; border-radius: 6px; background: none; color: var(--muted);
 }
 #outline:hover #outline-icon, body.dock-right #outline-icon { background: var(--panel); }
+/* The outline comes out from the pane's own edge, fading in, and never crosses the composer. */
 #outline-panel {
-  position: fixed; z-index: 2; top: var(--views-height); bottom: 0; right: calc(var(--composer-width) + 6px);
-  width: 280px; padding: 48px 8px 12px; overflow-y: auto; background: var(--background);
+  position: fixed; z-index: 2; top: calc(46px + var(--views-height)); bottom: 0; right: calc(var(--composer-width) + 6px);
+  width: 280px; padding: 12px 8px; overflow-y: auto; background: var(--background);
   border-left: 1px solid var(--line); box-shadow: -2px 0 14px rgba(0, 0, 0, 0.12);
-  transform: translateX(calc(100% + var(--composer-width) + 6px)); transition: transform 0.14s ease-out;
+  opacity: 0; visibility: hidden; transform: translateX(16px);
+  transition: opacity 0.14s ease-out, transform 0.14s ease-out, visibility 0s linear 0.14s;
 }
-#outline:hover #outline-panel, #outline:focus-within #outline-panel, body.dock-right #outline-panel { transform: none; }
+#outline:hover #outline-panel, #outline:focus-within #outline-panel, body.dock-right #outline-panel {
+  opacity: 1; visibility: visible; transform: none; transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+}
 #outline-panel h4 { margin: 0 10px 8px; color: var(--muted); font-size: 13px; }
 #menu-icon { cursor: default; }
 body.dock-left #menu-panel { transform: none; box-shadow: none; }
-/* Docked, a drawer starts under the top bar, which keeps its icons and its words. */
-body.dock-left #menu-panel, body.dock-right.has-outline:not(.view-chat) #outline-panel {
-  top: calc(46px + var(--views-height)); padding-top: 12px;
+/* A drawer, out or docked, starts under the bar of navigation icons, which it never covers
+   (2026-11-11). A strip under each icon keeps the pointer over the drawer on its way down. */
+#menu-panel { top: calc(46px + var(--views-height)); padding-top: 12px; }
+#menu:hover::after, #outline:hover::after {
+  content: ""; position: fixed; z-index: 2; top: calc(var(--views-height) + 30px); height: 20px; width: 40px;
 }
+#menu:hover::after { left: 5px; }
+#outline:hover::after { right: calc(var(--composer-width) + 11px); }
 body.dock-left #menu-icon { background: var(--panel); }
 body.dock-left #page, body.dock-left .view-pane { left: 300px; }
 body.dock-right.has-outline:not(.view-chat) .view-pane { right: calc(var(--composer-width) + 6px + 280px); }
