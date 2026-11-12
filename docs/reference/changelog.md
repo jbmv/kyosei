@@ -420,6 +420,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-12** — `KYO-859` (task) — The discussion check's skip is silent and its cues no longer fire on a bare question or an offer
+- **2026-11-12** — `KYO-853` (bug) — kyo attach --file ends in an uncaught UnicodeDecodeError on an image
 - **2026-11-12** — `KYO-843` (proposal) — How kyo reaches a seal key that the signed Mac app keeps in iCloud Keychain
 - **2026-11-12** — `KYO-789` (task) — The seal key can live in iCloud Keychain, through the signed Mac app
 - **2026-11-12** — `KYO-660` (task) — Excerpt packs, the person's review, and a standalone verifier
