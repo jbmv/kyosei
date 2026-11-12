@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  LOCATIONS, NEWEST, dayOf, located, locationFrom, membersOf, narrow, openPlans, pressedSort, recordSortFrom, sortRecords,
+  LOCATIONS, NEWEST, briefPage, briefRows, dayOf, located, notePage, noteRows, parseLink, sessionAt, locationFrom, membersOf, narrow, openPlans, pressedSort, recordSortFrom, sortRecords,
   storedFilters,
 } from "../src/records.ts";
 
@@ -98,4 +98,62 @@ test("a day is stated without its year in the present year, and not at all when 
   assert.match(dayOf("2025-03-05T12:00:00Z", now), /2025/);
   assert.equal(dayOf(undefined, now), "");
   assert.equal(dayOf("not a date", now), "");
+});
+
+const NOTES = { notes: [
+  { id: "K-S2", seq: 2, author: "orchestrator", created_at: "2026-01-03T10:00:00Z", handoff_for: null,
+    text: "Second note, first line.\nIts second line." },
+  { id: "K-S1", seq: 1, author: "orchestrator", created_at: "2026-01-01T10:00:00Z", handoff_for: "K-B2", text: "First note." },
+] };
+const BRIEFS = { briefs: [
+  { id: "K-B1", seq: 1, at: "2026-01-01T09:00:00Z", session_id: "aaaaaaaa-1111", session_start: true, build_commit: "0123456789ab" },
+  { id: "K-B2", seq: 2, at: "2026-01-02T09:00:00Z", session_id: "bbbbbbbb-2222", session_start: true, build_commit: null },
+  { id: "K-B3", seq: 3, at: "2026-01-03T09:30:00Z", session_id: "bbbbbbbb-2222", session_start: false, build_commit: null },
+] };
+
+test("shift notes and briefs are rows of their own Locations, newest first, and no part of All (KYO-869)", () => {
+  const notes = noteRows(NOTES);
+  assert.deepEqual(notes.map((row) => [row.id, row.kind, row.title, row.standing]), [
+    ["K-S2", "shift note", "Second note, first line.", "note"],
+    ["K-S1", "shift note", "First note.", "handoff"],
+  ]);
+  const briefs = briefRows(BRIEFS);
+  assert.deepEqual(briefs.map((row) => [row.id, row.title, row.standing]), [
+    ["K-B3", "Brief · session bbbbbbbb", "brief"],
+    ["K-B2", "Session start · session bbbbbbbb", "session start"],
+    ["K-B1", "Session start · session aaaaaaaa · build 01234567", "session start"],
+  ]);
+  const found = located(rows, new Set(), new Set(), { notes, briefs });
+  assert.deepEqual(ids(found["Shift notes"]), ["K-S2", "K-S1"]);
+  assert.deepEqual(ids(found.Briefs), ["K-B3", "K-B2", "K-B1"]);
+  assert.deepEqual(ids(found.All), ids(rows));
+  assert.deepEqual(noteRows(null), []);
+  assert.deepEqual(briefRows({}), []);
+});
+
+test("a note's session is the one whose opening brief came last before it", () => {
+  assert.equal(sessionAt(BRIEFS, "2026-01-03T10:00:00Z"), "bbbbbbbb-2222");
+  assert.equal(sessionAt(BRIEFS, "2026-01-01T10:00:00Z"), "aaaaaaaa-1111");
+  assert.equal(sessionAt(BRIEFS, "2025-12-31T00:00:00Z"), null);
+  assert.equal(sessionAt(null, "2026-01-03T10:00:00Z"), null);
+});
+
+test("a shift note and a brief are drawn as pages, and a link to either names it", () => {
+  const note = notePage({ object: "shift-note", ...NOTES.notes[1] }, "K-B2");
+  assert.equal(note.id, "K-S1");
+  assert.equal(note.kind, "shift note");
+  assert.equal(note.description, "First note.");
+  assert.deepEqual(note.facts.map((fact) => fact.label), ["author", "written", "handoff for"]);
+  assert.equal(note.facts[2].text, "K-B2");
+  const brief = briefPage({
+    run: BRIEFS.briefs[1], previous_brief_id: "K-B1",
+    shift_notes: [{ id: "K-S1", author: "orchestrator", created_at: "2026-01-01T10:00:00Z", text: "First note." }],
+    events: [{ id: "K-E5", actor: "orchestrator", at: "2026-01-01T10:00:00Z", command: "note --shift", record_id: null }],
+  });
+  assert.equal(brief.id, "K-B2");
+  assert.equal(brief.status, "session start");
+  assert.deepEqual(brief.sections.map((section) => [section.name, section.items.length]), [["Shift notes", 1], ["Events", 1]]);
+  assert.equal(brief.sections[1].items[0].text, "note --shift");
+  assert.equal(parseLink("kyosei://KYO/KYO-S392")?.record, "KYO-S392");
+  assert.equal(parseLink("kyosei://KYO/KYO-B180")?.record, "KYO-B180");
 });

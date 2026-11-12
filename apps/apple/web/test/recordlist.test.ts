@@ -146,7 +146,7 @@ test("the home is a table of the chosen Location, sorted by a pressed column, wi
   assert.deepEqual(found.locations, [
     ["Awaiting you", String(awaiting), false], ["Dispatchable", String(ready), false],
     ["Other open", String(otherOpen), false], ["Closed", String(closed), false], ["Reference", "0", false],
-    ["All", String(SIZE), true],
+    ["All", String(SIZE), true], ["Shift notes", "0", false], ["Briefs", "0", false],
   ]);
   assert.deepEqual(found.rows, ALL);
   assert.equal(found.sorted, "name descending");
@@ -279,4 +279,56 @@ test("a kept row follows the record that is open, and a new list from the server
   assert.equal(titles.length, 41);
   assert.ok(titles.every((title) => title.startsWith("The renamed record numbered ")), titles[0]);
   assert.deepEqual((await current()).side, ["KYO-9"]);
+});
+
+test("Shift notes is a Location of the home, the latest note is one press away, and a note opens as a page with its session", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open(records(12));
+  const found = await opened.run<{ count: string; rows: string[]; kinds: string[]; latest: string; counted: string; asked: boolean }>(`(() => {
+    window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "The session", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
+    ] } });
+    window.kyo.recordLists({
+      list: { records: ${JSON.stringify(records(12))} },
+      notes: { notes: [
+        { id: "KYO-S2", seq: 2, author: "orchestrator", created_at: "2026-01-03T10:00:00Z", handoff_for: null, text: "The second note." },
+        { id: "KYO-S1", seq: 1, author: "orchestrator", created_at: "2026-01-02T10:00:00Z", handoff_for: "KYO-B2", text: "The first note." },
+      ] },
+      briefs: { briefs: [{ id: "KYO-B1", seq: 1, at: "2026-01-01T09:00:00Z", session_id: "S1", session_start: true, build_commit: null }] },
+    });
+    document.querySelector('#records-locations [data-location="Shift notes"]').click();
+    const before = window.posted.length;
+    const out = {
+      count: document.querySelector('#records-locations [data-location="Shift notes"] .location-count').textContent,
+      rows: [...document.querySelectorAll("#records-table [data-open]")].map((row) => row.dataset.open),
+      kinds: [...document.querySelectorAll("#records-table .kind")].map((kind) => kind.textContent),
+      latest: document.querySelector("#records-home-latest-note [data-open]").dataset.open,
+      counted: document.getElementById("records-count").textContent,
+    };
+    document.querySelector("#records-home-latest-note [data-open]").click();
+    out.asked = window.posted.slice(before).some((p) => p.name === "records" && p.body.want === "record" && p.body.id === "KYO-S2");
+    return out;
+  })()`);
+  assert.deepEqual(found, {
+    count: "2", rows: ["KYO-S2", "KYO-S1"], kinds: ["shift note", "shift note"], latest: "KYO-S2",
+    counted: "2 shift notes", asked: true,
+  });
+  const drawn = await opened.run<{ head: string; body: string; session: string; view: boolean }>(`(() => {
+    window.kyo.record({ id: "KYO-S2", document: { object: "shift-note", id: "KYO-S2", seq: 2, author: "orchestrator",
+      created_at: "2026-01-03T10:00:00Z", text: "The second note." } });
+    const link = document.querySelector("#record .session-link");
+    const out = {
+      head: document.querySelector("#record .record-head").textContent,
+      body: document.querySelector("#record .reply").textContent.trim(),
+      session: link.textContent,
+    };
+    link.click();
+    out.view = document.body.classList.contains("view-history");
+    return out;
+  })()`);
+  assert.match(drawn.head, /KYO-S2/);
+  assert.match(drawn.head, /shift note/);
+  assert.equal(drawn.body, "The second note.");
+  assert.equal(drawn.session, "The session");
+  assert.equal(drawn.view, true, "the link opens the session in History");
 });

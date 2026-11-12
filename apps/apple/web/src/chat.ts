@@ -21,6 +21,7 @@ import {
   dayOf, dispatchableIds, historyFrom, historyRows, located, locationFrom, LOCATIONS, membersOf, narrow, newestFirst,
   openPlans,
   parseLink, prefixOf, pressedSort, recordSortFrom, sortRecords, standingOf, storedFilters,
+  briefPage, briefRows, notePage, noteRows, sessionAt,
   recordOf, recordPage, refParts, visit, when, withKinds,
 } from "./records";
 import {
@@ -4529,6 +4530,15 @@ const recordsTable = document.getElementById("records-table")!;
 const recordsHomeSearch = document.getElementById("records-home-search") as HTMLInputElement;
 
 let recordRows: RecordRow[] = [];
+/** The shift notes and the briefs as rows of the home's table, and the answers they came from (KYO-869). */
+let noteList: RecordRow[] = [];
+let briefList: RecordRow[] = [];
+let notesAnswer: unknown = null;
+let briefsAnswer: unknown = null;
+/** Every row a list can name: the records, then the shift notes and the briefs. */
+function listedRows(): RecordRow[] {
+  return [...recordRows, ...noteList, ...briefList];
+}
 let readyRecords = new Set<string>();
 let awaitingRecords = new Set<string>();
 /** Whether the lists have been asked for, and whether an answer has come. */
@@ -4768,7 +4778,7 @@ function drawRecordLists(): void {
     return item;
   }));
   const narrowed = narrowing.open || narrowing.search.trim() !== "";
-  const recent = narrow(historyRows(viewedRecords, recordRows), narrowing, readyRecords, awaitingRecords);
+  const recent = narrow(historyRows(viewedRecords, listedRows()), narrowing, readyRecords, awaitingRecords);
   fill(
     recordsHistoryList,
     recent.length
@@ -4783,9 +4793,13 @@ function drawRecordLists(): void {
   drawNav("records", openRecordId === null, recordPlaces);
   document.getElementById("records-count")!.textContent = openRecordId !== null || !listsRead
     ? ""
-    : homeRows().length === recordRows.length
-      ? plural(recordRows.length, "record")
-      : `${homeRows().length} of ${plural(recordRows.length, "record")}`;
+    : homeLocation === "Shift notes" && !chosenPlan()
+      ? plural(homeRows().length, "shift note")
+      : homeLocation === "Briefs" && !chosenPlan()
+        ? plural(homeRows().length, "brief")
+        : homeRows().length === recordRows.length
+          ? plural(recordRows.length, "record")
+          : `${homeRows().length} of ${plural(recordRows.length, "record")}`;
 }
 
 /** The table's rows: the chosen Location's records that the home's search leaves, sorted. */
@@ -4793,7 +4807,7 @@ function homeRows(): RecordRow[] {
   const plan = chosenPlan();
   const inLocation = plan
     ? membersOf(rowsNewestFirst(), plan)
-    : located(rowsNewestFirst(), readyRecords, awaitingRecords)[homeLocation];
+    : located(rowsNewestFirst(), readyRecords, awaitingRecords, { notes: noteList, briefs: briefList })[homeLocation];
   const found = narrow(
     inLocation, { open: false, dispatchable: false, awaiting: false, search: homeSearch }, readyRecords);
   return sortRecords(found, homeSort);
@@ -4823,12 +4837,12 @@ function mentionedRecords(): RecordRow[] {
     const id = link.kind === "record" ? parseLink(link.href)?.record : null;
     if (id && !ids.includes(id)) ids.push(id);
   }
-  return historyRows(ids, recordRows);
+  return historyRows(ids, listedRows());
 }
 
 /** The Records home (KYO-862): Locations with their counts, Recents, Mentioned and the table. */
 function drawRecordsHome(nothing: string): void {
-  const places = located(rowsNewestFirst(), readyRecords, awaitingRecords);
+  const places = located(rowsNewestFirst(), readyRecords, awaitingRecords, { notes: noteList, briefs: briefList });
   fill(document.getElementById("records-locations")!, LOCATIONS.map((name) => {
     const row = document.createElement("div");
     row.className = name === homeLocation && !chosenPlan() ? "location-row current" : "location-row";
@@ -4848,7 +4862,9 @@ function drawRecordsHome(nothing: string): void {
   const short = (rows: RecordRow[], none: string) => rows.length
     ? rows.slice(0, HOME_SIDE_ROWS).map(homeSideRow) : [emptyRow(none)];
   fill(document.getElementById("records-home-recent")!,
-    short(historyRows(viewedRecords, recordRows), "None yet."));
+    short(historyRows(viewedRecords, listedRows()), "None yet."));
+  // The note written last is the one a person reads to pick a project up, so it is one press away.
+  fill(document.getElementById("records-home-latest-note")!, short(noteList.slice(0, 1), "None yet."));
   fill(document.getElementById("records-home-mentioned")!, short(mentionedRecords(), "None yet."));
   document.querySelectorAll<HTMLElement>(".records-head [data-record-sort]").forEach((button) => {
     if (button.dataset.recordSort === homeSort.by) {
@@ -5088,7 +5104,18 @@ function drawRecord(): void {
     return;
   }
   const titles = new Map(recordRows.map((row) => [row.id, row.title]));
-  const page = recordPage(openRecordDoc, titles, coveringDocs);
+  // A shift note and a brief are no records and are drawn as pages of their own (KYO-869).
+  const isNote = openRecordDoc.object === "shift-note";
+  const isBrief = !isNote && typeof openRecordDoc.run === "object" && openRecordDoc.run !== null;
+  const handoffFor = isNote
+    ? ((notesAnswer as { notes?: { id?: string; handoff_for?: string | null }[] } | null)?.notes ?? [])
+      .find((note) => note.id === openRecordId)?.handoff_for ?? null
+    : null;
+  const page = isNote ? notePage(openRecordDoc, handoffFor)
+    : isBrief ? briefPage(openRecordDoc) : recordPage(openRecordDoc, titles, coveringDocs);
+  // The session a note was written in, or a brief opened, as a link to it in History.
+  const pageSession = isNote ? sessionAt(briefsAnswer, openRecordDoc.created_at)
+    : isBrief ? ((openRecordDoc.run as { session_id?: string | null }).session_id ?? null) : null;
   const head = document.createElement("div");
   head.className = "record-head";
   head.dataset.recordRef = page.id;
@@ -5102,6 +5129,23 @@ function drawRecord(): void {
     term.textContent = fact.label;
     const value = document.createElement("dd");
     value.append(linked(fact.text));
+    facts.append(term, value);
+  }
+  if (pageSession) {
+    const term = document.createElement("dt");
+    term.textContent = "session";
+    const value = document.createElement("dd");
+    const link = document.createElement("a");
+    link.className = "session-link";
+    link.href = "#";
+    link.textContent = sessionTitle(pageSession);
+    link.title = "Open this session in History";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      showView("history");
+      openMessage(pageSession, "", "");
+    });
+    value.append(link);
     facts.append(term, value);
   }
   const parts: HTMLElement[] = [head, title, facts];
@@ -5198,6 +5242,9 @@ const recordFrames = {
   /** The project the Records view shows, and the history the app kept for it. */
   records(frame: { project?: string; history?: unknown }): void {
     recordRows = [];
+    noteList = [];
+    briefList = [];
+    notesAnswer = briefsAnswer = null;
     readyRecords = new Set();
     awaitingRecords = new Set();
     listsRead = false;
@@ -5218,7 +5265,17 @@ const recordFrames = {
   /** `kyo list`, `kyo next` and the gates waiting on the person, each null when unread. */
   recordLists(frame: {
     list?: { records?: RecordRow[] } | null; next?: unknown; gates?: unknown; error?: string | null;
+    notes?: unknown; briefs?: unknown;
   }): void {
+    // The shift log and the briefs, each left as it was when its read failed.
+    if (frame.notes) {
+      notesAnswer = frame.notes;
+      noteList = noteRows(frame.notes);
+    }
+    if (frame.briefs) {
+      briefsAnswer = frame.briefs;
+      briefList = briefRows(frame.briefs);
+    }
     listsProblem = frame.error ?? null;
     // A read that failed leaves the lists as they were.
     if (Array.isArray(frame.list?.records)) {

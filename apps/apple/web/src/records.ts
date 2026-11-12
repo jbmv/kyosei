@@ -194,7 +194,8 @@ export function historyRows(history: string[], rows: RecordRow[]): RecordRow[] {
 // ------------------------------------------------------------------------------ record ids
 
 // An entry of a report has a second part: `KYO-740.r1.p1` (KYO-757).
-const REF = /^([A-Z][A-Z0-9]*-\d+)(\.[a-z]+\d+){0,2}$/;
+// A shift note's number follows an `S` and a brief's a `B`: `KYO-S392`, `KYO-B180`.
+const REF = /^([A-Z][A-Z0-9]*-[SB]?\d+)(\.[a-z]+\d+){0,2}$/;
 
 /**
  * The record an id belongs to: `KYO-732` for `KYO-732.c1` and for `KYO-732.r1.p1`. Null when
@@ -783,7 +784,9 @@ export function homeGroups<T extends RecordRow>(
 // ------------------------------------------------- the Records home as a table (KYO-862)
 
 /** The Locations of the Records home's side bar, each a filter of the table. */
-export const LOCATIONS = ["Awaiting you", "Dispatchable", "Other open", "Closed", "Reference", "All"] as const;
+export const LOCATIONS = [
+  "Awaiting you", "Dispatchable", "Other open", "Closed", "Reference", "All", "Shift notes", "Briefs",
+] as const;
 export type RecordLocation = typeof LOCATIONS[number];
 
 /** A stored Location, or All when what was stored names none. */
@@ -800,12 +803,15 @@ const KNOWLEDGE = new Set(["current", "void"]);
  */
 export function located<T extends RecordRow>(
   rows: T[], ready: ReadonlySet<string>, awaiting: ReadonlySet<string>,
+  log: { notes: T[]; briefs: T[] } = { notes: [], briefs: [] },
 ): Record<RecordLocation, T[]> {
   const [waiting, dispatchable, open, settled] = homeGroups(rows, ready, awaiting).map((group) => group.rows);
   const reference = (row: T) => KNOWLEDGE.has(standingOf(row));
   return {
     "Awaiting you": waiting, Dispatchable: dispatchable, "Other open": open,
     Closed: settled.filter((row) => !reference(row)), Reference: settled.filter(reference), All: rows,
+    // The shift log and the briefs are no records, so All does not hold them (KYO-869).
+    "Shift notes": log.notes, Briefs: log.briefs,
   };
 }
 
@@ -879,4 +885,123 @@ export function dayOf(at: unknown, now = new Date()): string {
   const when = new Date(at);
   return when.toLocaleDateString([], when.getFullYear() === now.getFullYear()
     ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
+}
+
+// ------------------------------------------- shift notes and briefs as Locations (KYO-869)
+
+/** The kind a shift note and a brief are listed under: neither is a record of a kind. */
+export const NOTE_KIND = "shift note";
+export const BRIEF_KIND = "brief";
+
+function firstLine(text: string, most = 140): string {
+  const line = text.trim().split("\n")[0].trim();
+  return line.length > most ? `${line.slice(0, most).trimEnd()}…` : line;
+}
+
+/**
+ * `kyo shift-notes --json` as rows of the table, newest first: a note is named by its first
+ * line and stands as `handoff` when it was the last one written before a session began.
+ */
+export function noteRows(answer: unknown): RecordRow[] {
+  return list((answer as Doc | null)?.notes)
+    .filter((note) => word(note.id))
+    .map((note) => {
+      const handoff = Boolean(word(note.handoff_for));
+      return {
+        id: note.id, kind: NOTE_KIND, seq: typeof note.seq === "number" ? note.seq : undefined,
+        title: word(note.redacted_at) ? "(redacted)" : firstLine(word(note.text) ?? ""),
+        status: handoff ? "handoff" : "note", standing: handoff ? "handoff" : "note",
+        created_at: word(note.created_at) ?? undefined, updated_at: word(note.created_at) ?? undefined,
+      };
+    })
+    .sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
+}
+
+/** `kyo briefs --json` as rows of the table, newest first, each named by what it opened. */
+export function briefRows(answer: unknown): RecordRow[] {
+  return list((answer as Doc | null)?.briefs)
+    .filter((brief) => word(brief.id))
+    .map((brief) => {
+      const session = word(brief.session_id);
+      const build = word(brief.build_commit);
+      const start = brief.session_start === true;
+      return {
+        id: brief.id, kind: BRIEF_KIND, seq: typeof brief.seq === "number" ? brief.seq : undefined,
+        title: [
+          start ? "Session start" : "Brief", session && `session ${session.slice(0, 8)}`,
+          build && `build ${build.slice(0, 8)}`,
+        ].filter(Boolean).join(" · "),
+        status: start ? "session start" : "brief", standing: start ? "session start" : "brief",
+        created_at: word(brief.at) ?? undefined, updated_at: word(brief.at) ?? undefined,
+      };
+    })
+    .sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
+}
+
+/**
+ * The session a shift note was written in: the one whose opening brief is the last before
+ * the note. A note carries no session, and a brief that opened a session carries its id.
+ */
+export function sessionAt(briefs: unknown, at: unknown): string | null {
+  const when_ = word(at);
+  if (!when_) return null;
+  let found: Doc | null = null;
+  for (const brief of list((briefs as Doc | null)?.briefs)) {
+    const began = word(brief.at);
+    if (brief.session_start !== true || !word(brief.session_id) || !began || began > when_) continue;
+    if (!found || began > found.at) found = brief;
+  }
+  return found ? found.session_id : null;
+}
+
+/** A shift note as a page: who wrote it and when, what it handed off to, and its text. */
+export function notePage(doc: Doc, handoffFor: string | null = null): Page {
+  return {
+    id: word(doc.id) ?? "", kind: NOTE_KIND, status: handoffFor ? "handoff" : "",
+    title: word(doc.redacted_at) ? "(redacted)" : firstLine(word(doc.text) ?? "", 90),
+    facts: [
+      ...line("author", doc.author),
+      ...line("written", when(doc.created_at)),
+      ...line("handoff for", handoffFor),
+      ...line("redacted", when(doc.redacted_at), doc.redacted_why),
+    ],
+    description: word(doc.text) ?? "", sections: [], none: [],
+  };
+}
+
+/** `kyo briefs <id> --json` as a page: the run, then the notes and the ledger since the brief before. */
+export function briefPage(doc: Doc): Page {
+  const run: Doc = doc.run && typeof doc.run === "object" ? doc.run : {};
+  const notes = list(doc.shift_notes);
+  const events = list(doc.events);
+  const start = run.session_start === true;
+  return {
+    id: word(run.id) ?? "", kind: BRIEF_KIND, status: start ? "session start" : "",
+    title: start ? "The brief that opened a session" : "A brief",
+    facts: [
+      ...line("printed", when(run.at)),
+      ...line("by", run.actor),
+      ...line("build", run.build_commit, when(run.build_commit_time), run.build_source),
+      ...line("brief before", doc.previous_brief_id),
+    ],
+    description: "",
+    sections: [
+      {
+        name: "Shift notes", count: `${notes.length} since the brief before`,
+        items: notes.map((note) => ({
+          ref: word(note.id) ?? undefined, meta: words(note.author, when(note.created_at)),
+          text: word(note.text) ?? "",
+        })),
+      },
+      {
+        name: "Events", count: `${events.length} since the brief before`,
+        items: events.map((event) => ({
+          ref: word(event.id) ?? undefined,
+          meta: words(event.actor, when(event.at)),
+          text: words(event.command, event.record_id).join(" · "),
+        })),
+      },
+    ].filter((section) => section.items.length),
+    none: [],
+  };
 }

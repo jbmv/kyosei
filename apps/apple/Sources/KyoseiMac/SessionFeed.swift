@@ -1381,8 +1381,9 @@ final class SessionFeed {
         return String(decoding: reply.data, as: UTF8.self)
     }
 
-    /// Reads `kyo list`, `kyo next` and the gates that wait on the person, and hands the page
-    /// all three. These are reads any viewer may make, so no device token is sent.
+    /// Reads `kyo list`, `kyo next`, the gates that wait on the person, the shift notes and
+    /// the briefs, and hands the page all five. These are reads any viewer may make, so no
+    /// device token is sent.
     private func loadRecordLists() {
         let project = project
         let client = client
@@ -1392,7 +1393,10 @@ final class SessionFeed {
             async let gates = try? client.command(
                 project: project, "gates",
                 flags: Self.awaitingTypes.map { (name: "type", value: $0) })
+            async let notes = try? client.command(project: project, "shift-notes")
+            async let briefs = try? client.command(project: project, "briefs")
             let (listed, ready, waiting) = await (list, next, gates)
+            let (noted, briefed) = await (notes, briefs)
             guard project == self.project else { return }
             var problem = "null"
             if listed == nil {
@@ -1403,16 +1407,21 @@ final class SessionFeed {
             send(
                 "recordLists",
                 #"{"project": \#(quoted(project)), "list": \#(document(listed)), "next": "#
-                    + #"\#(document(ready)), "gates": \#(document(waiting)), "error": \#(problem)}"#)
+                    + #"\#(document(ready)), "gates": \#(document(waiting)), "notes": "#
+                    + #"\#(document(noted)), "briefs": \#(document(briefed)), "error": \#(problem)}"#)
         }
     }
 
-    /// Reads one record as `kyo show --json` prints it. A refusal is the server's sentence.
+    /// Reads one record as `kyo show --json` prints it, or one brief as `kyo briefs <id>`
+    /// does, since `kyo show` reads no brief. A refusal is the server's sentence.
     private func loadRecord(_ id: String) {
         let project = project
         let client = client
+        // A brief's id is the prefix, a hyphen, `B` and its number: `KYO-B180`.
+        let brief = id.range(of: #"^[A-Z][A-Z0-9]*-B\d+$"#, options: .regularExpression) != nil
         Task {
-            let reply = try? await client.command(project: project, "show", positionals: [id])
+            let reply = try? await client.command(
+                project: project, brief ? "briefs" : "show", positionals: [id])
             guard project == self.project else { return }
             var problem = "null"
             if reply == nil {

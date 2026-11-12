@@ -333,6 +333,16 @@ record's number, which is the order of creation. A search field above the table,
 Kind control of its own, narrows the chosen Location's rows. A record is placed and shown by
 its standing, so a current decision is in Reference and not among the open work.
 
+Two further Locations hold what is in the store and is no record (KYO-869): Shift notes, every
+note of the shift log, and Briefs, every brief the store kept. Each lists newest first, and
+one opens as a page in the Records view: a note with its author, its time and its text, and
+a brief with the shift notes and the ledger's events since the brief before it. A note that
+was the last written before a session began stands as `handoff`. The page of either names
+its session as a link that opens the session in History; a note carries no session, so its
+session is the one whose opening brief came last before it. The note written last has a row
+of its own in the side column. These read `cmd/shift-notes`, `cmd/briefs` and
+`cmd/briefs/<id>`.
+
 The drawer is away on the home, where the fixed column stands in its place, and is back
 beside an open record. It holds three lists, Awaiting you, Recents and All, which share its
 height and scroll separately, and its search
