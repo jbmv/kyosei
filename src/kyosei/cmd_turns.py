@@ -54,7 +54,7 @@ import json
 import os
 import sys
 from argparse import Namespace
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -192,6 +192,55 @@ def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) ->
     return None
 
 
+def mark_candidate(store_root: Path | str, session_id: str, key: str, cues: list[str]) -> bool:
+    """KYO-876: write ``candidate`` on one index line, the cues that fired at the Stop that
+    ended the turn, so the session's next prompt can ask about it (:func:`next_candidate`).
+    A line that already carries a candidate or a skip is left as it is. Returns whether it
+    wrote."""
+    with _locked(store_root):
+        lines = read_lines(store_root)
+        for line in lines:
+            if (
+                line.get("session") == session_id
+                and line.get("role") != REPLY_ROLE
+                and key in (line.get("prompt_id"), line.get("turn"))
+            ):
+                if "candidate" in line or "skip" in line:
+                    return False
+                line["candidate"] = {"cues": list(cues), "at": _now(), "asked": None}
+                _rewrite(store_root, lines)
+                return True
+    return False
+
+
+def next_candidate(
+    store_root: Path | str, session_id: str, answered: Callable[[str], bool]
+) -> dict | None:
+    """KYO-876: the newest line of the session whose candidate has not been asked about,
+    that carries no skip and whose prompt ``answered`` does not call attached to a
+    discussion; and, marked asked under the lock, so that it is named once. None when
+    there is none."""
+    with _locked(store_root):
+        lines = read_lines(store_root)
+        for line in reversed(lines):
+            candidate = line.get("candidate")
+            prompt_id = line.get("prompt_id")
+            if (
+                line.get("session") != session_id
+                or line.get("role") == REPLY_ROLE
+                or not isinstance(candidate, dict)
+                or candidate.get("asked")
+                or "skip" in line
+                or not isinstance(prompt_id, str)
+                or answered(prompt_id)
+            ):
+                continue
+            candidate["asked"] = _now()
+            _rewrite(store_root, lines)
+            return line
+    return None
+
+
 def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
     path = turns_path(store_root)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -308,9 +357,7 @@ def commit_reply(
             "origin": ASSISTANT,
             "source": SOURCE_HOOK,
         }
-        line.update(
-            seal.seal_fields(lines, session, prompt_id, seal.ROLE_ASSISTANT, reply, key)
-        )
+        line.update(seal.seal_fields(lines, session, prompt_id, seal.ROLE_ASSISTANT, reply, key))
         _append(store_root, line)
 
 
@@ -390,9 +437,7 @@ def _fold(lines: list[dict], session_id: str, facts: list[transcript.TurnFact]) 
                 "origin": fact.origin,
                 "source": SOURCE_TRANSCRIPT,
                 # Chained, with no root: its text was not committed when it was sent.
-                **seal.seal_fields(
-                    lines, session_id, fact.prompt_id, seal.ROLE_USER, None, None
-                ),
+                **seal.seal_fields(lines, session_id, fact.prompt_id, seal.ROLE_USER, None, None),
             }
         )
         known_turns.add(fact.turn)

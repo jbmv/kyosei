@@ -84,18 +84,29 @@ def stop(kyo, prompt_id: str | None, reply: str, *, json_flag: bool = False, **e
     return kyo(*args, "discuss", "check", "--hook", stdin=json.dumps(payload))
 
 
-def feedback(run) -> str:
-    """The additionalContext of a check that fired, asserting the output is that and no more."""
-    assert run.code == 0 and run.err == "", run
-    (line,) = run.out.splitlines()
-    document = json.loads(line)
-    assert document == {
-        "hookSpecificOutput": {
-            "hookEventName": "Stop",
-            "additionalContext": document["hookSpecificOutput"]["additionalContext"],
-        }
+def candidate(root: Path, prompt_id: str) -> dict | None:
+    """The candidate mark the Stop check wrote on a prompt's index line (KYO-876)."""
+    return index_line(root, prompt_id).get("candidate")
+
+
+def marked(run, root: Path, prompt_id: str) -> dict:
+    """Assert a Stop check printed nothing, and that it marked the turn a candidate."""
+    assert silent(run), run
+    mark = candidate(root, prompt_id)
+    assert mark is not None and mark["asked"] is None, mark
+    return mark
+
+
+def prompt(kyo, prompt_id: str = "99999999-9999-4999-8999-999999999999", **extra):
+    """The session's next UserPromptSubmit, through `kyo discuss check --hook`."""
+    payload = {
+        "session_id": SESSION,
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": prompt_id,
+        "prompt": "the next words",
+        **extra,
     }
-    return document["hookSpecificOutput"]["additionalContext"]
+    return kyo("discuss", "check", "--hook", stdin=json.dumps(payload))
 
 
 def silent(run) -> bool:
@@ -140,11 +151,10 @@ def test_the_person_cue_ignores_instructions_code_and_urls(words: str) -> None:
         "It is your call.",
         "Done.\n\n- D1: keep the cache\n- D2: drop it\n\nNothing else changed.",
         "**Option A** — keep it.\n**Option B** — drop it.\n",
-        "The cache is stale after a restart.\n\nDo we keep it?",
         "Which one do you pick?",
     ],
 )
-def test_the_reply_cue_fires_on_a_recommendation_options_or_a_closing_question(reply: str) -> None:
+def test_the_reply_cue_fires_on_a_recommendation_or_options(reply: str) -> None:
     assert reply_cue(reply)
 
 
@@ -159,9 +169,11 @@ def test_the_reply_cue_fires_on_a_recommendation_options_or_a_closing_question(r
         "Shall I continue with the next record.\n\nDone for now.",
         "Would you like the log. Should I also rebase.\n\nThe run is green.",
         "Do you want it merged.\n\nThe run is green.",
+        "Shall I build and notarize one now?",
+        "The cache is stale after a restart.\n\nDo we keep it?",
     ],
 )
-def test_the_reply_cue_ignores_a_report(reply: str) -> None:
+def test_the_reply_cue_ignores_a_report_and_a_closing_question(reply: str) -> None:
     assert not reply_cue(reply)
 
 
@@ -232,24 +244,63 @@ def test_read_turn_finds_a_turn_that_starts_before_the_first_window(tmp_path: Pa
 # ------------------------------------------------------------------ KYO-662.c2: the hook
 
 
-def test_the_check_returns_additional_context_and_does_not_block(kyo, indexed: Path) -> None:
-    """A question from the person, a recommendation in reply, no discussion open: one line
-    of hook JSON carrying additionalContext, exit 0, nothing on stderr, no `decision`."""
-    words = feedback(stop(kyo, PROMPT_1, "I recommend keeping it."))
+def test_at_stop_the_check_prints_nothing_and_records_the_turn_as_a_candidate(
+    kyo, indexed: Path
+) -> None:
+    """KYO-876.c1: a question from the person, a recommendation in reply, no discussion
+    open. Nothing is printed, so the harness has nothing to continue the conversation on,
+    and the turn's index line carries the cues."""
+    run = stop(kyo, PROMPT_1, "I recommend keeping it.")
+    assert silent(run), run
+    mark = candidate(indexed, PROMPT_1)
+    assert mark["cues"] == [CUE_PERSON, CUE_REPLY] and mark["asked"] is None and mark["at"]
+    told = stop(kyo, PROMPT_1, "I recommend keeping it.", json_flag=True).json
+    assert told["fire"] is True and told["candidate"] is False  # already marked: not rewritten
+    assert "message" not in told
+    assert candidate(indexed, PROMPT_3) is None
+
+
+def test_the_next_prompt_names_the_candidate_once_with_both_commands(kyo, indexed: Path) -> None:
+    """KYO-876.c2."""
+    marked(stop(kyo, PROMPT_1, "I recommend keeping it."), indexed, PROMPT_1)
+    first = prompt(kyo)
+    assert first.code == 0 and first.err == "", first
+    (words,) = first.out.splitlines()
     line = index_line(indexed, PROMPT_1)
-    assert f"the person's message at {line['at']} (prompt {PROMPT_1[:8]})" in words
-    assert "no discussion is open in this session" in words
-    assert 'kyo discuss open --title "<topic>"' in words
+    assert f"the turn at {line['at']} (prompt {PROMPT_1[:8]})" in words
+    assert f"kyo discuss open --at-prompt {PROMPT_1} --title" in words
     assert f"kyo discuss skip --at-prompt {PROMPT_1} --why" in words
-    assert CUE_PERSON in words and CUE_REPLY in words
+    assert "Say nothing to the person about a skip." in words
+    assert candidate(indexed, PROMPT_1)["asked"]
+    assert silent(prompt(kyo, "88888888-8888-4888-8888-888888888888"))
+
+
+def test_the_next_prompt_names_the_newest_candidate_only(kyo, indexed: Path) -> None:
+    marked(stop(kyo, PROMPT_1, "I recommend keeping it."), indexed, PROMPT_1)
+    marked(stop(kyo, PROMPT_3, "Which do you want?"), indexed, PROMPT_3)
+    (words,) = prompt(kyo).out.splitlines()
+    assert f"(prompt {PROMPT_3[:8]})" in words
+    (older,) = prompt(kyo).out.splitlines()
+    assert f"(prompt {PROMPT_1[:8]})" in older
+    assert silent(prompt(kyo))
+
+
+def test_the_prompt_hook_is_silent_without_a_candidate_a_session_or_an_opt_in(
+    kyo, indexed: Path, project: Path
+) -> None:
+    assert silent(prompt(kyo))
+    marked(stop(kyo, PROMPT_1, "I recommend keeping it."), indexed, PROMPT_1)
+    assert silent(prompt(kyo, session_id="another-session"))
+    assert candidate(indexed, PROMPT_1)["asked"] is None
 
 
 def test_the_check_passes_once_a_discussion_is_open(kyo, indexed: Path) -> None:
-    """The first remedy the message names."""
-    assert feedback(stop(kyo, PROMPT_3, "Which do you want?"))
+    """The first remedy the prompt line names; KYO-876.c4: a discussion opened at the turn
+    clears its candidate, so the next prompt does not name it."""
+    marked(stop(kyo, PROMPT_3, "Which do you want?"), indexed, PROMPT_3)
     assert kyo("discuss", "open", "--title", "Whether the cache stays").code == 0
-    passed = stop(kyo, PROMPT_3, "Which do you want?")
-    assert silent(passed), passed
+    assert silent(prompt(kyo))
+    assert candidate(indexed, PROMPT_3)["asked"] is None  # cleared, never asked
     why = stop(kyo, PROMPT_3, "Which do you want?", json_flag=True).json
     assert why["fire"] is False and "names this turn" in why["why"]
     # An earlier turn of the session is attached too, by the discussion being open.
@@ -259,8 +310,9 @@ def test_the_check_passes_once_a_discussion_is_open(kyo, indexed: Path) -> None:
 def test_the_check_passes_once_the_turn_is_skipped_with_a_recorded_reason(
     kyo, indexed: Path
 ) -> None:
-    """The second remedy the message names, run as the message spells it."""
-    assert feedback(stop(kyo, PROMPT_1, "I recommend keeping it."))
+    """The second remedy the prompt line names, run as it spells it; KYO-876.c4: a skip
+    clears the candidate."""
+    marked(stop(kyo, PROMPT_1, "I recommend keeping it."), indexed, PROMPT_1)
     skipped = kyo(
         "discuss", "skip", "--at-prompt", PROMPT_1, "--why", "a question about a log line",
         "--json",
@@ -270,6 +322,7 @@ def test_the_check_passes_once_the_turn_is_skipped_with_a_recorded_reason(
     assert line["skip"]["why"] == "a question about a log line" and line["skip"]["at"]
     assert skipped.json["skip"] == line["skip"] and skipped.json["prompt_id"] == PROMPT_1
     assert silent(stop(kyo, PROMPT_1, "I recommend keeping it."))
+    assert silent(prompt(kyo))
     # The Stop hook's own fold of the transcript keeps the reason on the line.
     payload = {
         "session_id": SESSION,
@@ -278,8 +331,8 @@ def test_the_check_passes_once_the_turn_is_skipped_with_a_recorded_reason(
     }
     assert kyo("turns", "--hook", stdin=json.dumps(payload)).code == 0
     assert index_line(indexed, PROMPT_1)["skip"] == line["skip"]
-    # Another turn of the session is still asked about.
-    assert feedback(stop(kyo, PROMPT_3, "Which do you want?"))
+    # Another turn of the session is still marked.
+    marked(stop(kyo, PROMPT_3, "Which do you want?"), indexed, PROMPT_3)
 
 
 def test_skip_without_at_prompt_marks_the_sessions_latest_prompt(kyo, indexed: Path) -> None:
@@ -288,9 +341,7 @@ def test_skip_without_at_prompt_marks_the_sessions_latest_prompt(kyo, indexed: P
     assert "skip" not in index_line(indexed, PROMPT_1)
 
 
-def test_a_line_standing_for_the_agents_reply_is_never_the_one_skipped(
-    kyo, indexed: Path
-) -> None:
+def test_a_line_standing_for_the_agents_reply_is_never_the_one_skipped(kyo, indexed: Path) -> None:
     """A reply line repeats its prompt's id and comes after it; the skip goes on the
     prompt's line, by default and when the prompt is named."""
     with cmd_turns.turns_path(indexed).open("a", encoding="utf-8") as handle:
@@ -326,11 +377,11 @@ def test_skip_refuses_where_there_is_no_index(kyo, project: Path, session: str) 
     assert no_index.code == 64 and "nothing to skip here" in no_index.err
 
 
-def test_the_check_asks_once_per_turn(kyo, indexed: Path) -> None:
-    """`stop_hook_active` marks the stop that follows a Stop hook's feedback: nothing is
-    said then, whatever the agent did with the first prompt."""
-    assert feedback(stop(kyo, PROMPT_1, "I recommend keeping it."))
+def test_the_check_marks_nothing_on_a_stop_that_follows_a_hooks_feedback(
+    kyo, indexed: Path
+) -> None:
     assert silent(stop(kyo, PROMPT_1, "I recommend keeping it.", stop_hook_active=True))
+    assert candidate(indexed, PROMPT_1) is None
 
 
 def test_the_check_says_nothing_when_no_cue_fires(kyo, indexed: Path) -> None:
@@ -338,12 +389,12 @@ def test_the_check_says_nothing_when_no_cue_fires(kyo, indexed: Path) -> None:
     assert stop(kyo, PROMPT_3, "Kept.", json_flag=True).json["why"] == "no cue fired"
 
 
-def test_a_reply_that_puts_a_choice_fires_on_a_turn_the_person_did_not_open(
+def test_a_reply_that_puts_a_choice_marks__a_turn_the_person_did_not_open(
     kyo, indexed: Path
 ) -> None:
-    words = feedback(stop(kyo, PROMPT_2, "The run finished. Do you want it merged?"))
-    assert words.startswith("your reply in the turn opened at ")
-    assert f"(prompt {PROMPT_2[:8]})" in words and CUE_PERSON not in words
+    assert candidate(indexed, PROMPT_2) is None
+    marked(stop(kyo, PROMPT_2, "The run finished. I recommend merging it."), indexed, PROMPT_2)
+    assert candidate(indexed, PROMPT_2)["cues"] == [CUE_REPLY]
 
 
 def test_the_question_tool_fires(kyo, indexed: Path) -> None:
@@ -360,7 +411,7 @@ def test_the_question_tool_fires(kyo, indexed: Path) -> None:
             )
         ]
     )
-    assert CUE_ASKED in feedback(stop(kyo, PROMPT_3, "Recorded."))
+    assert CUE_ASKED in marked(stop(kyo, PROMPT_3, "Recorded."), indexed, PROMPT_3)["cues"]
 
 
 def test_a_turn_naming_a_record_no_open_discussion_is_about_fires_again(
@@ -381,10 +432,15 @@ def test_a_turn_naming_a_record_no_open_discussion_is_about_fires_again(
     assert kyo("discuss", "open", "--title", f"Whether {first} stays").code == 0
     prompt_hook(kyo, PROMPT_2)
     assert silent(stop(kyo, PROMPT_1, "Yes."))
-    words = feedback(stop(kyo, PROMPT_2, "It can go."))
-    assert f"it names {second}, which no discussion open in this session is about" in words
-    assert kyo("discuss", "open", "--title", f"Whether {second} goes").code == 0
+    told = stop(kyo, PROMPT_2, "It can go.", json_flag=True).json
+    assert told["fire"] is True and told["candidate"] is True
+    assert f"it names {second}, which no discussion open in this session is about" in told["why"]
+    assert (
+        kyo("discuss", "open", "--title", f"Whether {second} goes", "--at-prompt", PROMPT_2).code
+        == 0
+    )
     assert silent(stop(kyo, PROMPT_2, "It can go."))
+    assert silent(prompt(kyo))
 
 
 @pytest.mark.parametrize(
@@ -459,6 +515,18 @@ def test_the_check_has_its_own_stop_only_group_in_the_packaged_fragment() -> Non
     assert "discuss check --hook" not in json.dumps(under_end)
 
 
+def test_the_prompt_fragment_runs_the_check_after_the_turn_index_hook() -> None:
+    """KYO-876: the check that names a candidate runs at UserPromptSubmit, in a group of its
+    own after `kyo turns --hook`."""
+    under_prompt = install_hooks._load_hook_fragment("prompt-submit.json")
+    commands = [hook["command"] for group in under_prompt for hook in group["hooks"]]
+    assert [c.rsplit("; ", 1)[-1] for c in commands] == [
+        "kyo check-build --hook",
+        "kyo turns --hook",
+        "kyo discuss check --hook",
+    ]
+
+
 # ------------------------------------------------------------------ KYO-662.c3: doctor
 
 
@@ -518,9 +586,7 @@ def test_a_session_with_stops_and_no_index_lines_is_a_problem(
     assert kyo("doctor").code != 0
 
 
-def test_a_later_indexed_prompt_clears_the_problem(
-    kyo, project: Path, session: str
-) -> None:
+def test_a_later_indexed_prompt_clears_the_problem(kyo, project: Path, session: str) -> None:
     """The remedy the problem names: with the hooks running, a new session's prompt is
     indexed, and the earlier session is no longer reported."""
     opt_in_transcripts(project)
@@ -609,9 +675,7 @@ def test_the_detector_meets_its_recall_and_firing_bounds_on_the_private_transcri
     """KYO-662.c1, where the maintainer's transcripts are present. Nothing from them is
     asserted on or printed but counts."""
     directories = [
-        Path(part).expanduser()
-        for part in os.environ[ENV_TRANSCRIPTS].split(os.pathsep)
-        if part
+        Path(part).expanduser() for part in os.environ[ENV_TRANSCRIPTS].split(os.pathsep) if part
     ]
     result = _measure_module().measure(directories, Path(os.environ[ENV_SPANS]).expanduser())
     assert result["spans_eligible"] > 0
@@ -619,11 +683,10 @@ def test_the_detector_meets_its_recall_and_firing_bounds_on_the_private_transcri
     assert result["fires_outside_every_span"] <= 260, result
 
 
-def test_the_message_says_a_skip_is_recorded_and_nothing_is_written_to_the_person(
-    kyo, indexed: Path
-) -> None:
-    """KYO-859.c1: the wording the agent reads names the skip command and says it is not
-    reported to the person."""
-    words = feedback(stop(kyo, PROMPT_1, "I recommend keeping it."))
-    assert "A skip is recorded, so write nothing about it to the person." in words
+def test_the_prompt_line_says_a_skip_is_not_reported_to_the_person(kyo, indexed: Path) -> None:
+    """KYO-859.c1, carried to the prompt line by KYO-876: the wording the agent reads names
+    the skip command and says it is not reported to the person."""
+    marked(stop(kyo, PROMPT_1, "I recommend keeping it."), indexed, PROMPT_1)
+    (words,) = prompt(kyo).out.splitlines()
+    assert "Say nothing to the person about a skip." in words
     assert "kyo discuss skip --at-prompt" in words

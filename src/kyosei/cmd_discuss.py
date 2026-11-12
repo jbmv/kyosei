@@ -52,22 +52,26 @@ holds no text and survives the transcript's deletion. It has nothing to digest, 
 integrity object for a whole prompt is the per-line commitment the index line will carry
 (KYO-663), which a reference cites by its session and prompt id rather than repeating.
 
-THE STOP CHECK (KYO-662, decision KYO-654 DC4, proposal section 5.1 Tier 2). ``kyo discuss
-check --hook`` runs at every Stop, in its own hook group. It reads the turn that just ended
-(the person's words and whether AskUserQuestion was used, from the transcript through
-:func:`kyosei.harness.claude_code_transcript.read_turn`; the reply, from the payload's
-``last_assistant_message``) and asks two things: does a cue say a choice
+THE STOP CHECK (KYO-662, decision KYO-654 DC4, proposal section 5.1 Tier 2; moved to the next
+prompt by KYO-876). ``kyo discuss check --hook`` runs at every Stop, in its own hook group. It
+reads the turn that just ended (the person's words and whether AskUserQuestion was used, from
+the transcript through :func:`kyosei.harness.claude_code_transcript.read_turn`; the reply,
+from the payload's ``last_assistant_message``) and asks two things: does a cue say a choice
 was put to the person or raised by them (:func:`detect`), and is the turn attached, which
-means a discussion is open in this session or already names the turn. When a cue fires on
-an unattached turn it prints one JSON line carrying ``hookSpecificOutput.additionalContext``.
-Claude Code (read in its hooks reference at 2.1.322) gives that text to the agent as "Stop
-hook feedback" and CONTINUES THE CONVERSATION so the agent can act on it, without reporting
-a hook error; it is not ``decision: "block"`` and not exit 2. The agent runs ``kyo discuss
-open`` or ``kyo discuss skip --why "..."`` and stops again. The check says nothing when the
-payload's ``stop_hook_active`` is set, so it costs at most one continuation per turn
-whatever the agent did with it, and nothing when the turn is attached or its index line
-carries a skip. It never exits non-zero and never prints anything else: any failure to read
-the store, the index or the transcript is a pass, reported only under ``--json``.
+means a discussion is open in this session or already names the turn. At Stop it prints
+nothing and does not continue the conversation: when a cue fires on an unattached turn it
+writes ``candidate`` on the turn's index line (:func:`kyosei.cmd_turns.mark_candidate`). The
+first version printed hook feedback at Stop, which Claude Code answers by asking the agent for
+visible text after the skip's tool call, so the person read a line about a skip (KYO-876).
+
+At the session's next UserPromptSubmit the same command, run in that event's hook group, names
+the newest candidate once, as one line of context (:func:`prompt_line`): the turn's time, its
+prompt id and the two commands. The agent then opens a discussion or skips inside the turn it is
+already taking, and says nothing about a skip. A candidate is marked asked when named, so it
+is named once, and is cleared by a discussion that names the turn or by a skip. The check says
+nothing when the turn is attached or its index line carries a skip. It never exits non-zero
+and never prints anything else: any failure to read the store, the index or the transcript
+is a pass, reported only under ``--json``.
 
 ``kyo discuss skip --why "<one line>"`` writes the reason on the turn's index line
 (:func:`kyosei.cmd_turns.mark_skipped`), so a dismissal is kept, and ``kyo doctor`` counts
@@ -95,7 +99,9 @@ from .cmd_sessions import recorded_transcript_path
 from .cmd_turns import (
     HUMAN,
     confirm_from_transcript,
+    mark_candidate,
     mark_skipped,
+    next_candidate,
     prompt_lines,
     read_lines,
 )
@@ -828,7 +834,6 @@ _NOT_PROSE = re.compile(
     r"|<(system-reminder|pasted-content|pasted_content)\b[^>]*>.*?</\1>",
     re.S,
 )
-_QUESTION_MARK = re.compile(r"\?(?=[\s\"')\]*_]|$)")
 
 #: Phrases in the person's words that open a choice (proposal section 5.1, Tier 2).
 _PERSON_PHRASES = re.compile(
@@ -877,14 +882,12 @@ def person_cue(words: str) -> bool:
 
 def reply_cue(reply: str) -> bool:
     """Whether the agent's final message puts a choice to the person: a recommendation or a
-    request for their choice, two or more labelled options, or a closing question."""
+    request for their choice, or two or more labelled options. A closing question is not one:
+    it is as often a go-ahead question ("Shall I build one now?") as a choice (KYO-876)."""
     prose = _prose(reply)
     if _REPLY_PHRASES.search(prose):
         return True
-    if len({label.strip("()").lower() for label in _LABEL.findall(prose)}) >= 2:
-        return True
-    closing = [line for line in prose.splitlines() if line.strip()][-2:]
-    return any(_QUESTION_MARK.search(line) for line in closing)
+    return len({label.strip("()").lower() for label in _LABEL.findall(prose)}) >= 2
 
 
 def detect(person: tuple[str, ...] | list[str], reply: str | None, asked: bool) -> list[str]:
@@ -971,12 +974,7 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
     line = _index_line(ctx, session, turn.prompt_id)
     if line is not None and isinstance(line.get("skip"), dict):
         return result | {"why": "the turn is skipped with a recorded reason"}
-    if (
-        turn.prompt_id is not None
-        and store.conn.execute(
-            "SELECT 1 FROM turn_refs WHERE session = ? AND prompt_id = ?", (session, turn.prompt_id)
-        ).fetchone()
-    ):
+    if turn.prompt_id is not None and _attached(store, session, turn.prompt_id):
         return result | {"why": "a discussion names this turn"}
     discussions = open_discussions(store, session)
     named = set().union(
@@ -985,13 +983,8 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
     covered = set().union(*(d["about"] | {d["id"]} for d in discussions))
     if discussions and (CUE_PERSON not in cues or not named or named & covered):
         return result | {"why": f"{discussions[-1]['id']} is open in this session"}
-    at = (line or {}).get("at") or turn.at or "an unknown time"
-    prompt = (turn.prompt_id or "?")[:8]
-    whose = (
-        f"the person's message at {at} (prompt {prompt}) or your reply"
-        if turn.person
-        else f"your reply in the turn opened at {at} (prompt {prompt})"
-    )
+    if line is None:
+        return result | {"why": "the turn index holds no line for this turn"}
     if discussions:
         state = (
             f"it names {', '.join(sorted(named))}, which no discussion open in this session "
@@ -999,41 +992,78 @@ def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
         )
     else:
         state = "no discussion is open in this session"
-    message = (
-        f"{whose} put a choice to them ({'; '.join(cues)}), and {state}. Open one now with "
-        '`kyo discuss open --title "<topic>"`, which stamps the person\'s latest turn, or '
-        "record that it is not one with `kyo discuss skip --at-prompt "
-        f"{turn.prompt_id} --why "
-        '"<one line>"`. A skip is recorded, so write nothing about it to the person. '
-        "This is asked once for this turn and does not block the stop."
-    )
-    return result | {"fire": True, "why": state, "message": message}
+    key = line.get("prompt_id") or line.get("turn")
+    recorded = mark_candidate(ctx.root, session, key, cues)
+    return result | {"fire": True, "why": state, "candidate": recorded}
 
 
-def stop_feedback(message: str) -> str:
-    """The one line a Stop hook prints for Claude Code to hand ``message`` to the agent as
-    hook feedback. The conversation continues once so the agent can act on it."""
-    return json.dumps(
-        {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": message}},
-        ensure_ascii=False,
+def _attached(store: Store, session: str, prompt_id: str) -> bool:
+    return (
+        store.conn.execute(
+            "SELECT 1 FROM turn_refs WHERE session = ? AND prompt_id = ?", (session, prompt_id)
+        ).fetchone()
+        is not None
     )
+
+
+def prompt_line(line: dict) -> str:
+    """The one line of context the next prompt carries for a candidate turn."""
+    prompt_id = line["prompt_id"]
+    cues = "; ".join(line["candidate"].get("cues") or [])
+    return (
+        f"Kyosei: the turn at {line.get('at') or 'an unknown time'} (prompt {prompt_id[:8]}) may "
+        f"have put a choice to the person ({cues}). If it did, run `kyo discuss open --at-prompt "
+        f'{prompt_id} --title "<topic>"`; if not, run `kyo discuss skip --at-prompt {prompt_id} '
+        '--why "<one line>"`. Say nothing to the person about a skip. This is named once.'
+    )
+
+
+def next_prompt(ctx: Context, store: Store, payload: dict) -> dict:
+    """UserPromptSubmit: the line naming the session's newest unanswered candidate, marked
+    asked, or ``{"line": None, ...}`` with the reason there is none."""
+    if not transcripts_opted_in(store.config):
+        return {"line": None, "why": "the project has not opted in to reading transcripts"}
+    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
+        return {"line": None, "why": "a worktree's session is not the orchestrator's"}
+    session = payload.get("session_id")
+    if not isinstance(session, str) or not session:
+        return {"line": None, "why": "no session_id in the hook payload"}
+    found = next_candidate(
+        ctx.root, session, lambda prompt_id: _attached(store, session, prompt_id)
+    )
+    if found is None:
+        return {"line": None, "why": "no candidate turn is waiting"}
+    return {
+        "line": prompt_line(found),
+        "why": "a candidate turn is named",
+        "prompt_id": found["prompt_id"],
+    }
 
 
 def _check(ctx: Context, args: Namespace) -> Output:
     if not getattr(args, "hook", False):
         raise UsageError(
-            "check reads Claude Code's Stop payload on stdin: run it as `kyo discuss check "
-            "--hook`, which is how the packaged Stop hook runs it"
+            "check reads Claude Code's hook payload on stdin: run it as `kyo discuss check "
+            "--hook`, which is how the packaged Stop and UserPromptSubmit hooks run it"
         )
+    lines: list[str] = []
     try:
         raw = sys.stdin.read() if not sys.stdin.isatty() else ""
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             payload = {}
-        data = check_turn(ctx, ctx.store(), payload)
-    except Exception as exc:  # noqa: BLE001 - a Stop hook that fails must say nothing
+        if payload.get("hook_event_name") == "UserPromptSubmit":
+            data = next_prompt(ctx, ctx.store(), payload)
+            if data["line"] is not None:
+                lines = [data["line"]]
+            data = {
+                "fire": data["line"] is not None,
+                **{k: v for k, v in data.items() if k != "line"},
+            }
+        else:
+            data = check_turn(ctx, ctx.store(), payload)
+    except Exception as exc:  # noqa: BLE001 - a hook that fails must say nothing
         data = {"fire": False, "why": f"could not check: {exc}", "problem": str(exc)}
-    lines = [stop_feedback(data["message"])] if data.get("fire") else []
     return Output(lines, {"ok": True, "command": "discuss check", **data})
 
 

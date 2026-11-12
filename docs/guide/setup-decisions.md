@@ -141,7 +141,8 @@ decides, and how a setup agent can find the answer before asking.
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
   | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |
-  | The session stops | `kyo discuss check --hook` | Where D14 is yes, asks the orchestrator to open a discussion when a turn put a choice to you and none is open. |
+  | The session stops | `kyo discuss check --hook` | Where D14 is yes, marks a turn that put a choice to you while no discussion was open as a candidate. |
+  | You send a prompt | `kyo discuss check --hook` | Names the candidate once, for the orchestrator to open a discussion or record why the turn is not one. |
   | Session start, stop and end | `kyo sessions --hook` | Silent; records the session in the store's local `sessions.json`. At a stop it also announces the session's task list when there is something to say. |
   | The session ends | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index from the transcript and copies the transcript to the local archive. |
 

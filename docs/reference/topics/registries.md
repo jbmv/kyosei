@@ -51,20 +51,21 @@ closes one that produced nothing.
 ended: the person's words and any use of AskUserQuestion from the transcript, and the
 agent's final message from the hook payload. A cue fires when the person's words hold a
 phrase that opens a choice (a question mark alone does not fire it), when the reply holds a
-recommendation, a request for their choice, two or more labelled options or a closing
-question (an offer to act, such as "want me to" or "shall I", does not), or when the turn
-used AskUserQuestion. The turn is attached when a discussion opened in this session is
+recommendation, a request for their choice or two or more labelled options (a closing
+question does not, nor does an offer to act, such as "want me to" or "shall I"), or when the
+turn used AskUserQuestion. The turn is attached when a discussion opened in this session is
 still open, or a turn reference already names the turn; a turn whose words name a record
 that no open discussion's title, description, notes or links mention is not attached. When
-a cue fires on an unattached turn, the check prints one line of hook JSON whose
-`hookSpecificOutput.additionalContext` asks the agent to run `kyo discuss open` or `kyo
-discuss skip --why "<one line>"`, and says that a skip is recorded and not reported to the
-person. Claude Code gives that text to the agent as Stop hook
-feedback and continues the conversation once so the agent can act on it; it is not a
-block and is not reported as a hook error. The check says nothing on the stop that follows
-its own feedback (`stop_hook_active`), so it asks at most once per turn. It is also silent
-in a project that has not opted in to reading transcripts, in a worktree, and whenever it
-cannot read the store, the index or the transcript. `kyo discuss skip` writes its reason
+a cue fires on an unattached turn, the check prints nothing and does not continue the
+conversation: it writes `candidate` (the cues and the time) on the turn's line of the turn
+index. At the session's next prompt the same command, run by the `UserPromptSubmit` hook,
+prints one line of context for the newest candidate that no discussion names and no skip
+covers: the turn's time and prompt id, the commands `kyo discuss open --at-prompt <prompt>
+--title "<topic>"` and `kyo discuss skip --at-prompt <prompt> --why "<one line>"`, and the
+instruction that a skip is not reported to the person. The candidate is marked asked when
+named, so a turn is named once; a discussion opened at the turn, or a skip of it, clears it.
+The check is silent in a project that has not opted in to reading transcripts, in a
+worktree, and whenever it cannot read the store, the index or the transcript. `kyo discuss skip` writes its reason
 on the turn's line of the turn index (`skip`, with the time), `--at-prompt <prompt>` naming
 the turn and the session's latest prompt being the default. `kyo doctor` prints, as a
 notice per week, the share of decisions whose discussion was opened live, opened late or
