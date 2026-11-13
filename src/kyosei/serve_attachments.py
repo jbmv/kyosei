@@ -29,6 +29,13 @@ private to this account and refused inside a git repository, through
 extension is the checked type's, and nothing the client names becomes part of a path, so the
 same file sent twice is one file with one id. Files are kept: nothing here deletes one.
 
+A BOX THAT CHANGED SESSION (KYO-920). A draft's boxes pass from a session that ended to the
+next one (:mod:`kyosei.serve_drafts`, KYO-763), and a box names its files by id only, so its
+files lie under the session they were attached in. An id that this session does not hold is
+looked for under the project's other sessions (:func:`find_in_project`), which is sound
+because an id is the digest of the bytes. A prompt sent with such a file is given a copy in
+its own session's directory (:func:`resolve`), and the GET route reads the file where it is.
+
 A RECORD'S REFERENCE (KYO-856). A record holds an image by reference to its attachment and
 never as bytes: `kyo attach` stores evidence whose whole text is the one line
 :func:`reference_line` writes, ``attachment <sha256>.<extension> of session <session id>``.
@@ -321,11 +328,39 @@ def find(
     return None
 
 
+def find_in_project(
+    environ: dict[str, str], project: str, session_id: str, attachment_id: str
+) -> dict[str, Any] | None:
+    """The attachment as :func:`find` gives it, from this session or another of the project.
+
+    The session's own directory is asked first, then the project's others in the order of
+    their names. One that cannot name a session's directory, or is a link out of the
+    attachments directory, is passed over.
+    """
+    found = find(environ, project, session_id, attachment_id)
+    if found is not None or not _ID.match(attachment_id):
+        return found
+    base = serve_files.composer_kind_directory(environ, serve_files.ATTACHMENTS) / project
+    try:
+        others = sorted(entry.name for entry in base.iterdir() if entry.name != session_id)
+    except OSError:
+        return None
+    for other in others:
+        try:
+            found = find(environ, project, other, attachment_id)
+        except Refusal:
+            continue
+        if found is not None:
+            return found
+    return None
+
+
 def _not_found(attachment_id: str, session_id: str) -> Refusal:
     return Refusal(
         404,
-        f"no attachment {attachment_id!r} is saved for session {session_id}; POST the file to "
-        "this session's attachments route, and use the id it answers",
+        f"no attachment {attachment_id!r} is saved for session {session_id} or another session "
+        "of its project; POST the file to this session's attachments route, and use the id it "
+        "answers",
         reason="attachment-not-found",
         attachment=attachment_id,
     )
@@ -349,21 +384,42 @@ def read(
         root_of()
     else:
         _authorized(environ, root_of, session_id, authorization)
-    found = find(environ, project, session_id, attachment_id)
+    # A chip of a box that came from another session names a file kept under that one.
+    found = find_in_project(environ, project, session_id, attachment_id)
     if found is None:
         raise _not_found(attachment_id, session_id)
     return found["media_type"], Path(found["path"]).read_bytes()
 
 
+def _kept_here(
+    environ: dict[str, str], project: str, session_id: str, found: dict[str, Any]
+) -> dict[str, Any]:
+    """The attachment as this session's directory holds it, copied there when it was not.
+
+    The prompt then names a file of the session it was sent in, as it does for a file
+    attached there, and the History reader finds it under that session.
+    """
+    directory = serve_files.attachment_directory(environ, project, session_id, create=True)
+    source = Path(found["path"])
+    if source.parent == directory:
+        return found
+    serve_files.write_attachment(directory, source.name, source.read_bytes())
+    return _document(found["id"], directory / source.name, found["media_type"], found["bytes"])
+
+
 def resolve(
     environ: dict[str, str], project: str, session_id: str, ids: list[str], where: str
 ) -> list[dict[str, Any]]:
-    """The saved attachments these ids name, in order; an unknown one is a 400 naming it."""
+    """The saved attachments these ids name, in order; an unknown one is a 400 naming it.
+
+    An id saved under another session of the project only is first copied to this one
+    (KYO-920), since a box keeps its files' ids when it passes to the next session.
+    """
     found: list[dict[str, Any]] = []
     for index, attachment_id in enumerate(ids):
-        attachment = find(environ, project, session_id, attachment_id)
+        attachment = find_in_project(environ, project, session_id, attachment_id)
         if attachment is None:
             refusal = _not_found(attachment_id, session_id)
             raise serve_send.bad_request(f"{where}[{index}]: {refusal}")
-        found.append(attachment)
+        found.append(_kept_here(environ, project, session_id, attachment))
     return found
