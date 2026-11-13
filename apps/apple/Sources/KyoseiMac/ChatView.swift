@@ -276,11 +276,28 @@ final class ChatPage: WKWebView {
         return super.performKeyEquivalent(with: event)
     }
 
+    // MARK: Indent and Outdent on a box's words (KYO-912)
+
+    /// Whether the last right-click was on a composer box's words, which the page posts as
+    /// `composerMenu` from its `contextmenu` listener before WebKit's menu opens.
+    var composerMenu = false
+
     // MARK: Quick Look on an image (KYO-883)
 
-    /// WebKit's menu for an image gains Quick Look at its top; the page says which image.
+    /// WebKit's menu gains Indent and Outdent at its top when the right-click was on a box's
+    /// words (KYO-912), and Quick Look for an image (KYO-883); the page says which. WebKit's own
+    /// items stay, so a misspelled word keeps its suggestions below the added ones.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
+        if composerMenu {
+            composerMenu = false
+            let indent = NSMenuItem(title: "Indent", action: #selector(indentChosen), keyEquivalent: "")
+            let outdent = NSMenuItem(title: "Outdent", action: #selector(outdentChosen), keyEquivalent: "")
+            [indent, outdent].forEach { $0.target = self }
+            menu.insertItem(indent, at: 0)
+            menu.insertItem(outdent, at: 1)
+            if menu.items.count > 2 { menu.insertItem(.separator(), at: 2) }
+        }
         let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]
         guard menu.items.contains(where: { imageItems.contains($0.identifier?.rawValue ?? "") })
         else { return }
@@ -300,6 +317,14 @@ final class ChatPage: WKWebView {
             menu.removeItem(at: download)
             menu.insertItem(own, at: download)
         }
+    }
+
+    @objc private func indentChosen() {
+        evaluateJavaScript("window.kyo.indent()", completionHandler: nil)
+    }
+
+    @objc private func outdentChosen() {
+        evaluateJavaScript("window.kyo.outdent()", completionHandler: nil)
     }
 
     @objc private func saveChosen() {
@@ -450,7 +475,7 @@ struct ChatWebView: NSViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "strip")
         for name in [
             "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
-            "sendNow", "copy", "attention", "quicklook",
+            "sendNow", "copy", "attention", "quicklook", "composerMenu",
             "terminal", "records", "files", "history", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
@@ -533,6 +558,12 @@ struct ChatWebView: NSViewRepresentable {
                 if waiting, !NSApp.isActive {
                     attentionRequest = NSApp.requestUserAttention(.criticalRequest)
                 }
+                return
+            }
+            // KYO-912: whether the right-click about to open WebKit's menu was on a box's words.
+            if message.name == "composerMenu" {
+                let body = message.body as? [String: Any]
+                (message.webView as? ChatPage)?.composerMenu = body?["composer"] as? Bool ?? false
                 return
             }
             // KYO-883: Quick Look on an image the page was right-clicked on: its data, or a

@@ -46,6 +46,7 @@ import {
   type LineMarks, createEditor, lineOfId, marksOf as lineMarks, placeItem, refreshMarks, removeEffect, removeItem,
   showLanding,
 } from "./editor";
+import { indentLines, outdentLines } from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -1741,6 +1742,21 @@ const kyo = {
   },
 
   /**
+   * Indent and Outdent in WebKit's menu on a box's words (KYO-912): they act on the focused
+   * box's selection as Tab and Shift-Tab do, and do nothing when no box has the focus. The
+   * right-click put the focus in the box it was on, and the menu does not move it.
+   */
+  indent(): void {
+    const editor = focusedEditor();
+    if (editor) indentLines(editor);
+  },
+
+  outdent(): void {
+    const editor = focusedEditor();
+    if (editor) outdentLines(editor);
+  },
+
+  /**
    * The composer's boxes as the page's tests read them (KYO-910): each box's kind, id, text and
    * selection, and whether it has the focus. `select` focuses a box and sets its selection.
    */
@@ -2231,6 +2247,14 @@ const composerNote = document.getElementById("composer-note")!;
 function editors(): EditorView[] {
   return Array.from(boxes.querySelectorAll<HTMLElement>(":scope > .box .cm-editor"))
     .flatMap((element) => EditorView.findFromDOM(element) ?? []);
+}
+
+/**
+ * The box whose words hold the focus, if any. The document's active element is read rather
+ * than `hasFocus`, which also asks whether the window has the focus.
+ */
+function focusedEditor(): EditorView | undefined {
+  return editors().find((editor) => editor.root.activeElement === editor.contentDOM);
 }
 
 /** The text of a box, as typed. */
@@ -3956,6 +3980,10 @@ function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
 type QuickLookTarget = { data: string; name: string; attachment?: string };
 let quickLookTarget: QuickLookTarget | null = null;
 document.addEventListener("contextmenu", (event) => {
+  // KYO-912: the app adds Indent and Outdent to WebKit's menu when the right-click was on a
+  // box's words. It is told on every right-click, before the menu opens.
+  const target = event.target instanceof Element ? event.target : null;
+  post("composerMenu", { composer: !!target?.closest("#boxes .cm-content") });
   const image = event.target instanceof HTMLImageElement ? event.target : null;
   const name = image?.alt || "image";
   quickLookTarget = !image ? null
