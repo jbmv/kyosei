@@ -124,9 +124,9 @@ its members, and carries no criteria of its own (KYO-210). Members join one by o
 you recommended nothing, `--decision-file d.yml` to list alternatives). **Never retype the
 person's words** (KYO-900): each credit (`kyo confirm`, `kyo new`/`kyo spawn` of a decision,
 `kyo verify --method human-observed`, `kyo ungate`, `kyo credit`) copies them from the
-transcript, from the person's latest turn. When a short approval rests on earlier
-turns, cite them all, `--turn <id>` once each (`kyo turns --said` lists the ids), and read the
-turns the receipt echoes; where no transcript is read, `kyo confirm --quote-file q.txt`. A
+person's latest turn in the transcript. When an approval rests on earlier turns, cite them,
+`--context-turn <id>` once each (`--turn <id>` for another approval; `kyo turns --said` lists
+ids), and read the turns echoed; with no transcript, `kyo confirm --quote-file q.txt`. A
 choice needing design work first is a proposal.
 
 A discussion is optional: `kyo discuss open --title "<topic>"` records a long choice, `kyo

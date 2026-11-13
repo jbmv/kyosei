@@ -153,6 +153,23 @@ its role, time and the first line of its words, and so does the receipt of the c
 that wrote the credit. A sole cited turn of four words or fewer adds one line to the
 receipt saying that earlier turns can be cited as context; it refuses nothing.
 
+`--context-turn <id>`, repeatable and named as `--turn` names a turn, cites a turn as
+context beside the approval without replacing it, so that with no `--turn` the approval is
+still the person's latest turn of the session (KYO-914). A context turn that is the
+approval, or later than it, is refused. When `--turn` is given and none of the cited turns
+is the person's latest turn of the session, the receipt says so and names `--context-turn`.
+A refined decision names the turn that refined the recommendation the same way, with
+`--refining-turn <id>` beside `--outcome refined` or `refining_turn` in the decision file,
+and the turn's record uuid and session are stored.
+
+A credit written in the session the command runs in, at or after the person's previous turn
+of that session began, can be replaced by `kyo credit --supersede <credit-id>` with no
+`--basis`, as a correction (KYO-914). The turns compared are the person's turns that open a
+turn of the session, in transcript order; a message sent mid-turn opens none. The
+correction names the same person and only rows the replaced credit names (all of them when
+no subject id is given), keeps the replaced credit's creation time and basis, and leaves the
+replaced credit readable as superseded. An older credit is replaced only on a basis.
+
 What is stored of a turn is the person's typed words. Pasted content is left out and its
 place marked `[...]`; a turn longer than 4,000 characters keeps its first 3,000 and last
 1,000 around the same mark, and the receipt says so. A context turn's words are an

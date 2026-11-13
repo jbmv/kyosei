@@ -1515,7 +1515,8 @@ def build_parser() -> KyoseiParser:
         metavar="SUBJECT_ID",
         nargs="*",
         help="verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; "
-        "none with --recheck, --batch or --withdraw",
+        "none with --recheck, --batch or --withdraw, and with --supersede alone, those of "
+        "the credit it replaces",
     )
     p_credit.add_argument(
         "--role",
@@ -1531,7 +1532,9 @@ def build_parser() -> KyoseiParser:
     p_credit.add_argument(
         "--supersede",
         metavar="CREDIT_ID",
-        help="replace this current credit of a subject; it stays readable as superseded",
+        help="replace this current credit of a subject; it stays readable as superseded. A "
+        "credit written in this session since the person's previous turn began is replaced "
+        "as a correction, with no --basis (KYO-914)",
     )
     p_credit.add_argument(
         "--recheck",

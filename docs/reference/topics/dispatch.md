@@ -582,7 +582,9 @@ act records and the gate it clears. `--person KEY` names the person and defaults
 only one declared. `--session ID` names the Claude Code session the words were said in
 and defaults to `$CLAUDE_CODE_SESSION_ID`; in a project that has opted in to reading
 transcripts `--turn ID`, repeatable, names the turns the credit cites, by prompt id or
-transcript record uuid, and the words are copied from them; a quote given beside it must
+transcript record uuid, and the words are copied from them. `--context-turn ID` cites a
+turn as context and leaves the person's latest turn as the approval, and with `--turn` the
+receipt says when the latest turn is not cited (KYO-914). A quote given beside `--turn` must
 occur in a named turn, and a quote given alone is checked against the session's
 transcript. A second `kyo confirm` naming the same turn skips what the first applied, as
 it does for the same quote. `--source-other

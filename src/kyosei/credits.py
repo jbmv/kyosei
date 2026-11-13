@@ -259,6 +259,15 @@ def add_credit_flags(
         "turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)",
     )
     parser.add_argument(
+        "--context-turn",
+        action="append",
+        metavar="ID",
+        help="a turn of the person's that the credit cites as context, repeatable, named as "
+        "--turn names one: an earlier turn in which what was approved was specified. The "
+        "approval is still the person's latest turn of the session, or the turn --turn names "
+        "(KYO-914)",
+    )
+    parser.add_argument(
         "--source-other",
         # Not PROSE_ARGUMENT_METAVAR: one line naming a place, single-line enforced, like
         # --why without its file twin; the words themselves always come from a file.
@@ -272,13 +281,19 @@ def add_credit_flags(
             help="YAML: recommended, recommended_by, outcome (accepted | refined | overrode "
             "| unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is "
             "person, orchestrator or worker and an entry without one is read as the "
-            "agent's, and refining_turn for a refined outcome",
+            "agent's, and refining_turn for a refined outcome, named as --turn names a turn",
         )
         parser.add_argument(
             "--outcome",
             choices=CREDIT_OUTCOMES,
             help="in place of --decision-file, for a decision that lists no alternatives: "
-            "accepted, refined, overrode or unprompted (KYO-900)",
+            "accepted, refined (with --refining-turn), overrode or unprompted (KYO-900)",
+        )
+        parser.add_argument(
+            "--refining-turn",
+            metavar="ID",
+            help="with --outcome refined: the person's turn that refined the recommendation, "
+            "named as --turn names one (KYO-914)",
         )
         parser.add_argument(
             "--recommended",
@@ -317,20 +332,21 @@ def requested(args: Namespace, *, words_flag: bool = True) -> bool:
     words from it whether or not a credit is written (`kyo confirm`)."""
     return any(
         getattr(args, name, None)
-        for name in ("person", "session", "turn", "source_other", *DECISION_FLAGS)
+        for name in ("person", "session", "turn", "context_turn", "source_other", *DECISION_FLAGS)
     ) or bool(words_flag and getattr(args, "quote_file", None))
 
 
-#: The flags that say what a decided credit decided: the YAML file, or its three scalars.
-DECISION_FLAGS = ("decision_file", "outcome", "recommended", "recommended_by")
+#: The flags that say what a decided credit decided: the YAML file, or its scalars.
+DECISION_FLAGS = ("decision_file", "outcome", "recommended", "recommended_by", "refining_turn")
 
 
 def _decision_text(args: Namespace) -> str | None:
-    """KYO-900: ``--outcome``, ``--recommended`` and ``--recommended-by`` as the YAML a
-    ``--decision-file`` would hold, or None when none was given."""
+    """KYO-900: ``--outcome``, ``--recommended``, ``--recommended-by`` and (KYO-914)
+    ``--refining-turn`` as the YAML a ``--decision-file`` would hold, or None when none was
+    given."""
     given = {
         name: getattr(args, name, None)
-        for name in ("outcome", "recommended", "recommended_by")
+        for name in ("outcome", "recommended", "recommended_by", "refining_turn")
         if getattr(args, name, None)
     }
     if not given:
@@ -343,8 +359,8 @@ def _decision_text(args: Namespace) -> str | None:
         )
     if "outcome" not in given:
         raise UsageError(
-            "--recommended and --recommended-by go with --outcome (accepted, refined, "
-            "overrode or unprompted)"
+            "--recommended, --recommended-by and --refining-turn go with --outcome "
+            "(accepted, refined, overrode or unprompted)"
         )
     return yaml.safe_dump(given)
 
@@ -392,6 +408,9 @@ class Cited:
     approval: CitedTurn
     quote_text: str
     defaulted: bool = False
+    #: KYO-914: with ``--turn`` given, the person's latest turn of the session when none of
+    #: the cited turns is it, as ``(label, time)``; the receipt says so.
+    latest_uncited: tuple[str, str] | None = None
 
     def check(self) -> dict:
         return {
@@ -408,6 +427,11 @@ class Cited:
         how = (
             f"the person's latest turn of session {approval.session} was taken, since no "
             "--turn was given"
+            + (
+                f", with {len(self.turns) - 1} turn(s) --context-turn names as context"
+                if len(self.turns) > 1
+                else ""
+            )
             if self.defaulted
             else f"the words were copied from the transcript at {len(self.turns)} turn(s)"
         )
@@ -434,7 +458,16 @@ class _SessionView:
 def turn_refs_of(args: Namespace) -> list[str]:
     """``--turn`` as a list. The flag is repeatable; a caller that builds its own
     Namespace (a batch line, a composed step) may still hand one string."""
-    given = getattr(args, "turn", None)
+    return _refs(args, "turn")
+
+
+def context_refs_of(args: Namespace) -> list[str]:
+    """``--context-turn`` as a list (KYO-914)."""
+    return _refs(args, "context_turn")
+
+
+def _refs(args: Namespace, name: str) -> list[str]:
+    given = getattr(args, name, None)
     if not given:
         return []
     return [given] if isinstance(given, str) else [ref for ref in given if ref]
@@ -573,7 +606,7 @@ def session_turns(ctx: Context, session: str) -> list[CitedTurn]:
     return out
 
 
-def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
+def _find_in(view: _SessionView, ref: str, flag: str = "--turn") -> CitedTurn | None:
     """The turn of the person's that ``ref`` names in one session, or None when it names
     nothing there. Refuses a reference that names several turns, a line of the index that
     is not the person's, and a turn of the person's the transcript does not hold."""
@@ -590,7 +623,7 @@ def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
             raise UsageError(
                 "\n".join(
                     [
-                        f"--turn {ref!r} names {len(found)} of the person's turns in session "
+                        f"{flag} {ref} names {len(found)} of the person's turns in session "
                         f"{view.session}; give more of the id:",
                         *(
                             f"  {'prompt ' + t.prompt_id if t.prompt_id else 'turn ' + t.id}"
@@ -613,7 +646,7 @@ def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
             raise ContractViolation(
                 CONTRACT_CREDIT_TURN_WORDS_UNREAD,
                 [
-                    f"--turn {ref} is the person's turn of {line.get('at')} in session "
+                    f"{flag} {ref} is the person's turn of {line.get('at')} in session "
                     f"{view.session}, and its words cannot be copied: {view.why}; nothing "
                     "was written",
                     "give their words in --quote-file FILE without --turn, which records "
@@ -623,7 +656,7 @@ def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
         raise ContractViolation(
             CONTRACT_CREDIT_TURN_NOT_THE_PERSONS,
             [
-                f"--turn {ref} is not a turn of the person's: the turn index records the "
+                f"{flag} {ref} is not a turn of the person's: the turn index records the "
                 f"prompt of {line.get('at')} in session {view.session} as "
                 f"{line.get('origin') or 'of unknown origin'} (a task notification and a "
                 "subagent's report arrive as prompts too), and a credit cites the "
@@ -637,11 +670,17 @@ def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
     return None
 
 
-def _resolve_turn(ctx: Context, views: dict[str, _SessionView], session: str | None, ref: str):
+def _resolve_turn(
+    ctx: Context,
+    views: dict[str, _SessionView],
+    session: str | None,
+    ref: str,
+    flag: str = "--turn",
+):
     """One ``--turn`` reference as a :class:`CitedTurn`: looked for in the credit's own
     session first, then in whichever one other session of the turn index holds it."""
     if session is not None:
-        found = _find_in(views[session], ref)
+        found = _find_in(views[session], ref, flag)
         if found is not None:
             return found
     elsewhere: set[str] = set()
@@ -659,7 +698,7 @@ def _resolve_turn(ctx: Context, views: dict[str, _SessionView], session: str | N
         other = elsewhere.pop()
         if other not in views:
             views[other] = _session_view(ctx, other)
-        found = _find_in(views[other], ref)
+        found = _find_in(views[other], ref, flag)
         if found is not None:
             return found
     where = f"session {session}" if session is not None else "the turn index"
@@ -667,7 +706,7 @@ def _resolve_turn(ctx: Context, views: dict[str, _SessionView], session: str | N
     raise UsageError(
         "\n".join(
             [
-                f"--turn {ref!r} names "
+                f"{flag} {ref} names "
                 + (f"turns of {len(elsewhere)} sessions" if elsewhere else "no turn")
                 + f" of the person's in {where}; give a prompt id or a transcript record "
                 "uuid from the turn index, whole or by a unique prefix of at least "
@@ -722,6 +761,7 @@ def _cite_turns(
     ctx: Context, store, args: Namespace, quote_text: str | None
 ) -> tuple[Cited | None, str]:
     refs = turn_refs_of(args)
+    contexts = context_refs_of(args)
     quoted = bool((quote_text or "").strip())
     if getattr(args, "source_other", None) is not None:
         return None, ""
@@ -732,9 +772,10 @@ def _cite_turns(
             "from a turn: pass --quote-file FILE"
         )
     session = getattr(args, "session", None) or ctx.environ.get(ENV_SESSION) or None
-    if not refs and quoted:
+    if not refs and not contexts and quoted:
         return None, ""
     if session is None and not refs:
+        _refuse_context_without_latest(contexts)
         return None, (
             "no Claude Code session is known, so there is no turn to copy them from: pass "
             "--quote-file FILE, with --source-other WHERE if they were said outside Claude "
@@ -755,6 +796,7 @@ def _cite_turns(
     else:
         legacy = (
             quoted
+            and not contexts
             and len(refs) == 1
             and (
                 refs[0].startswith(transcript.HISTORY_ID_PREFIX)
@@ -790,7 +832,62 @@ def _cite_turns(
         approval = chosen[-1]
         stored = approval.words
     approval.role = TURN_ROLE_APPROVAL
-    return Cited(chosen, approval, stored, defaulted=not refs), ""
+    chosen += _context_turns(ctx, views, session, contexts, approval, chosen)
+    chosen.sort(key=lambda turn: turn.at)
+    latest_uncited = None
+    if refs and session is not None and views[session].turns:
+        # KYO-914: --turn replaces the default; the receipt says when that left the
+        # person's latest turn out, since it is the turn a confirmation usually answers.
+        latest = views[session].turns[-1]
+        if not any((t.session, t.turn) == (session, latest.id) for t in chosen):
+            label = f"prompt {latest.prompt_id}" if latest.prompt_id else f"turn {latest.id}"
+            latest_uncited = (label, latest.timestamp)
+    cited = Cited(chosen, approval, stored, defaulted=not refs, latest_uncited=latest_uncited)
+    return cited, ""
+
+
+def _refuse_context_without_latest(contexts: list[str]) -> None:
+    """KYO-914: ``--context-turn`` with no ``--turn`` sits beside the person's latest turn,
+    which needs a known session."""
+    if contexts:
+        raise UsageError(
+            "--context-turn cites turns beside the approving turn, which is the "
+            "person's latest turn of the session when no --turn names it; no Claude "
+            "Code session is known, so name the approving turn with --turn as well"
+        )
+
+
+def _context_turns(
+    ctx: Context,
+    views: dict[str, _SessionView],
+    session: str | None,
+    contexts: list[str],
+    approval: CitedTurn,
+    chosen: list[CitedTurn],
+) -> list[CitedTurn]:
+    """KYO-914: the turns ``--context-turn`` names, each beside the approval and never in
+    its place: not the approving turn itself, and not later than it. A turn already among
+    ``chosen`` is not added twice."""
+    held = {(t.session, t.turn) for t in chosen}
+    out: list[CitedTurn] = []
+    for ref in contexts:
+        turn = _resolve_turn(ctx, views, session, ref, "--context-turn")
+        key = (turn.session, turn.turn)
+        if key == (approval.session, approval.turn):
+            raise UsageError(
+                f"--context-turn {ref} is the approving turn ({approval.label()} of "
+                f"{approval.at}), so it cannot also be context; leave it out"
+            )
+        if turn.at > approval.at:
+            raise UsageError(
+                f"--context-turn {ref} ({turn.label()} of {turn.at}) is later than the "
+                f"approving turn ({approval.label()} of {approval.at}); context is what was "
+                "specified before the approval. Name a later approving turn with --turn"
+            )
+        if key not in held:
+            held.add(key)
+            out.append(turn)
+    return out
 
 
 def words_from_turns(ctx: Context, store, args: Namespace, given: str | None) -> str | None:
@@ -807,6 +904,12 @@ def _legacy_turn(args: Namespace) -> str | None:
     """``--turn`` for the path that reads no turn from the index: at most one, the
     transcript record (or prompt-history line) holding the quoted words."""
     refs = turn_refs_of(args)
+    if context_refs_of(args):
+        raise UsageError(
+            "--context-turn cites a turn of the turn index beside the approval, and here the "
+            "words come from --quote-file alone: the project does not read transcripts, or "
+            "the session's transcript cannot be read"
+        )
     if len(refs) > 1:
         raise UsageError(
             "several --turn cite several turns of the turn index, and here the words come "
@@ -836,6 +939,8 @@ class Credit:
     turns: list[CitedTurn] = field(default_factory=list)
     #: Whether the turn was taken by default, as the person's latest of the session.
     turn_defaulted: bool = False
+    #: KYO-914: the person's latest turn, ``(label, time)``, when --turn left it uncited.
+    latest_uncited: tuple[str, str] | None = None
 
     @property
     def transcript_check(self) -> str:
@@ -931,8 +1036,10 @@ def resolve(
         raise UsageError(
             "--session and --source-other both say where the words were said; give one"
         )
-    if other is not None and turn_refs_of(args):
-        raise UsageError("--turn names a transcript record, and --source-other has none")
+    if other is not None and (turn_refs_of(args) or context_refs_of(args)):
+        raise UsageError(
+            "--turn and --context-turn name a transcript record, and --source-other has none"
+        )
     person = _person(store, getattr(args, "person", None))
     if session is None and other is None:
         session = ctx.environ.get(ENV_SESSION) or None
@@ -1034,6 +1141,7 @@ def resolve(
             check_why=cited.why(),
             turns=cited.turns,
             turn_defaulted=cited.defaulted,
+            latest_uncited=cited.latest_uncited,
         )
     else:
         assert session is not None
@@ -1188,14 +1296,17 @@ def _decision(
     if outcome == CREDIT_OUTCOME_REFINED:
         if not refining_turn or not refining_session:
             raise UsageError(
-                "--decision-file outcome 'refined' cites the turn that refined the "
-                "recommendation as refining_turn (and refining_session when it is not "
-                "the credit's session)"
+                "outcome 'refined' cites the turn that refined the recommendation: "
+                "--refining-turn ID beside --outcome, or refining_turn in the decision file "
+                "(with refining_session when it is not the credit's session)"
             )
-        _require_person_turn(ctx, store, str(refining_session), str(refining_turn))
+        refining_session, refining_turn = _refining_turn(
+            ctx, store, str(refining_session), str(refining_turn)
+        )
     elif refining_turn:
         raise UsageError(
-            f"--decision-file refining_turn belongs to outcome 'refined', not {outcome!r}"
+            f"--refining-turn (refining_turn in a decision file) belongs to outcome "
+            f"'refined', not {outcome!r}"
         )
     return {
         "recommended": recommended,
@@ -1253,24 +1364,20 @@ def proposer_of(alternative: dict) -> str:
     return alternative.get("proposed_by") or PROPOSER_DEFAULT
 
 
-def _require_person_turn(ctx: Context, store, session: str, turn: str) -> None:
-    """A refining turn must be one of the person's when the transcript can say so."""
+def _refining_turn(ctx: Context, store, session: str, ref: str) -> tuple[str, str]:
+    """``(session, transcript record uuid)`` of a refined decision's refining turn.
+
+    KYO-914: the turn is named as ``--turn`` names one (a prompt id or a record uuid, whole
+    or by a unique prefix) and resolved by the same resolver, in ``session`` first; what is
+    stored is the turn's record uuid and its own session, as ``source_turn`` is. Where no
+    transcript can be read, or the project reads none, it is stored as given."""
     if not transcripts_opted_in(store.config):
-        return
-    try:
-        read = transcript.find_person_turns(
-            session,
-            recorded=recorded_transcript_path(ctx.root, session),
-            environ=ctx.environ,
-            archive=_archive(ctx),
-        )
-    except (ValueError, OSError):
-        return
-    if read.readable and turn not in {t.id for t in read.turns}:
-        raise UsageError(
-            f"refining_turn {turn} is not one of the person's turns in session {session} "
-            f"({len(read.turns)} read)"
-        )
+        return session, ref
+    views = {session: _session_view(ctx, session)}
+    if not views[session].readable:
+        return session, ref
+    turn = _resolve_turn(ctx, views, session, ref, "refining_turn")
+    return turn.session, turn.turn
 
 
 def _span(ctx: Context, store, args: Namespace, credit: Credit) -> tuple[dict, str]:
@@ -1456,6 +1563,11 @@ def lines(store, credit_id: str, credit: Credit) -> list[str]:
                 else ""
             )
         )
+        if d.get("refining_turn"):
+            # KYO-914: the record uuid the refining turn was resolved to, and its session.
+            out.append(
+                f"  refined in turn {d['refining_turn']} of session {d['refining_session']}"
+            )
     if credit.span:
         s = credit.span
         if s.get("span_active_seconds") is not None:
@@ -1502,12 +1614,19 @@ def turn_lines(store, credit_id: str, credit: Credit | None) -> list[str]:
                 f"first {TURN_WORDS_HEAD} and last {TURN_WORDS_TAIL} are stored around {OMISSION}"
             )
     approval = next(turn for turn in credit.turns if turn.role == TURN_ROLE_APPROVAL)
+    if credit.latest_uncited is not None:
+        label, at = credit.latest_uncited
+        out.append(
+            f"  the person's latest turn, {label} of {at}, is not cited: --turn names the "
+            f"approval, here {approval.label()}. Where the latest turn is the approval, name "
+            "the earlier turns with --context-turn <id> instead of --turn"
+        )
     count = len(approval.words.split())
     if len(credit.turns) == 1 and count <= SHORT_TURN_WORDS:
         out.append(
             f"  the cited turn is {count} word(s). Where earlier turns specified what it "
-            "approves, a credit can cite them as context: --turn <id> for each of them and "
-            "for this one"
+            "approves, a credit can cite them as context: --context-turn <id> for each of "
+            "them, or --turn <id> for each of them and for this one"
         )
     return out
 
@@ -1625,6 +1744,14 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     needs no basis, provided it is credited from the session that holds those words
     (KYO-653: the credit is then not derived as reconstructed either).
 
+    A CORRECTION (KYO-914). ``--supersede`` of a credit written in this session since the
+    person's previous turn began needs no basis either (:func:`correction_window`): it
+    replaces a slip caught at once, such as a confirmation that cited the wrong turn, and
+    the replaced credit stays readable as superseded. The correction names the same person
+    and only rows the replaced credit names (all of them when no SUBJECT_ID is given), and
+    it keeps the replaced credit's ``created_at`` and basis, so that a live credit stays
+    live. Outside that window the basis rule stands.
+
     ``--recheck <credit-id>`` and ``--batch FILE`` are the two other forms: they are
     :func:`recheck` and :func:`batch`.
     """
@@ -1639,13 +1766,17 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         return recheck(ctx, args)
     if args.batch:
         return batch(ctx, args)
-    if not args.subject_ids:
+    if not args.subject_ids and not args.supersede:
         raise UsageError(
             "kyo credit names the rows to credit: give one or more SUBJECT_ID, or "
             "--recheck CREDIT_ID, or --batch FILE"
         )
     store = ctx.store()
     subject_ids = list(dict.fromkeys(args.subject_ids))
+    if not subject_ids:
+        # KYO-914: with --supersede alone, the rows are those of the credit it replaces.
+        _superseded_credit(store, args.supersede)
+        subject_ids = [s["subject_id"] for s in store.credit_subjects(args.supersede)]
     resolved = [(sid, *_subject(store, sid)) for sid in subject_ids]
     kinds = {kind for _sid, kind, _rec, _at in resolved}
     records = {rec for _sid, _kind, rec, _at in resolved}
@@ -1683,8 +1814,9 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         sid: store.current_credits_of(sid) for sid, *_ in resolved if store.current_credits_of(sid)
     }
     superseded = args.supersede
+    old = None
     if superseded is not None:
-        old = store.credit(superseded)
+        old = _superseded_credit(store, superseded)
         if old["superseded_by"]:
             raise UsageError(
                 f"--supersede {superseded} was already superseded by {old['superseded_by']}"
@@ -1732,7 +1864,15 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     # it is a credit written after the fact, and rests on a basis like any other.
     live_go_ahead = go_ahead_after and ctx.environ.get(ENV_SESSION) == credit.source_session
     basis_id = args.basis
-    if basis_id is None and not live_go_ahead:
+    # KYO-914: a slip caught at once is replaced without a basis, inside the window only.
+    correction: tuple[bool, str] | None = None
+    if basis_id is None and not live_go_ahead and old is not None:
+        correction = correction_window(ctx, store, old, credit, subject_ids)
+    created_at = None
+    if correction is not None and correction[0]:
+        assert old is not None
+        created_at, basis_id = old["created_at"], old["basis_id"]
+    elif basis_id is None and not live_go_ahead:
         raise ContractViolation(
             CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS,
             [
@@ -1749,6 +1889,15 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
                     ]
                     if go_ahead_after
                     else []
+                ),
+                (
+                    f"--supersede {superseded} is no correction without a basis: "
+                    f"{correction[1]}. A credit written in this session since the person's "
+                    "previous turn began is corrected with --supersede and no basis"
+                    if correction is not None
+                    else "or, for a credit written in this session since the person's "
+                    "previous turn began, replace it as a correction: --supersede "
+                    "<credit-id>, which needs no basis"
                 ),
             ],
         )
@@ -1768,6 +1917,7 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
             subjects=[(kind, sid) for sid, kind, _rec, _at in resolved],
             author=ctx.actor,
             basis_id=basis_id,
+            created_at=created_at,
         )
         if superseded is not None:
             store.supersede_credit(superseded, credit_id)
@@ -1783,12 +1933,16 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
     out = [f"credited {', '.join(subject_ids)} on {record_id}, written by {ctx.actor}"]
     out += lines(store, credit_id, credit)
     out.append(f"  words stored as {quote_id}")
+    corrected = correction is not None and correction[0]
     if basis_id:
         out.append(f"  reconstructed; approved in {basis_id}")
     elif live_go_ahead:
         out.append("  a go-ahead given after the record was filed; no basis needed")
+    if corrected:
+        assert correction is not None
+        out.append(f"  corrects {superseded}, {correction[1]}; no basis needed")
     if superseded:
-        out.append(f"  supersedes {superseded}")
+        out.append(f"  supersedes {superseded}, which stays readable as superseded")
     return Output(
         out,
         {
@@ -1799,8 +1953,66 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
             "quote_id": quote_id,
             "basis_id": basis_id,
             "superseded": superseded,
+            "correction": corrected,
             "record": after[record_id],
         },
+    )
+
+
+def _superseded_credit(store, credit_id: str):
+    """The credit ``--supersede`` names, or a usage error saying there is none."""
+    try:
+        return store.credit(credit_id)
+    except NotFound as exc:
+        raise UsageError(f"--supersede {credit_id}: no such credit") from exc
+
+
+def correction_window(
+    ctx: Context, store, old, credit: Credit, subject_ids: list[str]
+) -> tuple[bool, str]:
+    """KYO-914: whether ``old`` may be replaced by ``credit`` without a basis, as the
+    correction of a slip caught at once, and why or why not.
+
+    The window is the current and the previous turn of the session this command runs in
+    (``$CLAUDE_CODE_SESSION_ID``), counted in the person's turns that open a turn of the
+    session, as the transcript orders them (a message sent mid-turn opens none): ``old``
+    must have been written at or after the time of the person's second-latest such turn,
+    or of their only one. It must also cite that session, name the same person as the
+    correction, and name every row the correction names. Anything else rests on a basis."""
+    from .render import _instant
+
+    session = ctx.environ.get(ENV_SESSION) or None
+    if session is None:
+        return False, f"no Claude Code session is known (${ENV_SESSION} is unset)"
+    if old["source_session"] != session:
+        return False, (
+            f"it cites session {old['source_session'] or '(none: said elsewhere)'}, and "
+            f"this command runs in session {session}"
+        )
+    if old["person"] != credit.person:
+        return False, f"it credits {old['person']}, and the correction credits {credit.person}"
+    named = {row["subject_id"] for row in store.credit_subjects(old["id"])}
+    extra = [sid for sid in subject_ids if sid not in named]
+    if extra:
+        return False, f"the correction names {', '.join(extra)}, which it does not"
+    if not transcripts_opted_in(store.config):
+        return False, "this project reads no transcripts, so the session's turns are unknown"
+    view = _session_view(ctx, session)
+    opening = [turn for turn in view.turns if turn.form != transcript.FORM_MID_TURN]
+    if not opening:
+        return False, f"no turn of the person's in session {session} can be read ({view.why})"
+    since = opening[-2] if len(opening) > 1 else opening[-1]
+    written, start = _instant(old["created_at"]), _instant(since.timestamp)
+    label = f"prompt {since.prompt_id}" if since.prompt_id else f"turn {since.id}"
+    which = "previous" if len(opening) > 1 else "only"
+    if written is None or start is None or written < start:
+        return False, (
+            f"it was written at {old['created_at']}, before the person's {which} turn of "
+            f"this session ({label} of {since.timestamp})"
+        )
+    return True, (
+        f"written at {old['created_at']} in this session, since the person's {which} turn "
+        f"({label} of {since.timestamp})"
     )
 
 
@@ -2327,6 +2539,7 @@ def refuse_unused_flags(args: Namespace, why: str) -> None:
             ("person", "--person"),
             ("session", "--session"),
             ("turn", "--turn"),
+            ("context_turn", "--context-turn"),
             ("source_other", "--source-other"),
             ("credit", "--credit"),
         )
@@ -2565,6 +2778,7 @@ def filing_credit_flag_problem(args: Namespace, kind_def) -> None:
         ("outcome", "--outcome"),
         ("recommended", "--recommended"),
         ("recommended_by", "--recommended-by"),
+        ("refining_turn", "--refining-turn"),
     ):
         if getattr(args, name, None):
             raise UsageError(

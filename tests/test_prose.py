@@ -76,6 +76,8 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--basis",  # a credit id (KYO-644)
         "--supersede",  # a credit id (KYO-644)
         "--turn",  # a prompt id or transcript record uuid, repeatable (KYO-644, KYO-900)
+        "--context-turn",  # the same ids as --turn, cited as context (KYO-914)
+        "--refining-turn",  # one id as --turn takes it, for a refined decision (KYO-914)
         "--outcome",  # accepted | refined | overrode | unprompted (KYO-900)
         "--recommended-by",  # who recommended it: an author's name, one token (KYO-900)
         "--person",  # a key under `people:` (KYO-644)

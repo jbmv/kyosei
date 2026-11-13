@@ -430,7 +430,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`, `credit_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--all-unobserved] [--gate GATE_ID] [--person KEY] [--session ID] [--turn ID] [--source-other WHERE] [--no-close] RECORD_ID`
+Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--quote TEXT] [--quote-file FILE] [--criterion CRITERION_ID [CRITERION_ID ...]] [--all-unobserved] [--gate GATE_ID] [--person KEY] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--no-close] RECORD_ID`
 
 ### Positional arguments
 
@@ -446,6 +446,7 @@ Usage: `kyo confirm [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--no-close` — optional. record the words and clear the gate, but leave the record's status alone
 
@@ -465,17 +466,17 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--role ROLE] [--basis CREDIT_ID] [--supersede CREDIT_ID] [--recheck CREDIT_ID] [--batch FILE] [--withdraw CREDIT_ID] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [SUBJECT_ID ...]`
+Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--role ROLE] [--basis CREDIT_ID] [--supersede CREDIT_ID] [--recheck CREDIT_ID] [--batch FILE] [--withdraw CREDIT_ID] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--refining-turn ID] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [SUBJECT_ID ...]`
 
 ### Positional arguments
 
-- `[SUBJECT_ID ...]` — optional. verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; none with --recheck, --batch or --withdraw
+- `[SUBJECT_ID ...]` — optional. verification (RECORD.vN), gate (RECORD.gN) or record ids, all on one record; none with --recheck, --batch or --withdraw, and with --supersede alone, those of the credit it replaces
 
 ### Options
 
 - `--role ROLE` — optional. observed | decided | authorized; defaults to decided for a record, observed otherwise. authorized: a go-ahead approving a plan already stated
 - `--basis CREDIT_ID` — optional. the person's own decided credit approving this batch of reconstructed credits
-- `--supersede CREDIT_ID` — optional. replace this current credit of a subject; it stays readable as superseded
+- `--supersede CREDIT_ID` — optional. replace this current credit of a subject; it stays readable as superseded. A credit written in this session since the person's previous turn began is replaced as a correction, with no --basis (KYO-914)
 - `--recheck CREDIT_ID` — optional. redo the transcript check of a credit recorded transcript-absent, and supersede it with the new outcome (what doctor's credit_transcripts_appeared notice names; KYO-653)
 - `--batch FILE` — optional. credit many rows at once, every line under the one --basis and --person, in one transaction or none at all (a bad line refuses the whole batch and is named). FILE is tab-separated, one credit per line, blank and #-lines skipped, with seven columns: subjects (ids, comma-separated, on one record); role (empty: decided for a record, observed otherwise); where (a Claude Code session id, or other:<where it was said>); turn (a transcript record uuid, or empty); outcome and recommended (a decided credit's accepted | overrode | unprompted and what was recommended, else empty; a refined outcome is credited alone); quote (the person's words, the rest of the line, with \n for a newline, \t for a tab and \\ for a backslash). Needs --basis (KYO-653)
 - `--withdraw CREDIT_ID` — optional. retract this current credit, which should not exist, with no replacement; it stays readable as withdrawn, with --why, and its subjects are uncredited again (KYO-670)
@@ -485,9 +486,11 @@ Usage: `kyo credit [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
-- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined, overrode or unprompted (KYO-900)
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome, named as --turn names a turn
+- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined (with --refining-turn), overrode or unprompted (KYO-900)
+- `--refining-turn ID` — optional. with --outcome refined: the person's turn that refined the recommendation, named as --turn names one (KYO-914)
 - `--recommended WHAT` — optional. with --outcome: what was recommended, one line; none for unprompted
 - `--recommended-by WHO` — optional. with --recommended: who recommended it; defaults to the acting author
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
@@ -1037,7 +1040,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--withdrawn] [--force] ID [ID ...]`
+Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--withdrawn] [--force] ID [ID ...]`
 
 ### Positional arguments
 
@@ -1051,6 +1054,7 @@ Usage: `kyo move [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
 - `--force` — optional. close a plan over unsettled (not complete or retired) members, recording that it was closed over them; or enter a completion or retired status with a gate still open, leaving it open (KYO-490)
@@ -1067,7 +1071,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--implements ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
+Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TEXT] [--plan ID] [--implements ID] [--scope SCOPE] [--since-note NOTE-ID] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--refining-turn ID] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--from FILE] [--check] [--force] [--no-prior-art] kind`
 
 ### Positional arguments
 
@@ -1088,9 +1092,11 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
-- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined, overrode or unprompted (KYO-900)
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome, named as --turn names a turn
+- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined (with --refining-turn), overrode or unprompted (KYO-900)
+- `--refining-turn ID` — optional. with --outcome refined: the person's turn that refined the recommendation, named as --turn names one (KYO-914)
 - `--recommended WHAT` — optional. with --outcome: what was recommended, one line; none for unprompted
 - `--recommended-by WHO` — optional. with --recommended: who recommended it; defaults to the acting author
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
@@ -1609,7 +1615,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`, `discussion_id`, `record_id`, `link_id`, `evidence_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--plan ID] [--implements ID] [--keep-open] [--check] [--force] [--no-prior-art] SOURCE_ID`
+Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] --kind KIND [--title TEXT] [--description-file FILE] [--criteria-file FILE] [--touches-file FILE] [--scope SCOPE] [--from FILE] [--evidence-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--decision-file FILE] [--outcome {accepted,refined,overrode,unprompted}] [--refining-turn ID] [--recommended WHAT] [--recommended-by WHO] [--span-first UUID] [--span-last UUID] [--span-session ID] [--discussion ID] [--opened-late] [--at-prompt PROMPT] [--plan ID] [--implements ID] [--keep-open] [--check] [--force] [--no-prior-art] SOURCE_ID`
 
 ### Positional arguments
 
@@ -1629,9 +1635,11 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
-- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome
-- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined, overrode or unprompted (KYO-900)
+- `--decision-file FILE` — optional. YAML: recommended, recommended_by, outcome (accepted | refined | overrode | unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is person, orchestrator or worker and an entry without one is read as the agent's, and refining_turn for a refined outcome, named as --turn names a turn
+- `--outcome {accepted,refined,overrode,unprompted}` — optional. in place of --decision-file, for a decision that lists no alternatives: accepted, refined (with --refining-turn), overrode or unprompted (KYO-900)
+- `--refining-turn ID` — optional. with --outcome refined: the person's turn that refined the recommendation, named as --turn names one (KYO-914)
 - `--recommended WHAT` — optional. with --outcome: what was recommended, one line; none for unprompted
 - `--recommended-by WHO` — optional. with --recommended: who recommended it; defaults to the acting author
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
@@ -1792,7 +1800,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `credit_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--tag TAG] [--apply] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--withdrawn] [--credit CREDIT_ID] [GATE_ID ...]`
+Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--tag TAG] [--apply] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--withdrawn] [--credit CREDIT_ID] [GATE_ID ...]`
 
 ### Positional arguments
 
@@ -1808,6 +1816,7 @@ Usage: `kyo ungate [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
 - `--credit CREDIT_ID` — optional. add this clearing to an existing credit of the same act (kyo confirm uses it); the credit must be current and on the same record
@@ -1853,7 +1862,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--verdict VERDICT] [--method METHOD] [--evidence-file FILE] [--from-report DISPATCH_ID] [--only CRITERION_ID [CRITERION_ID ...]] [--again] [--why TEXT] [--why-file FILE] [--person KEY] [--session ID] [--turn ID] [--source-other WHERE] [--credit CREDIT_ID] [CRITERION_ID]`
+Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--verdict VERDICT] [--method METHOD] [--evidence-file FILE] [--from-report DISPATCH_ID] [--only CRITERION_ID [CRITERION_ID ...]] [--again] [--why TEXT] [--why-file FILE] [--person KEY] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--credit CREDIT_ID] [CRITERION_ID]`
 
 ### Positional arguments
 
@@ -1872,6 +1881,7 @@ Usage: `kyo verify [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 - `--person KEY` — optional. the person whose judgement this is, a key under `people:` in kyosei/config.yml; defaults to the only one declared (KYO-644)
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--credit CREDIT_ID` — optional. add this human-observed verdict to an existing credit of the same act and words (kyo confirm uses it)
 
@@ -1939,7 +1949,7 @@ Writes to the store: **yes** — an events row and a fresh export.
 
 Top-level ids in `--json`: `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
-Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--source-other WHERE] [--withdrawn] [--force] id`
+Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--why TEXT] [--why-file FILE] [--person KEY] [--quote-file FILE] [--session ID] [--turn ID] [--context-turn ID] [--source-other WHERE] [--withdrawn] [--force] id`
 
 ### Positional arguments
 
@@ -1953,6 +1963,7 @@ Usage: `kyo wont-do [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--quote-file FILE` — optional. the person's words, verbatim, from a file or '-' for stdin. Needed where kyo cannot copy them from a turn: a project that does not read transcripts, or words said outside Claude Code. Beside --turn it narrows what is stored to part of a named turn
 - `--session ID` — optional. the Claude Code session the words were said in; defaults to $CLAUDE_CODE_SESSION_ID. The words are checked against that session's transcript
 - `--turn ID` — optional. a turn of the person's that the credit cites, repeatable: a prompt id or a transcript record uuid from the turn index (`kyo turns --said` lists them), whole or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is needed, and stores the turns in transcript order: the latest is the approval and the earlier ones the context it approved. With neither --turn nor --quote-file, in a Claude Code session of a project that reads transcripts, the person's latest turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)
+- `--context-turn ID` — optional. a turn of the person's that the credit cites as context, repeatable, named as --turn names one: an earlier turn in which what was approved was specified. The approval is still the person's latest turn of the session, or the turn --turn names (KYO-914)
 - `--source-other WHERE` — optional. one line saying where the words were said, when not in a Claude Code session
 - `--withdrawn` — optional. no person answered: the wait stopped mattering. Needs --why; the gate is recorded cleared_as withdrawn (KYO-644)
 - `--force` — optional. retire the record with a gate still open, leaving it open
