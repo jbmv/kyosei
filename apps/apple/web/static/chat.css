@@ -342,9 +342,10 @@ body.terminal-open #jump-bottom { display: none; }
 
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
 .box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
-/* The prompt's text starts 24px in from the box's padding, past the gutters that hold the fold
-   toggles and the marks. */
-.box-delete { margin-left: 24px; color: var(--muted); font-weight: 500; }
+/* The prompt's text starts 40px in from the box's padding, past the gutters that hold the
+   section lines, the marks and the fold toggles (`TEXT_START` in web/src/editor.ts, less the
+   box's 12px padding), and Delete starts there too. */
+.box-delete { margin-left: 40px; color: var(--muted); font-weight: 500; }
 .box-delete:hover { color: var(--apple-red); text-decoration: underline; }
 /* Bare text in the accent colour, with the keys that do the same beside it. */
 .box-send { color: var(--link); font-weight: 600; }
@@ -368,25 +369,31 @@ body.terminal-open #jump-bottom { display: none; }
 .box.main .box-body { min-height: 0; overflow-y: auto; }
 .box.main .box-actions { flex: none; }
 
-/* A scratchpad: a box of the same draft that is never sent. Its heading names it, and the
-   button before the heading collapses it to that line. */
+/* A scratchpad: a box of the same draft that is never sent. Its head shows the first line of
+   its text that holds words, which is edited in the text (KYO-917), and the button before it
+   collapses the scratchpad to that line. The button stands over the fold toggles' column and
+   the words start where the text does: the toggle's 20px centred on the fold gutter's middle,
+   46px less 7px from the box's edge, and the words at 52px. The words are muted while the
+   scratchpad is open, since its first line is just below, and drawn in full when collapsed. */
 .box.scratch { background: color-mix(in srgb, var(--background) 60%, var(--panel)); }
-.scratch-head { display: flex; align-items: center; gap: 4px; margin-left: -4px; }
+.scratch-head { display: flex; align-items: center; gap: 3px; margin-left: 17px; min-width: 0; }
 .scratch-toggle { flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); }
 .scratch-toggle::before { content: "▾"; font-size: 12px; }
 .box.collapsed .scratch-toggle::before { content: "▸"; }
 .scratch-toggle:hover { background: var(--line); color: var(--text); }
-.scratch-heading {
+.scratch-title {
   flex: 1;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: none;
-  color: var(--text);
-  font: 600 13px/1.4 -apple-system, system-ui, sans-serif;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font: 500 13px/1.4 -apple-system, system-ui, sans-serif;
+  cursor: default;
+  user-select: none;
 }
-.scratch-heading::placeholder { color: var(--muted); font-weight: 500; }
+.box.collapsed .scratch-title { color: var(--text); font-weight: 600; }
+.box.collapsed .scratch-title.empty { color: var(--muted); font-weight: 500; }
 .box.collapsed { gap: 0; padding-top: 7px; padding-bottom: 7px; }
 .box.collapsed .box-body, .box.collapsed .box-actions { display: none; }
 .box-create { color: var(--link); font-weight: 600; }
@@ -396,10 +403,10 @@ body.terminal-open #jump-bottom { display: none; }
 .box { position: relative; }
 /* KYO-910: a box's text is an editor (web/src/editor.ts), whose own theme draws its gutters,
    the hanging indent of wrapped rows, the indent guides, the heading rules and the folds. Its
-   fold gutter, 12px wide, stands in the box's padding, and its marks gutter after it, so the
-   text starts 24px in from the padding, as the Delete button below it does (KYO-913). The
-   body, not the editor, reaches into the padding: the prompt's body scrolls, and would clip
-   what stood past its own edge. */
+   gutters start at the box's edge, in its padding: the section lines, the marks, then the fold
+   toggles (KYO-917), so the text starts 40px in from the padding, as the Delete button below
+   it does. The body, not the editor, reaches into the padding: the prompt's body scrolls, and
+   would clip what stood past its own edge. */
 .box-body { display: flex; margin-left: -12px; }
 .box .cm-editor {
   flex: 1;
@@ -407,7 +414,6 @@ body.terminal-open #jump-bottom { display: none; }
   font: 15px/1.45 -apple-system, system-ui, sans-serif;
   color: var(--text);
 }
-.box .cm-editor .cm-gutter.kyo-marks { width: 18px; }
 
 .mark {
   position: absolute;
@@ -426,8 +432,8 @@ body.terminal-open #jump-bottom { display: none; }
 }
 .mark[hidden] { display: none; }
 /* The paragraph the next anchor lands on, shown while the composer has no caret. The editor
-   draws it in the fold gutter, beside the paragraph's own mark (KYO-913); it may cover a fold
-   toggle, and takes no press, so the toggle under it still folds. */
+   draws it in the fold gutter, beside the paragraph's own mark (KYO-913, KYO-917); it may
+   cover a fold toggle, and takes no press, so the toggle under it still folds. */
 .mark-landing { background: var(--background); color: var(--link); font-weight: 600; }
 .mark.ghost { opacity: 0.45; }
 .mark.ghost:hover { opacity: 1; background: var(--line); }

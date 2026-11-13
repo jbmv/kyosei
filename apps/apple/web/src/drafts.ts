@@ -8,10 +8,40 @@
 export interface DraftBox { id: string; text: string; marks?: unknown; scratch?: Scratch | null }
 
 /**
- * What makes a box a scratchpad and not the prompt (KYO-903): the heading the person gave it,
- * which names it and is never sent, and whether it is collapsed to that heading.
+ * What makes a box a scratchpad and not the prompt (KYO-903): the object itself, and whether
+ * the scratchpad is collapsed to its head. Its head shows the first line of its text that
+ * holds words (KYO-917).
  */
-export interface Scratch { heading: string; collapsed?: boolean }
+export interface Scratch {
+  /**
+   * The heading an earlier build kept apart from the text (KYO-903). It is no longer written:
+   * a scratchpad that has one opens with it as its first line (`headingAsLine`).
+   */
+  heading?: string;
+  collapsed?: boolean;
+}
+
+/** The words a scratchpad's head shows: its first line that holds words, trimmed (KYO-917). */
+export function scratchTitle(text: string): string {
+  return text.split("\n").find((line) => line.trim())?.trim() ?? "";
+}
+
+/**
+ * A scratchpad saved by an earlier build with a heading (KYO-917): the heading becomes the
+ * first line of its text, each mark moves one line down with its line, and the heading is
+ * dropped, so the box is saved without it with the next edit and nothing is moved twice. A
+ * heading that is already the text's first line is not added again, and an empty text with
+ * no marks becomes the heading alone.
+ */
+export function headingAsLine<M extends { line: number }>(
+  text: string, marks: M[], scratch: Scratch,
+): { text: string; marks: M[]; scratch: Scratch } {
+  const { heading, ...rest } = scratch;
+  const words = heading?.trim() ?? "";
+  if (!words || text.split("\n")[0].trim() === words) return { text, marks, scratch: rest };
+  if (!text && !marks.length) return { text: words, marks, scratch: rest };
+  return { text: `${words}\n${text}`, marks: marks.map((mark) => ({ ...mark, line: mark.line + 1 })), scratch: rest };
+}
 
 /** A new id for a box made in this window. */
 export function boxId(): string {
@@ -40,8 +70,9 @@ function canonical(value: unknown): string {
  */
 export function boxSignature(box: { text: string; marks?: unknown; scratch?: Scratch | null }): string {
   const marks = Array.isArray(box.marks) && box.marks.length ? box.marks : [];
-  // A scratchpad differs from a prompt of the same words, and by its heading and whether it
-  // is collapsed, so each of those is saved and merged as an edit of the text is (KYO-903).
+  // A scratchpad differs from a prompt of the same words, and by whether it is collapsed, which
+  // is saved and merged as an edit of the text is (KYO-903). An earlier build's heading counts
+  // too, so that a box that still has one differs from the same box without it (KYO-917).
   if (box.scratch) return canonical([box.text, marks, [box.scratch.heading ?? "", Boolean(box.scratch.collapsed)]]);
   return canonical([box.text, marks]);
 }

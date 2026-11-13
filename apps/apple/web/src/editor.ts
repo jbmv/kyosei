@@ -2,8 +2,8 @@
  * A composer box's editor on CodeMirror 6 (KYO-906, KYO-909). The document is the text as
  * typed, which is what is saved and sent; everything else here is drawn over it or kept beside
  * it: the marks each line holds, the gutter that shows them, the hanging indent of wrapped
- * rows, the indent guides, the heading rules and the folded sections (KYO-913). The composer's
- * boxes are built here (KYO-910).
+ * rows, the indent guides, the heading rules, the folded sections (KYO-913) and the lines
+ * beside a heading's section (KYO-917). The composer's boxes are built here (KYO-910).
  *
  * What the composer decides (drafts, sending, the mark's panel, uploads) stays in `chat.ts`,
  * which reaches this module through the callbacks of `EditorOptions` and the functions below.
@@ -23,7 +23,7 @@ import {
   codeFolding, foldEffect, foldKeymap, foldService, foldable, foldedRanges, unfoldEffect,
 } from "@codemirror/language";
 import { shiftLines } from "./marks.ts";
-import { INDENT_WIDTH, lineShapes, sectionEnd } from "./outline.ts";
+import { INDENT_WIDTH, headingSections, lineShapes, sectionEnd } from "./outline.ts";
 
 // ---------------------------------------------------------------- marks (proposal 5.2)
 
@@ -272,6 +272,21 @@ export function hoverLine(state: EditorState): number | null {
 
 // ---------------------------------------------------------------------- the gutter
 
+/**
+ * The strip left of the text (KYO-917), from the box's edge in: the section lines, the marks,
+ * then the folds, so that a chevron stands next to the words it folds. The mark and the chevron
+ * are each inset in their gutter, so that the edge, a mark or the ghost, a chevron and the
+ * line's first character stand at least four pixels apart, and the text starts `TEXT_START`
+ * pixels from the edge. The composer's stylesheet sets its Delete button and a scratchpad's
+ * head on the same measures.
+ */
+export const SECTIONS_WIDTH = 8;
+export const MARKS_WIDTH = 24;
+const MARK_INSET = 2;
+export const FOLDS_WIDTH = 14;
+const CHEVRON_INSET = 2;
+const CHEVRON_WIDTH = 10;
+
 type Draw = (view: EditorView) => HTMLElement;
 
 class DrawnMarker extends GutterMarker {
@@ -289,6 +304,8 @@ class DrawnMarker extends GutterMarker {
 
 /** The left padding CodeMirror gives a line, restated so that the hanging indent adds to it. */
 const LINE_PADDING = 6;
+/** Where a line's first character stands, from the box's edge, past the gutters. */
+export const TEXT_START = SECTIONS_WIDTH + MARKS_WIDTH + FOLDS_WIDTH + LINE_PADDING;
 /** Where in its level a guide stands: under the marker of the item the line is nested in. */
 const GUIDE_INSET = 3;
 const GUIDE_WIDTH = 1.5;
@@ -394,6 +411,85 @@ const outline = ViewPlugin.fromClass(class {
     return Decoration.set(ranges);
   }
 }, { decorations: (plugin) => plugin.decorations });
+
+// ------------------------------------------------------------------ section lines (KYO-917)
+
+const SECTION_BAR = 2;
+const SECTION_PITCH = 4;
+/** How far below the top of a heading's row its section's line begins, below the heading's rule. */
+const SECTION_START = 3;
+
+/**
+ * The lines of one row: one for each heading section the line is in, outermost at the box's
+ * edge. A section that begins or ends on the line rounds that end of its stroke.
+ */
+class SectionMarker extends GutterMarker {
+  constructor(readonly depth: number, readonly starts: number, readonly ends: number, readonly pitch: number, readonly bar: number) {
+    super();
+  }
+  eq(other: GutterMarker): boolean {
+    return other instanceof SectionMarker && other.depth === this.depth && other.starts === this.starts
+      && other.ends === this.ends && other.pitch === this.pitch && other.bar === this.bar;
+  }
+  toDOM(): Node {
+    const holder = document.createElement("span");
+    holder.className = "section-lines";
+    for (let slot = 0; slot < this.depth; slot++) {
+      const line = document.createElement("span");
+      const starts = Boolean(this.starts & (1 << slot));
+      const ends = Boolean(this.ends & (1 << slot));
+      line.className = `section-line${starts ? " starts" : ""}${ends ? " ends" : ""}`;
+      line.style.cssText = `left: ${(slot * this.pitch).toFixed(2)}px; width: ${this.bar.toFixed(2)}px; `
+        + `top: ${starts ? SECTION_START : 0}px;`;
+      holder.append(line);
+    }
+    return holder;
+  }
+}
+
+/**
+ * The section lines of a document, as gutter markers on the lines they stand beside. Two
+ * levels of sections stand `SECTION_PITCH` apart; a box whose sections nest deeper draws its
+ * lines closer, so that they stay in their gutter and the text does not move as a heading is
+ * typed.
+ */
+function sectionMarkers(doc: Text): RangeSet<GutterMarker> {
+  const held = headingSections(doc.toString());
+  const deepest = Math.max(0, ...held.map((chain) => chain.length));
+  const pitch = deepest <= 2 ? SECTION_PITCH : (SECTIONS_WIDTH - SECTION_BAR) / (deepest - 1);
+  const bar = Math.min(SECTION_BAR, Math.max(1, pitch - 1));
+  const markers: { pos: number; marker: GutterMarker }[] = [];
+  held.forEach((chain, line) => {
+    if (!chain.length) return;
+    let starts = 0;
+    let ends = 0;
+    chain.forEach((heading, slot) => {
+      if (heading === line) starts |= 1 << slot;
+      if (held[line + 1]?.[slot] !== heading) ends |= 1 << slot;
+    });
+    markers.push({ pos: doc.line(line + 1).from, marker: new SectionMarker(chain.length, starts, ends, pitch, bar) });
+  });
+  return RangeSet.of(markers.map(({ pos, marker }) => marker.range(pos)));
+}
+
+const sectionLinesField = StateField.define<RangeSet<GutterMarker>>({
+  create: (state) => sectionMarkers(state.doc),
+  update: (value, tr) => (tr.docChanged ? sectionMarkers(tr.state.doc) : value),
+});
+
+/**
+ * The section lines (KYO-917): a heading's section, as `sectionEnd` gives it to folding and
+ * Send to prompt, has a line at the box's edge down every row it holds, the heading's
+ * included, and a section nested in it a second line beside the first. They are markers of
+ * the outermost gutter, so they lie in no line's background, beside the indent guides and the
+ * heading's rule and tint and over none of them. CodeMirror sizes a gutter's element to its
+ * line's block, wrapped rows and all, so the line of a section runs unbroken, and draws a
+ * folded section's marker on its first line alone. Nothing here changes the text.
+ */
+const sectionsGutter: Extension = [
+  sectionLinesField,
+  gutter({ class: "kyo-sections", markers: (view) => view.state.field(sectionLinesField) }),
+];
 
 // ------------------------------------------------------------------- keys (proposal 5.6)
 
@@ -701,8 +797,8 @@ const openToggle = new FoldToggle(false);
 const foldedToggle = new FoldToggle(true);
 
 /**
- * The fold gutter, left of the marks: a chevron on the line under the pointer when it can
- * fold, and on every folded line always. A press on it folds or unfolds that line's section.
+ * The fold gutter, between the marks and the text (KYO-917): a chevron on the line under the
+ * pointer when it can fold, and on every folded line always. A press on it folds or unfolds that line's section.
  * The landing arrow is drawn here too (KYO-913), over the chevron where the two meet, so that
  * it no longer covers the line's mark; it takes no press, which reaches the chevron under it.
  */
@@ -911,22 +1007,34 @@ const look = EditorView.theme({
   ".cm-content": { padding: "0", "--kyo-guide": "var(--line, rgba(128, 128, 128, 0.4))" },
   ".cm-line": { padding: `0 2px 0 ${LINE_PADDING}px` },
   ".cm-gutters": { background: "none", border: "none", color: "inherit" },
-  ".cm-gutter.kyo-marks": { width: "24px" },
+  // KYO-917: the section lines at the box's edge, then the marks, then the folds (`TEXT_START`).
+  ".cm-gutter.kyo-sections": { width: `${SECTIONS_WIDTH}px` },
+  ".cm-gutter.kyo-sections .cm-gutterElement": { position: "relative" },
+  ".section-line": {
+    position: "absolute", bottom: "0", borderRadius: "0",
+    background: "color-mix(in srgb, var(--muted, #888) 60%, transparent)",
+  },
+  ".section-line.starts": { borderTopLeftRadius: "1px", borderTopRightRadius: "1px" },
+  ".section-line.ends": { borderBottomLeftRadius: "1px", borderBottomRightRadius: "1px" },
+  ".cm-gutter.kyo-marks": { width: `${MARKS_WIDTH}px` },
   ".cm-gutter.kyo-marks .cm-gutterElement": { position: "relative" },
-  // KYO-913: the fold gutter, 12 pixels wide, left of the marks. Its chevron points right on a
-  // folded line and down on one that can fold; the landing arrow covers it where both stand.
-  ".cm-gutter.kyo-folds": { width: "12px" },
+  ".cm-gutter.kyo-marks .mark": { left: `${MARK_INSET}px` },
+  // KYO-913: the fold gutter. Its chevron points right on a folded line and down on one that
+  // can fold; the landing arrow covers it where both stand.
+  ".cm-gutter.kyo-folds": { width: `${FOLDS_WIDTH}px` },
   ".cm-gutter.kyo-folds .cm-gutterElement": { position: "relative", cursor: "default" },
+  // The chevron is square, so that turning it down leaves its box where it was, centred on the
+  // line's first row as the mark is.
   ".fold-toggle": {
-    position: "absolute", left: "0", top: "1px", width: "12px", height: "20px", lineHeight: "20px",
-    textAlign: "center", fontSize: "14px", color: "var(--muted, #888)", cursor: "pointer",
-    transform: "rotate(90deg)",
+    position: "absolute", left: `${CHEVRON_INSET}px`, top: `${11 - CHEVRON_WIDTH / 2}px`, width: `${CHEVRON_WIDTH}px`,
+    height: `${CHEVRON_WIDTH}px`, lineHeight: `${CHEVRON_WIDTH}px`, textAlign: "center", fontSize: "14px",
+    color: "var(--muted, #888)", cursor: "pointer", transform: "rotate(90deg)",
   },
   ".fold-toggle.folded": { transform: "none" },
   ".fold-toggle:hover": { color: "var(--text, currentColor)" },
   ".cm-gutter.kyo-folds .mark-landing": {
-    position: "absolute", left: "0", top: "1px", zIndex: "1", width: "12px", height: "20px",
-    lineHeight: "20px", textAlign: "center", fontSize: "12px", overflow: "hidden", pointerEvents: "none",
+    position: "absolute", left: `${CHEVRON_INSET - 1}px`, top: "1px", zIndex: "1", width: `${CHEVRON_WIDTH + 2}px`,
+    height: "20px", lineHeight: "20px", textAlign: "center", fontSize: "12px", overflow: "hidden", pointerEvents: "none",
   },
   ".cm-foldPlaceholder.kyo-fold": {
     margin: "0 0 0 4px", padding: "0 5px", border: "none", borderRadius: "4px",
@@ -971,8 +1079,10 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
     // composer's stylesheet sets the gutters, so that they came to stand over the text.
     gutters({ fixed: false }),
     folding(options.describeItems ?? ((items: T[]) => `${items.length} ${items.length === 1 ? "item" : "items"}`)),
-    foldsGutter(options),
+    // The gutters stand in the order they are given, from the box's edge in (KYO-917).
+    sectionsGutter,
     marksGutter(options),
+    foldsGutter(options),
     followPointer,
     outline,
     transfers(options),

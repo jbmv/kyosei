@@ -141,7 +141,7 @@ const settle = `new Promise((done) => requestAnimationFrame(() => requestAnimati
 const SCRATCH = "# topic\nwords\n- item\n  - nested\n# other\nkeep";
 const PROMPT = "# ask\n- first\n  - detail\n- second\ntail";
 const BOXES = [
-  { id: "a", text: SCRATCH, scratch: { heading: "notes" },
+  { id: "a", text: SCRATCH, scratch: {},
     marks: [{ line: 1, items: [{ kind: "tag", name: "review" }] }, { line: 3, items: [{ kind: "tag", name: "later" }] },
       { line: 5, items: [{ kind: "tag", name: "stays" }] }] },
   { id: "b", text: PROMPT, marks: [{ line: 2, items: [{ kind: "tag", name: "inner" }] }] },
@@ -165,11 +165,14 @@ async function saveAndSend(page: Page): Promise<{ saved: unknown; sent: unknown 
   return { saved: kept, sent: await page.run(sentBody) };
 }
 
-test("with sections folded, the saved draft and the posted send body are those of the boxes unfolded (KYO-913.c2)", async (t) => {
+test("with sections folded, the saved draft and the posted send body are those of the boxes unfolded, and the section lines change neither (KYO-913.c2, KYO-917.c8)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(BOXES)}, etag: "e" }); })()`);
+    // Both boxes have headings, whose sections' lines are drawn beside them.
+    const lined = `[...document.querySelectorAll("#boxes > .box")].map((box) => box.querySelectorAll(".cm-gutter.kyo-sections .section-line").length)`;
+    assert.deepEqual(await page.run(lined), [6, 5]);
     const plain = await saveAndSend(page);
 
     await page.reload();
@@ -177,6 +180,8 @@ test("with sections folded, the saved draft and the posted send body are those o
     await foldAt(page, 0, 0);
     await foldAt(page, 1, 1);
     assert.deepEqual(await page.run(`[window.kyo.composer.folds(0), window.kyo.composer.folds(1)]`), [[0], [1]]);
+    // A folded heading keeps its line on its own row, and the hidden rows have none.
+    assert.deepEqual(await page.run(lined), [3, 4]);
     const folded = await saveAndSend(page);
     assert.deepEqual(await page.run(`[window.kyo.composer.folds(0), window.kyo.composer.folds(1)]`), [[0], [1]]);
 
@@ -278,7 +283,7 @@ test("the landing arrow stands in the fold gutter, over a fold toggle and beside
   try {
     await page.reload();
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: [
-      { id: "a", text: "# topic\\nwords\\n# plain", scratch: { heading: "" },
+      { id: "a", text: "# topic\\nwords\\n# plain", scratch: {},
         marks: [{ line: 0, items: [{ kind: "tag", name: "top" }] }, { line: 2, items: [{ kind: "tag", name: "plain" }] }] },
     ], etag: "e" }); })()`);
     await foldAt(page, 0, 0);
@@ -291,7 +296,9 @@ test("the landing arrow stands in the fold gutter, over a fold toggle and beside
       await ${settle};
       const arrow = document.querySelector("#boxes .mark-landing");
       const box = arrow.getBoundingClientRect();
-      const row = (element) => Math.round(element.getBoundingClientRect().top);
+      // A row by the middle of what is drawn on it, since the marker, the arrow and the chevron
+      // are of different heights, each centred on the line's first row.
+      const row = (element) => { const rect = element.getBoundingClientRect(); return Math.round(rect.top + rect.height / 2); };
       const mark = [...document.querySelectorAll("#boxes .mark.held")].find((held) => Math.abs(row(held) - row(arrow)) < 4);
       const toggle = document.querySelector("#boxes .fold-toggle.folded");
       const other = mark.getBoundingClientRect();
@@ -312,5 +319,84 @@ test("the landing arrow stands in the fold gutter, over a fold toggle and beside
     // On a line that does not fold and holds a mark, the arrow stands beside the mark.
     const onPlain = await look(2);
     assert.deepEqual([onPlain.inFolds, onPlain.overlap, onPlain.overToggle], [true, false, false]);
+  } finally { await page.close(); }
+});
+
+// ------------------------------------------------- the gutters' order and spacing (KYO-917)
+
+test("in every box the marks gutter is the outer one and the folds stand between it and the text, all at least four pixels apart at the composer's narrowest (KYO-917.c5, c6)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    // The composer dragged as narrow as it goes, by its band.
+    const width = await page.run<number>(`(() => {
+      const band = document.getElementById("band");
+      band.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: 600 }));
+      document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: window.innerWidth - 10 }));
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      return document.getElementById("composer").getBoundingClientRect().width;
+    })()`);
+    assert.equal(width, 300);
+    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(BOXES)}, etag: "e" }); })()`);
+    await foldAt(page, 1, 1);
+    // For each box, and each line asked for, with the pointer over it: the boxes of its section
+    // lines, its mark or ghost, its chevron and its first character, from the box's inner edge.
+    const measure = (kind: string, line: number) => page.run<{
+      gutters: string[]; bars: [number, number][]; mark: [number, number] | null; chevron: [number, number] | null;
+      first: [number, number]; arrow: boolean;
+    }>(`(async () => {
+      const box = document.querySelector("#boxes .box.${kind}");
+      const edge = box.getBoundingClientRect().left + parseFloat(getComputedStyle(box).borderLeftWidth);
+      const span = (element) => { const rect = element.getBoundingClientRect(); return [rect.left - edge, rect.right - edge]; };
+      const editor = box.querySelector(".cm-editor");
+      const row = box.querySelectorAll(".cm-line")[${line}];
+      const at = row.getBoundingClientRect();
+      editor.dispatchEvent(new MouseEvent("mousemove", { clientX: at.left + 20, clientY: at.top + 4, bubbles: true }));
+      await ${settle};
+      const onRow = (selector) => [...box.querySelectorAll(selector)].find((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.height && rect.top < at.top + 12 && rect.bottom > at.top + 4;
+      });
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      const text = walker.nextNode();
+      range.setStart(text, 0);
+      range.setEnd(text, 1);
+      const bars = onRow(".cm-gutter.kyo-sections .cm-gutterElement");
+      const mark = onRow(".cm-gutter.kyo-marks .mark");
+      const chevron = onRow(".cm-gutter.kyo-folds .fold-toggle");
+      return {
+        gutters: [...box.querySelectorAll(".cm-gutters > .cm-gutter")].map((gutter) => gutter.className.replace("cm-gutter ", "")),
+        bars: bars ? [...bars.querySelectorAll(".section-line")].map(span) : [],
+        mark: mark ? span(mark) : null,
+        chevron: chevron ? span(chevron) : null,
+        first: span(range),
+        arrow: Boolean(box.querySelector(".cm-gutter.kyo-folds .mark-landing")) || !box.querySelector(".mark-landing"),
+      };
+    })()`);
+    const apart = (what: string, left: [number, number] | undefined | null, right: [number, number] | undefined | null) => {
+      assert.ok(left && right, `${what}: both are drawn`);
+      assert.ok(right[0] - left[1] >= 4, `${what}: ${JSON.stringify(left)} and ${JSON.stringify(right)} stand ${right[0] - left[1]}px apart`);
+    };
+    // The scratchpad's "- item" holds nothing and folds: the ghost and an open chevron. Its
+    // "words" holds a mark and does not fold. The prompt's "- first" is folded, and its
+    // "  - detail" hidden; its "# ask" holds nothing and folds.
+    const cases: [string, number, boolean][] = [["scratch", 2, true], ["scratch", 1, false], ["main", 1, true], ["main", 0, true]];
+    for (const [kind, line, folds] of cases) {
+      const seen = await measure(kind, line);
+      assert.deepEqual(seen.gutters, ["kyo-sections", "kyo-marks", "kyo-folds"], `${kind}: the gutters from the box's edge in`);
+      assert.ok(seen.arrow, `${kind}: the landing arrow, if drawn, is in the fold gutter`);
+      if (seen.bars.length) {
+        assert.ok(Math.abs(seen.bars[0][0]) < 0.5, `${kind} line ${line}: its section's line is at the box's edge`);
+        apart(`${kind} line ${line}: section line and mark`, seen.bars.at(-1), seen.mark);
+      }
+      apart(`${kind} line ${line}: mark and first character`, seen.mark, seen.first);
+      if (folds) {
+        apart(`${kind} line ${line}: mark and chevron`, seen.mark, seen.chevron);
+        apart(`${kind} line ${line}: chevron and first character`, seen.chevron, seen.first);
+      } else {
+        assert.equal(seen.chevron, null);
+      }
+    }
   } finally { await page.close(); }
 });

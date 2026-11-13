@@ -73,6 +73,25 @@ export function sectionEnd(text: string, line: number): number {
   return end;
 }
 
+/**
+ * For each line of `text`, the headings whose sections hold it, outermost first, each by the
+ * line it is on (KYO-917). A heading's section is the one `sectionEnd` gives, which folding
+ * and Send to prompt use too, so the heading's own line is in it and the blank lines at its
+ * end are not. Sections nest, since a heading's ends at the next heading of its level or above,
+ * so the list is each line's chain of sections from the outermost in. A line before the first
+ * heading is in none.
+ */
+export function headingSections(text: string): number[][] {
+  const shapes = lineShapes(text);
+  const held: number[][] = shapes.map(() => []);
+  shapes.forEach((shape, line) => {
+    if (!shape.heading) return;
+    const end = sectionEnd(text, line);
+    for (let at = line; at < end; at++) held[at].push(line);
+  });
+  return held;
+}
+
 /** A box's words with what its lines hold, each by the line it is on. */
 export interface Lined<T> { text: string; marks?: { line: number; items: T[] }[] }
 

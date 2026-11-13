@@ -176,7 +176,7 @@ test("a save refused as stale is merged with the draft saved first, and saved ag
 
 test("a prompt sent from one device leaves the other, which keeps its unsaved edits", async (t) => {
   if (!laptop) return t.skip("no Chrome on this machine");
-  const kept = { id: "a", text: "Notes", scratch: { heading: "" } };
+  const kept = { id: "a", text: "Notes", scratch: {} };
   const [here, there] = await open([kept, { id: "b", text: "Sent from the laptop" }]);
   await focus(there, 0);
   await there.page.type(", still being typed");
@@ -198,17 +198,15 @@ test("a prompt sent from one device leaves the other, which keeps its unsaved ed
 test("every box is saved with an id, which it keeps while it is edited", async (t) => {
   if (!laptop) return t.skip("no Chrome on this machine");
   const [here] = await open([{ id: "a", text: "First" }]);
-  // The + button adds a scratchpad above the prompt, with the caret in its heading.
+  // The + button adds a scratchpad above the prompt, with the caret in its text (KYO-917).
   await here.page.run(`document.getElementById("new-prompt").click()`);
-  await here.page.type("A heading");
-  await here.page.run(`window.kyo.composer.select(0, 0)`);
   await here.page.type("Notes");
   await wait(here, PAUSE);
   await save(here);
   const [second, first] = server.boxes;
   assert.equal(first.id, "a");
   assert.ok(second.id && second.id !== "a");
-  assert.deepEqual([second.text, second.scratch], ["Notes", { heading: "A heading" }]);
+  assert.deepEqual([second.text, second.scratch], ["Notes", {}]);
   await here.page.type(", edited");
   await wait(here, PAUSE);
   await save(here);

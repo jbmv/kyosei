@@ -1,17 +1,17 @@
 // Run with `npm test`. The composer has one prompt, the last box, and the boxes above it are
-// scratchpads: headed, collapsible, never sent, and moved into the prompt by Create prompt
-// (KYO-903). A box's text is read and its caret set through `window.kyo.composer`, since the
+// scratchpads: headed by their first line (KYO-917), collapsible, never sent, and moved into the
+// prompt by Create prompt (KYO-903). A box's text is read and its caret set through `window.kyo.composer`, since the
 // box is an editor (KYO-910). A machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { META, SHIFT, openPage } from "./chrome.ts";
-import { boxSignature } from "../src/drafts.ts";
+import { boxSignature, headingAsLine, scratchTitle } from "../src/drafts.ts";
 
 const STATE = `(() => { const texts = window.kyo.composer.boxes().map((box) => box.text);
   return [...document.querySelectorAll("#boxes .box")].map((box, index) => ({
   kind: box.classList.contains("main") ? "prompt" : "scratch",
   text: texts[index],
-  heading: box.querySelector(".scratch-heading")?.value ?? null,
+  heading: box.querySelector(".scratch-title")?.textContent ?? null,
   collapsed: box.classList.contains("collapsed"),
   send: Boolean(box.querySelector(".box-send")),
   create: box.querySelector(".box-create") ? !box.querySelector(".box-create").disabled : null,
@@ -21,14 +21,35 @@ const START = `window.kyo.project({ project: "p", scope: "server/p" });`;
 const saved = `window.posted.filter((m) => m.name === "saveDraft").at(-1)?.body.boxes`;
 const pause = `new Promise((done) => setTimeout(done, 900))`;
 
-test("a heading and a collapsed state are part of what a box holds, and a prompt's signature is as it was", () => {
+test("a collapsed state is part of what a box holds, and a prompt's signature is as it was", () => {
   const plain = boxSignature({ text: "a" });
   assert.equal(plain, boxSignature({ text: "a", marks: [], scratch: null }));
-  const pad = boxSignature({ text: "a", scratch: { heading: "" } });
+  const pad = boxSignature({ text: "a", scratch: {} });
   assert.notEqual(pad, plain);
+  // An earlier build's empty heading is no heading, and one with words still differs.
+  assert.equal(pad, boxSignature({ text: "a", scratch: { heading: "" } }));
   assert.notEqual(pad, boxSignature({ text: "a", scratch: { heading: "h" } }));
-  assert.notEqual(pad, boxSignature({ text: "a", scratch: { heading: "", collapsed: true } }));
-  assert.equal(pad, boxSignature({ text: "a", scratch: { heading: "", collapsed: false } }));
+  assert.notEqual(pad, boxSignature({ text: "a", scratch: { collapsed: true } }));
+  assert.equal(pad, boxSignature({ text: "a", scratch: { collapsed: false } }));
+});
+
+test("a scratchpad's head is its first line that holds words, and an earlier build's heading becomes that line once (KYO-917.c1, c3)", () => {
+  assert.equal(scratchTitle("\n  \n  - first words  \nmore"), "- first words");
+  assert.equal(scratchTitle(" \n"), "");
+  const marks = [{ line: 0, items: ["a"] }, { line: 2, items: ["b"] }];
+  const moved = headingAsLine("notes\n\nlast", marks, { heading: " topic ", collapsed: true });
+  assert.deepEqual(moved, {
+    text: "topic\nnotes\n\nlast", marks: [{ line: 1, items: ["a"] }, { line: 3, items: ["b"] }], scratch: { collapsed: true },
+  });
+  // What it leaves has no heading, so reading it again moves nothing.
+  assert.deepEqual(headingAsLine(moved.text, moved.marks, moved.scratch), moved);
+  // A heading alone is the text; one already the first line is not added again; none is dropped.
+  assert.deepEqual(headingAsLine("", [], { heading: "only" }), { text: "only", marks: [], scratch: {} });
+  assert.deepEqual(headingAsLine("topic\nnotes", [], { heading: "topic" }), { text: "topic\nnotes", marks: [], scratch: {} });
+  assert.deepEqual(headingAsLine("notes", [], { heading: "  " }), { text: "notes", marks: [], scratch: {} });
+  // A box with marks and no words keeps its marks on their line, below the heading.
+  assert.deepEqual(headingAsLine("", [{ line: 0, items: ["a"] }], { heading: "h" }),
+    { text: "h\n", marks: [{ line: 1, items: ["a"] }], scratch: {} });
 });
 
 test("an older draft's last prompt is the prompt and the others become scratchpads, saved with the next edit", async (t) => {
@@ -56,29 +77,45 @@ test("an older draft's last prompt is the prompt and the others become scratchpa
     await page.run(pause);
     const kept = await page.run<{ id: string; scratch?: unknown }[]>(saved);
     assert.deepEqual(kept.map((box) => [box.id, box.scratch ?? null]), [
-      ["a", { heading: "" }], ["b", { heading: "" }], ["c", null],
+      ["a", {}], ["b", {}], ["c", null],
     ]);
   } finally { await page.close(); }
 });
 
-test("+ adds a scratchpad above the prompt, whose heading is saved and whose state survives a reload of the draft", async (t) => {
+/** What a scratchpad's head holds: its words, whether any of it can be edited, and what is drawn. */
+const HEAD = `(() => { const head = document.querySelector("#boxes .box.scratch .scratch-head");
+  return { words: head.querySelector(".scratch-title").textContent,
+    editable: [...head.querySelectorAll("*")].some((element) => element.isContentEditable
+      || element.matches("input, textarea, select")),
+    shown: [...document.querySelector("#boxes .box.scratch").children]
+      .filter((child) => getComputedStyle(child).display !== "none").map((child) => child.className) }; })()`;
+
+test("+ adds a scratchpad with the caret in its text, headed by its first line, which is not edited there, and collapsed to it (KYO-917.c1, c2)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
     await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    // An empty scratchpad is headed "Scratchpad", and the caret is in its text.
+    assert.equal((await page.run<{ words: string }>(HEAD)).words, "Scratchpad");
+    assert.deepEqual((await page.run<{ kind: string; focused: boolean }[]>(`window.kyo.composer.boxes()`))
+      .map((box) => [box.kind, box.focused]), [["scratch", true], ["prompt", false]]);
+    await page.press("Enter");
     await page.type("gate evidence");
     await page.press("Enter");
     await page.type("seen working");
     let boxes = await page.run<Box[]>(STATE);
+    // The head shows the first line that holds words, and follows it as it is typed.
     assert.deepEqual(boxes.map((box) => [box.kind, box.heading, box.text]), [
-      ["scratch", "gate evidence", "seen working"], ["prompt", null, ""],
+      ["scratch", "gate evidence", "\ngate evidence\nseen working"], ["prompt", null, ""],
     ]);
-    await page.run(`document.querySelector(".scratch-toggle").click()`);
+    const open = await page.run<{ words: string; editable: boolean; shown: string[] }>(HEAD);
+    assert.deepEqual(open, { words: "gate evidence", editable: false, shown: ["scratch-head", "box-body", "box-actions"] });
+    // A press on the head's words collapses the scratchpad to them, as its button does.
+    await page.run(`document.querySelector(".scratch-title").click()`);
+    assert.deepEqual((await page.run<{ shown: string[] }>(HEAD)).shown, ["scratch-head"]);
     await page.run(pause);
     const kept = await page.run<{ id: string; text: string; scratch: unknown }[]>(saved);
-    assert.deepEqual(kept.map((box) => [box.text, box.scratch]), [
-      ["seen working", { heading: "gate evidence", collapsed: true }],
-    ]);
+    assert.deepEqual(kept.map((box) => [box.text, box.scratch]), [["\ngate evidence\nseen working", { collapsed: true }]]);
     // The same draft read on another device, or after a relaunch.
     await page.reload();
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(kept)}, etag: "e" }); })()`);
@@ -86,8 +123,42 @@ test("+ adds a scratchpad above the prompt, whose heading is saved and whose sta
     assert.deepEqual(boxes.map((box) => [box.kind, box.heading, box.collapsed]), [
       ["scratch", "gate evidence", true], ["prompt", null, false],
     ]);
-    const hidden = await page.run<string>(`getComputedStyle(document.querySelector(".box.scratch .box-body")).display`);
-    assert.equal(hidden, "none");
+    assert.deepEqual(await page.run(HEAD), { words: "gate evidence", editable: false, shown: ["scratch-head"] });
+    await page.run(`document.querySelector(".scratch-toggle").click()`);
+    assert.deepEqual((await page.run<{ shown: string[] }>(HEAD)).shown, ["scratch-head", "box-body", "box-actions"]);
+  } finally { await page.close(); }
+});
+
+test("a scratchpad an earlier build saved with a heading opens with it as its first line, once, and is saved without it (KYO-917.c3)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    const older = [
+      { id: "a", text: "notes", scratch: { heading: "topic", collapsed: true }, marks: [{ line: 0, items: [{ kind: "tag", name: "kept" }] }] },
+      { id: "h", text: "", scratch: { heading: "only a heading" } },
+      { id: "b", text: "the prompt" },
+    ];
+    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(older)}, etag: "e" }); })()`);
+    let boxes = await page.run<Box[]>(STATE);
+    assert.deepEqual(boxes.map((box) => [box.kind, box.heading, box.text, box.collapsed]), [
+      ["scratch", "topic", "topic\nnotes", true], ["scratch", "only a heading", "only a heading", false], ["prompt", null, "the prompt", false],
+    ]);
+    // Reading it is not an edit; the next edit saves each scratchpad with its heading in its
+    // text, its mark on the line it was on, and a scratch object with no heading.
+    await page.run(pause);
+    assert.equal(await page.run(`${saved} ?? null`), null);
+    await page.run(`window.kyo.composer.select(2, 10)`);
+    await page.type("!");
+    await page.run(pause);
+    const kept = await page.run<{ id: string; text: string; scratch?: unknown; marks: { line: number }[] }[]>(saved);
+    assert.deepEqual(kept.map((box) => [box.id, box.text, box.scratch ?? null, box.marks.map((mark) => mark.line)]), [
+      ["a", "topic\nnotes", { collapsed: true }, [1]], ["h", "only a heading", {}, []], ["b", "the prompt!", null, []],
+    ]);
+    // Read again, as on another device, the heading is not added a second time.
+    await page.reload();
+    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(kept)}, etag: "e2" }); })()`);
+    boxes = await page.run<Box[]>(STATE);
+    assert.deepEqual(boxes.map((box) => box.text), ["topic\nnotes", "only a heading", "the prompt!"]);
   } finally { await page.close(); }
 });
 
@@ -96,21 +167,22 @@ test("Create prompt moves a scratchpad into an empty prompt and is refused while
   try {
     await page.reload();
     await page.run(`(() => { ${START}
-      window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "topic" } }], etag: "e" });
+      window.kyo.draft({ boxes: [{ id: "a", text: "topic\\nnotes", scratch: {} }], etag: "e" });
       window.kyo.composer.select(1, 0);
     })()`);
     await page.type("x");
     let boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => box.create), [false, null]);
     await page.run(`document.querySelector(".box-create").click()`);
-    assert.deepEqual((await page.run<Box[]>(STATE)).map((box) => box.text), ["notes", "x"]);
+    assert.deepEqual((await page.run<Box[]>(STATE)).map((box) => box.text), ["topic\nnotes", "x"]);
 
     await page.press("Backspace", 0, "deleteBackward");
     boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => box.create), [true, null]);
     await page.run(`document.querySelector(".box-create").click()`);
+    // The whole text moves, the first line that headed the scratchpad included (KYO-917.c4).
     boxes = await page.run<Box[]>(STATE);
-    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "notes"]]);
+    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "topic\nnotes"]]);
     await page.run(pause);
     const kept = await page.run<{ id: string; scratch?: unknown }[]>(saved);
     assert.deepEqual(kept.map((box) => [box.id, box.scratch ?? null]), [["a", null]]);
@@ -123,11 +195,11 @@ test("Command-Return in a scratchpad sends nothing; in the prompt it sends, and 
     await page.reload();
     const sent = `window.posted.filter((m) => m.name === "send").map((m) => m.body.segments.map((s) => s.text).join(""))`;
     await page.run(`(() => { ${START}
-      window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "" } }, { id: "b", text: "the prompt" }], etag: "e" });
+      window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: {} }, { id: "b", text: "the prompt" }], etag: "e" });
       window.kyo.composer.select(0, 0);
     })()`);
     await page.press("Enter", META);
-    await page.run(`document.querySelector(".scratch-heading").focus()`);
+    await page.run(`window.kyo.composer.select(0, 5)`);
     await page.press("Enter", META);
     assert.deepEqual(await page.run<string[]>(sent), []);
     await page.run(`window.kyo.composer.select(1, 0)`);
@@ -146,7 +218,7 @@ test("Send to prompt moves a paragraph with what is nested under it and its mark
     const marks = (box: string) => `[...document.querySelectorAll("#boxes .box.${box} .mark.held")].map((mark) => mark.title)`;
     await page.run(`(() => { ${START}
       window.kyo.draft({ boxes: [
-        { id: "a", text: "- keep\\n- take\\n  - nested\\n- last", scratch: { heading: "topic" },
+        { id: "a", text: "- keep\\n- take\\n  - nested\\n- last", scratch: {},
           marks: [{ line: 2, items: [{ kind: "tag", name: "review" }] }, { line: 3, items: [{ kind: "tag", name: "stays" }] }] },
         { id: "b", text: "already here" },
       ], etag: "e" });
@@ -178,7 +250,7 @@ test("the prompt stays at the foot of the composer and grows to half its height,
     const long = Array.from({ length: 80 }, (_, line) => `line ${line}`).join("\n");
     const seen = await page.run<{ column: number; prompt: number; bottom: number; foot: number; inner: boolean; send: boolean }>(`(() => { ${START}
       window.kyo.draft({ boxes: [
-        { id: "a", text: ${JSON.stringify(long)}, scratch: { heading: "long" } },
+        { id: "a", text: ${JSON.stringify(long)}, scratch: {} },
         { id: "b", text: ${JSON.stringify(long)} },
       ], etag: "e" });
       const column = document.getElementById("boxes");
@@ -212,7 +284,7 @@ test("Tab and Shift-Tab indent and outdent the caret's line or the selected line
     await page.press("Tab", SHIFT);
     assert.deepEqual(await page.run(read), ["plain", 5, 5, true]);
     await page.run(`(() => {
-      window.kyo.draft({ boxes: [{ id: "s", text: "- a\\n- b\\n3. c\\n- d", scratch: { heading: "" } }], etag: "e" });
+      window.kyo.draft({ boxes: [{ id: "s", text: "- a\\n- b\\n3. c\\n- d", scratch: {} }], etag: "e" });
       window.kyo.composer.select(0, 5, 12); })()`);
     await page.press("Tab");  // the selection touches the second and third lines
     assert.deepEqual(await page.run(read), ["- a\n  - b\n  1. c\n- d", 4, 16, true]);
@@ -295,7 +367,7 @@ test("a right-click in the prompt's gutter opens the panel of the line under the
     // Outdent is disabled where none of the lines is indented, and a scratchpad's panel holds
     // the same actions and Send to prompt.
     await page.run(`(() => { window.kyo.draft({ boxes: [
-      { id: "s", text: "- x\\n- y", scratch: { heading: "" } }, { id: "r", text: "z" },
+      { id: "s", text: "- x\\n- y", scratch: {} }, { id: "r", text: "z" },
     ], etag: "g" }); })()`);
     await page.run(gutterMenu("scratch", 0));
     assert.deepEqual(await page.run(PANEL), [["Indent", true], ["Outdent", false], ["Send to prompt", true]]);
@@ -345,12 +417,13 @@ test("the panel offers Fold or Unfold only on a line that can fold, and it acts 
   } finally { await page.close(); }
 });
 
-test("Create prompt on a scratchpad that holds only a heading moves the heading's words into the prompt (KYO-916)", async (t) => {
+test("Create prompt on a scratchpad of one line moves that line, which headed it, into the prompt (KYO-916, KYO-917.c4)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
     await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
-    await page.type("Create prompt test");  // the caret is in the heading after +
+    await page.type("Create prompt test");  // the caret is in the text after +
+    assert.equal((await page.run<{ words: string }>(HEAD)).words, "Create prompt test");
     await page.run(`document.querySelector(".box-create").click()`);
     const boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "Create prompt test"]]);
