@@ -391,7 +391,10 @@ suggestions with Ignore and Learn, then Indent and Outdent, then Cut, Copy and P
 other items, which suit a web page more than a prompt, are left out there. The suggestions
 are taken by their place, as the groups before the first one that holds Look Up, Cut or a
 submenu, because WebKit's names for its items are not documented; if Cut, Copy and Paste are
-not found, nothing is left out and the two items follow the suggestions. On every right-click the page posts a
+not found, nothing is left out and the two items follow the suggestions. The two spelling
+settings that WebKit's submenu held are in the Edit menu's Spelling and Grammar
+(`SpellingCommands` in `App.swift`): each item sends the web view WebKit's own action and
+shows the stored setting as its tick. On every right-click the page posts a
 `composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
 `ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
 `window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do

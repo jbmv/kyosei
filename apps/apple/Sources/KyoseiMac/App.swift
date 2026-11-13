@@ -76,10 +76,41 @@ struct KyoseiMacApp: App {
                 Button("Projects…") { feed.toggleProjectList() }
                     .keyboardShortcut("o", modifiers: .command)
             }
+            SpellingCommands()
         }
 
         Settings {
             SettingsView(feed: feed)
+        }
+    }
+}
+
+/// The Edit menu's Spelling and Grammar (KYO-918). The right-click menu on a composer box no
+/// longer holds WebKit's submenu of that name, so the two settings it kept are here: whether
+/// misspelled words are underlined and whether they are corrected as they are typed. Each item
+/// sends the web view the action WebKit's own item sent, which stores the choice under the
+/// key `ChatPage` registers a default for (KYO-796), and shows that key's value as its tick.
+struct SpellingCommands: Commands {
+    @AppStorage("WebContinuousSpellCheckingEnabled") private var underlines = true
+    @AppStorage("WebAutomaticSpellingCorrectionEnabled") private var corrects = false
+
+    private func send(_ action: String) {
+        NSApp.sendAction(Selector((action)), to: nil, from: nil)
+    }
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Menu("Spelling and Grammar") {
+                Button("Show Spelling and Grammar") { send("showGuessPanel:") }
+                Button("Check Document Now") { send("checkSpelling:") }
+                Divider()
+                Toggle(
+                    "Check Spelling While Typing",
+                    isOn: Binding(get: { underlines }, set: { _ in send("toggleContinuousSpellChecking:") }))
+                Toggle(
+                    "Correct Spelling Automatically",
+                    isOn: Binding(get: { corrects }, set: { _ in send("toggleAutomaticSpellingCorrection:") }))
+            }
         }
     }
 }
