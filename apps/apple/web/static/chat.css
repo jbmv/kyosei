@@ -342,10 +342,10 @@ body.terminal-open #jump-bottom { display: none; }
 
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
 .box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
-/* The prompt's text starts 40px in from the box's padding, past the gutters that hold the
+/* The prompt's text starts 42px in from the box's padding, past the gutters that hold the
    section lines, the marks and the fold toggles (`TEXT_START` in web/src/editor.ts, less the
    box's 12px padding), and Delete starts there too. */
-.box-delete { margin-left: 40px; color: var(--muted); font-weight: 500; }
+.box-delete { margin-left: 42px; color: var(--muted); font-weight: 500; }
 .box-delete:hover { color: var(--apple-red); text-decoration: underline; }
 /* Bare text in the accent colour, with the keys that do the same beside it. */
 .box-send { color: var(--link); font-weight: 600; }
@@ -373,10 +373,10 @@ body.terminal-open #jump-bottom { display: none; }
    its text that holds words, which is edited in the text (KYO-917), and the button before it
    collapses the scratchpad to that line. The button stands over the fold toggles' column and
    the words start where the text does: the toggle's 20px centred on the fold gutter's middle,
-   46px less 7px from the box's edge, and the words at 52px. The words are muted while the
+   the words at 54px from the box's edge, with the toggle before them. The words are muted while the
    scratchpad is open, since its first line is just below, and drawn in full when collapsed. */
 .box.scratch { background: color-mix(in srgb, var(--background) 60%, var(--panel)); }
-.scratch-head { display: flex; align-items: center; gap: 3px; margin-left: 17px; min-width: 0; }
+.scratch-head { display: flex; align-items: center; gap: 3px; margin-left: 19px; min-width: 0; }
 .scratch-toggle { flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); }
 .scratch-toggle::before { content: "▾"; font-size: 12px; }
 .box.collapsed .scratch-toggle::before { content: "▸"; }

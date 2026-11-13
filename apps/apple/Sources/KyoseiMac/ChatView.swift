@@ -284,9 +284,9 @@ final class ChatPage: WKWebView {
 
     // MARK: Quick Look on an image (KYO-883)
 
-    /// WebKit's menu gains Indent and Outdent at its top when the right-click was on a box's
-    /// words (KYO-912), and Quick Look for an image (KYO-883); the page says which. WebKit's own
-    /// items stay, so a misspelled word keeps its suggestions below the added ones.
+    /// WebKit's menu gains Indent and Outdent when the right-click was on a box's words
+    /// (KYO-912), and Quick Look for an image (KYO-883); the page says which. WebKit's own
+    /// items stay, and a misspelled word's suggestions stay above the added ones (KYO-918).
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         if composerMenu {
@@ -294,9 +294,30 @@ final class ChatPage: WKWebView {
             let indent = NSMenuItem(title: "Indent", action: #selector(indentChosen), keyEquivalent: "")
             let outdent = NSMenuItem(title: "Outdent", action: #selector(outdentChosen), keyEquivalent: "")
             [indent, outdent].forEach { $0.target = self }
-            menu.insertItem(indent, at: 0)
-            menu.insertItem(outdent, at: 1)
-            if menu.items.count > 2 { menu.insertItem(.separator(), at: 2) }
+            // KYO-918: a misspelled word's suggestions, with Ignore and Learn, open the menu
+            // and stay first, since they are what the person most often comes for; the two
+            // items follow them. With no such items they are the menu's first.
+            let spelling: Set<String> = [
+                "WKMenuItemIdentifierSpellingGuess", "WKMenuItemIdentifierNoGuessesFound",
+                "WKMenuItemIdentifierIgnoreSpelling", "WKMenuItemIdentifierLearnSpelling",
+                "WKMenuItemIdentifierIgnoreGrammar",
+            ]
+            var at = 0
+            while at < menu.items.count,
+                menu.items[at].isSeparatorItem
+                    || spelling.contains(menu.items[at].identifier?.rawValue ?? "")
+            { at += 1 }
+            // A menu that only begins with a separator has no suggestions to keep first.
+            if !menu.items.prefix(at).contains(where: { !$0.isSeparatorItem }) { at = 0 }
+            if at > 0, !menu.items[at - 1].isSeparatorItem {
+                menu.insertItem(.separator(), at: at)
+                at += 1
+            }
+            menu.insertItem(indent, at: at)
+            menu.insertItem(outdent, at: at + 1)
+            if menu.items.count > at + 2, !menu.items[at + 2].isSeparatorItem {
+                menu.insertItem(.separator(), at: at + 2)
+            }
         }
         let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]
         guard menu.items.contains(where: { imageItems.contains($0.identifier?.rawValue ?? "") })

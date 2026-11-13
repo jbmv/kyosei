@@ -410,8 +410,10 @@ test("a heading's section has a line at the box's edge down all its rows, a nest
   assert.ok(wrapped.bottom - wrapped.top > 30, `the long line wraps (${wrapped.bottom - wrapped.top}px)`);
   for (const row of rows) {
     row.bars.forEach((bar, slot) => {
-      // At the box's edge, the nested one beside it, and as tall as the line's rows.
-      assert.ok(Math.abs(bar.left - slot * 4) < 0.5, `line ${row.line}'s line ${slot} stands at ${bar.left}`);
+      // In one strip beside the text (KYO-918), the nested one beside the first, and as tall
+      // as the line's rows.
+      const edge = rows.find((other) => other.bars.length)!.bars[0].left;
+      assert.ok(Math.abs(bar.left - edge - slot * 4) < 0.5, `line ${row.line}'s line ${slot} stands at ${bar.left}`);
       assert.ok(bar.right - bar.left >= 1.5, "a line is two pixels wide");
       assert.ok(Math.abs(bar.bottom - row.bottom) < 0.5, `line ${row.line}'s line ${slot} runs to the foot of its rows`);
     });

@@ -384,11 +384,13 @@ test("in every box the marks gutter is the outer one and the folds stand between
     const cases: [string, number, boolean][] = [["scratch", 2, true], ["scratch", 1, false], ["main", 1, true], ["main", 0, true]];
     for (const [kind, line, folds] of cases) {
       const seen = await measure(kind, line);
-      assert.deepEqual(seen.gutters, ["kyo-sections", "kyo-marks", "kyo-folds"], `${kind}: the gutters from the box's edge in`);
+      // KYO-918: the section lines are innermost, against the text.
+      assert.deepEqual(seen.gutters, ["kyo-marks", "kyo-folds", "kyo-sections"], `${kind}: the gutters from the box's edge in`);
       assert.ok(seen.arrow, `${kind}: the landing arrow, if drawn, is in the fold gutter`);
       if (seen.bars.length) {
-        assert.ok(Math.abs(seen.bars[0][0]) < 0.5, `${kind} line ${line}: its section's line is at the box's edge`);
-        apart(`${kind} line ${line}: section line and mark`, seen.bars.at(-1), seen.mark);
+        apart(`${kind} line ${line}: mark and section line`, seen.mark, seen.bars[0]);
+        apart(`${kind} line ${line}: section line and first character`, seen.bars.at(-1), seen.first);
+        if (folds) apart(`${kind} line ${line}: chevron and section line`, seen.chevron, seen.bars[0]);
       }
       apart(`${kind} line ${line}: mark and first character`, seen.mark, seen.first);
       if (folds) {

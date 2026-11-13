@@ -283,7 +283,7 @@ export function hoverLine(state: EditorState): number | null {
 export const SECTIONS_WIDTH = 8;
 export const MARKS_WIDTH = 24;
 const MARK_INSET = 2;
-export const FOLDS_WIDTH = 14;
+export const FOLDS_WIDTH = 16;
 const CHEVRON_INSET = 2;
 const CHEVRON_WIDTH = 10;
 
@@ -1042,13 +1042,19 @@ const look = EditorView.theme({
     color: "var(--muted, #888)", fontWeight: "400", cursor: "pointer",
   },
   ".cm-foldPlaceholder.kyo-fold.holds-marks": { color: "var(--pastel-blue, #4a7fd6)", fontWeight: "600" },
+  // KYO-918: a heading's bar begins at its section's line, in the strip left of the text: a
+  // `#` at the first line and a deeper heading at the second, with its words where they were.
   ".cm-line.heading": {
+    marginLeft: `${-(SECTIONS_WIDTH - SECTION_PITCH)}px`,
+    paddingLeft: `${LINE_PADDING + SECTIONS_WIDTH - SECTION_PITCH}px`,
     fontWeight: "600",
     borderRadius: "0 0 4px 4px",
     boxShadow: "inset 0 1px 0 var(--line, rgba(128, 128, 128, 0.4))",
     backgroundColor: "color-mix(in srgb, var(--text, currentColor) 4%, transparent)",
   },
   ".cm-line.heading.level-1": {
+    marginLeft: `${-SECTIONS_WIDTH}px`,
+    paddingLeft: `${LINE_PADDING + SECTIONS_WIDTH}px`,
     boxShadow: "inset 0 2px 0 var(--muted, rgba(128, 128, 128, 0.8))",
     backgroundColor: "color-mix(in srgb, var(--text, currentColor) 8%, transparent)",
   },
@@ -1079,10 +1085,12 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
     // composer's stylesheet sets the gutters, so that they came to stand over the text.
     gutters({ fixed: false }),
     folding(options.describeItems ?? ((items: T[]) => `${items.length} ${items.length === 1 ? "item" : "items"}`)),
-    // The gutters stand in the order they are given, from the box's edge in (KYO-917).
-    sectionsGutter,
+    // The gutters stand in the order they are given, from the box's edge in (KYO-917). The
+    // section lines are innermost, against the text: a heading's bar reaches left over their
+    // strip to the line of its own section, so the line runs down from the bar's end (KYO-918).
     marksGutter(options),
     foldsGutter(options),
+    sectionsGutter,
     followPointer,
     outline,
     transfers(options),

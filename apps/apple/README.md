@@ -301,11 +301,13 @@ line's background, so they run down every row it wraps to, and the rows a long i
 start under its words. None of it changes the text. Which lines are indented and which are
 headings is decided in `web/src/outline.ts`.
 
-A heading's section has a vertical line at the box's left edge beside every row it holds, the
-heading's own included, and a section nested in another has a second line beside the first
-(KYO-917), so that a line after a list under a heading is seen to belong to the heading. The
-lines are markers of a gutter of their own, outside the marks, so they run unbroken down
-wrapped rows and lie over neither the guides nor a heading's rule and tint; a line before the
+A heading's section has a vertical line beside every row it holds, the heading's own included,
+and a section nested in another has a second line beside the first (KYO-917), so that a line
+after a list under a heading is seen to belong to the heading. The lines are markers of a
+gutter of their own, the innermost, directly left of the text (KYO-918), so they run unbroken
+down wrapped rows and lie over neither the guides nor the marks. A heading's bar reaches left
+over that strip to the line of its own section, a `#` bar to the first line and a deeper
+heading's to the second, so each line runs down from the end of its bar; a line before the
 first heading has none. Which lines a section holds is `headingSections` in
 `web/src/outline.ts`, from the same `sectionEnd` that folding and Send to prompt use.
 
@@ -384,8 +386,9 @@ inserts no path into it, so `ChatPage.performDragOperation` reads the paths of t
 files from the drag and hands them to the page with the point of the drop
 (`window.kyo.dropPaths`), which inserts them, one to a line, where they fell.
 
-WebKit's menu on a box's words gains Indent and Outdent at its top, above the spelling
-suggestions and WebKit's other items (KYO-912). On every right-click the page posts a
+WebKit's menu on a box's words gains Indent and Outdent (KYO-912). A misspelled word's
+suggestions, with Ignore and Learn, stay first and the two items follow them (KYO-918); with
+no suggestions the two items are the menu's first, above WebKit's other items. On every right-click the page posts a
 `composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
 `ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
 `window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
