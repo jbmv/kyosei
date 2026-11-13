@@ -37,7 +37,7 @@ import {
 } from "./drafts";
 import { SendGate } from "./sending";
 import {
-  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
+  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaSummary, agendaView, listAfter,
   refusalText,
 } from "./agenda";
 import { moveLines, sectionEnd } from "./outline";
@@ -2265,12 +2265,21 @@ const kyo = {
  */
 const pasted = new WeakMap<EditorView, string[]>();
 const boxes = document.getElementById("boxes")!;
+/** The scratchpads' boxes, which stand together between the session's list and the prompt (KYO-925). */
+const scratches = document.getElementById("scratches")!;
 const composerNote = document.getElementById("composer-note")!;
+
+/** The composer's boxes in their order: the scratchpads, then the prompt. */
+function boxElements(): HTMLElement[] {
+  return Array.from(boxes.querySelectorAll<HTMLElement>(":scope > #scratches > .box, :scope > .box"));
+}
 
 /** The composer's editors, in the order of their boxes. */
 function editors(): EditorView[] {
-  return Array.from(boxes.querySelectorAll<HTMLElement>(":scope > .box .cm-editor"))
-    .flatMap((element) => EditorView.findFromDOM(element) ?? []);
+  return boxElements().flatMap((box) => {
+    const element = box.querySelector<HTMLElement>(".cm-editor");
+    return (element && EditorView.findFromDOM(element)) ?? [];
+  });
 }
 
 /**
@@ -2293,7 +2302,7 @@ function boxOf(editor: EditorView): HTMLElement {
 
 // A box taken out of the composer for good takes its editor with it: the editor's listeners on
 // the window and the document go. A box moved within the composer is back before this runs.
-new MutationObserver((records) => {
+const removedBoxes = new MutationObserver((records) => {
   for (const record of records) {
     for (const node of record.removedNodes) {
       if (!(node instanceof HTMLElement) || node.isConnected) continue;
@@ -2301,7 +2310,8 @@ new MutationObserver((records) => {
       if (element) EditorView.findFromDOM(element)?.destroy();
     }
   }
-}).observe(boxes, { childList: true });
+});
+for (const column of [boxes, scratches]) removedBoxes.observe(column, { childList: true });
 
 /** A button inside a box. It leaves the focus, and so the caret, in the text. */
 function boxButton(className: string, label: string, act: () => void): HTMLButtonElement {
@@ -2377,19 +2387,14 @@ function caretTo(editor: EditorView, at: number): void {
 
 /**
  * The caret's line is shown by the editor, which scrolls each scrolling box around it by the
- * least that shows the line. A scratchpad's line is shown above the prompt, which covers the
- * foot of the column, and on the last line of a box the box's buttons are shown too.
+ * least that shows the line. On the last line of a scratchpad, whose boxes scroll together
+ * above the prompt (KYO-925), the box's buttons are shown too.
  */
 const showAbovePrompt = EditorView.scrollMargins.of((editor) => {
   if (!scratchOf.has(editor)) return null;
-  const prompt = mainBox()?.getBoundingClientRect();
-  const column = boxes.getBoundingClientRect();
-  let bottom = prompt ? Math.max(0, column.bottom - prompt.top) : 0;
   const { state } = editor;
-  if (state.doc.lineAt(state.selection.main.head).number === state.doc.lines) {
-    bottom += Math.max(0, boxOf(editor).getBoundingClientRect().bottom - editor.dom.getBoundingClientRect().bottom);
-  }
-  return { bottom };
+  if (state.doc.lineAt(state.selection.main.head).number !== state.doc.lines) return null;
+  return { bottom: Math.max(0, boxOf(editor).getBoundingClientRect().bottom - editor.dom.getBoundingClientRect().bottom) };
 });
 
 /** The icon of one thing a mark holds: a record's and a file's are their views'. */
@@ -2433,6 +2438,7 @@ function drawGhost(editor: EditorView, id: number): HTMLElement {
 function boxUpdated(update: ViewUpdate): void {
   const editor = update.view;
   if (update.docChanged) nameScratch(editor);
+  if (update.docChanged && !scratchOf.has(editor)) drawPromptSummary();
   const before = lineMarks<Item>(update.startState);
   const after = marksOf(editor);
   if (before !== after) {
@@ -3660,8 +3666,29 @@ function ensureMain(): boolean {
   }
   const main = boxOf(keep ?? addBox());
   if (main !== boxes.lastElementChild) boxes.append(main);
+  // A prompt that became a scratchpad where it stood joins the scratchpads, after those
+  // already there, as it was after them in the column (KYO-925).
+  for (const box of boxes.querySelectorAll<HTMLElement>(":scope > .box.scratch")) scratches.append(box);
   syncCreate();
+  drawSections();
   return changed;
+}
+
+/**
+ * Puts the composer's boxes in this order, moving only a box that is out of its place, since
+ * moving one takes the focus from it. The last box that is not a scratchpad stands where the
+ * prompt does, and every other box among the scratchpads, so that a prompt `ensureMain` then
+ * turns into a scratchpad keeps its place among them (KYO-925).
+ */
+function placeBoxes(order: HTMLElement[]): void {
+  const last = order.findLast((box) => !box.classList.contains("scratch"));
+  let next = scratches.querySelector(":scope > .box");
+  for (const box of order) {
+    if (box === last) continue;
+    if (box === next) next = next.nextElementSibling;
+    else scratches.insertBefore(box, next);
+  }
+  if (last && last !== boxes.lastElementChild) boxes.append(last);
 }
 
 /**
@@ -3742,7 +3769,7 @@ function addBox(
   body.className = "box-body";
   box.append(body);
   // The box is placed before its editor is built, so the editor measures its font at once.
-  if (scratch) boxes.insertBefore(box, mainBox());
+  if (scratch) scratches.append(box);
   else boxes.append(box);
   const editor = createEditor<Item>({
     parent: body,
@@ -3826,6 +3853,11 @@ function addBox(
     const title = document.createElement("span");
     title.className = "scratch-title";
     const toggle = boxButton("scratch-toggle", "", () => {
+      // KYO-925: while the scratchpads are drawn as their heads, a press on one goes into it.
+      if (sectionInUse !== "scratch") {
+        enterScratch(editor);
+        return;
+      }
       const collapsed = box.classList.toggle("collapsed");
       toggle.setAttribute("aria-expanded", String(!collapsed));
       if (collapsed && openMark?.editor === editor) hideMark();
@@ -3841,6 +3873,8 @@ function addBox(
     const head = document.createElement("div");
     head.className = "scratch-head";
     head.append(toggle, title);
+    // KYO-926: the head, its toggle included, is what moves the scratchpad among the others.
+    head.addEventListener("mousedown", (event) => dragScratch(event, box));
     scratchOf.set(editor, { title, box });
     const create = boxButton("box-create", "Create prompt", () => createPrompt(editor));
     actions.append(remove, create);
@@ -3848,8 +3882,14 @@ function addBox(
     box.append(actions);
     nameScratch(editor);
   } else {
+    // KYO-925: the prompt's first line, drawn in place of its text while another section of
+    // the composer is in use. A press on it goes back into the prompt.
+    const summary = boxButton("box-summary composer-summary", "", () => enterPrompt());
+    summary.tabIndex = -1;
+    box.prepend(summary);
     actions.append(remove, send);
     box.append(actions);
+    drawPromptSummary();
   }
   syncCreate();
   paintAnchors();
@@ -3976,12 +4016,7 @@ function applyBoxes(wanted: NamedBox[]): void {
     if (openMark?.editor === editor) hideMark();
     boxOf(editor).remove();
   }
-  // Only a box that is out of its place is moved, since moving one takes the focus from it.
-  let next = boxes.querySelector(":scope > .box");
-  for (const box of order) {
-    if (box === next) next = next.nextElementSibling;
-    else boxes.insertBefore(box, next);
-  }
+  placeBoxes(order);
   ensureMain();
   loadingDraft = wasLoading;
   paintAnchors();
@@ -4057,14 +4092,16 @@ function remember(): void {
 function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   hideMark();
   // The session's list is the first thing in this column and is not a prompt.
-  for (const box of boxes.querySelectorAll(":scope > .box")) box.remove();
+  for (const box of boxElements()) box.remove();
   // A prompt whose text is known keeps its id with its marks, each known prompt once.
   const left = [...kept];
+  const order: HTMLElement[] = [];
   for (const text of texts) {
     const at = left.findIndex((box) => box.text === text);
     const known = at < 0 ? undefined : left.splice(at, 1)[0];
-    addBox(text, known?.marks, known?.id || boxId(), known?.scratch ?? null);
+    order.push(boxOf(addBox(text, known?.marks, known?.id || boxId(), known?.scratch ?? null)));
   }
+  placeBoxes(order);
   ensureMain();
   remember();
 }
@@ -4514,6 +4551,8 @@ function agendaRow(row: Row): HTMLElement {
 function drawAgenda(): void {
   const view = agendaView(agendaFrame, agendaShowCompleted);
   agendaPane.hidden = !view.shown;
+  agendaSummaryButton.textContent = agendaSummary(agendaFrame);
+  drawSections();
   agendaWhy.hidden = view.why === null;
   agendaWhy.textContent = view.why ?? "";
   agendaAdd.hidden = !view.canAdd;
@@ -4594,6 +4633,184 @@ document.getElementById("held-send-now")!.addEventListener("click", () => {
 });
 
 document.getElementById("interrupt")!.addEventListener("click", () => post("interrupt", {}));
+
+// ------------------------------------------- the composer's sections (KYO-925, KYO-926)
+
+/**
+ * The composer holds three sections, top to bottom: the session's reminder list, the
+ * scratchpads and the prompt. The one in use takes up to two thirds of the column's height as
+ * its content needs, and scrolls within that; each other one is drawn as its summary, of about
+ * a line, so that all three stay on screen whatever they hold. The section in use is the one
+ * the focus last entered: it changes when the focus enters another section, and not when the
+ * focus leaves the composer (KYO-925.c3). The page opens with the prompt in use.
+ */
+type Section = "agenda" | "scratch" | "prompt";
+let sectionInUse: Section = "prompt";
+const agendaSummaryButton = document.getElementById("agenda-summary")!;
+
+/** The section an element stands in, or null when it is in none of them. */
+function sectionAt(node: EventTarget | null): Section | null {
+  if (!(node instanceof Element)) return null;
+  if (node.closest("#agenda")) return "agenda";
+  if (node.closest("#scratches")) return "scratch";
+  if (node.closest("#boxes > .box.main")) return "prompt";
+  return null;
+}
+
+/**
+ * Draws the section in use open and the others as their summaries. A section with nothing to
+ * show, the list with no session or the scratchpads when there are none, gives way to the
+ * prompt. A section drawn as its summary keeps no focus, so that what is typed goes where it
+ * can be seen.
+ */
+function drawSections(): void {
+  if (sectionInUse === "agenda" && agendaPane.hidden) sectionInUse = "prompt";
+  if (sectionInUse === "scratch" && !scratches.querySelector(":scope > .box")) sectionInUse = "prompt";
+  if (boxes.dataset.inUse !== sectionInUse) {
+    boxes.dataset.inUse = sectionInUse;
+    // An editor shown again had no room to lay its lines out in while it was a summary.
+    for (const editor of editors()) if (sectionAt(editor.dom) === sectionInUse) editor.requestMeasure();
+  }
+  if (openMark && sectionAt(openMark.editor.dom) !== sectionInUse) hideMark();
+  const active = document.activeElement;
+  const holder = sectionAt(active);
+  if (holder && holder !== sectionInUse && active instanceof HTMLElement) active.blur();
+}
+
+function useSection(section: Section): void {
+  sectionInUse = section;
+  drawSections();
+}
+
+// Whatever puts the focus in a section, a press, a key or the page itself, puts it in use.
+document.addEventListener("focusin", (event) => {
+  const section = sectionAt(event.target);
+  if (section && section !== sectionInUse) useSection(section);
+});
+
+/** Focuses a box's text where its caret was, and shows the caret's line. */
+function enterBox(editor: EditorView): void {
+  editor.focus();
+  editor.dispatch({ effects: EditorView.scrollIntoView(editor.state.selection.main.head, { y: "nearest" }) });
+}
+
+/** A press on the prompt's summary: the prompt is in use, with the caret where it was. */
+function enterPrompt(): void {
+  const editor = mainEditor();
+  if (editor) enterBox(editor);
+}
+
+/**
+ * A press on a scratchpad's head while the scratchpads are drawn as their heads: they are in
+ * use, and the caret is in this one, which is opened if it was collapsed.
+ */
+function enterScratch(editor: EditorView): void {
+  const box = boxOf(editor);
+  useSection("scratch");
+  if (box.classList.contains("collapsed")) {
+    box.classList.remove("collapsed");
+    box.querySelector(".scratch-toggle")?.setAttribute("aria-expanded", "true");
+    remember();
+  }
+  enterBox(editor);
+  box.scrollIntoView({ block: "nearest" });
+}
+
+// A press on the list's summary opens the list, with the caret in its add field when it has one.
+agendaSummaryButton.addEventListener("mousedown", (event) => event.preventDefault());
+agendaSummaryButton.addEventListener("click", () => {
+  useSection("agenda");
+  if (!agendaAdd.hidden && !agendaAddRow.hidden) agendaAdd.focus();
+});
+
+/**
+ * The prompt's summary: its first line that holds words, then an ellipsis. A prompt with marks
+ * and no words yet says so, and an empty one shows what its text does when empty.
+ */
+function drawPromptSummary(): void {
+  for (const box of boxes.querySelectorAll<HTMLElement>(":scope > .box.main")) {
+    const element = box.querySelector<HTMLElement>(".cm-editor");
+    const editor = element && EditorView.findFromDOM(element);
+    const summary = box.querySelector<HTMLElement>(".box-summary");
+    if (!editor || !summary) continue;
+    const words = scratchTitle(textOf(editor));
+    const shown = words ? `${words}…` : marksOf(editor).items.size ? "No words yet…" : "Reply…";
+    if (summary.textContent !== shown) summary.textContent = shown;
+    summary.title = words;
+  }
+}
+
+/** How far the pointer moves on a scratchpad's head before the press is a drag (KYO-926). */
+const DRAG_START_PX = 4;
+/** How near the edge of the scratchpads the pointer scrolls them while it drags one. */
+const DRAG_SCROLL_EDGE_PX = 24;
+
+/**
+ * KYO-926: a scratchpad moves among the others by its head, its toggle included. The box
+ * follows the pointer, a line shows where it will land, and it is put there when the button
+ * is let go, and the order saved with the draft. A press that does not move past
+ * `DRAG_START_PX` is a press, and folds or opens the scratchpad as it did; the click that ends
+ * a drag does not.
+ */
+function dragScratch(event: MouseEvent, box: HTMLElement): void {
+  if (event.button !== 0) return;
+  const startY = event.clientY;
+  const startScroll = scratches.scrollTop;
+  const marker = document.createElement("span");
+  marker.className = "scratch-drop";
+  let dragging = false;
+  let before: Element | null = null;
+  const place = (y: number) => {
+    // Where the pointer is among the other boxes, which keep their places while it drags.
+    const others = Array.from(scratches.querySelectorAll<HTMLElement>(":scope > .box")).filter((other) => other !== box);
+    before = others.find((other) => {
+      const rect = other.getBoundingClientRect();
+      return y < rect.top + rect.height / 2;
+    }) ?? null;
+    const at = before instanceof HTMLElement ? before.offsetTop - 5
+      : others.length ? others[others.length - 1].offsetTop + others[others.length - 1].offsetHeight + 5 : 0;
+    marker.style.top = `${at}px`;
+    box.style.transform = `translateY(${y - startY + scratches.scrollTop - startScroll}px)`;
+  };
+  const move = (moved: MouseEvent) => {
+    if (!dragging) {
+      if (Math.abs(moved.clientY - startY) < DRAG_START_PX) return;
+      dragging = true;
+      box.classList.add("dragging");
+      document.body.classList.add("sorting-scratch");
+      scratches.append(marker);
+    }
+    moved.preventDefault();
+    const area = scratches.getBoundingClientRect();
+    if (moved.clientY < area.top + DRAG_SCROLL_EDGE_PX) scratches.scrollTop -= 12;
+    else if (moved.clientY > area.bottom - DRAG_SCROLL_EDGE_PX) scratches.scrollTop += 12;
+    place(moved.clientY);
+  };
+  const up = () => {
+    document.removeEventListener("mousemove", move, true);
+    document.removeEventListener("mouseup", up, true);
+    if (!dragging) return;
+    marker.remove();
+    box.classList.remove("dragging");
+    box.style.transform = "";
+    document.body.classList.remove("sorting-scratch");
+    // The click that ends the drag is no press on the head.
+    const swallow = (click: MouseEvent) => {
+      click.stopPropagation();
+      click.preventDefault();
+    };
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    window.setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+    if (before === box.nextElementSibling || (before === null && box === scratches.lastElementChild)) return;
+    // Moving the box takes the focus from it, which is given back.
+    const focused = focusedEditor();
+    scratches.insertBefore(box, before);
+    if (focused && !focused.hasFocus) focused.focus();
+    remember();
+  };
+  document.addEventListener("mousemove", move, true);
+  document.addEventListener("mouseup", up, true);
+}
 
 const COMPOSER_MIN = 300;
 const CHAT_MIN = 420;

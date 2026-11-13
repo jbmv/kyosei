@@ -257,13 +257,51 @@ body.terminal-open #jump-bottom { display: none; }
 #interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 500; }
 #interrupt[hidden] { display: none; }
 #interrupt:hover { color: var(--apple-red); text-decoration: underline; }
-#boxes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-/* The prompts sit at the bottom of their column. The session's list is the column's first
-   child and sits directly above them, so it rises as they grow, and once they need the room
-   it scrolls up and out of view with them (KYO-771). */
-#agenda { margin-top: auto; }
-#agenda[hidden] + .box { margin-top: auto; }
+/* KYO-925: the column holds three sections, the session's list, the scratchpads and the
+   prompt, which sit at its foot. The one in use (`data-in-use`, set by web/src/chat.ts) takes
+   up to two thirds of the column as its content needs and scrolls within that; each other one
+   is drawn as its summary, so that all three stay on screen. The column itself does not
+   scroll, and in a column too short for all of it the sections shrink and scroll within. */
+#boxes { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: size; }
+#boxes::before { content: ""; flex: 1 1 0; }
+#boxes > * { flex: 0 1 auto; min-height: 0; }
 .box { flex: none; }
+#boxes[data-in-use="agenda"] > #agenda,
+#boxes[data-in-use="scratch"] > #scratches,
+#boxes[data-in-use="prompt"] > .box.main { max-height: 66cqh; }
+#boxes:not([data-in-use="agenda"]) > #agenda,
+#boxes:not([data-in-use="prompt"]) > .box.main { flex: none; }
+
+/* A section's summary: one line, italic and grey, that a press opens the section from. */
+.composer-summary {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: italic 13px/1.4 -apple-system, system-ui, sans-serif;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.composer-summary:hover { color: var(--text); }
+#boxes[data-in-use="agenda"] #agenda-summary { display: none; }
+/* The list is out of sight but not out of the page, so that a focus put in it opens it. */
+#boxes:not([data-in-use="agenda"]) > #agenda { gap: 0; }
+#boxes:not([data-in-use="agenda"]) #agenda > :not(#agenda-summary) { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; }
+#agenda-summary { margin-left: 21px; }
+
+/* The scratchpads stand together and scroll together. A drag of one by its head (KYO-926)
+   draws it over the others, and a line where it will land. */
+#scratches { position: relative; overflow-y: auto; margin-bottom: 10px; }
+#scratches:not(:has(> .box)) { display: none; }
+#scratches > .box:last-of-type { margin-bottom: 0; }
+#scratches > .box.dragging { position: relative; z-index: 2; box-shadow: 0 4px 14px rgb(0 0 0 / 0.14); }
+.scratch-drop { position: absolute; left: 4px; right: 4px; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--link); pointer-events: none; }
+body.sorting-scratch, body.sorting-scratch * { cursor: grabbing !important; user-select: none; }
 
 /* The session's task list: a bubble shaped as a prompt's is and slightly dimmed, since it is
    read more often than it is written. It comes to full strength under the pointer or the caret.
@@ -273,7 +311,6 @@ body.terminal-open #jump-bottom { display: none; }
    something else repainted the column (KYO-852); the layer is the suspected cause, which
    was not reproduced outside the app. */
 #agenda {
-  flex: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -286,6 +323,7 @@ body.terminal-open #jump-bottom { display: none; }
   line-height: 1.4;
   color: color-mix(in srgb, var(--text) 68%, var(--background));
   transition: color 0.12s;
+  overflow-y: auto;
 }
 #agenda[hidden] { display: none; }
 #agenda:hover, #agenda:focus-within { color: var(--text); }
@@ -354,21 +392,17 @@ body.terminal-open #jump-bottom { display: none; }
 .box-send:disabled { color: var(--muted); cursor: default; }
 .send-keys { margin-left: 8px; font-weight: 400; letter-spacing: 1px; }
 
-/* KYO-903: the prompt is the last box and the only one sent. It stays at the foot of the
-   column while the scratchpads above it scroll, and grows to half the column's height, past
-   which its text scrolls inside it and its buttons stay in view. */
-#boxes { container-type: size; }
-.box.main {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  max-height: 50cqh;
-  margin-bottom: 0;
-  box-sizing: border-box;
-  box-shadow: 0 -10px 0 0 var(--panel);
-}
+/* KYO-903: the prompt is the last box and the only one sent, at the foot of the column. In
+   use it grows to two thirds of the column's height (KYO-925), past which its text scrolls
+   inside it and its buttons stay in view. Otherwise it is its first line, above its buttons. */
+.box.main { margin-bottom: 0; box-sizing: border-box; }
 .box.main .box-body { min-height: 0; overflow-y: auto; }
 .box.main .box-actions { flex: none; }
+.box.main > .box-summary { display: none; }
+#boxes:not([data-in-use="prompt"]) > .box.main > .box-summary { display: block; margin-left: 42px; }
+/* The text is out of sight but not out of the page, so that the page can still put the caret
+   in it, which opens the prompt again. */
+#boxes:not([data-in-use="prompt"]) > .box.main > .box-body { flex: none; height: 0; margin-top: -8px; overflow: hidden; }
 
 /* A scratchpad: a box of the same draft that is never sent. Its head shows the first line of
    its text that holds words, which is edited in the text (KYO-917), and the button before it
@@ -397,6 +431,14 @@ body.terminal-open #jump-bottom { display: none; }
 .box.collapsed .scratch-title.empty { color: var(--muted); font-weight: 500; }
 .box.collapsed { gap: 0; padding-top: 7px; padding-bottom: 7px; }
 .box.collapsed .box-body, .box.collapsed .box-actions { display: none; }
+/* KYO-925: while another section is in use, each scratchpad is its head, as a collapsed one
+   is. Its text stays in the page, out of sight, so that the page can put the caret in it. */
+#boxes:not([data-in-use="scratch"]) .box.scratch { gap: 0; padding-top: 7px; padding-bottom: 7px; }
+#boxes:not([data-in-use="scratch"]) .box.scratch > .box-body,
+#boxes:not([data-in-use="scratch"]) .box.scratch > .box-actions { height: 0; overflow: hidden; }
+#boxes:not([data-in-use="scratch"]) .scratch-toggle::before { content: "▸"; }
+#boxes:not([data-in-use="scratch"]) .scratch-title { color: var(--text); font-weight: 600; }
+#boxes:not([data-in-use="scratch"]) .scratch-title.empty { color: var(--muted); font-weight: 500; }
 .box-create { color: var(--link); font-weight: 600; }
 .box-create:hover:not(:disabled) { color: var(--pastel-blue); text-decoration: underline; }
 .box-create:disabled { color: var(--muted); cursor: default; }
