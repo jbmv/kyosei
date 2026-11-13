@@ -66,7 +66,7 @@ test("an older draft's last prompt is the prompt and the others become scratchpa
     // KYO-910.c1: nothing in the composer is a text area, and each box holds one editor.
     const shape = await page.run(`[
       document.querySelectorAll("#composer textarea").length,
-      [...document.querySelectorAll("#boxes > .box")].map((box) => box.querySelectorAll(".cm-editor .cm-content[contenteditable=true]").length),
+      [...document.querySelectorAll("#boxes .box")].map((box) => box.querySelectorAll(".cm-editor .cm-content[contenteditable=true]").length),
     ]`);
     assert.deepEqual(shape, [0, [1, 1, 1]]);
     // Reading it is not an edit and saves nothing; the next edit saves the boxes as they are.
@@ -243,7 +243,8 @@ test("Send to prompt moves a paragraph with what is nested under it and its mark
   } finally { await page.close(); }
 });
 
-test("the prompt stays at the foot of the composer and grows to half its height, then scrolls inside", async (t) => {
+// KYO-925: the prompt in use grows to two thirds of the column, where it once grew to half.
+test("the prompt stays at the foot of the composer and grows to two thirds of its height, then scrolls inside", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
@@ -265,7 +266,7 @@ test("the prompt stays at the foot of the composer and grows to half its height,
         send: send.bottom <= column.getBoundingClientRect().bottom && send.height > 0,
       };
     })()`);
-    assert.ok(Math.abs(seen.prompt - seen.column / 2) <= 2, `${seen.prompt} of ${seen.column}`);
+    assert.ok(Math.abs(seen.prompt - seen.column * 0.66) <= 2, `${seen.prompt} of ${seen.column}`);
     assert.equal(seen.bottom, seen.foot);  // in view although the column is scrolled to its top
     assert.deepEqual([seen.inner, seen.send], [true, true]);
   } finally { await page.close(); }

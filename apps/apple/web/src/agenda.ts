@@ -106,6 +106,23 @@ export function agendaView(frame: AgendaFrame | null, showCompleted = false): Ag
   };
 }
 
+/**
+ * The list drawn as one line while another section of the composer is in use (KYO-925): how
+ * many items are left unchecked, by whose they are, as "4 of yours, 2 of Claude's…". A group
+ * with none left is not named. The line of a list that cannot be read is why; with no list,
+ * it is empty.
+ */
+export function agendaSummary(frame: AgendaFrame | null): string {
+  if (!frame || frame.state === "absent") return "";
+  if (frame.state === "unavailable") return frame.why;
+  const left = (author: AgendaItem["author"]) => frame.items.filter((item) => item.author === author && !item.checked).length;
+  const mine = left("person");
+  const theirs = left("orchestrator");
+  const parts = [...(mine ? [`${mine} of yours`] : []), ...(theirs ? [`${theirs} of Claude's`] : [])];
+  if (parts.length) return `${parts.join(", ")}…`;
+  return frame.items.length ? "Every reminder is done…" : "No reminders…";
+}
+
 /** One line of typed text as an item holds it, or null when it holds nothing. */
 export function itemText(typed: string): string | null {
   const text = typed.split(/\s+/).filter(Boolean).join(" ").slice(0, MAX_TEXT);

@@ -27,7 +27,7 @@ const pause = (ms = 900) => `new Promise((done) => setTimeout(done, ${ms}))`;
  * the attachment each stands for. A mark's panel is opened by a press on the mark.
  */
 async function shown(page: Page): Promise<{ kind: string; images: [string, string][] }[]> {
-  return page.run(`(() => [...document.querySelectorAll("#boxes > .box")].map((box) => {
+  return page.run(`(() => [...document.querySelectorAll("#boxes .box")].map((box) => {
     const images = [];
     for (const mark of box.querySelectorAll(".mark.held")) {
       mark.click();
