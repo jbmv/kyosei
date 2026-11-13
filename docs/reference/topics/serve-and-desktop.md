@@ -1054,8 +1054,15 @@ Refusals carry a `reason`: `attachment-type-not-accepted` (415, a type not in th
 list given as `accepted`), `attachment-content-mismatch` (415, bytes of another type than the
 one declared, with `declared` and `found`), `attachment-empty` (400), `attachment-too-large`
 (413, with `limit`; the body is not read and the connection is closed), and
-`attachment-not-found` (404) for an id this session has no file for, besides those of the
-token. A refused file is not saved.
+`attachment-not-found` (404) for an id that neither this session nor another session of the
+project has a file for, besides those of the token. A refused file is not saved.
+
+**A box that passed to another session (KYO-920).** A composer box names its files by id, and
+its boxes pass from a session that has ended to the next one (KYO-763), while each file stays
+under the session it was attached in. An id this session has no file for is therefore looked
+for under the project's other sessions, which is sound because the id is the sha256 of the
+bytes. `GET attachments/<id>` reads the file where it is found. A prompt sent with such an id
+is given a copy in this session's directory, and its `attached` line names the copy.
 
 **A record's files (KYO-856).** `kyo attach` given an image or a PDF keeps it as an attachment
 and stores evidence that names it by sha256 and session (see the `evidence_artifacts` row of the
@@ -1262,8 +1269,9 @@ and its anchors are validated when it is held: a mark whose anchor does not vali
 is refused `bad-request`, naming the mark, and nothing is held.
 
 **Attaching files to a line (KYO-715).** A mark may also carry `"attachments": [ids]`, the ids
-the attachments route returned for this session. Each is checked to exist when the message is
-held, and an unknown one is refused `bad-request`, naming it, with nothing held. In the
+the attachments route returned for this session or for another session of the project
+(see "Attachments" above). Each is checked to exist when the message is held, and an unknown
+one is refused `bad-request`, naming it, with nothing held. In the
 message each becomes one typed line `attached <absolute path>`, directly above the marked line
 and after that mark's `on` lines. With the second line of the prompt above marked on a note and
 given a pasted screenshot, the agent receives

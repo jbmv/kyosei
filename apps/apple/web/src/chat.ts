@@ -3703,12 +3703,14 @@ function createPrompt(editor: EditorView): void {
   const main = mainEditor();
   if (main && isDraft(main)) return;
   // KYO-917: the whole text moves, its first line included, since the head shows that line
-  // and holds nothing of its own.
-  const held = savedBox(editor);
+  // and holds nothing of its own. KYO-920: a file still uploading moves too, and the server's
+  // answer for it is taken by the prompt, whose line holds the same item.
+  const held = savedBox(editor, true);
   if (openMark?.editor === editor || (main && openMark?.editor === main)) hideMark();
   if (main) boxOf(main).remove();
   boxOf(editor).remove();
   const prompt = addBox(held.text, held.marks, held.id);
+  for (const upload of uploads.values()) if (upload.editor === editor) upload.editor = prompt;
   ensureMain();
   paintAnchors();
   remember();
@@ -3872,8 +3874,11 @@ function currentTexts(): string[] {
   return editors().map(textOf).filter(Boolean);
 }
 
-/** One prompt as it is saved: its id, its words, and its marks by the line each is on. */
-function savedBox(editor: EditorView): NamedBox {
+/**
+ * One prompt as it is saved: its id, its words, and its marks by the line each is on. With
+ * `uploading`, a file still uploading is kept too, for a box drawn again in this window.
+ */
+function savedBox(editor: EditorView, uploading = false): NamedBox {
   const marks = marksOf(editor);
   const scratch = scratchOf.get(editor);
   return {
@@ -3882,7 +3887,7 @@ function savedBox(editor: EditorView): NamedBox {
     text: textOf(editor),
     marks: marks.ids.flatMap((id, line) => {
       // A file still uploading is not saved: nothing would finish it after a relaunch.
-      const items = marks.items.get(id)?.filter((item) => !(item.kind === "file" && item.pending));
+      const items = marks.items.get(id)?.filter((item) => uploading || !(item.kind === "file" && item.pending));
       return items?.length ? [{ line, items }] : [];
     }),
   };

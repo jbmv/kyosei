@@ -196,7 +196,10 @@ in the composer when that project's draft is next read, and are forgotten once a
 been acknowledged. The wait and the kept prompts are `settleDraft` and `KeptDraft` in
 `Sources/KyoseiClient/DraftSettlement.swift`.
 
-A prompt carried into a later session keeps its tags, attachments and anchors. An anchor made
+A prompt carried into a later session keeps its tags, attachments and anchors. An attachment
+is kept by the box as its id and thumbnail, and its file stays under the session it was
+attached in; the server finds the file there when the prompt is sent from a later session
+(KYO-920). An anchor made
 in a session other than the one shown is sent as its line of words, which the server reads
 from the session the anchor names. Its chip in the composer is drawn dimmed with a dashed
 outline and takes no press, because the chat on screen has no place for it to open. The choice
@@ -240,7 +243,8 @@ adds one, with the caret in its text. A scratchpad's head shows the first line o
 holds words (KYO-917), which is edited in the text and cannot be edited in the head, and a
 button before it, or a press on the words, collapses the scratchpad to that line. It has no
 Send. Its Create prompt button moves its whole text, the first line included, and its anchors,
-attachments and tags into the prompt, and is disabled while the prompt holds anything. One section is moved with
+attachments and tags into the prompt, a file still uploading included (KYO-920), and is
+disabled while the prompt holds anything. One section is moved with
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
 gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level, goes to the end of the prompt,
