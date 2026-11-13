@@ -71,10 +71,9 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
 kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
 
-The composer's editor module is built on [CodeMirror 6](https://codemirror.net/), whose MIT
-licence, with the notices of the packages it brings, is kept in `web/LICENSE-codemirror` and
-copied into the app beside the renderer. The page does not use the module yet; the composer's
-boxes are still text areas.
+Each box of the composer is an editor built on [CodeMirror 6](https://codemirror.net/), whose
+MIT licence, with the notices of the packages it brings, is kept in `web/LICENSE-codemirror`
+and copied into the app beside the renderer.
 
 The files that the later sections do not name, with what each holds:
 
@@ -94,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror, not yet used by the page: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
@@ -218,6 +217,15 @@ Command-Return send it, and an empty one takes its place after a send or a delet
 Command-Return with the caret in a scratchpad sends nothing (KYO-904). It stays at the foot of the composer while the boxes above it scroll, and
 grows to half the composer's height, past which its text scrolls inside it.
 
+Each box is an editor built by `web/src/editor.ts` on CodeMirror (KYO-910), whose document is
+the text as typed; what is saved and sent is that text. The page keeps each box's id, its
+scratchpad and its pastes beside its editor, and reads its text, caret and marks from the
+editor's state. The editor is as tall as its text, and it scrolls the caret's line into view
+by the least that shows it, in a scratchpad above the prompt. Tab and Shift-Tab, and
+Command-] and Command-[, indent and outdent the lines the caret or the selection touches and
+keep the caret in the box (KYO-905). Return continues a list and ends it on an empty item.
+The page's tests read and set a box through `window.kyo.composer`.
+
 The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
 adds one. A scratchpad has a heading, which names it and is never sent, and a button that
 collapses it to that heading; a scratchpad with no heading shows the first words of its text
@@ -242,10 +250,8 @@ scratchpad above it.
 ### Anchors in an unsent prompt
 
 <!-- governs:
-- apps/apple/web/src/chat.ts#trackEdit
-- apps/apple/web/src/chat.ts#trackHistory
-- apps/apple/web/src/chat.ts#stepPlacing
 - apps/apple/web/src/chat.ts#addAnchor
+- apps/apple/web/src/chat.ts#attachFile
 - apps/apple/web/src/chat.ts#anchorsHeld
 - apps/apple/web/src/chat.ts#anchoredBlocks
 - apps/apple/web/src/chat.ts#paintAnchors
@@ -255,8 +261,10 @@ scratchpad above it.
 
 Placing an anchor is a step of its own in a prompt's undo (KYO-780): Command-Z directly after
 it takes the anchor back and leaves the text as it was, and Shift-Command-Z puts it back. The
-text area's own history holds edits of the text only, so the page keeps the placings beside it
-and steps through whichever was made last. What an unsent prompt is anchored to is highlighted
+marks are kept in the editor's state, and placing or removing one, an attachment or a tag
+included, is a step of the same history as the edits of the text (KYO-910), so the keys and
+Edit > Undo step through both in the order they were made. Typing is one step until a pause
+of half a second. What an unsent prompt is anchored to is highlighted
 in the chat, and the highlight goes when the anchor does, unless another prompt holds an anchor
 on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
 cannot be highlighted, so the chip above that paragraph in the sent prompt reads "place lost"
@@ -270,17 +278,16 @@ it the frames the app would send, and are skipped on a machine with no Chrome.
 
 <!-- governs:
 - apps/apple/web/src/outline.ts
-- apps/apple/web/src/chat.ts#drawOutline
 -->
 
 A prompt is sent as typed, so a nested list and a line beginning with `#` reach the agent as
 markdown. The composer draws them (KYO-902): each indented line has one light vertical guide
 for each level of indentation, under the marker of the item it is nested in, and a heading
-line has a rule above it and a tint behind it, stronger for `#` than for `##`. Both are drawn
-on a layer over the text that takes no press, placed from the hidden copy of the text that
-also places the gutter's marks. The text area cannot indent the rows a long line wraps to, so
-a wrapped row of a nested item starts at the left edge and its guide passes through it. Which
-lines are indented and which are headings is decided in `web/src/outline.ts`.
+line has a rule above it and a tint behind it, stronger for `#` than for `##`, and is set in
+semibold. Each is a decoration of its line in the box's editor (KYO-910): the guides are the
+line's background, so they run down every row it wraps to, and the rows a long item wraps to
+start under its words. None of it changes the text. Which lines are indented and which are
+headings is decided in `web/src/outline.ts`.
 
 ### A session's task list
 
@@ -331,8 +338,17 @@ on system-wide. `ChatPage` in `ChatView.swift` registers the first as true and t
 false before the web view is built. The Spelling and Grammar menu stores a choice under the
 same keys, and a stored value is read before a registered one, so a choice made there is
 kept. Smart quotes, smart dashes and text replacement have their own keys and still follow
-the system-wide settings. `Tests/KyoseiMacTests` builds the web view without a window and
-checks the keys and that typed text is left as typed.
+the system-wide settings. A box of the composer is an editor whose text is in a
+`contenteditable` element marked `spellcheck="true"` (KYO-910), so WebKit checks it as it
+checked the text area, and nothing in the page handles a right-click on its words, so the
+menu keeps the checker's suggestions. `Tests/KyoseiMacTests` builds the web view without a
+window and checks the keys and that text typed into such an element is left as typed.
+
+A file dragged onto a box from the Finder is handled in two parts. The page attaches an image
+or a PDF to the paragraph it fell on. The editor inserts no other file's contents, and WebKit
+inserts no path into it, so `ChatPage.performDragOperation` reads the paths of the other
+files from the drag and hands them to the page with the point of the drop
+(`window.kyo.dropPaths`), which inserts them, one to a line, where they fell.
 
 ## Views
 

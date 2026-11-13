@@ -98,22 +98,19 @@ async function announce(device: Device): Promise<void> {
 }
 
 const shown = (device: Device) => device.page.run<string[]>(
-  `[...document.querySelectorAll("#boxes textarea")].map((area) => area.value)`);
+  `window.kyo.composer.boxes().map((box) => box.text)`);
 const note = (device: Device) => device.page.run<string>(`document.getElementById("composer-note").textContent`);
 const wait = (device: Device, ms: number) => device.page.run(`new Promise((done) => setTimeout(done, ${ms}))`);
 /** Puts the caret at the end of the nth box. */
-const focus = (device: Device, nth: number) => device.page.run(`(() => {
-  const area = document.querySelectorAll("#boxes textarea")[${nth}];
-  area.focus();
-  area.setSelectionRange(area.value.length, area.value.length);
-})()`);
+const focus = (device: Device, nth: number) => device.page.run(
+  `window.kyo.composer.select(${nth}, window.kyo.composer.boxes()[${nth}].text.length)`);
 const PAUSE = 900;
 
 test("what is typed on one device appears on the other, which was not reopened", async (t) => {
   if (!laptop) return t.skip("no Chrome on this machine");
   const [here, there] = await open([{ id: "a", text: "First" }, { id: "b", text: "Second" }]);
   await focus(there, 1);
-  await there.page.run(`window.marked = document.activeElement`);
+  await there.page.run(`void (window.marked = document.activeElement)`);
   await focus(here, 0);
   await here.page.type(", typed on the laptop");
   await wait(here, PAUSE);
@@ -138,7 +135,7 @@ test("a device holding unsaved edits keeps them, is told, and both versions reac
   await here.page.type(" from the laptop");
   await focus(there, 0);
   await there.page.type(" from the Studio");
-  await there.page.run(`window.marked = document.activeElement`);
+  await there.page.run(`void (window.marked = document.activeElement)`);
   await wait(here, PAUSE);
   assert.deepEqual(await save(here), ["saved"]);
   // The Studio has asked for its own save, which the app has not made when the laptop's is
@@ -204,7 +201,7 @@ test("every box is saved with an id, which it keeps while it is edited", async (
   // The + button adds a scratchpad above the prompt, with the caret in its heading.
   await here.page.run(`document.getElementById("new-prompt").click()`);
   await here.page.type("A heading");
-  await here.page.run(`document.querySelector("#boxes .box.scratch textarea").focus()`);
+  await here.page.run(`window.kyo.composer.select(0, 0)`);
   await here.page.type("Notes");
   await wait(here, PAUSE);
   await save(here);

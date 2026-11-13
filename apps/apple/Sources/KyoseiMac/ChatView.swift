@@ -2,6 +2,7 @@ import AppKit
 import KyoseiClient
 import Quartz
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 struct ChatView: View {
@@ -303,6 +304,39 @@ final class ChatPage: WKWebView {
 
     @objc private func saveChosen() {
         evaluateJavaScript("window.kyo.saveImage()", completionHandler: nil)
+    }
+
+    // MARK: Files dragged from the Finder (KYO-910)
+
+    /// A composer box is an editor, which takes no dropped file's contents, and WebKit inserts
+    /// no file's path into it as it did into a text area. So the paths of the dragged files
+    /// that the page does not attach, which are those that are not images or PDFs, are handed
+    /// to the page with the point of the drop, in the page's coordinates, and the page inserts
+    /// them where they fell. WebKit still takes the drop, and the page attaches the rest.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let taken = super.performDragOperation(sender)
+        let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let paths = urls.filter { !Self.attachable($0) }.map(\.path)
+        guard !paths.isEmpty else { return taken }
+        let point = convert(sender.draggingLocation, from: nil)
+        let zoom = pageZoom > 0 ? pageZoom : 1
+        let frame: [String: Any] = [
+            "paths": paths,
+            "x": point.x / zoom,
+            "y": (isFlipped ? point.y : bounds.height - point.y) / zoom,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: frame),
+            let json = String(data: data, encoding: .utf8)
+        else { return taken }
+        evaluateJavaScript("window.kyo.dropPaths(\(json))", completionHandler: nil)
+        return true
+    }
+
+    /// Whether the page attaches a file dropped on a box: an image or a PDF.
+    static func attachable(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .image) || type.conforms(to: .pdf)
     }
 
     @objc private func quickLookChosen() {

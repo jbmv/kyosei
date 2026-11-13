@@ -27,15 +27,15 @@ async function open(): Promise<Page> {
       replies: [{ message_id: "m1", uuid: "x1", at: "2026-01-01T00:00:01Z", text: ${JSON.stringify(FIRST)} }],
       tool_calls: [{ call_id: "c1", uuid: "y1", at: "2026-01-01T00:00:02Z", name: "Bash",
         input: { command: "ls" }, result: { text: "a", is_error: false } }] });
-    document.querySelector("#boxes textarea").focus();
+    window.kyo.composer.select(0, 0);
   })()`);
   await opened.type("my paragraph");
   await wait(100);
-  // The + beside a paragraph shows where the pointer is over the box, and opens its panel.
+  // The + beside a paragraph shows where the pointer is over the box's text, and opens its panel.
   await opened.run(`(() => {
-    const area = document.querySelector("#boxes textarea").getBoundingClientRect();
-    document.querySelector("#boxes .box-body").dispatchEvent(new MouseEvent("mousemove",
-      { bubbles: true, clientX: area.left + 10, clientY: area.top + 8 }));
+    const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
+    document.querySelector("#boxes .cm-content").dispatchEvent(new MouseEvent("mousemove",
+      { bubbles: true, clientX: line.left + 10, clientY: line.top + line.height / 2 }));
     document.querySelector("#boxes .mark.ghost").click();
   })()`);
   return opened;
@@ -181,9 +181,9 @@ test("in Records a press on the record's metadata anchors the whole record", asy
     row.remove();
     window.kyo.record({ id: "KYO-9", document: ${JSON.stringify(RECORD)} });
     // The box's + panel and the mode, with the record open.
-    const area = document.querySelector("#boxes textarea").getBoundingClientRect();
-    document.querySelector("#boxes .box-body").dispatchEvent(new MouseEvent("mousemove",
-      { bubbles: true, clientX: area.left + 10, clientY: area.top + 8 }));
+    const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
+    document.querySelector("#boxes .cm-content").dispatchEvent(new MouseEvent("mousemove",
+      { bubbles: true, clientX: line.left + 10, clientY: line.top + line.height / 2 }));
     document.querySelector("#boxes .mark.ghost").click();
     document.querySelector(".mark-panel .mark-anchor-mode").click();
   })()`);

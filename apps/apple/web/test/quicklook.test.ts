@@ -48,7 +48,7 @@ test("a composer chip's thumbnail goes to Quick Look as its attachment, and text
   await page.run(`document.querySelector("#boxes .mark.held").click()`);
   const chip = await page.run<{ shown: boolean; posted: unknown[] }>(rightClick("img.mark-thumb"));
   assert.deepEqual(chip.posted, [{ attachment: "abc123", name: "shot.png", data: PIXEL }]);
-  const text = await page.run<{ shown: boolean; posted: unknown[] }>(rightClick("#boxes textarea"));
+  const text = await page.run<{ shown: boolean; posted: unknown[] }>(rightClick("#boxes .cm-line"));
   assert.deepEqual(text.posted, []);
 });
 

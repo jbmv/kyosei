@@ -394,53 +394,19 @@ body.terminal-open #jump-bottom { display: none; }
 
 .box { position: relative; }
 .box-body { display: flex; }
-.box-gutter { flex: none; position: relative; width: 24px; margin-left: -6px; }
-.box-text { flex: 1; min-width: 0; position: relative; }
 
-.box textarea, .box-mirror, .box-measure {
-  margin: 0;
-  padding: 0;
+/* KYO-910: a box's text is an editor (web/src/editor.ts), whose own theme draws its gutter,
+   the hanging indent of wrapped rows, the indent guides and the heading rules. Its marks
+   gutter stands 6px into the box's padding, so the text starts 18px in from the padding, as
+   the Delete button below it does. */
+.box .cm-editor {
+  flex: 1;
+  min-width: 0;
+  margin-left: -6px;
   font: 15px/1.45 -apple-system, system-ui, sans-serif;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-}
-
-.box textarea, .box-measure {
-  display: block;
-  width: 100%;
-  border: 0;
-  outline: 0;
-  resize: none;
-  background: none;
   color: var(--text);
-  overflow: hidden;
 }
-
-/* A hidden copy of the text, wrapped the same way, tells the gutter where each line sits. */
-.box-mirror { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
-/* KYO-902: indent guides and heading rules, placed from the hidden copy's lines. The layer
-   lies over the text and takes no press; a guide stands in the indentation, where there are
-   no words, and a heading's tint is light enough to read through. */
-.box-outline { position: absolute; inset: 0; pointer-events: none; }
-.box-outline-probe { position: absolute; visibility: hidden; white-space: pre; font: 15px/1.45 -apple-system, system-ui, sans-serif; }
-.outline-guide { position: absolute; width: 0; border-left: 1.5px solid var(--line); }
-.outline-heading {
-  position: absolute;
-  left: -6px;
-  right: -6px;
-  box-sizing: border-box;
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 4px 4px;
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-.outline-heading.level-1 {
-  border-top: 2px solid var(--muted);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-.outline-heading.level-2 { border-top-color: var(--muted); }
-/* A text area outside the boxes that holds a copy of a box's text while its height is read
-   (KYO-750): the box's own text area is taller than its text while a completion is offered. */
-.box-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
+.box .cm-editor .cm-gutter.kyo-marks { width: 18px; }
 
 .mark {
   position: absolute;

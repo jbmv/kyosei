@@ -1,7 +1,9 @@
 // Run with `npm test`. What the composer does with an anchor that only a web view can show:
 // the keys that undo and redo, the box's own undo history beside them, and what is painted
-// in the chat (KYO-780, KYO-712). The page is the built renderer in a headless Chrome, fed
-// the frames the app would send; a machine with no Chrome skips these.
+// in the chat (KYO-780, KYO-712), and what a prompt with anchors, a tag and a paste is saved
+// and sent as (KYO-910). The page is the built renderer in a headless Chrome, fed the frames
+// the app would send; a machine with no Chrome skips these. A box's text is read and its
+// caret set through `window.kyo.composer`, since the box is an editor (KYO-910).
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { META, SHIFT, openPage, type Page } from "./chrome.ts";
@@ -31,7 +33,7 @@ async function open(marks: object[] = []): Promise<Page> {
       ],
       replies: [{ message_id: "m1", uuid: "x1", at: "2026-01-01T00:00:01Z", text: ${JSON.stringify(`${FIRST}\n\n${SECOND}\n\n- a **bold** item`)} }] });
     window.kyo.marks({ marks: ${JSON.stringify(marks)} });
-    document.querySelector("#boxes textarea").focus();
+    window.kyo.composer.select(0, 0);
   })()`);
   return opened;
 }
@@ -39,14 +41,17 @@ async function open(marks: object[] = []): Promise<Page> {
 interface Shown { highlighted: string[]; bars: string[]; boxes: { text: string; anchors: string[] }[] }
 
 /** The chat's highlights and bars for unsent anchors, and each box's text and anchors. */
-const SHOWN = `(() => ({
-  highlighted: [...(CSS.highlights.get("anchored") ?? [])].map((range) => range.toString()),
-  bars: [...document.querySelectorAll("#chat .anchored")].map((block) => block.textContent),
-  boxes: [...document.querySelectorAll("#boxes .box")].map((box) => ({
-    text: box.querySelector("textarea").value,
-    anchors: [...box.querySelectorAll(".mark.held")].flatMap((mark) => mark.title.split("\\n")),
-  })),
-}))()`;
+const SHOWN = `(() => {
+  const texts = window.kyo.composer.boxes().map((box) => box.text);
+  return {
+    highlighted: [...(CSS.highlights.get("anchored") ?? [])].map((range) => range.toString()),
+    bars: [...document.querySelectorAll("#chat .anchored")].map((block) => block.textContent),
+    boxes: [...document.querySelectorAll("#boxes .box")].map((box, index) => ({
+      text: texts[index],
+      anchors: [...box.querySelectorAll(".mark.held")].flatMap((mark) => mark.title.split("\\n")),
+    })),
+  };
+})()`;
 const shown = (opened: Page) => opened.run<Shown>(SHOWN);
 
 /** Right-clicks an element of the chat and takes the menu's first entry, the caret's paragraph. */
@@ -61,8 +66,6 @@ const anchor = (opened: Page, selector: string) => opened.run(`(() => {
 
 const undo = (opened: Page) => opened.press("z", META, "undo");
 const redo = (opened: Page) => opened.press("z", META | SHIFT, "redo");
-const focusBox = (opened: Page, index: number) =>
-  opened.run(`document.querySelectorAll("#boxes textarea")[${index}].focus()`);
 
 test("Command-Z takes back an anchor before the typing, and Shift-Command-Z puts it back (KYO-780)", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
@@ -77,8 +80,10 @@ test("Command-Z takes back an anchor before the typing, and Shift-Command-Z puts
   assert.deepEqual(await shown(opened), { highlighted: [], bars: [], boxes: [{ text: "abc", anchors: [] }] },
     "the anchor is gone, the text is as it was, and the chat shows no highlight");
 
+  // The editor groups typing into one undo step until a pause of 500 ms, as a Mac text view
+  // does, where the text area took back one character at a time (KYO-910).
   await undo(opened);
-  assert.deepEqual((await shown(opened)).boxes, [{ text: "ab", anchors: [] }], "the next undo is the box's own");
+  assert.deepEqual((await shown(opened)).boxes, [{ text: "", anchors: [] }], "the next undo is the box's own");
 
   await redo(opened);
   assert.deepEqual((await shown(opened)).boxes, [{ text: "abc", anchors: [] }], "the typing comes back first");
@@ -98,8 +103,9 @@ test("typing after an anchor is undone before the anchor is (KYO-780)", async (t
   assert.deepEqual((await shown(opened)).boxes, [{ text: "abc", anchors: ["anchor: First paragraph of the reply here."] }]);
   await undo(opened);
   assert.deepEqual((await shown(opened)).boxes, [{ text: "abc", anchors: [] }]);
+  // The typing before the anchor is one step, the editor's grouping (KYO-910).
   await undo(opened);
-  assert.deepEqual((await shown(opened)).boxes, [{ text: "ab", anchors: [] }]);
+  assert.deepEqual((await shown(opened)).boxes, [{ text: "", anchors: [] }]);
 });
 
 test("an anchor in an empty box is taken back with no typing to undo (KYO-780)", async (t) => {
@@ -121,8 +127,9 @@ test("the Undo menu item, which reaches the page as an edit, takes back the anch
   // The editing command with no Command-Z for the page to read, as the menu item gives it.
   await opened.press("F13", 0, "undo");
   assert.deepEqual(await shown(opened), { highlighted: [], bars: [], boxes: [{ text: "abc", anchors: [] }] });
-  // The engine sends the page a redo only when the box's own history has one, so with none
-  // the menu's Redo does not put the anchor back, and the key does.
+  // Chrome sends the page a redo only when its own record of edits has one, and the editor
+  // took the undo, so the menu's Redo does not put the anchor back here; the key does
+  // (KYO-909.c5). How the app's Edit menu behaves is observed in the app.
   await opened.press("F13", 0, "redo");
   assert.deepEqual((await shown(opened)).boxes, [{ text: "abc", anchors: [] }]);
   await redo(opened);
@@ -135,11 +142,11 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
   // Two boxes anchored to the same words, and the first also to a list item.
   // The first is a scratchpad, which + adds above the prompt (KYO-903); the second is the prompt.
   await opened.run(`document.getElementById("new-prompt").click()`);
-  await opened.run(`document.querySelector("#boxes .box.scratch textarea").focus()`);
+  await opened.run(`window.kyo.composer.select(0, 0)`);
   await opened.type("one");
   await anchor(opened, "#chat .reply p");
   await anchor(opened, "#chat .reply li strong");
-  await opened.run(`document.querySelector("#boxes .box.main textarea").focus()`);
+  await opened.run(`window.kyo.composer.select(1, 0)`);
   await opened.type("two");
   await anchor(opened, "#chat .reply p");
   const first = "anchor: First paragraph of the reply here.";
@@ -166,14 +173,10 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
   assert.deepEqual(now.highlighted.sort(), [FIRST, ITEM]);
 
   // By deleting its line: the first box's paragraph goes with the anchor it still held.
-  await focusBox(opened, 0);
-  await opened.run(`(() => {
-    const area = document.querySelectorAll("#boxes textarea")[0];
-    area.setSelectionRange(area.value.length, area.value.length);
-  })()`);
+  await opened.run(`window.kyo.composer.select(0, window.kyo.composer.boxes()[0].text.length)`);
   await opened.press("Enter", 0, "insertNewline");
   await opened.type("more");
-  await opened.run(`document.querySelectorAll("#boxes textarea")[0].setSelectionRange(0, 4)`);
+  await opened.run(`window.kyo.composer.select(0, 0, 4)`);
   await opened.press("Backspace", 0, "deleteBackward");
   now = await shown(opened);
   assert.deepEqual(now.boxes[0], { text: "more", anchors: [] });
@@ -214,4 +217,152 @@ test("a sent paragraph whose anchor is stale says so on its chip and names the p
   assert.equal(fresh.stale, false);
   assert.equal(fresh.said, "none");
   assert.equal(fresh.title.includes("stale"), false);
+});
+
+/**
+ * What the text-area composer saved and sent for the prompt `typedPrompt` makes, recorded from
+ * the build before the editor (base 00bb7214, KYO-910.c3) with the same steps, in which the
+ * paste was inserted by the browser after the page had seen it.
+ */
+const SAVED_BY_TEXT_AREA = {
+    "id": "a",
+    "text": "Opening words\n- see pasted words and more",
+    "marks": [
+      {
+        "line": 0,
+        "items": [
+          {
+            "kind": "tag",
+            "name": "review"
+          },
+          {
+            "kind": "anchor",
+            "key": "r:m1",
+            "session": "S1",
+            "start": 36,
+            "end": 76,
+            "words": "Second paragraph, with more words in\u2026",
+            "exact": true
+          }
+        ]
+      },
+      {
+        "line": 1,
+        "items": [
+          {
+            "kind": "anchor",
+            "key": "r:m1",
+            "session": "S1",
+            "start": 0,
+            "end": 34,
+            "words": "First paragraph of the reply here.",
+            "exact": true
+          }
+        ]
+      }
+    ]
+  };
+const SENT_BY_TEXT_AREA = {
+    "segments": [
+      {
+        "kind": "typed",
+        "text": "Opening words\n- see "
+      },
+      {
+        "kind": "pasted",
+        "text": "pasted words"
+      },
+      {
+        "kind": "typed",
+        "text": " and more"
+      }
+    ],
+    "marks": [
+      {
+        "line": 0,
+        "anchors": [
+          {
+            "kind": "turn",
+            "session": "S1",
+            "start": 36,
+            "end": 76,
+            "message": "m1"
+          }
+        ],
+        "tags": [
+          "review"
+        ]
+      },
+      {
+        "line": 1,
+        "anchors": [
+          {
+            "kind": "turn",
+            "session": "S1",
+            "start": 0,
+            "end": 34,
+            "message": "m1"
+          }
+        ],
+        "tags": []
+      }
+    ]
+  };
+
+/** A prompt typed and pasted into, with a tag and two anchors on two paragraphs. */
+async function typedPrompt(opened: Page): Promise<void> {
+  await opened.run(`window.kyo.draft({ boxes: [{ id: "a", text: "Opening words" }], etag: "e" })`);
+  await opened.run(`window.kyo.composer.select(0, 13)`);
+  await opened.press("Enter", 0, "insertNewline");
+  await opened.type("- see ");
+  await opened.run(`(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "pasted words");
+    document.activeElement.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  })()`);
+  // The editor inserts the paste itself, as the browser did into the text area.
+  assert.equal(await opened.run(`window.kyo.composer.boxes()[0].text`), "Opening words\n- see pasted words");
+  await opened.type(" and more");
+  // An anchor on the second paragraph, chosen from the menu's list of the others.
+  await opened.run(`window.kyo.composer.select(0, 0)`);
+  const rightClick = (selector: string, entry: string) => opened.run(`(() => {
+    const target = document.querySelector(${JSON.stringify(selector)});
+    const box = target.getBoundingClientRect();
+    target.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: box.left + 30, clientY: box.top + box.height / 2,
+    }));
+    document.querySelector(${JSON.stringify(entry)}).click();
+  })()`);
+  await rightClick("#chat .reply p", "#anchor-menu button:not(.anchor-new)");
+  // A tag on the first paragraph, from the panel its ghost + opens.
+  await opened.run(`(() => {
+    const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
+    document.querySelector("#boxes .cm-content").dispatchEvent(new MouseEvent("mousemove",
+      { bubbles: true, clientX: line.left + 10, clientY: line.top + line.height / 2 }));
+    document.querySelector("#boxes .mark.ghost").click();
+  })()`);
+  await opened.type("review");
+  await opened.press("Enter");
+  // And an anchor on the caret's paragraph, the first.
+  await rightClick("#chat .reply p + p", "#anchor-menu .anchor-new");
+}
+
+test("the saved draft and the posted prompt are, field by field, those the text area made (KYO-910.c3)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  await typedPrompt(opened);
+  await opened.run(`new Promise((done) => setTimeout(done, 900))`);
+  const saved = await opened.run<Record<string, unknown>[]>(
+    `window.posted.filter((m) => m.name === "saveDraft").at(-1).body.boxes`);
+  assert.equal(saved.length, 1);
+  for (const field of ["id", "text", "marks", "scratch"]) {
+    assert.deepEqual(saved[0][field], (SAVED_BY_TEXT_AREA as Record<string, unknown>)[field], `saved ${field}`);
+  }
+  assert.deepEqual(Object.keys(saved[0]).sort(), Object.keys(SAVED_BY_TEXT_AREA).sort());
+  await opened.run(`document.querySelector("#boxes .box.main .box-send").click()`);
+  const sent = await opened.run<Record<string, unknown>>(`window.posted.filter((m) => m.name === "send").at(-1).body`);
+  for (const field of ["segments", "marks"]) {
+    assert.deepEqual(sent[field], (SENT_BY_TEXT_AREA as Record<string, unknown>)[field], `sent ${field}`);
+  }
+  assert.deepEqual(Object.keys(sent).sort(), Object.keys(SENT_BY_TEXT_AREA).sort());
 });
