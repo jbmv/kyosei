@@ -359,3 +359,79 @@ test("the gutter draws held marks, the ghost and the landing arrow on their line
   await box("");
   assert.equal(await opened.run(`ed.view().dom.querySelector(".cm-placeholder")?.textContent`), "Reply…");
 });
+
+/**
+ * Each drawn line's section lines (KYO-917): for each line of the box drawn, counted from 0,
+ * the box of each line beside it, outermost first, measured from the editor's left edge, with
+ * the line's own block.
+ */
+const SECTIONS = `ed.settle().then(() => {
+  const view = ed.view();
+  const edge = view.dom.getBoundingClientRect().left;
+  const rows = new Map();
+  for (const element of view.dom.querySelectorAll(".cm-gutter.kyo-sections .cm-gutterElement")) {
+    const rect = element.getBoundingClientRect();
+    if (!rect.height) continue;
+    const block = view.lineBlockAtHeight(rect.top + 1 - view.documentTop);
+    rows.set(view.state.doc.lineAt(block.from).number - 1, [...element.querySelectorAll(".section-line")].map((bar) => {
+      const box = bar.getBoundingClientRect();
+      return { left: box.left - edge, right: box.right - edge, top: box.top, bottom: box.bottom };
+    }));
+  }
+  return [...view.contentDOM.querySelectorAll(".cm-line")].map((line) => {
+    const number = view.state.doc.lineAt(view.posAtDOM(line)).number;
+    const block = view.lineBlockAt(view.state.doc.line(number).from);
+    return { line: number - 1, top: block.top + view.documentTop, bottom: block.bottom + view.documentTop, bars: rows.get(number - 1) ?? [] };
+  });
+})`;
+
+test("a heading's section has a line at the box's edge down all its rows, a nested section a second beside it, and a folded section the line on its heading's row (KYO-917.c7, c8)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const source = [
+    "before the first heading",
+    "# History view",
+    "## when a session ends",
+    "Records are kept with the session that wrote them, and the list shows them by day, so this line wraps onto rows below.",
+    "- one item",
+    "  - nested item under it",
+    "",
+    "test",
+    "",
+    "# Other",
+    "last words",
+  ].join("\n");
+  const opened = await box(source);
+  type Row = { line: number; top: number; bottom: number; bars: { left: number; right: number; top: number; bottom: number }[] };
+  const rows = await opened.run<Row[]>(SECTIONS);
+  // How many lines each line carries: none before the first heading, two in the nested section,
+  // the plain line after the list among them, and none on the blank line that ends a section.
+  assert.deepEqual(rows.map((row) => row.bars.length), [0, 1, 2, 2, 2, 2, 2, 2, 0, 1, 1]);
+  const wrapped = rows[3];
+  assert.ok(wrapped.bottom - wrapped.top > 30, `the long line wraps (${wrapped.bottom - wrapped.top}px)`);
+  for (const row of rows) {
+    row.bars.forEach((bar, slot) => {
+      // At the box's edge, the nested one beside it, and as tall as the line's rows.
+      assert.ok(Math.abs(bar.left - slot * 4) < 0.5, `line ${row.line}'s line ${slot} stands at ${bar.left}`);
+      assert.ok(bar.right - bar.left >= 1.5, "a line is two pixels wide");
+      assert.ok(Math.abs(bar.bottom - row.bottom) < 0.5, `line ${row.line}'s line ${slot} runs to the foot of its rows`);
+    });
+  }
+  // Unbroken: down a section, each line's stroke starts where the one above it ends; it starts
+  // on its heading's row, a little below the heading's rule.
+  for (const [heading, slot, end] of [[1, 0, 8], [2, 1, 8], [9, 0, 11]]) {
+    const bars = rows.filter((row) => row.line >= heading && row.line < end).map((row) => row.bars[slot]);
+    assert.ok(bars[0].top > rows[heading].top && bars[0].top - rows[heading].top <= 4, `section ${heading} starts on its heading's row`);
+    bars.slice(1).forEach((bar, at) => assert.ok(Math.abs(bar.top - bars[at].bottom) < 0.5, `section ${heading} is unbroken at line ${heading + at + 1}`));
+  }
+
+  // Folded, the heading's row carries the line and the hidden rows carry none.
+  await opened.run(`ed.select(${source.indexOf("# History view")})`);
+  await opened.press("[", META | 1);
+  const folded = await opened.run<Row[]>(SECTIONS);
+  assert.deepEqual(folded.map((row) => [row.line, row.bars.length]), [[0, 0], [1, 1], [8, 0], [9, 1], [10, 1]]);
+  assert.ok(Math.abs(folded[1].bars[0].bottom - folded[1].bottom) < 0.5);
+  // The lines are drawn beside the text and change none of it.
+  assert.equal(await text(opened), source);
+  await opened.press("]", META | 1);
+  assert.deepEqual((await opened.run<Row[]>(SECTIONS)).map((row) => row.bars.length), [0, 1, 2, 2, 2, 2, 2, 2, 0, 1, 1]);
+});

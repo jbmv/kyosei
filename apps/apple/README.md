@@ -93,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
@@ -236,19 +236,22 @@ folded one, which acts as Command-Option-[ and Command-Option-] do at the caret.
 stays open after each of these, so that a second press acts again.
 
 The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
-adds one. A scratchpad has a heading, which names it and is never sent, and a button that
-collapses it to that heading; a scratchpad with no heading shows the first words of its text
-there. It has no Send. Its Create prompt button moves its text, anchors, attachments and tags
-into the prompt, and is disabled while the prompt holds anything. One section is moved with
+adds one, with the caret in its text. A scratchpad's head shows the first line of its text that
+holds words (KYO-917), which is edited in the text and cannot be edited in the head, and a
+button before it, or a press on the words, collapses the scratchpad to that line. It has no
+Send. Its Create prompt button moves its whole text, the first line included, and its anchors,
+attachments and tags into the prompt, and is disabled while the prompt holds anything. One section is moved with
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
 gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level, goes to the end of the prompt,
 outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad;
 a section that was folded arrives folded (KYO-913). What a section is and how its lines move are `sectionEnd` and `moveLines` in
 `web/src/outline.ts`. A scratchpad is a box of
-the same draft with a `scratch` object holding the heading and the collapsed state, so it is
-saved, merged between devices and carried between sessions as a prompt is, and a change of
-either is merged as an edit of the text is.
+the same draft with a `scratch` object, which holds whether it is collapsed, so it is saved,
+merged between devices and carried between sessions as a prompt is, and collapsing it is
+merged as an edit of the text is. Earlier builds kept a heading in that object, apart from the
+text: a scratchpad saved with one opens with the heading as the first line of its text and its
+marks one line lower, and is saved that way with its next edit, so the heading is moved once.
 
 A draft saved before scratchpads, or a merge that kept two versions of the prompt, can hold
 several boxes that are not scratchpads. The last of them that holds anything is the prompt and
@@ -298,16 +301,27 @@ line's background, so they run down every row it wraps to, and the rows a long i
 start under its words. None of it changes the text. Which lines are indented and which are
 headings is decided in `web/src/outline.ts`.
 
+A heading's section has a vertical line at the box's left edge beside every row it holds, the
+heading's own included, and a section nested in another has a second line beside the first
+(KYO-917), so that a line after a list under a heading is seen to belong to the heading. The
+lines are markers of a gutter of their own, outside the marks, so they run unbroken down
+wrapped rows and lie over neither the guides nor a heading's rule and tint; a line before the
+first heading has none. Which lines a section holds is `headingSections` in
+`web/src/outline.ts`, from the same `sectionEnd` that folding and Send to prompt use.
+
 A heading's section and a list item's nested lines fold (KYO-913). The section is the one Send
 to prompt moves: a heading's runs to the next heading of its level or above, and an item's
-holds the lines nested under it. A chevron in a narrow gutter left of the marks folds the line
-under the pointer and stays on a folded line to unfold it; Command-Option-[ and
+holds the lines nested under it. A chevron in a narrow gutter between the marks and the text
+(KYO-917) folds the line under the pointer and stays on a folded line to unfold it; Command-Option-[ and
 Command-Option-] fold and unfold the caret's line. A folded section is drawn as a placeholder
 after its first line, which names how many of the hidden lines hold a mark, since their marks
 are not drawn. Folding changes nothing that is saved or sent. The window keeps each box's
 folds while the app runs, also when the box is drawn again after a merge or Send to prompt,
 and they are not saved in the draft. The arrow that marks where the next anchor lands is
-drawn in the same gutter, beside the paragraph's mark.
+drawn in the same gutter, beside the paragraph's mark. The section lines, the marks, the
+chevron and a line's first character stand at least four pixels apart, and the text starts
+52 pixels from the box's edge; the widths are `TEXT_START` and the constants before it in
+`web/src/editor.ts`.
 
 ### A session's task list
 

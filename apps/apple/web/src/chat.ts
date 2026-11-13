@@ -32,7 +32,8 @@ import {
   meetDraft, sessionLinks, typedChoice,
 } from "./projects";
 import {
-  type Agreed, type DraftBox, type Scratch, agreedOn, boxId, boxSignature, mergeDraft, mergeNote, signatures,
+  type Agreed, type DraftBox, type Scratch, agreedOn, boxId, boxSignature, headingAsLine, mergeDraft, mergeNote,
+  scratchTitle, signatures,
 } from "./drafts";
 import { SendGate } from "./sending";
 import {
@@ -1944,7 +1945,7 @@ const kyo = {
     // KYO-903: the prompt is where it was sent from, so the one taken back is the prompt
     // again, to be edited and sent. What was typed in the prompt since becomes a scratchpad
     // above it, and nothing typed is lost.
-    const others = currentBoxes().map((box) => (box.scratch ? box : { ...box, scratch: { heading: "" } }));
+    const others = currentBoxes().map((box) => (box.scratch ? box : { ...box, scratch: {} }));
     const restored: NamedBox = { id: sentId ?? boxId(), text: frame.text, marks };
     sentId = null;
     const list = [...others, restored];
@@ -2407,7 +2408,7 @@ function drawGhost(editor: EditorView, id: number): HTMLElement {
 }
 
 /**
- * What follows an update of a box: its scratchpad's heading, the composer's buttons, the chat's
+ * What follows an update of a box: its scratchpad's head, the composer's buttons, the chat's
  * highlights and the open panel follow its marks, and an edit of its text or marks is saved.
  */
 function boxUpdated(update: ViewUpdate): void {
@@ -3572,10 +3573,10 @@ function reveal(item: AnchorItem): void {
 
 /** A box for one prompt: the whole of one message, with its own Send and Delete. */
 /**
- * KYO-903: the scratchpads, each by its editor, with the field holding its heading. A box
- * that is not here is the prompt, the one box that is sent.
+ * KYO-903: the scratchpads, each by its editor, with the element of its head that shows its
+ * first line (KYO-917). A box that is not here is the prompt, the one box that is sent.
  */
-const scratchOf = new WeakMap<EditorView, { heading: HTMLInputElement; box: HTMLElement }>();
+const scratchOf = new WeakMap<EditorView, { title: HTMLElement; box: HTMLElement }>();
 
 /** The prompt's box: the one that is not a scratchpad. */
 function mainBox(): HTMLElement | null {
@@ -3599,10 +3600,18 @@ function syncCreate(): void {
   }
 }
 
-/** A scratchpad's heading field shows the first words of its text until it is given one. */
+/**
+ * A scratchpad's head shows the first line of its text that holds words, which is edited in
+ * the text and nowhere else (KYO-917), or "Scratchpad" while the text holds none.
+ */
 function nameScratch(editor: EditorView): void {
   const held = scratchOf.get(editor);
-  if (held) held.heading.placeholder = textOf(editor).split("\n").find((line) => line.trim())?.trim().slice(0, 80) || "Scratchpad";
+  if (!held) return;
+  const words = scratchTitle(textOf(editor));
+  const shown = words || "Scratchpad";
+  if (held.title.textContent !== shown) held.title.textContent = shown;
+  held.title.title = words;
+  held.title.classList.toggle("empty", !words);
 }
 
 /**
@@ -3623,7 +3632,7 @@ function ensureMain(): boolean {
     if (openMark?.editor === editor) hideMark();
     if (isDraft(editor)) {
       const held = savedBox(editor);
-      const fresh = addBox(held.text, held.marks, held.id, { heading: "" });
+      const fresh = addBox(held.text, held.marks, held.id, {});
       box.replaceWith(boxOf(fresh));
       changed = true;
     } else {
@@ -3657,8 +3666,8 @@ function sendToPrompt(editor: EditorView, line: number): void {
     .map((fold) => (fold.line >= end ? { ...fold, line: fold.line - (end - line) } : fold)));
   foldsById.set(to.id, [...(foldsById.get(to.id) ?? []), ...folds.filter((fold) => fold.line >= line && fold.line < end)
     .map((fold) => ({ line: start + fold.line - line, text: lines[start + fold.line - line] }))]);
-  const scratch = from.scratch ?? { heading: "" };
-  const emptied = !moved.source.text.trim() && !moved.source.marks?.length && !scratch.heading;
+  const scratch = from.scratch ?? {};
+  const emptied = !moved.source.text.trim() && !moved.source.marks?.length;
   const old = boxOf(editor);
   if (emptied) old.remove();
   else old.replaceWith(boxOf(addBox(moved.source.text, moved.source.marks, from.id, scratch)));
@@ -3674,14 +3683,13 @@ function sendToPrompt(editor: EditorView, line: number): void {
 function createPrompt(editor: EditorView): void {
   const main = mainEditor();
   if (main && isDraft(main)) return;
+  // KYO-917: the whole text moves, its first line included, since the head shows that line
+  // and holds nothing of its own.
   const held = savedBox(editor);
-  // A scratchpad that holds only its heading has nothing else to move: the heading's words
-  // become the prompt, since dropping them would lose what the person typed (KYO-916).
-  const text = held.text.trim() || held.marks?.length ? held.text : held.scratch?.heading ?? "";
   if (openMark?.editor === editor || (main && openMark?.editor === main)) hideMark();
   if (main) boxOf(main).remove();
   boxOf(editor).remove();
-  const prompt = addBox(text, held.marks, held.id);
+  const prompt = addBox(held.text, held.marks, held.id);
   ensureMain();
   paintAnchors();
   remember();
@@ -3705,6 +3713,8 @@ function filesIn(editor: EditorView, files: File[], how: "paste" | "drop", pos: 
 function addBox(
   text = "", saved: SavedBox["marks"] = [], id: string = boxId(), scratch: Scratch | null = null,
 ): EditorView {
+  // KYO-917: a scratchpad an earlier build saved with a heading opens with it as its first line.
+  if (scratch?.heading !== undefined) ({ text, marks: saved, scratch } = headingAsLine(text, saved ?? [], scratch));
   const box = document.createElement("div");
   box.className = scratch ? `box scratch${scratch.collapsed ? " collapsed" : ""}` : "box main";
   const body = document.createElement("div");
@@ -3783,22 +3793,11 @@ function addBox(
   const actions = document.createElement("div");
   actions.className = "box-actions";
   if (scratch) {
-    // KYO-903: a scratchpad is headed by its name, which is saved and never sent, and is
-    // collapsed to it. It has no Send: Create prompt moves it into the prompt.
-    const heading = document.createElement("input");
-    heading.type = "text";
-    heading.className = "scratch-heading";
-    heading.maxLength = 120;
-    heading.value = scratch.heading ?? "";
-    heading.setAttribute("aria-label", "Scratchpad heading");
-    heading.addEventListener("input", remember);
-    heading.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" || event.metaKey) return;
-      event.preventDefault();
-      box.classList.remove("collapsed");
-      toggle.setAttribute("aria-expanded", "true");
-      editor.focus();
-    });
+    // KYO-903, KYO-917: a scratchpad is headed by the first line of its text that holds words,
+    // shown and not edited there, and is collapsed to that line. It has no Send: Create prompt
+    // moves it into the prompt.
+    const title = document.createElement("span");
+    title.className = "scratch-title";
     const toggle = boxButton("scratch-toggle", "", () => {
       const collapsed = box.classList.toggle("collapsed");
       toggle.setAttribute("aria-expanded", String(!collapsed));
@@ -3809,10 +3808,13 @@ function addBox(
     });
     toggle.title = "Collapse or open this scratchpad";
     toggle.setAttribute("aria-expanded", String(!scratch.collapsed));
+    // A press on the words opens or collapses the scratchpad, as one on the button does.
+    title.addEventListener("mousedown", (event) => event.preventDefault());
+    title.addEventListener("click", () => toggle.click());
     const head = document.createElement("div");
     head.className = "scratch-head";
-    head.append(toggle, heading);
-    scratchOf.set(editor, { heading, box });
+    head.append(toggle, title);
+    scratchOf.set(editor, { title, box });
     const create = boxButton("box-create", "Create prompt", () => createPrompt(editor));
     actions.append(remove, create);
     box.prepend(head);
@@ -3857,12 +3859,7 @@ function savedBox(editor: EditorView): NamedBox {
   const scratch = scratchOf.get(editor);
   return {
     id: boxIds.get(editor)!,
-    ...(scratch ? {
-      scratch: {
-        heading: scratch.heading.value,
-        ...(scratch.box.classList.contains("collapsed") ? { collapsed: true } : {}),
-      },
-    } : {}),
+    ...(scratch ? { scratch: scratch.box.classList.contains("collapsed") ? { collapsed: true } : {} } : {}),
     text: textOf(editor),
     marks: marks.ids.flatMap((id, line) => {
       // A file still uploading is not saved: nothing would finish it after a relaunch.
@@ -3874,7 +3871,7 @@ function savedBox(editor: EditorView): NamedBox {
 
 /** A box that is a draft: a prompt with an anchor and no words yet is still one. */
 function isDraft(editor: EditorView): boolean {
-  return Boolean(editor.state.doc.length || marksOf(editor).items.size || scratchOf.get(editor)?.heading.value);
+  return Boolean(editor.state.doc.length || marksOf(editor).items.size);
 }
 
 /** Each prompt with its marks. */
@@ -4101,12 +4098,11 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
   });
 }
 
-/** A new prompt is made on purpose: an empty box is reused before another is added. */
-/** The + button: a new scratchpad above the prompt, with the caret in its heading (KYO-903). */
+/** The + button: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
 function newPrompt(): void {
-  const editor = addBox("", [], boxId(), { heading: "" });
+  const editor = addBox("", [], boxId(), {});
   syncCreate();
-  scratchOf.get(editor)!.heading.focus();
+  editor.focus();
 }
 
 function post(name: string, body: unknown): void {

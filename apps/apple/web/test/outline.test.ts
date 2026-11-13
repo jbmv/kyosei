@@ -58,3 +58,31 @@ test("moved lines go to the end of the target with what they hold, outdented, an
   assert.deepEqual(moved.target, { text: "first\n- b\n  - c", marks: [{ line: 0, items: ["z"] }, { line: 1, items: ["x"] }] });
   assert.deepEqual(moveLines(source, { text: "" }, 3, 4).target, { text: "- d", marks: [{ line: 0, items: ["y"] }] });
 });
+
+import { headingSections } from "../src/outline.ts";
+
+test("each line is in the sections of the headings above it, outermost first, as sectionEnd gives them (KYO-917)", () => {
+  const text = [
+    "before",        // 0: before the first heading, in none
+    "# one",         // 1
+    "## inner",      // 2
+    "- item",        // 3
+    "  - nested",    // 4
+    "",              // 5
+    "test",          // 6: a plain line after a list is still in both sections
+    "",              // 7: a blank line at the end of a section is left out of it
+    "# two",         // 8
+    "### deep",      // 9: a level skipped is still nested
+    "words",         // 10
+  ].join("\n");
+  assert.deepEqual(headingSections(text), [
+    [], [1], [1, 2], [1, 2], [1, 2], [1, 2], [1, 2], [], [8], [8, 9], [8, 9],
+  ]);
+  // Each heading's lines are exactly those sectionEnd gives it.
+  headingSections(text).forEach((chain) => chain.forEach((heading) => assert.ok(heading < sectionEnd(text, heading))));
+  for (const heading of [1, 2, 8, 9]) {
+    const lines = headingSections(text).flatMap((chain, line) => (chain.includes(heading) ? [line] : []));
+    assert.deepEqual(lines, Array.from({ length: sectionEnd(text, heading) - heading }, (_, at) => heading + at));
+  }
+  assert.deepEqual(headingSections("no headings\n- here"), [[], []]);
+});
