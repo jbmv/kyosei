@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-13** — `KYO-919` (bug) — kyo confirm prints the cited turns and the latest-turn-not-cited line twice
 - **2026-11-13** — `KYO-914` (bug) — A decision's refining_turn refuses the prompt id that --turn accepts
 - **2026-11-13** — `KYO-913` (task) — Mac app: a heading's section and a list item's nested lines fold in the composer
 - **2026-11-13** — `KYO-912` (task) — Mac app: Indent and Outdent in the right-click menu on a box's words
