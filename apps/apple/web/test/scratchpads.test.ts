@@ -344,3 +344,15 @@ test("the panel offers Fold or Unfold only on a line that can fold, and it acts 
     assert.equal((await page.run<[string]>(PROMPT))[0], text);
   } finally { await page.close(); }
 });
+
+test("Create prompt on a scratchpad that holds only a heading moves the heading's words into the prompt (KYO-916)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    await page.type("Create prompt test");  // the caret is in the heading after +
+    await page.run(`document.querySelector(".box-create").click()`);
+    const boxes = await page.run<Box[]>(STATE);
+    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "Create prompt test"]]);
+  } finally { await page.close(); }
+});

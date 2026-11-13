@@ -3675,10 +3675,13 @@ function createPrompt(editor: EditorView): void {
   const main = mainEditor();
   if (main && isDraft(main)) return;
   const held = savedBox(editor);
+  // A scratchpad that holds only its heading has nothing else to move: the heading's words
+  // become the prompt, since dropping them would lose what the person typed (KYO-916).
+  const text = held.text.trim() || held.marks?.length ? held.text : held.scratch?.heading ?? "";
   if (openMark?.editor === editor || (main && openMark?.editor === main)) hideMark();
   if (main) boxOf(main).remove();
   boxOf(editor).remove();
-  const prompt = addBox(held.text, held.marks, held.id);
+  const prompt = addBox(text, held.marks, held.id);
   ensureMain();
   paintAnchors();
   remember();
