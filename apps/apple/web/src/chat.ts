@@ -636,6 +636,134 @@ function drawToolCall(call: ToolCall): HTMLElement {
   return element;
 }
 
+// ------------------------------------------------- a question asked in the terminal (KYO-922)
+
+interface QuestionOption { label?: unknown; description?: unknown }
+interface Question { question?: unknown; header?: unknown; options?: unknown; multiSelect?: unknown }
+
+/** The questions of an `AskUserQuestion` call, as its input in the transcript holds them. */
+function questionsOf(call: ToolCall): Question[] {
+  const list = call.input?.questions;
+  return Array.isArray(list) ? list.filter((item): item is Question => !!item && typeof item === "object") : [];
+}
+
+/**
+ * The answers in the tool result of an `AskUserQuestion` call, by question: Claude Code
+ * writes them as `"question"="answer"` pairs. A question whose words hold a quote is not
+ * found, and its card then names no answer.
+ */
+function answersOf(call: ToolCall): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const match of (call.result?.text ?? "").matchAll(/"([^"]*)"="([^"]*)"/g)) {
+    found.set(match[1], match[2]);
+  }
+  return found;
+}
+
+/**
+ * The question the session waits on: the last `AskUserQuestion` call with no result, while
+ * the terminal shows a question. The transcript holds its words before it is answered.
+ */
+function pendingQuestion(): ToolCall | null {
+  if (sessionEnded || screenState !== "ask-user-question") return null;
+  let last: ToolCall | null = null;
+  for (const call of calls.values()) {
+    if (call.name === "AskUserQuestion" && (!last || call.at >= last.at)) last = call;
+  }
+  return last && !last.result ? last : null;
+}
+
+/**
+ * An `AskUserQuestion` call as a card in the conversation, not a row of a tool run: each
+ * question with its header, its options and their descriptions. The card of the question the
+ * session waits on says so and opens the terminal, where it is answered; `drawQuestionState`
+ * keeps that part current as the screen changes.
+ */
+function drawQuestion(call: ToolCall): HTMLElement {
+  const element = document.createElement("section");
+  element.className = "question";
+  const answers = answersOf(call);
+  for (const item of questionsOf(call)) {
+    const block = document.createElement("div");
+    block.className = "question-item";
+    if (typeof item.header === "string" && item.header) {
+      const header = document.createElement("div");
+      header.className = "question-header";
+      header.textContent = item.header;
+      block.append(header);
+    }
+    const words = document.createElement("div");
+    words.className = "question-text";
+    words.textContent = typeof item.question === "string" ? item.question : "";
+    block.append(words);
+    const answer = typeof item.question === "string" ? answers.get(item.question) : undefined;
+    const chosen = new Set((answer ?? "").split(", "));
+    const options = document.createElement("ol");
+    options.className = "question-options";
+    for (const option of Array.isArray(item.options) ? item.options as QuestionOption[] : []) {
+      const row = document.createElement("li");
+      row.className = "question-option";
+      const label = document.createElement("span");
+      label.className = "question-label";
+      label.textContent = typeof option?.label === "string" ? option.label : "";
+      row.append(label);
+      if (answer !== undefined && chosen.has(label.textContent)) row.classList.add("chosen");
+      if (typeof option?.description === "string" && option.description) {
+        const description = document.createElement("span");
+        description.className = "question-description";
+        description.textContent = option.description;
+        row.append(description);
+      }
+      options.append(row);
+    }
+    block.append(options);
+    if (answer !== undefined && ![...options.children].some((row) => row.classList.contains("chosen"))) {
+      const other = document.createElement("div");
+      other.className = "question-answer";
+      other.textContent = `Answered: ${answer}`;
+      block.append(other);
+    }
+    element.append(block);
+  }
+  const state = document.createElement("div");
+  state.className = "question-state";
+  element.append(state);
+  drawQuestionState(element, call);
+  return element;
+}
+
+/** The foot of a question's card: waiting, with the way to the terminal, or answered. */
+function drawQuestionState(element: HTMLElement, call: ToolCall): void {
+  const state = element.querySelector<HTMLElement>(".question-state");
+  if (!state) return;
+  const waiting = pendingQuestion() === call;
+  // Drawn again only when it changes, since the line under the composer asks each second.
+  const said = `${waiting}|${call.result ? call.result.is_error : "none"}`;
+  if (state.dataset.said === said) return;
+  state.dataset.said = said;
+  element.classList.toggle("waiting", waiting);
+  if (waiting) {
+    const words = document.createElement("span");
+    words.textContent = "Waiting for your answer in the terminal";
+    const open = document.createElement("button");
+    open.className = "question-open";
+    open.textContent = "Open the terminal";
+    open.addEventListener("click", openTerminal);
+    state.replaceChildren(words, open);
+  } else {
+    state.replaceChildren(call.result ? (call.result.is_error ? "Not answered" : "Answered") : "");
+  }
+  state.hidden = !state.textContent;
+}
+
+/** Brings each question's card up to date with the screen. */
+function drawQuestionStates(): void {
+  for (const element of chat.querySelectorAll<HTMLElement>(".question")) {
+    const call = callOf(element);
+    if (call) drawQuestionState(element, call);
+  }
+}
+
 interface Background {
   running: boolean; shells: number; agents: { type: string; description: string }[];
 }
@@ -680,6 +808,11 @@ function backgroundWords(): string {
   return parts.length ? `${parts.join(", ")} in the background` : "working in the background";
 }
 
+/** Whether the terminal shows a prompt only the person can answer: a permission or a question. */
+function askingInTerminal(): boolean {
+  return screenState === "permission-prompt" || screenState === "ask-user-question";
+}
+
 function workingWords(): string {
   if (sessionEnded) return "";
   if (screenState === "permission-prompt") return "Waiting for permission in the terminal";
@@ -698,6 +831,11 @@ function workingWords(): string {
 const WAITING = "Waiting for you…";
 /** Whether the line last said the session waits on the person; null before any screen was read. */
 let waitingSeen: boolean | null = null;
+/**
+ * KYO-922: the live session waits on the person and no subagent or background shell runs.
+ * The Chat item of the bar is then amber, whichever view is shown.
+ */
+let chatWaiting = false;
 
 /**
  * The line under the composer, whole: what the session is doing and what runs in the
@@ -706,7 +844,9 @@ let waitingSeen: boolean | null = null;
  */
 function drawWorking(): void {
   const doing = workingWords();
-  const idle = !doing && !sessionEnded && screenState !== null;
+  // KYO-922: a question or a permission prompt in the terminal is a wait on the person too,
+  // and its words say where it is answered.
+  const idle = !sessionEnded && screenState !== null && (askingInTerminal() || !doing);
   const words = doing || (idle ? WAITING : "");
   // KYO-883: when the session comes to wait on the person, the app bounces its Dock icon if
   // another app is in front. The first state read is not a change, so opening does not bounce.
@@ -715,6 +855,10 @@ function drawWorking(): void {
   if (!idle && waitingSeen === true && screenState !== null) post("attention", { waiting: false });
   if (screenState !== null) waitingSeen = idle;
   working.classList.toggle("idle", idle);
+  // KYO-922: everything waits on the person, nothing running behind the wait.
+  chatWaiting = idle && !background?.running;
+  drawChatItem();
+  drawQuestionStates();
   if (working.hidden === !words && workingText.textContent === words) return;
   workingText.textContent = words;
   // KYO-883: the line keeps to one row, so the composer does not move; hovering shows it whole.
@@ -1562,6 +1706,13 @@ document.getElementById("side-agents-finished")!.addEventListener("click", () =>
   drawAgents();
 });
 
+/** KYO-922: Chat with its terminal shown, as the terminal's button opens it, and never closed. */
+function openTerminal(): void {
+  if (currentView !== "chat") showView("chat");
+  if (document.body.classList.contains("terminal-open")) emulator?.focus();
+  else document.getElementById("terminal-toggle")!.click();
+}
+
 document.getElementById("terminal-toggle")!.addEventListener("click", () => {
   // KYO-883: from another view the button opens Chat with its terminal shown.
   if (currentView !== "chat") {
@@ -1848,7 +1999,8 @@ const kyo = {
       for (const call of batch.tool_calls ?? []) {
         const version = `${call.result?.text ?? ""}${call.result?.is_error ?? ""}`;
         calls.set(call.call_id, call);
-        place(`c:${call.call_id}`, call.at, version, () => drawToolCall(call));
+        place(`c:${call.call_id}`, call.at, version,
+          () => call.name === "AskUserQuestion" ? drawQuestion(call) : drawToolCall(call));
       }
       for (const output of batch.command_outputs ?? []) {
         place(`o:${output.uuid}`, output.at, output.text, () => drawCommandOutput(output));
@@ -4640,6 +4792,14 @@ const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () 
   { id: "history", name: "History", icon: "history", entered: () => enterHistory() },
 ];
 let currentView = "chat";
+
+function drawChatItem(): void {
+  const item = document.querySelector<HTMLElement>('#view-items [data-view-item="chat"]');
+  if (!item) return;
+  item.classList.toggle("waiting", chatWaiting);
+  item.title = chatWaiting ? "The session is waiting for you" : "";
+}
+
 /** Where the transcript was when another view replaced it. */
 let chatPlace: { top: number; following: boolean } | null = null;
 
@@ -4647,6 +4807,7 @@ function drawViews(): void {
   document.getElementById("view-items")!.replaceChildren(...VIEWS.map((view) => {
     const item = document.createElement("button");
     item.className = "view-item";
+    item.dataset.viewItem = view.id;
     if (view.id === currentView) item.setAttribute("aria-current", "page");
     item.append(icon(view.icon), view.name);
     // The open view's own name goes to its home, as its Home button does (2026-11-11).
@@ -4656,6 +4817,7 @@ function drawViews(): void {
     });
     return item;
   }));
+  drawChatItem();
 }
 
 function showView(id: string): void {
