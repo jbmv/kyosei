@@ -82,37 +82,32 @@ test("with no caret in the composer an arrow marks the paragraph the next anchor
   if (!page) return t.skip("no Chrome on this machine");
   await page.reload();
   await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
+  // The arrow is a marker in the box's gutter (KYO-910), placed by the editor on its line.
   const arrow = `(() => {
     const found = document.querySelector("#boxes .mark-landing");
-    return found ? { top: found.style.top, count: document.querySelectorAll("#boxes .mark-landing").length } : null;
+    return found ? { top: found.getBoundingClientRect().top, count: document.querySelectorAll("#boxes .mark-landing").length } : null;
   })()`;
   // Three paragraphs, the caret left in the second, and the box then left for the chat.
   const tops = await page.run<{ focused: unknown }>(`(() => {
-    document.getElementById("new-prompt").click();
-    const area = document.querySelector("#boxes textarea");
-    area.focus();
-    area.value = "one\\ntwo\\nthree";
-    area.dispatchEvent(new Event("input", { bubbles: true }));
-    area.setSelectionRange(5, 5);
+    window.kyo.draft({ boxes: [{ id: "a", text: "one\\ntwo\\nthree", scratch: { heading: "" } }], etag: "e" });
+    window.kyo.composer.select(0, 5);
     return { focused: ${arrow} };
   })()`);
   assert.equal(tops.focused, null, "no arrow while the box has the caret");
-  await page.run(`document.querySelector("#boxes textarea").blur()`);
+  await page.run(`document.activeElement.blur()`);
   await new Promise((done) => setTimeout(done, 50));
-  const shown = await page.run<{ top: string; count: number } | null>(arrow);
+  const shown = await page.run<{ top: number; count: number } | null>(arrow);
   assert.ok(shown, "an arrow once the caret is gone");
   assert.equal(shown.count, 1);
   // The caret moved to the first paragraph puts the arrow on a higher line.
-  const first = await page.run<{ top: string } | null>(`(() => {
-    const area = document.querySelector("#boxes textarea");
-    area.focus();
-    area.setSelectionRange(0, 0);
-    area.blur();
+  const first = await page.run<{ top: number } | null>(`(() => {
+    window.kyo.composer.select(0, 0);
+    document.activeElement.blur();
     return new Promise((done) => setTimeout(() => done(${arrow}), 50));
   })()`);
   assert.ok(first);
-  assert.ok(parseFloat(first.top) < parseFloat(shown.top), `${first.top} above ${shown.top}`);
-  await page.run(`document.querySelector("#boxes textarea").focus()`);
+  assert.ok(first.top < shown.top, `${first.top} above ${shown.top}`);
+  await page.run(`window.kyo.composer.select(0, 0)`);
   await new Promise((done) => setTimeout(done, 50));
   assert.equal(await page.run(arrow), null, "it goes when the caret is back");
 });

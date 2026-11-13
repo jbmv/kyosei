@@ -4,7 +4,7 @@
 import { agentKind, shortModel } from "./agents";
 import {
   type FilePlace, type Place, blockLines, drawnSpan, fileLine, lineWords, heldLine, lineAt, lineOf, nearest,
-  placeAnchor, placeKey, recordLine as placedRecord, samePlace, scrollToShow, sentenceAt, shiftLines, sourceIndex,
+  placeAnchor, placeKey, recordLine as placedRecord, samePlace, sentenceAt, sourceIndex,
   sourceSpan, spanPlace,
 } from "./marks";
 import {
@@ -39,7 +39,13 @@ import {
   type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
   refusalText,
 } from "./agenda";
-import { INDENT_WIDTH, lineShapes, moveLines, sectionEnd } from "./outline";
+import { moveLines, sectionEnd } from "./outline";
+import { Transaction } from "@codemirror/state";
+import { EditorView, type ViewUpdate } from "@codemirror/view";
+import {
+  type LineMarks, createEditor, lineOfId, marksOf as lineMarks, placeItem, refreshMarks, removeEffect, removeItem,
+  showLanding,
+} from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -1670,6 +1676,8 @@ const kyo = {
     if (data.project !== windowProject) return;
     menu = data;
     followFilesSession(data.current);
+    // A held anchor's title says whether its session runs, which this list tells.
+    for (const editor of editors()) refreshMarks(editor);
     drawMenu();
     drawEnded();
     drawStart();
@@ -1710,6 +1718,53 @@ const kyo = {
   /** Download Image in the image menu: the app saves the image last right-clicked to Downloads. */
   saveImage(): void {
     if (quickLookTarget) post("quicklook", { ...quickLookTarget, save: true });
+  },
+
+  /**
+   * Files dragged from the Finder that are not images or PDFs (KYO-910). The editor takes no
+   * file's contents and WebKit inserts no path into it, so the app reads the paths from the
+   * drag and hands them here with the point they were dropped at, in the page's coordinates.
+   * They are inserted, one to a line, where they fell in the box under the point; a drop
+   * anywhere else inserts nothing.
+   */
+  dropPaths(frame: { paths: string[]; x: number; y: number }): void {
+    const under = document.elementFromPoint(frame.x, frame.y)?.closest<HTMLElement>("#boxes .cm-editor");
+    const editor = under ? EditorView.findFromDOM(under) : null;
+    if (!editor || !frame.paths.length) return;
+    const at = editor.posAtCoords({ x: frame.x, y: frame.y }) ?? editor.state.selection.main.head;
+    const text = frame.paths.join("\n");
+    editor.focus();
+    editor.dispatch({
+      changes: { from: at, insert: text }, selection: { anchor: at + text.length },
+      scrollIntoView: true, userEvent: "input.drop",
+    });
+  },
+
+  /**
+   * The composer's boxes as the page's tests read them (KYO-910): each box's kind, id, text and
+   * selection, and whether it has the focus. `select` focuses a box and sets its selection.
+   */
+  composer: {
+    boxes(): { kind: string; id: string; text: string; from: number; to: number; focused: boolean }[] {
+      return editors().map((editor) => ({
+        kind: scratchOf.has(editor) ? "scratch" : "prompt",
+        id: boxIds.get(editor) ?? "",
+        text: textOf(editor),
+        from: editor.state.selection.main.from,
+        to: editor.state.selection.main.to,
+        focused: editor.hasFocus,
+      }));
+    },
+    select(index: number, from: number, to = from): void {
+      const editor = editors()[index];
+      editor.focus();
+      editor.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
+    },
+    /** Where position `pos` of box `index` is drawn, as the editor's `coordsAtPos` gives it. */
+    coords(index: number, pos: number): { left: number; top: number } | null {
+      const rect = editors()[index].coordsAtPos(pos, 1);
+      return rect && { left: rect.left, top: rect.top };
+    },
   },
 
   apply(batch: Batch): void {
@@ -2027,14 +2082,16 @@ const kyo = {
     const upload = uploads.get(frame.ref);
     if (!upload) return;
     uploads.delete(frame.ref);
-    const { area, item } = upload;
-    const marks = marksOf.get(area);
-    if (!marks) return;
+    const { editor, item } = upload;
     if (frame.error || !frame.id) {
-      for (const [id, items] of marks.items) {
-        const rest = items.filter((other) => other !== item);
-        if (rest.length) marks.items.set(id, rest);
-        else marks.items.delete(id);
+      // The file leaves its paragraph, and that is no step of the box's history to undo.
+      const marks = marksOf(editor);
+      const line = marks.ids.findIndex((id) => marks.items.get(id)?.includes(item));
+      if (line >= 0) {
+        editor.dispatch({
+          effects: removeEffect.of({ pos: editor.state.doc.line(line + 1).from, item }),
+          annotations: Transaction.addToHistory.of(false),
+        });
       }
       composerNote.textContent = frame.error ?? "The file could not be attached.";
     } else {
@@ -2043,7 +2100,7 @@ const kyo = {
       delete item.pending;
     }
     remember();
-    drawMarks(area);
+    refreshMarks(editor);
   },
 
   /** The session's sent prompts' anchors, from the store, which the chat keeps showing. */
@@ -2160,44 +2217,43 @@ const kyo = {
 
 // ------------------------------------------------------------------------------ the composer
 
-const pasted = new WeakMap<HTMLTextAreaElement, string[]>();
+/**
+ * KYO-910: each box's text is an editor built by `editor.ts` on CodeMirror 6, whose document is
+ * the text as typed, which is what is saved and sent. The marks of its lines, and the history
+ * that undoes their placing among the edits of the text, are kept in the editor's state. What
+ * the page keeps of a box beside it is in the maps below, keyed by the box's `EditorView`.
+ */
+const pasted = new WeakMap<EditorView, string[]>();
 const boxes = document.getElementById("boxes")!;
 const composerNote = document.getElementById("composer-note")!;
 
-/**
- * A text area that is never focused, in which a box's text is measured. The system draws an
- * inline prediction inside the focused text area as part of its layout, so that area's
- * `scrollHeight` counts an offered completion's lines although its value does not hold them,
- * and no event tells the page when the offer is made or withdrawn (KYO-750). It stands
- * outside the boxes, where no list of the prompts' text areas finds it. It is editable, as
- * the boxes are, so that nothing but the focus distinguishes it from the one it stands for.
- */
-const boxMeasure = document.createElement("textarea");
-boxMeasure.className = "box-measure";
-boxMeasure.rows = 1;
-boxMeasure.tabIndex = -1;
-boxMeasure.setAttribute("aria-hidden", "true");
-boxes.after(boxMeasure);
-
-/**
- * Makes a box as tall as its text: the text the person typed or accepted, wrapped at the
- * box's width. The height is read from a copy of the text and not from the box, for two
- * measured reasons. The box is taller than its text while a completion that wraps is
- * offered: a box fitted then grew, kept the lines after the offer was withdrawn, and lost
- * them at the next key (KYO-750). And where scroll bars take room, the box read with its
- * height released reports a line more than its text has at some widths, which stays under
- * the text until a later fit reads otherwise (KYO-760). The box's own height is never
- * released, so the composer keeps its place (KYO-727).
- */
-function fitBox(area: HTMLTextAreaElement): void {
-  boxMeasure.style.width = `${area.getBoundingClientRect().width}px`;
-  boxMeasure.value = area.value;
-  area.style.height = `${boxMeasure.scrollHeight}px`;
+/** The composer's editors, in the order of their boxes. */
+function editors(): EditorView[] {
+  return Array.from(boxes.querySelectorAll<HTMLElement>(":scope > .box .cm-editor"))
+    .flatMap((element) => EditorView.findFromDOM(element) ?? []);
 }
 
-function textAreas(): HTMLTextAreaElement[] {
-  return Array.from(boxes.querySelectorAll("textarea"));
+/** The text of a box, as typed. */
+function textOf(editor: EditorView): string {
+  return editor.state.doc.toString();
 }
+
+/** The box an editor stands in. */
+function boxOf(editor: EditorView): HTMLElement {
+  return editor.dom.closest<HTMLElement>(".box")!;
+}
+
+// A box taken out of the composer for good takes its editor with it: the editor's listeners on
+// the window and the document go. A box moved within the composer is back before this runs.
+new MutationObserver((records) => {
+  for (const record of records) {
+    for (const node of record.removedNodes) {
+      if (!(node instanceof HTMLElement) || node.isConnected) continue;
+      const element = node.querySelector<HTMLElement>(".cm-editor");
+      if (element) EditorView.findFromDOM(element)?.destroy();
+    }
+  }
+}).observe(boxes, { childList: true });
 
 /** A button inside a box. It leaves the focus, and so the caret, in the text. */
 function boxButton(className: string, label: string, act: () => void): HTMLButtonElement {
@@ -2233,35 +2289,14 @@ type Item = TagItem | AnchorItem | FileItem | Place;
 interface SavedBox { id?: string; text: string; marks?: { line: number; items: Item[] }[]; scratch?: Scratch | null }
 type NamedBox = SavedBox & DraftBox;
 
-/**
- * One placing of an anchor in a box (KYO-780). The box's own undo history holds edits of its
- * text and nothing else, so the placings are kept here and stepped through by the same keys.
- * `text` is the box's text when the anchor was placed, and `buried` says that an edit of the
- * text stands between this step and the key: the box's own history is then stepped first.
- */
-interface Placed { line: number; item: AnchorItem | Place; text: string; buried: boolean }
-
-interface Marks {
-  /** The placings Command-Z takes back, oldest first, and those Shift-Command-Z puts back. */
-  undo: Placed[];
-  redo: Placed[];
-  /** The text the ids were last matched to. */
-  text: string;
-  /** One id for each line of the text. */
-  ids: number[];
-  items: Map<number, Item[]>;
-  /** What a removed line held, by that line's text, so undoing or pasting it back restores it. */
-  lost: Map<string, Item[]>;
-  gutter: HTMLElement;
-  mirror: HTMLElement;
-  ghost: HTMLButtonElement;
+/** What the lines of a box hold, from its editor's state (KYO-910). */
+function marksOf(editor: EditorView): LineMarks<Item> {
+  return lineMarks<Item>(editor.state);
 }
 
-const marksOf = new WeakMap<HTMLTextAreaElement, Marks>();
 /** Each box's id (KYO-798), which it keeps for as long as it is a draft on any device. */
-const boxIds = new WeakMap<HTMLTextAreaElement, string>();
-let nextLine = 1;
-let openMark: { area: HTMLTextAreaElement; id: number } | null = null;
+const boxIds = new WeakMap<EditorView, string>();
+let openMark: { editor: EditorView; id: number } | null = null;
 const markPanel = document.createElement("div");
 markPanel.className = "mark-panel";
 
@@ -2270,138 +2305,38 @@ let storeTags: string[] = [];
 
 /** Tags to suggest: those on the prompts now, then those used on this device, newest first. */
 function knownTags(): string[] {
-  const here = textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
+  const here = editors().flatMap((editor) => Array.from(marksOf(editor).items.values()).flat())
     .flatMap((item) => (item.kind === "tag" ? [item.name] : []));
   return Array.from(new Set([...here, ...stored<string[]>(TAGS_KEY, []), ...storeTags]));
 }
 
-/** Carries each mark to where its paragraph went in an edit. */
-function trackEdit(area: HTMLTextAreaElement): void {
-  const marks = marksOf.get(area)!;
-  const before = marks.text.split("\n");
-  const shift = shiftLines(marks.text, area.value, marks.ids, () => nextLine++, area.selectionStart);
-  for (const [from, into] of shift.merged) {
-    const moved = marks.items.get(from);
-    if (moved) marks.items.set(into, [...(marks.items.get(into) ?? []), ...moved]);
-    marks.items.delete(from);
-  }
-  for (const id of shift.dropped) {
-    const held = marks.items.get(id);
-    const text = before[marks.ids.indexOf(id)];
-    if (held && text) marks.lost.set(text, held);
-    marks.items.delete(id);
-  }
-  const after = area.value.split("\n");
-  shift.ids.forEach((id, line) => {
-    // A removed paragraph that is back, by undo or by paste, takes up what it held.
-    const back = after[line] && !marks.items.has(id) ? marks.lost.get(after[line]) : undefined;
-    if (!back) return;
-    marks.items.set(id, back);
-    marks.lost.delete(after[line]);
-  });
-  marks.ids = shift.ids;
-  marks.text = area.value;
-}
-
-/**
- * Keeps the placings in step with the box's own undo history, from the kind of each edit of
- * the text (KYO-780). A new edit stands after every placing and ends what could be put back.
- * An undo or a redo of an edit that brings the text back to what it was when an anchor was
- * placed, or taken back, makes that step the next one again. The box's history cannot be
- * read, so the text is what is compared: an edit that happens to restore the same text
- * earlier than the history does makes the step the next one too soon, by that edit.
- */
-function trackHistory(area: HTMLTextAreaElement, inputType: string | undefined): void {
-  const marks = marksOf.get(area)!;
-  const bury = (steps: Placed[]) => { for (const step of steps) step.buried = true; };
-  const meet = (steps: Placed[]) => {
-    const next = steps[steps.length - 1];
-    if (next && next.text === area.value) next.buried = false;
-  };
-  if (inputType === "historyUndo") {
-    bury(marks.redo);
-    meet(marks.undo);
-  } else if (inputType === "historyRedo") {
-    bury(marks.undo);
-    meet(marks.redo);
-  } else {
-    bury(marks.undo);
-    marks.redo = [];
-  }
-}
-
-/**
- * Takes back the last placing of an anchor, or puts back the last one taken, when that is
- * the step the key is for. It answers false when the step is an edit of the text, which is
- * the box's own to undo.
- */
-function stepPlacing(area: HTMLTextAreaElement, redo: boolean): boolean {
-  const marks = marksOf.get(area)!;
-  const steps = redo ? marks.redo : marks.undo;
-  const step = steps[steps.length - 1];
-  if (!step || step.buried) return false;
-  steps.pop();
-  const id = marks.ids[step.line];
-  const held = marks.items.get(id) ?? [];
-  // A placing whose anchor was since removed by its chip has nothing left to take back.
-  if (step.text !== area.value || id === undefined || (!redo && !held.includes(step.item))) return false;
-  const now = redo ? [...held, step.item] : held.filter((item) => item !== step.item);
-  if (now.length) marks.items.set(id, now);
-  else marks.items.delete(id);
-  (redo ? marks.undo : marks.redo).push(step);
-  remember();
-  drawMarks(area);
-  return true;
-}
-
-/** Where a line sits beside the text, read from a hidden copy that wraps as the text does. */
-function lineTop(marks: Marks, line: number): number {
-  return (marks.mirror.children[line] as HTMLElement | undefined)?.offsetTop ?? 0;
-}
-
 /** The paragraph the caret is in, or was in when the box was last used. */
-function caretLine(area: HTMLTextAreaElement): number {
-  return lineOf(area.value, area.selectionStart);
+function caretLine(editor: EditorView): number {
+  return editor.state.doc.lineAt(editor.state.selection.main.head).number - 1;
 }
 
-const CARET_MARGIN = 8;
+/** Puts the caret at `at` in a box, focused, and shows it. */
+function caretTo(editor: EditorView, at: number): void {
+  editor.focus();
+  editor.dispatch({ selection: { anchor: Math.min(at, editor.state.doc.length) }, scrollIntoView: true });
+}
 
 /**
- * Scrolls the composer by the least that shows the line the caret is on, and not at all
- * while that line is in view. The line is found in the hidden copy of the text, by the
- * character beside the caret. On the last line of a box the box's buttons are shown too.
+ * The caret's line is shown by the editor, which scrolls each scrolling box around it by the
+ * least that shows the line. A scratchpad's line is shown above the prompt, which covers the
+ * foot of the column, and on the last line of a box the box's buttons are shown too.
  */
-function showCaret(area: HTMLTextAreaElement): void {
-  const marks = marksOf.get(area)!;
-  const caret = area.selectionEnd;
-  const start = area.value.lastIndexOf("\n", caret - 1) + 1;
-  const node = marks.mirror.children[lineOf(area.value, caret)]?.firstChild;
-  if (!(node instanceof Text)) return;
-  // The character after the caret, or at a paragraph's end the one before it.
-  const from = Math.max(0, Math.min(caret - start, node.length - 1));
-  const range = document.createRange();
-  range.setStart(node, from);
-  range.setEnd(node, Math.min(from + 1, node.length));
-  const line = range.getBoundingClientRect();
-  if (!line.height) return;
-  const box = area.closest<HTMLElement>(".box")!;
-  const lastLine = area.getBoundingClientRect().bottom - line.bottom < line.height / 2;
-  if (!scratchOf.has(area)) {
-    // KYO-903: the prompt stays at the foot of the column and scrolls inside itself once it
-    // has grown to its limit, so the caret is brought into view there.
-    const body = box.querySelector<HTMLElement>(".box-body")!;
-    const view = body.getBoundingClientRect();
-    body.scrollTop += scrollToShow(line.top - CARET_MARGIN, line.bottom + CARET_MARGIN, view.top, view.bottom);
-    return;
+const showAbovePrompt = EditorView.scrollMargins.of((editor) => {
+  if (!scratchOf.has(editor)) return null;
+  const prompt = mainBox()?.getBoundingClientRect();
+  const column = boxes.getBoundingClientRect();
+  let bottom = prompt ? Math.max(0, column.bottom - prompt.top) : 0;
+  const { state } = editor;
+  if (state.doc.lineAt(state.selection.main.head).number === state.doc.lines) {
+    bottom += Math.max(0, boxOf(editor).getBoundingClientRect().bottom - editor.dom.getBoundingClientRect().bottom);
   }
-  const view = boxes.getBoundingClientRect();
-  // The prompt covers the foot of the column, so a scratchpad's line is shown above it.
-  const foot = mainBox()?.getBoundingClientRect().top ?? view.bottom;
-  const bottom = lastLine ? box.getBoundingClientRect().bottom : line.bottom;
-  boxes.scrollTop += scrollToShow(
-    line.top - CARET_MARGIN, bottom + CARET_MARGIN, view.top, Math.min(view.bottom, foot),
-  );
-}
+  return { bottom };
+});
 
 /** The icon of one thing a mark holds: a record's and a file's are their views'. */
 /** Whether the project's session list shows a session as running; false before it is known. */
@@ -2413,93 +2348,40 @@ function itemIcon(item: Item): keyof typeof ICONS {
   return item.kind === "record" ? "records" : item.kind === "path" ? "page" : item.kind;
 }
 
-/** The width of one level of indentation in a box's font, measured once it can be. */
-let indentStep = 0;
-
-/**
- * KYO-902: the indent guides and heading rules of a box, on a layer over its text that takes
- * no press. Each is placed from the hidden copy's line of the same index, as a gutter mark
- * is, so it spans the rows a long line wraps to. A guide stands under the marker of the item
- * the line is nested in, and the guides of consecutive lines meet.
- */
-function drawOutline(marks: Marks, text: string): void {
-  const words = marks.mirror.parentElement!;
-  let layer = words.querySelector<HTMLElement>(":scope > .box-outline");
-  if (!layer) {
-    layer = document.createElement("div");
-    layer.className = "box-outline";
-    layer.setAttribute("aria-hidden", "true");
-    words.append(layer);
-  }
-  const shapes = lineShapes(text);
-  if (!shapes.some((shape) => shape.depth || shape.heading)) {
-    layer.replaceChildren();
-    return;
-  }
-  if (!indentStep) {
-    const probe = document.createElement("span");
-    probe.className = "box-outline-probe";
-    probe.textContent = " ".repeat(INDENT_WIDTH * 10);
-    layer.append(probe);
-    indentStep = probe.getBoundingClientRect().width / 10;
-    probe.remove();
-  }
-  const drawn: HTMLElement[] = [];
-  shapes.forEach((shape, index) => {
-    const line = marks.mirror.children[index] as HTMLElement | undefined;
-    if (!line || !(shape.depth || shape.heading)) return;
-    const top = `${line.offsetTop}px`;
-    const height = `${line.offsetHeight}px`;
-    if (shape.heading) {
-      const rule = document.createElement("div");
-      rule.className = `outline-heading level-${Math.min(shape.heading, 3)}`;
-      rule.style.top = top;
-      rule.style.height = height;
-      drawn.push(rule);
-    }
-    for (let level = 1; level <= shape.depth; level++) {
-      const guide = document.createElement("div");
-      guide.className = "outline-guide";
-      guide.style.top = top;
-      guide.style.height = height;
-      guide.style.left = `${(level - 1) * indentStep + 3}px`;
-      drawn.push(guide);
-    }
-  });
-  layer.replaceChildren(...drawn);
+/** A paragraph's mark in the gutter: one thing shows as what it is, and several as their number. */
+function drawMark(editor: EditorView, id: number, items: Item[]): HTMLElement {
+  const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(editor, id));
+  if (items.length === 1) mark.append(icon(itemIcon(items[0])));
+  mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
+    : item.kind === "file" ? `attached: ${item.name}`
+    : item.kind === "anchor" && !anchorOpens(item.session, menu?.current)
+      ? `anchor: ${item.words} (${sessionRuns(item.session) ? "another session" : "session ended"})`
+    : `anchor: ${item.words}`)).join("\n");
+  return mark;
 }
 
-function drawMarks(area: HTMLTextAreaElement): void {
-  const marks = marksOf.get(area)!;
-  marks.mirror.replaceChildren(...area.value.split("\n").map((text) => {
-    const line = document.createElement("div");
-    line.textContent = text || "\u200b";
-    return line;
-  }));
-  drawOutline(marks, area.value);
-  const held = marks.ids.flatMap((id, line) => {
-    const items = marks.items.get(id) ?? [];
-    if (!items.length) return [];
-    // One thing shows as what it is, and several as their number.
-    const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(area, id));
-    if (items.length === 1) mark.append(icon(itemIcon(items[0])));
-    mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
-      : item.kind === "file" ? `attached: ${item.name}`
-      : item.kind === "anchor" && !anchorOpens(item.session, menu?.current)
-        ? `anchor: ${item.words} (${sessionRuns(item.session) ? "another session" : "session ended"})`
-      : `anchor: ${item.words}`)).join("\n");
-    mark.style.top = `${lineTop(marks, line)}px`;
-    return [mark];
-  });
-  marks.ghost.hidden = true;
-  marks.gutter.replaceChildren(marks.ghost, ...held);
-  syncCreate();
-  drawLanding();
-  paintAnchors();
-  if (openMark?.area === area) {
-    if (marks.ids.includes(openMark.id)) showMark(area, openMark.id);
-    else hideMark();
+/** The ghost [+] on the paragraph under the pointer that holds nothing yet. */
+function drawGhost(editor: EditorView, id: number): HTMLElement {
+  const ghost = boxButton("mark ghost", "+", () => showMark(editor, id));
+  ghost.title = "Attach to this paragraph";
+  return ghost;
+}
+
+/**
+ * What follows an update of a box: its scratchpad's heading, the composer's buttons, the chat's
+ * highlights and the open panel follow its marks, and an edit of its text or marks is saved.
+ */
+function boxUpdated(update: ViewUpdate): void {
+  const editor = update.view;
+  if (update.docChanged) nameScratch(editor);
+  const before = lineMarks<Item>(update.startState);
+  const after = marksOf(editor);
+  if (before !== after) {
+    syncCreate();
+    paintAnchors();
+    if (openMark?.editor === editor) showMark(editor, openMark.id);
   }
+  if (update.docChanged || before.items !== after.items) remember();
 }
 
 /**
@@ -2509,33 +2391,15 @@ function drawMarks(area: HTMLTextAreaElement): void {
  * holds, since without the caret nothing else says where the next one goes.
  */
 function drawLanding(): void {
-  boxes.querySelectorAll(".mark-landing").forEach((arrow) => arrow.remove());
+  const all = editors();
   const active = document.activeElement;
-  if (active instanceof HTMLTextAreaElement && marksOf.has(active)) return;
-  const areas = textAreas();
-  const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
-  const marks = area ? marksOf.get(area) : undefined;
-  if (!area || !marks) return;
-  const arrow = span("mark mark-landing", "→");
-  arrow.title = "An anchor or an attachment made now lands on this paragraph";
-  arrow.style.top = `${lineTop(marks, caretLine(area))}px`;
-  marks.gutter.append(arrow);
+  const typing = active instanceof Element && Boolean(active.closest("#boxes .cm-editor"));
+  const target = typing ? null : lastEditor && all.includes(lastEditor) ? lastEditor : all[all.length - 1];
+  for (const editor of all) showLanding(editor, editor === target);
 }
 // The focus has moved by the time a timer runs, which `focusout` alone does not promise.
 document.addEventListener("focusin", () => drawLanding());
 document.addEventListener("focusout", () => window.setTimeout(drawLanding, 0));
-
-/** The ghost [+] follows the mouse, on the paragraphs that hold nothing yet. */
-function followMouse(area: HTMLTextAreaElement, event: MouseEvent): void {
-  const marks = marksOf.get(area)!;
-  const y = event.clientY - marks.mirror.getBoundingClientRect().top;
-  const lines = Array.from(marks.mirror.children) as HTMLElement[];
-  const line = lines.findIndex((element) => y < element.offsetTop + element.offsetHeight);
-  const id = marks.ids[line < 0 ? lines.length - 1 : line];
-  marks.ghost.hidden = id === undefined || Boolean(marks.items.get(id)?.length);
-  marks.ghost.dataset.id = String(id);
-  marks.ghost.style.top = `${lineTop(marks, marks.ids.indexOf(id))}px`;
-}
 
 function hideMark(): void {
   openMark = null;
@@ -2543,19 +2407,20 @@ function hideMark(): void {
 }
 
 /** The list of what one mark holds, each removable, and a field that adds a tag. */
-function showMark(area: HTMLTextAreaElement, id: number): void {
-  const marks = marksOf.get(area)!;
-  const refocus = openMark?.area === area && openMark.id === id
+function showMark(editor: EditorView, id: number): void {
+  const marks = marksOf(editor);
+  const line = marks.ids.indexOf(id);
+  if (line < 0) {
+    hideMark();
+    return;
+  }
+  const refocus = openMark?.editor === editor && openMark.id === id
     && markPanel.contains(document.activeElement);
-  openMark = { area, id };
-  const change = (items: Item[]) => {
-    if (items.length) marks.items.set(id, items);
-    else marks.items.delete(id);
-    remember();
-    drawMarks(area);
-  };
+  openMark = { editor, id };
+  // Adding and removing are steps of the box's own history, as placing an anchor is (KYO-910).
+  const lineNow = () => lineOfId(editor.state, id);
   const held = marks.items.get(id) ?? [];
-  const chips = held.map((item, index) => {
+  const chips = held.map((item) => {
     const chip = document.createElement("span");
     chip.className = "mark-item";
     if (item.kind === "tag") {
@@ -2592,7 +2457,7 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
       place.prepend(icon(itemIcon(item)));
       chip.append(place);
     }
-    chip.append(boxButton("mark-remove", "×", () => change(held.filter((_, at) => at !== index))));
+    chip.append(boxButton("mark-remove", "×", () => removeItem(editor, lineNow(), item)));
     return chip;
   });
   const field = document.createElement("input");
@@ -2603,7 +2468,7 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
   suggestions.className = "tag-suggestions";
   const addTag = (name: string) => {
     store(TAGS_KEY, [name, ...stored<string[]>(TAGS_KEY, []).filter((used) => used !== name)].slice(0, 200));
-    if (!held.some((item) => item.kind === "tag" && item.name === name)) change([...held, { kind: "tag", name }]);
+    if (!held.some((item) => item.kind === "tag" && item.name === name)) placeItem<Item>(editor, lineNow(), { kind: "tag", name });
   };
   const suggest = () => {
     const typed = field.value.trim().replace(/^#/, "").toLowerCase();
@@ -2621,7 +2486,7 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     event.stopPropagation();
     if (event.key === "Escape") {
       hideMark();
-      area.focus();
+      editor.focus();
     }
     const name = field.value.trim().replace(/^#/, "");
     if (event.key !== "Enter" || !name) return;
@@ -2629,21 +2494,24 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
     addTag(name);
   });
   // KYO-823: the reverse of a right-click, a place in the chat chosen for this paragraph.
-  const anchorButton = boxButton("mark-anchor-mode", "Anchor", () => startAnchorMode(area, id));
+  const anchorButton = boxButton("mark-anchor-mode", "Anchor", () => startAnchorMode(editor, id));
   anchorButton.prepend(icon("anchor"));
   const divider = document.createElement("div");
   divider.className = "mark-divider";
   const actions: HTMLElement[] = [anchorButton];
-  if (scratchOf.has(area)) {
+  if (scratchOf.has(editor)) {
     // KYO-904: a scratchpad's paragraph, with what is nested under it, goes to the prompt.
-    const move = boxButton("mark-to-prompt", "Send to prompt", () => sendToPrompt(area, marks.ids.indexOf(id)));
+    const move = boxButton("mark-to-prompt", "Send to prompt", () => sendToPrompt(editor, lineNow()));
     move.title = "Move this paragraph, with what is nested under it, to the end of the prompt";
     actions.push(move);
   }
   markPanel.replaceChildren(...chips, ...actions, divider, field, suggestions);
   suggest();
-  markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
-  area.closest(".box")!.append(markPanel);
+  // Below its paragraph's first row, in the box, which the panel is placed in.
+  const box = boxOf(editor);
+  const row = editor.lineBlockAt(editor.state.doc.line(line + 1).from);
+  box.append(markPanel);
+  markPanel.style.top = `${editor.documentTop + row.top - box.getBoundingClientRect().top - box.clientTop + 24}px`;
   if (refocus || !held.length) field.focus();
 }
 
@@ -2659,7 +2527,7 @@ const ANCHOR_WORDS = 6;
 const anchorMenu = document.createElement("div");
 anchorMenu.id = "anchor-menu";
 /** The prompt last typed in, which a new anchor goes to. */
-let lastArea: HTMLTextAreaElement | null = null;
+let lastEditor: EditorView | null = null;
 
 function firstWords(text: string, count: number): string {
   const words = text.trim().split(/\s+/);
@@ -2772,43 +2640,35 @@ function spanAt(
 
 /**
  * Puts an anchor on a paragraph of a prompt: the one named, or the one the caret was in when
- * the box was left, which a text area keeps while the focus is elsewhere. The text is not
- * changed, so an empty paragraph takes the anchor as it is, and the placing is a step of its
- * own in the box's undo (`stepPlacing`).
+ * the box was left, which the editor keeps while the focus is elsewhere. The text is not
+ * changed, so an empty paragraph takes the anchor as it is. The placing is a step of the box's
+ * own history, so Command-Z takes it back first (KYO-780, KYO-910).
  */
-function addAnchor(area: HTMLTextAreaElement, line: number | null, item: AnchorItem | Place): void {
-  const marks = marksOf.get(area)!;
-  const at = line ?? caretLine(area);
-  const id = marks.ids[at];
-  const held = marks.items.get(id) ?? [];
+function addAnchor(editor: EditorView, line: number | null, item: AnchorItem | Place): void {
+  const marks = marksOf(editor);
+  const at = line ?? caretLine(editor);
+  const held = marks.items.get(marks.ids[at]) ?? [];
   const same = (other: Item) => (item.kind === "anchor"
     ? other.kind === "anchor" && other.key === item.key && other.start === item.start && other.end === item.end
     : (other.kind === "record" || other.kind === "path") && samePlace(other, item));
-  if (!held.some(same)) {
-    marks.items.set(id, [...held, item]);
-    // KYO-780: the placing is the last thing done, so it is what Command-Z takes back first.
-    marks.undo.push({ line: at, item, text: area.value, buried: false });
-    marks.redo = [];
-  }
+  if (!held.some(same)) placeItem<Item>(editor, at, item);
   // Typing goes on where it was.
-  area.focus();
-  remember();
-  drawMarks(area);
+  editor.focus();
 }
 
 function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
-  const areas = textAreas();
-  const area = lastArea && areas.includes(lastArea) ? lastArea : areas[areas.length - 1];
+  const all = editors();
+  const editor = lastEditor && all.includes(lastEditor) ? lastEditor : all[all.length - 1];
   const entry = (label: string, line: number | null, className = "") => {
     const button = boxButton(className, label, () => {
       anchorMenu.remove();
-      addAnchor(area, line, item);
+      addAnchor(editor, line, item);
     });
     return button;
   };
   // The first entry is the caret's paragraph, so the list names the others.
-  const caret = caretLine(area);
-  const lines = area.value.split("\n")
+  const caret = caretLine(editor);
+  const lines = textOf(editor).split("\n")
     .map((text, line) => ({ text, line }))
     .filter(({ text, line }) => text.trim() && line !== caret);
   const heading = document.createElement("div");
@@ -2868,7 +2728,7 @@ document.addEventListener("keydown", (event) => {
 // ---- anchor mode (KYO-823): from a paragraph's + panel, the next press on a place in the
 // chat, an open record or an open file anchors it to that paragraph, as a right-click would.
 
-let anchorMode: { area: HTMLTextAreaElement; id: number } | null = null;
+let anchorMode: { editor: EditorView; id: number } | null = null;
 let anchorLit: Element[] = [];
 /** Set by a press made in the mode, whose click must not also act on what it fell on. */
 let anchorSwallow = false;
@@ -2888,9 +2748,9 @@ function anchorCursor(colour: string): string {
   return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") 13 13, crosshair`;
 }
 
-function startAnchorMode(area: HTMLTextAreaElement, id: number): void {
+function startAnchorMode(editor: EditorView, id: number): void {
   hideMark();
-  anchorMode = { area, id };
+  anchorMode = { editor, id };
   document.body.style.setProperty("--anchor-cursor", anchorCursor("#1d1d1f"));
   document.body.style.setProperty("--anchor-cursor-off", anchorCursor("#a3a3a3"));
   document.body.classList.add("anchor-mode");
@@ -3015,15 +2875,13 @@ document.addEventListener("mouseup", (event) => {
     : event.target;
   const found = anchorPlaceAt(from, { x: event.clientX, y: event.clientY }, own);
   if (!found) return;
-  const { area, id } = anchorMode;
+  const { editor, id } = anchorMode;
   endAnchorMode();
-  const line = marksOf.get(area)?.ids.indexOf(id) ?? -1;
+  const line = lineOfId(editor.state, id);
   if (line < 0) return;
-  addAnchor(area, line, found.item);
   window.getSelection()?.removeAllRanges();
-  area.focus();
-  const end = area.value.split("\n").slice(0, line + 1).join("\n").length;
-  area.setSelectionRange(end, end);
+  addAnchor(editor, line, found.item);
+  caretTo(editor, editor.state.doc.line(line + 1).to);
 }, true);
 
 document.addEventListener("click", (event) => {
@@ -3041,7 +2899,7 @@ document.addEventListener("keydown", (event) => {
 }, true);
 
 function anchorsHeld(): AnchorItem[] {
-  return textAreas().flatMap((area) => Array.from(marksOf.get(area)?.items.values() ?? []).flat())
+  return editors().flatMap((editor) => Array.from(marksOf(editor).items.values()).flat())
     .filter((item): item is AnchorItem => item.kind === "anchor");
 }
 
@@ -3641,19 +3499,24 @@ function reveal(item: AnchorItem): void {
 
 /** A box for one prompt: the whole of one message, with its own Send and Delete. */
 /**
- * KYO-903: the scratchpads, each by its text area, with the field holding its heading. A box
+ * KYO-903: the scratchpads, each by its editor, with the field holding its heading. A box
  * that is not here is the prompt, the one box that is sent.
  */
-const scratchOf = new WeakMap<HTMLTextAreaElement, { heading: HTMLInputElement; box: HTMLElement }>();
+const scratchOf = new WeakMap<EditorView, { heading: HTMLInputElement; box: HTMLElement }>();
 
 /** The prompt's box: the one that is not a scratchpad. */
 function mainBox(): HTMLElement | null {
   return boxes.querySelector<HTMLElement>(":scope > .box.main");
 }
 
+/** The prompt's editor: the one that is not a scratchpad's. */
+function mainEditor(): EditorView | undefined {
+  return editors().find((editor) => !scratchOf.has(editor));
+}
+
 /** Create prompt is offered while the prompt is empty, since it would replace what is there. */
 function syncCreate(): void {
-  const main = textAreas().find((area) => !scratchOf.has(area));
+  const main = mainEditor();
   const full = Boolean(main && isDraft(main));
   for (const button of boxes.querySelectorAll<HTMLButtonElement>(".box-create")) {
     button.disabled = full;
@@ -3664,9 +3527,9 @@ function syncCreate(): void {
 }
 
 /** A scratchpad's heading field shows the first words of its text until it is given one. */
-function nameScratch(area: HTMLTextAreaElement): void {
-  const held = scratchOf.get(area);
-  if (held) held.heading.placeholder = area.value.split("\n").find((line) => line.trim())?.trim().slice(0, 80) || "Scratchpad";
+function nameScratch(editor: EditorView): void {
+  const held = scratchOf.get(editor);
+  if (held) held.heading.placeholder = textOf(editor).split("\n").find((line) => line.trim())?.trim().slice(0, 80) || "Scratchpad";
 }
 
 /**
@@ -3677,24 +3540,24 @@ function nameScratch(area: HTMLTextAreaElement): void {
  * an empty prompt is added. It says whether a box became a scratchpad.
  */
 function ensureMain(): boolean {
-  const mains = textAreas().filter((area) => !scratchOf.has(area));
+  const mains = editors().filter((editor) => !scratchOf.has(editor));
   const drafts = mains.filter(isDraft);
   const keep = drafts.length ? drafts[drafts.length - 1] : mains[mains.length - 1];
   let changed = false;
-  for (const area of mains) {
-    if (area === keep) continue;
-    const box = area.closest(".box")!;
-    if (openMark?.area === area) hideMark();
-    if (isDraft(area)) {
-      const held = savedBox(area);
+  for (const editor of mains) {
+    if (editor === keep) continue;
+    const box = boxOf(editor);
+    if (openMark?.editor === editor) hideMark();
+    if (isDraft(editor)) {
+      const held = savedBox(editor);
       const fresh = addBox(held.text, held.marks, held.id, { heading: "" });
-      box.replaceWith(fresh.closest(".box")!);
+      box.replaceWith(boxOf(fresh));
       changed = true;
     } else {
       box.remove();
     }
   }
-  const main = (keep ?? addBox()).closest(".box")!;
+  const main = boxOf(keep ?? addBox());
   if (main !== boxes.lastElementChild) boxes.append(main);
   syncCreate();
   return changed;
@@ -3705,141 +3568,89 @@ function ensureMain(): boolean {
  * with what each of its lines holds. Both boxes are drawn again from what they then hold; a
  * scratchpad left with nothing leaves.
  */
-function sendToPrompt(area: HTMLTextAreaElement, line: number): void {
-  const main = textAreas().find((other) => !scratchOf.has(other));
+function sendToPrompt(editor: EditorView, line: number): void {
+  const main = mainEditor();
   if (!main || line < 0) return;
   hideMark();
-  const from = savedBox(area);
+  const from = savedBox(editor);
   const to = savedBox(main);
-  const moved = moveLines(from, to, line, sectionEnd(area.value, line));
+  const moved = moveLines(from, to, line, sectionEnd(textOf(editor), line));
   const scratch = from.scratch ?? { heading: "" };
   const emptied = !moved.source.text.trim() && !moved.source.marks?.length && !scratch.heading;
-  const old = area.closest(".box")!;
+  const old = boxOf(editor);
   if (emptied) old.remove();
-  else old.replaceWith(addBox(moved.source.text, moved.source.marks, from.id, scratch).closest(".box")!);
-  main.closest(".box")!.remove();
+  else old.replaceWith(boxOf(addBox(moved.source.text, moved.source.marks, from.id, scratch)));
+  boxOf(main).remove();
   const prompt = addBox(moved.target.text, moved.target.marks, to.id);
   ensureMain();
   paintAnchors();
   remember();
-  prompt.focus();
-  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
-  showCaret(prompt);
+  caretTo(prompt, prompt.state.doc.length);
 }
 
 /** Moves a scratchpad's words and marks into the prompt, which is empty (KYO-903). */
-function createPrompt(area: HTMLTextAreaElement): void {
-  const main = textAreas().find((other) => !scratchOf.has(other));
+function createPrompt(editor: EditorView): void {
+  const main = mainEditor();
   if (main && isDraft(main)) return;
-  const held = savedBox(area);
-  if (openMark?.area === area || (main && openMark?.area === main)) hideMark();
-  main?.closest(".box")!.remove();
-  area.closest(".box")!.remove();
+  const held = savedBox(editor);
+  if (openMark?.editor === editor || (main && openMark?.editor === main)) hideMark();
+  if (main) boxOf(main).remove();
+  boxOf(editor).remove();
   const prompt = addBox(held.text, held.marks, held.id);
   ensureMain();
   paintAnchors();
   remember();
-  prompt.focus();
-  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  caretTo(prompt, prompt.state.doc.length);
+}
+
+/**
+ * Files pasted into a box, or dropped on it (KYO-910). A paste attaches every file to the
+ * caret's paragraph. A drop attaches an image or a PDF to the paragraph it fell on; any other
+ * file dropped is the app's to name, which it inserts as its path through `kyo.dropPaths`.
+ */
+function filesIn(editor: EditorView, files: File[], how: "paste" | "drop", pos: number): void {
+  const line = editor.state.doc.lineAt(pos).number - 1;
+  const taken = how === "paste" ? files
+    : files.filter((file) => file.type.startsWith("image/") || file.type === "application/pdf");
+  if (!taken.length) return;
+  if (how === "drop") editor.focus();
+  for (const file of taken) attachFile(editor, file, line);
 }
 
 function addBox(
   text = "", saved: SavedBox["marks"] = [], id: string = boxId(), scratch: Scratch | null = null,
-): HTMLTextAreaElement {
+): EditorView {
   const box = document.createElement("div");
   box.className = scratch ? `box scratch${scratch.collapsed ? " collapsed" : ""}` : "box main";
-  const area = document.createElement("textarea");
-  boxIds.set(area, id);
-  area.rows = 1;
-  area.placeholder = scratch ? "Notes…" : "Reply…";
-  area.value = text;
-  const gutter = document.createElement("div");
-  gutter.className = "box-gutter";
-  const mirror = document.createElement("div");
-  mirror.className = "box-mirror";
-  const ghost = boxButton("mark ghost", "+", () => showMark(area, Number(ghost.dataset.id)));
-  ghost.title = "Attach to this paragraph";
-  const ids = text.split("\n").map(() => nextLine++);
-  const marks: Marks = {
-    text, ids, gutter, mirror, ghost, lost: new Map(), undo: [], redo: [],
-    items: new Map(saved.filter((mark) => mark.line < ids.length && mark.items.length)
-      .map((mark) => [ids[mark.line], mark.items])),
-  };
-  marksOf.set(area, marks);
-  const words = document.createElement("div");
-  words.className = "box-text";
-  words.append(area, mirror);
   const body = document.createElement("div");
   body.className = "box-body";
-  body.append(gutter, words);
-  body.addEventListener("mousemove", (event) => followMouse(area, event));
-  body.addEventListener("mouseleave", () => { ghost.hidden = true; });
-  // KYO-904: a right-click in a scratchpad's gutter opens the panel of the paragraph under
-  // the pointer, which holds Send to prompt.
-  gutter.addEventListener("contextmenu", (event) => {
-    if (!scratchOf.has(area)) return;
-    event.preventDefault();
-    followMouse(area, event);
-    const id = Number(ghost.dataset.id);
-    if (marks.ids.includes(id)) showMark(area, id);
-  });
-  // The height was fitted to the text as it wrapped at one width. At another the box is too
-  // short or too tall, and a box shorter than its text scrolls the text inside itself when
-  // the caret goes to the hidden part (KYO-727). A long draft restored into an empty
-  // composer meets this at once where scroll bars take room: its height is what makes the
-  // composer's scroll bar appear, and the bar narrows it.
-  let fittedWidth = -1;
-  new ResizeObserver(() => {
-    if (words.clientWidth !== fittedWidth) {
-      fittedWidth = words.clientWidth;
-      fitBox(area);
-    }
-    drawMarks(area);
-  }).observe(words);
-  area.addEventListener("keydown", (event) => listKeys(area, event));
-  area.addEventListener("focus", () => { lastArea = area; });
-  area.addEventListener("paste", (event) => {
-    const files = Array.from(event.clipboardData?.files ?? []);
-    if (files.length) {
-      // A pasted file belongs to the paragraph the caret is in.
+  box.append(body);
+  // The box is placed before its editor is built, so the editor measures its font at once.
+  if (scratch) boxes.insertBefore(box, mainBox());
+  else boxes.append(box);
+  const editor = createEditor<Item>({
+    parent: body,
+    text,
+    marks: saved,
+    placeholder: scratch ? "Notes…" : "Reply…",
+    drawMark,
+    drawGhost,
+    // KYO-904: a right-click in a scratchpad's gutter opens the panel of the paragraph under
+    // the pointer, which holds Send to prompt.
+    onGutterMenu: (view, _line, lineId, event) => {
+      if (!scratchOf.has(view) || lineId === undefined) return false;
       event.preventDefault();
-      for (const file of files) attachFile(area, file);
-      return;
-    }
-    const text = event.clipboardData?.getData("text/plain");
-    if (text) pasted.set(area, [...(pasted.get(area) ?? []), text]);
+      showMark(view, lineId);
+      return true;
+    },
+    onFiles: filesIn,
+    // A paste is sent as a paste.
+    onPaste: (view, pastedText) => pasted.set(view, [...(pasted.get(view) ?? []), pastedText]),
+    onUpdate: boxUpdated,
+    extensions: [showAbovePrompt],
   });
-  // An image or PDF dragged in is attached. Any other file is left to the text area, which
-  // takes its path as text.
-  area.addEventListener("drop", (event) => {
-    const files = Array.from(event.dataTransfer?.files ?? [])
-      .filter((file) => file.type.startsWith("image/") || file.type === "application/pdf");
-    if (!files.length) return;
-    event.preventDefault();
-    area.focus();
-    for (const file of files) attachFile(area, file);
-  });
-  // KYO-780: Command-Z and Shift-Command-Z step through the placings of anchors as they do
-  // through the edits of the text. A key that is not for a placing is left to the box. An
-  // undo or redo asked for another way, as by a menu item, reaches the page as the edit it
-  // is about to make, and only when the box's own history has one to make.
-  area.addEventListener("keydown", (event) => {
-    if (event.key.toLowerCase() !== "z" || !event.metaKey || event.ctrlKey || event.altKey) return;
-    if (stepPlacing(area, event.shiftKey)) event.preventDefault();
-  });
-  area.addEventListener("beforeinput", (event) => {
-    if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo") return;
-    if (stepPlacing(area, event.inputType === "historyRedo")) event.preventDefault();
-  });
-  area.addEventListener("input", (event) => {
-    trackHistory(area, (event as InputEvent).inputType);
-    fitBox(area);
-    trackEdit(area);
-    drawMarks(area);
-    showCaret(area);
-    nameScratch(area);
-    remember();
-  });
+  boxIds.set(editor, id);
+  editor.contentDOM.addEventListener("focus", () => { lastEditor = editor; });
   let armed: number | undefined;
   const disarm = () => {
     if (armed !== undefined) clearTimeout(armed);
@@ -3850,23 +3661,23 @@ function addBox(
   // it was gone before an anchor could be chosen for it in the chat. Delete asks once more
   // when the box holds words or marks, then removes this prompt and leaves the others.
   const remove = boxButton("box-delete", "Delete", () => {
-    if (armed === undefined && (area.value || marks.items.size)) {
+    if (armed === undefined && (editor.state.doc.length || marksOf(editor).items.size)) {
       remove.textContent = "Delete?";
       armed = window.setTimeout(disarm, 3000);
       return;
     }
     disarm();
-    const wasPrompt = !scratchOf.has(area);
+    const wasPrompt = !scratchOf.has(editor);
     box.remove();
     ensureMain();
     // The prompt that was deleted leaves an empty one, which takes the caret.
-    if (wasPrompt) textAreas().find((other) => !scratchOf.has(other))?.focus();
+    if (wasPrompt) mainEditor()?.focus();
     // KYO-780: what the box was anchored to is no longer anchored.
     paintAnchors();
     remember();
   });
   // Bare text in the accent colour, then the keys that do the same.
-  const send = boxButton("box-send", "", () => attemptSend(area));
+  const send = boxButton("box-send", "", () => attemptSend(editor));
   const word = document.createElement("span");
   const keys = document.createElement("span");
   keys.className = "send-keys";
@@ -3892,15 +3703,14 @@ function addBox(
       event.preventDefault();
       box.classList.remove("collapsed");
       toggle.setAttribute("aria-expanded", "true");
-      fitBox(area);
-      area.focus();
+      editor.focus();
     });
     const toggle = boxButton("scratch-toggle", "", () => {
       const collapsed = box.classList.toggle("collapsed");
       toggle.setAttribute("aria-expanded", String(!collapsed));
-      if (collapsed && openMark?.area === area) hideMark();
-      // A box drawn while it was collapsed had no width to fit its text to.
-      if (!collapsed) { fitBox(area); drawMarks(area); }
+      if (collapsed && openMark?.editor === editor) hideMark();
+      // A box drawn while it was collapsed had no size to lay its lines out in.
+      if (!collapsed) editor.requestMeasure();
       remember();
     });
     toggle.title = "Collapse or open this scratchpad";
@@ -3908,20 +3718,20 @@ function addBox(
     const head = document.createElement("div");
     head.className = "scratch-head";
     head.append(toggle, heading);
-    scratchOf.set(area, { heading, box });
-    const create = boxButton("box-create", "Create prompt", () => createPrompt(area));
+    scratchOf.set(editor, { heading, box });
+    const create = boxButton("box-create", "Create prompt", () => createPrompt(editor));
     actions.append(remove, create);
-    box.append(head, body, actions);
-    boxes.insertBefore(box, mainBox());
-    nameScratch(area);
+    box.prepend(head);
+    box.append(actions);
+    nameScratch(editor);
   } else {
     actions.append(remove, send);
-    box.append(body, actions);
-    boxes.append(box);
+    box.append(actions);
   }
-  fitBox(area);
-  drawMarks(area);
-  return area;
+  syncCreate();
+  paintAnchors();
+  queueMicrotask(drawLanding);
+  return editor;
 }
 
 const SHELF_KEY = "composer-shelf";
@@ -3944,22 +3754,22 @@ function store(key: string, value: unknown): void {
 }
 
 function currentTexts(): string[] {
-  return textAreas().map((area) => area.value).filter(Boolean);
+  return editors().map(textOf).filter(Boolean);
 }
 
 /** One prompt as it is saved: its id, its words, and its marks by the line each is on. */
-function savedBox(area: HTMLTextAreaElement): NamedBox {
-  const marks = marksOf.get(area)!;
-  const scratch = scratchOf.get(area);
+function savedBox(editor: EditorView): NamedBox {
+  const marks = marksOf(editor);
+  const scratch = scratchOf.get(editor);
   return {
-    id: boxIds.get(area)!,
+    id: boxIds.get(editor)!,
     ...(scratch ? {
       scratch: {
         heading: scratch.heading.value,
         ...(scratch.box.classList.contains("collapsed") ? { collapsed: true } : {}),
       },
     } : {}),
-    text: area.value,
+    text: textOf(editor),
     marks: marks.ids.flatMap((id, line) => {
       // A file still uploading is not saved: nothing would finish it after a relaunch.
       const items = marks.items.get(id)?.filter((item) => !(item.kind === "file" && item.pending));
@@ -3969,13 +3779,13 @@ function savedBox(area: HTMLTextAreaElement): NamedBox {
 }
 
 /** A box that is a draft: a prompt with an anchor and no words yet is still one. */
-function isDraft(area: HTMLTextAreaElement): boolean {
-  return Boolean(area.value || marksOf.get(area)!.items.size || scratchOf.get(area)?.heading.value);
+function isDraft(editor: EditorView): boolean {
+  return Boolean(editor.state.doc.length || marksOf(editor).items.size || scratchOf.get(editor)?.heading.value);
 }
 
 /** Each prompt with its marks. */
 function currentBoxes(): NamedBox[] {
-  return textAreas().filter(isDraft).map(savedBox);
+  return editors().filter(isDraft).map(savedBox);
 }
 
 /** The draft this window and the server last agreed on (KYO-798); none before one is read. */
@@ -4018,32 +3828,32 @@ function agreedWith(server: NamedBox[], taken: Set<string>): Agreed {
  * box with no words is no part of a draft and stays too.
  */
 function applyBoxes(wanted: NamedBox[]): void {
-  const focused = document.activeElement instanceof HTMLTextAreaElement && boxIds.has(document.activeElement)
-    ? document.activeElement : null;
-  const caret = focused
-    ? { id: boxIds.get(focused)!, start: focused.selectionStart, end: focused.selectionEnd } : null;
-  const before = textAreas();
-  const have = new Map(before.map((area) => [boxIds.get(area)!, area]));
+  const before = editors();
+  const focused = before.find((editor) => editor.hasFocus);
+  const caret = focused ? {
+    id: boxIds.get(focused)!, anchor: focused.state.selection.main.anchor, head: focused.state.selection.main.head,
+  } : null;
+  const have = new Map(before.map((editor) => [boxIds.get(editor)!, editor]));
   const ids = new Set(wanted.map((box) => box.id));
-  const kept = new Set<HTMLTextAreaElement>();
+  const kept = new Set<EditorView>();
   const order: Element[] = [];
   const wasLoading = loadingDraft;
   loadingDraft = true;
   for (const box of wanted) {
     const shown = have.get(box.id);
-    const area = shown && boxSignature(savedBox(shown)) === boxSignature(box)
+    const editor = shown && boxSignature(savedBox(shown)) === boxSignature(box)
       ? shown : addBox(box.text, box.marks, box.id, box.scratch ?? null);
-    kept.add(area);
-    order.push(area.closest(".box")!);
+    kept.add(editor);
+    order.push(boxOf(editor));
   }
-  for (const area of before) {
-    if (kept.has(area)) continue;
-    if (!isDraft(area) && !ids.has(boxIds.get(area)!)) {
-      order.push(area.closest(".box")!);
+  for (const editor of before) {
+    if (kept.has(editor)) continue;
+    if (!isDraft(editor) && !ids.has(boxIds.get(editor)!)) {
+      order.push(boxOf(editor));
       continue;
     }
-    if (openMark?.area === area) hideMark();
-    area.closest(".box")!.remove();
+    if (openMark?.editor === editor) hideMark();
+    boxOf(editor).remove();
   }
   // Only a box that is out of its place is moved, since moving one takes the focus from it.
   let next = boxes.querySelector(":scope > .box");
@@ -4054,10 +3864,11 @@ function applyBoxes(wanted: NamedBox[]): void {
   ensureMain();
   loadingDraft = wasLoading;
   paintAnchors();
-  const again = caret && textAreas().find((area) => boxIds.get(area) === caret.id);
-  if (again && document.activeElement !== again) {
+  const again = caret && editors().find((editor) => boxIds.get(editor) === caret.id);
+  if (again && !again.hasFocus) {
+    const length = again.state.doc.length;
     again.focus();
-    again.setSelectionRange(Math.min(caret.start, again.value.length), Math.min(caret.end, again.value.length));
+    again.dispatch({ selection: { anchor: Math.min(caret.anchor, length), head: Math.min(caret.head, length) } });
   }
 }
 
@@ -4195,9 +4006,9 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
 /** A new prompt is made on purpose: an empty box is reused before another is added. */
 /** The + button: a new scratchpad above the prompt, with the caret in its heading (KYO-903). */
 function newPrompt(): void {
-  const area = addBox("", [], boxId(), { heading: "" });
+  const editor = addBox("", [], boxId(), { heading: "" });
   syncCreate();
-  scratchOf.get(area)!.heading.focus();
+  scratchOf.get(editor)!.heading.focus();
 }
 
 function post(name: string, body: unknown): void {
@@ -4205,7 +4016,7 @@ function post(name: string, body: unknown): void {
 }
 
 /** One prompt's text, split at what was pasted, since a paste is sent as a paste. */
-function messageSegments(area: HTMLTextAreaElement): { kind: string; text: string }[] {
+function messageSegments(editor: EditorView): { kind: string; text: string }[] {
   const segments: { kind: string; text: string }[] = [];
   const add = (kind: string, text: string) => {
     const last = segments[segments.length - 1];
@@ -4213,8 +4024,8 @@ function messageSegments(area: HTMLTextAreaElement): { kind: string; text: strin
     if (last?.kind === kind) last.text += text;
     else segments.push({ kind, text });
   };
-  let rest = area.value;
-  for (const piece of pasted.get(area) ?? []) {
+  let rest = textOf(editor);
+  for (const piece of pasted.get(editor) ?? []) {
     const at = rest.indexOf(piece);
     if (at < 0) continue;
     add("typed", rest.slice(0, at));
@@ -4226,9 +4037,9 @@ function messageSegments(area: HTMLTextAreaElement): { kind: string; text: strin
 }
 
 /** The prompt whose Send was answered with the cold-cache warning, until it is pressed again. */
-let coldConfirm: HTMLTextAreaElement | null = null;
+let coldConfirm: EditorView | null = null;
 
-const uploads = new Map<string, { area: HTMLTextAreaElement; item: FileItem }>();
+const uploads = new Map<string, { editor: EditorView; item: FileItem }>();
 let nextUpload = 1;
 const THUMB_PX = 96;
 
@@ -4247,28 +4058,28 @@ async function thumbnail(file: File): Promise<string | undefined> {
   }
 }
 
-/** Puts a pasted file on the caret's paragraph and sends it to the session's machine. */
-async function attachFile(area: HTMLTextAreaElement, file: File): Promise<void> {
-  const marks = marksOf.get(area)!;
-  const id = marks.ids[caretLine(area)];
+/**
+ * Puts a file on a paragraph, the caret's unless another is named, and sends it to the
+ * session's machine. The attaching is a step of the box's history, as an anchor's is (KYO-910).
+ */
+async function attachFile(editor: EditorView, file: File, line = caretLine(editor)): Promise<void> {
   const ref = `upload-${nextUpload++}`;
   const item: FileItem = { kind: "file", id: "", name: file.name || "pasted image", pending: ref };
-  marks.items.set(id, [...(marks.items.get(id) ?? []), item]);
-  uploads.set(ref, { area, item });
-  drawMarks(area);
+  placeItem<Item>(editor, line, item);
+  uploads.set(ref, { editor, item });
   item.thumb = await thumbnail(file);
+  refreshMarks(editor);
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let at = 0; at < bytes.length; at += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
   }
   post("attach", { ref, type: file.type, name: item.name, data: btoa(binary) });
-  drawMarks(area);
 }
 
 /** A prompt's marks as the server takes them: the line, its anchors and its tags. */
-function sentMarks(area: HTMLTextAreaElement): unknown[] {
-  const marks = marksOf.get(area)!;
+function sentMarks(editor: EditorView): unknown[] {
+  const marks = marksOf(editor);
   return marks.ids.flatMap((id, line) => {
     const items = marks.items.get(id) ?? [];
     if (!items.length) return [];
@@ -4303,20 +4114,20 @@ function drawSending(): void {
   }
 }
 
-function attemptSend(area: HTMLTextAreaElement): void {
+function attemptSend(editor: EditorView): void {
   // A prompt already on its way to the server is not posted again.
   if (sendGate.current) return;
-  const segments = messageSegments(area);
+  const segments = messageSegments(editor);
   if (!segments.length) {
     // A prompt needs some words: the server sends text, and a mark rides on a line of it.
-    if (marksOf.get(area)!.items.size) composerNote.textContent = "Add a few words to send this.";
+    if (marksOf(editor).items.size) composerNote.textContent = "Add a few words to send this.";
     return;
   }
   if (heldId) {
     composerNote.textContent = "One message is already waiting. Edit it first.";
     return;
   }
-  const waiting = Array.from(marksOf.get(area)!.items.values()).flat()
+  const waiting = Array.from(marksOf(editor).items.values()).flat()
     .some((item) => item.kind === "file" && item.pending);
   if (waiting) {
     composerNote.textContent = "A file is still uploading.";
@@ -4325,23 +4136,23 @@ function attemptSend(area: HTMLTextAreaElement): void {
   // After the cache has expired the whole context is written again, so Send asks once more.
   const cache = facts?.cache;
   const expired = cache?.expires_at ? new Date(cache.expires_at).getTime() : NaN;
-  if (expired < Date.now() && coldConfirm !== area) {
+  if (expired < Date.now() && coldConfirm !== editor) {
     const tokens = cache?.recache_tokens_if_cold;
     const went = new Date(expired).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     composerNote.textContent = `The cache went cold at ${went}. Sending rewrites ${
       tokens ? `about ${tokenWords(tokens)} tokens` : "the whole context"}. Send again to confirm.`;
-    coldConfirm = area;
-    window.setTimeout(() => { if (coldConfirm === area) coldConfirm = null; }, 15000);
+    coldConfirm = editor;
+    window.setTimeout(() => { if (coldConfirm === editor) coldConfirm = null; }, 15000);
     return;
   }
   coldConfirm = null;
-  if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
-  sentId = boxIds.get(area) ?? null;
+  if (!sendGate.begin(boxOf(editor))) return;
+  sentId = boxIds.get(editor) ?? null;
   composerNote.textContent = "Sending…";
   drawSending();
   // A prompt sent while the session works is held, and is shown in the held box instead.
   if (screenState !== "working") showSentPreview(segments.map((segment) => segment.text).join(""));
-  post("send", { segments, marks: sentMarks(area) });
+  post("send", { segments, marks: sentMarks(editor) });
 }
 
 /**
@@ -4644,72 +4455,6 @@ document.getElementById("held-send-now")!.addEventListener("click", () => {
 
 document.getElementById("interrupt")!.addEventListener("click", () => post("interrupt", {}));
 
-const LIST_ITEM = /^(\s*)(?:(\d+)\.|([-*]))\s(.*)$/;
-const INDENT = "  ";
-
-/** Replaces a range by the editing command, which keeps the box's undo history. */
-function replaceRange(area: HTMLTextAreaElement, from: number, to: number, text: string): void {
-  const before = area.value;
-  area.setSelectionRange(from, to);
-  const done = text
-    ? document.execCommand("insertText", false, text)
-    : document.execCommand("delete");
-  if (!done || area.value === before) {
-    area.setRangeText(text, from, to, "end");
-    area.dispatchEvent(new Event("input"));
-  }
-}
-
-/** Numbered and bulleted lists: Return continues one, and an empty item ends it. */
-function listKeys(area: HTMLTextAreaElement, event: KeyboardEvent): void {
-  if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    // Tab and Shift-Tab indent and outdent every line the caret or the selection touches, a
-    // list item or not, and never leave the box: with several boxes in the composer the key
-    // otherwise moved the caret to the next one (KYO-905).
-    event.preventDefault();
-    const caret = area.selectionStart;
-    const selected = area.selectionEnd > caret;
-    const from = area.value.lastIndexOf("\n", caret - 1) + 1;
-    // A selection that ends at the start of a line does not take that line.
-    const last = selected && area.value[area.selectionEnd - 1] === "\n" ? area.selectionEnd - 1 : area.selectionEnd;
-    const nextEnd = area.value.indexOf("\n", last);
-    const to = nextEnd < 0 ? area.value.length : nextEnd;
-    const lines = area.value.slice(from, to).split("\n");
-    const moved = lines.map((line) => {
-      if (event.shiftKey) return line.startsWith(INDENT) ? line.slice(INDENT.length) : line.replace(/^[ \t]/, "");
-      if (!line.trim() && lines.length > 1) return line;
-      // A numbered item starts a new count where it is nested.
-      return INDENT + (LIST_ITEM.exec(line)?.[2] ? line.replace(/\d+\./, "1.") : line);
-    });
-    const text = moved.join("\n");
-    if (text === lines.join("\n")) return;
-    replaceRange(area, from, to, text);
-    if (selected) area.setSelectionRange(from, from + text.length);
-    else {
-      const at = Math.max(from, caret + moved[0].length - lines[0].length);
-      area.setSelectionRange(at, at);
-    }
-    return;
-  }
-  if (event.metaKey || area.selectionStart !== area.selectionEnd) return;
-  const caret = area.selectionStart;
-  const start = area.value.lastIndexOf("\n", caret - 1) + 1;
-  const line = area.value.slice(start, caret);
-  const item = line.match(LIST_ITEM);
-  if (event.key !== "Enter" || !item) return;
-  const [, indent, number, bullet, content] = item;
-  if (!content) {
-    // Return or Shift-Return on an empty item ends the list, on that same line.
-    event.preventDefault();
-    replaceRange(area, start, caret, "");
-    return;
-  }
-  if (event.shiftKey) return;
-  event.preventDefault();
-  const marker = number ? `${Number(number) + 1}.` : bullet;
-  replaceRange(area, caret, caret, `\n${indent}${marker} `);
-}
-
 const COMPOSER_MIN = 300;
 const CHAT_MIN = 420;
 const band = document.getElementById("band")!;
@@ -4754,7 +4499,7 @@ document.addEventListener("keydown", (event) => {
   // KYO-903, KYO-904: only the prompt is sent, and not from a scratchpad, where the key
   // does nothing: the person goes to the prompt to send it.
   if (event.target instanceof Element && event.target.closest(".box.scratch")) return;
-  const target = textAreas().find((area) => !scratchOf.has(area));
+  const target = mainEditor();
   if (!target) return;
   event.preventDefault();
   attemptSend(target);

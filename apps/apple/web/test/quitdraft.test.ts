@@ -21,9 +21,7 @@ async function open(): Promise<Page> {
     ] } });
     window.kyo.draft({ boxes: [{ text: "Saved before" }], etag: "e1" });
     window.posted.length = 0;
-    const area = document.querySelector("#boxes textarea");
-    area.focus();
-    area.setSelectionRange(area.value.length, area.value.length);
+    window.kyo.composer.select(0, window.kyo.composer.boxes()[0].text.length);
   })()`);
   return opened;
 }
@@ -60,7 +58,7 @@ test("prompts kept at a quit replace the server's draft at the next launch and a
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
   await opened.run(`window.kyo.restoreDraft({ boxes: [{ text: "Saved before, and ten more" }, { text: "A second prompt" }] })`);
-  const shown = await opened.run<string[]>(`[...document.querySelectorAll("#boxes textarea")].map((area) => area.value)`);
+  const shown = await opened.run<string[]>(`window.kyo.composer.boxes().map((box) => box.text)`);
   assert.deepEqual(shown, ["Saved before, and ten more", "A second prompt"]);
   await wait(opened, 900);
   assert.deepEqual(await saves(opened), [["Saved before, and ten more", "A second prompt"]]);

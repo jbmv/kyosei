@@ -10,7 +10,8 @@ import WebKit
 // the process, so the chat's web view registers them as it is built. These tests build that
 // web view without a window. Whether an underline is drawn cannot be read from a page, so
 // the tests read the two keys as WebKit does, and the typing test shows that the page's text
-// is left as typed.
+// is left as typed. A composer box is an editor whose text is a `contenteditable` element
+// (KYO-910), so the typing test types into one carrying the attributes the editor sets.
 @MainActor
 @Suite(.serialized)
 struct SpellingTests {
@@ -58,15 +59,21 @@ struct SpellingTests {
 
     @Test func typingInThePageLeavesTheWordsAsTyped() async throws {
         let view = page()
-        view.loadHTMLString("<!doctype html><textarea></textarea>", baseURL: nil)
+        // The attributes CodeMirror's content element carries in the composer (web/src/editor.ts),
+        // and the white space it keeps, under which a typed space stays a space.
+        view.loadHTMLString(
+            """
+            <!doctype html><div id="box" contenteditable="true" spellcheck="true" \
+            autocorrect="off" autocapitalize="off" style="white-space: break-spaces"></div>
+            """, baseURL: nil)
         let typed = "teh cat. hello agian. i recieve "
         for _ in 0..<100 {
             let ready = try? await view.evaluateJavaScript(
-                "document.readyState === 'complete' && !!document.querySelector('textarea')")
+                "document.readyState === 'complete' && !!document.getElementById('box')")
             if ready as? Bool == true { break }
             try await Task.sleep(for: .milliseconds(50))
         }
-        _ = try await view.evaluateJavaScript("document.querySelector('textarea').focus()")
+        _ = try await view.evaluateJavaScript("document.getElementById('box').focus()")
         for character in typed {
             let literal = String(
                 decoding: try JSONEncoder().encode(String(character)), as: UTF8.self)
@@ -77,7 +84,7 @@ struct SpellingTests {
         // A correction arrives from the app's process after the word is typed.
         try await Task.sleep(for: .seconds(1))
         let value = try #require(
-            try await view.evaluateJavaScript("document.querySelector('textarea').value")
+            try await view.evaluateJavaScript("document.getElementById('box').textContent")
                 as? String)
         #expect(value == typed)
     }

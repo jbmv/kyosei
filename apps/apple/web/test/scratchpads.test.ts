@@ -1,19 +1,21 @@
 // Run with `npm test`. The composer has one prompt, the last box, and the boxes above it are
 // scratchpads: headed, collapsible, never sent, and moved into the prompt by Create prompt
-// (KYO-903). A machine with no Chrome skips these.
+// (KYO-903). A box's text is read and its caret set through `window.kyo.composer`, since the
+// box is an editor (KYO-910). A machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { META, SHIFT, openPage } from "./chrome.ts";
 import { boxSignature } from "../src/drafts.ts";
 
-const STATE = `(() => [...document.querySelectorAll("#boxes .box")].map((box) => ({
+const STATE = `(() => { const texts = window.kyo.composer.boxes().map((box) => box.text);
+  return [...document.querySelectorAll("#boxes .box")].map((box, index) => ({
   kind: box.classList.contains("main") ? "prompt" : "scratch",
-  text: box.querySelector("textarea").value,
+  text: texts[index],
   heading: box.querySelector(".scratch-heading")?.value ?? null,
   collapsed: box.classList.contains("collapsed"),
   send: Boolean(box.querySelector(".box-send")),
   create: box.querySelector(".box-create") ? !box.querySelector(".box-create").disabled : null,
-})))()`;
+})); })()`;
 interface Box { kind: string; text: string; heading: string | null; collapsed: boolean; send: boolean; create: boolean | null }
 const START = `window.kyo.project({ project: "p", scope: "server/p" });`;
 const saved = `window.posted.filter((m) => m.name === "saveDraft").at(-1)?.body.boxes`;
@@ -40,10 +42,16 @@ test("an older draft's last prompt is the prompt and the others become scratchpa
     assert.deepEqual(boxes.map((box) => [box.kind, box.text, box.send]), [
       ["scratch", "long notes", false], ["scratch", "more", false], ["prompt", "next", true],
     ]);
+    // KYO-910.c1: nothing in the composer is a text area, and each box holds one editor.
+    const shape = await page.run(`[
+      document.querySelectorAll("#composer textarea").length,
+      [...document.querySelectorAll("#boxes > .box")].map((box) => box.querySelectorAll(".cm-editor .cm-content[contenteditable=true]").length),
+    ]`);
+    assert.deepEqual(shape, [0, [1, 1, 1]]);
     // Reading it is not an edit and saves nothing; the next edit saves the boxes as they are.
     await page.run(pause);
     assert.equal(await page.run(`${saved} ?? null`), null);
-    await page.run(`document.querySelector("#boxes .box.main textarea").focus()`);
+    await page.run(`window.kyo.composer.select(2, 0)`);
     await page.type("!");
     await page.run(pause);
     const kept = await page.run<{ id: string; scratch?: unknown }[]>(saved);
@@ -89,7 +97,7 @@ test("Create prompt moves a scratchpad into an empty prompt and is refused while
     await page.reload();
     await page.run(`(() => { ${START}
       window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "topic" } }], etag: "e" });
-      document.querySelector("#boxes .box.main textarea").focus();
+      window.kyo.composer.select(1, 0);
     })()`);
     await page.type("x");
     let boxes = await page.run<Box[]>(STATE);
@@ -116,13 +124,13 @@ test("Command-Return in a scratchpad sends nothing; in the prompt it sends, and 
     const sent = `window.posted.filter((m) => m.name === "send").map((m) => m.body.segments.map((s) => s.text).join(""))`;
     await page.run(`(() => { ${START}
       window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "" } }, { id: "b", text: "the prompt" }], etag: "e" });
-      document.querySelector("#boxes .box.scratch textarea").focus();
+      window.kyo.composer.select(0, 0);
     })()`);
     await page.press("Enter", META);
     await page.run(`document.querySelector(".scratch-heading").focus()`);
     await page.press("Enter", META);
     assert.deepEqual(await page.run<string[]>(sent), []);
-    await page.run(`document.querySelector("#boxes .box.main textarea").focus()`);
+    await page.run(`window.kyo.composer.select(1, 0)`);
     await page.press("Enter", META);
     assert.deepEqual(await page.run<string[]>(sent), ["the prompt"]);
     await page.run(`window.kyo.sent({})`);
@@ -142,8 +150,8 @@ test("Send to prompt moves a paragraph with what is nested under it and its mark
           marks: [{ line: 2, items: [{ kind: "tag", name: "review" }] }, { line: 3, items: [{ kind: "tag", name: "stays" }] }] },
         { id: "b", text: "already here" },
       ], etag: "e" });
-      const gutter = document.querySelector("#boxes .box.scratch .box-gutter");
-      const lines = document.querySelector("#boxes .box.scratch .box-mirror").children;
+      const gutter = document.querySelector("#boxes .box.scratch .cm-gutter.kyo-marks");
+      const lines = document.querySelectorAll("#boxes .box.scratch .cm-line");
       const at = lines[1].getBoundingClientRect();
       gutter.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: gutter.getBoundingClientRect().left + 5, clientY: at.top + at.height / 2 }));
       document.querySelector(".mark-to-prompt").click();
@@ -195,16 +203,17 @@ test("Tab and Shift-Tab indent and outdent the caret's line or the selected line
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
-    const read = `(() => { const a = document.activeElement; return [a.value, a.selectionStart, a.selectionEnd, a.closest(".box").classList.contains("scratch")]; })()`;
+    const read = `(() => { const a = window.kyo.composer.boxes().find((box) => box.focused); return a ? [a.text, a.from, a.to, a.kind === "scratch"] : null; })()`;
     await page.run(`(() => { ${START} document.getElementById("new-prompt").click();
-      document.querySelector("#boxes .box.scratch textarea").focus(); })()`);
+      window.kyo.composer.select(0, 0); })()`);
     await page.type("plain");
     await page.press("Tab");  // not a list item: indented all the same, and the caret stays
     assert.deepEqual(await page.run(read), ["  plain", 7, 7, true]);
     await page.press("Tab", SHIFT);
     assert.deepEqual(await page.run(read), ["plain", 5, 5, true]);
-    await page.run(`(() => { const a = document.activeElement; a.value = "- a\\n- b\\n3. c\\n- d";
-      a.dispatchEvent(new InputEvent("input", { inputType: "insertText" })); a.setSelectionRange(5, 12); })()`);
+    await page.run(`(() => {
+      window.kyo.draft({ boxes: [{ id: "s", text: "- a\\n- b\\n3. c\\n- d", scratch: { heading: "" } }], etag: "e" });
+      window.kyo.composer.select(0, 5, 12); })()`);
     await page.press("Tab");  // the selection touches the second and third lines
     assert.deepEqual(await page.run(read), ["- a\n  - b\n  1. c\n- d", 4, 16, true]);
     await page.press("Tab", SHIFT);

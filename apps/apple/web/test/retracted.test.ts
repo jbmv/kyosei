@@ -52,31 +52,29 @@ test("a plain prompt taken back is its text alone", async (t) => {
   const texts = await page.run<string[]>(`(() => {
     window.kyo.project({ project: "p", scope: "server/p" });
     window.kyo.retracted({ text: "plain" });
-    return [...document.querySelectorAll("#boxes textarea")].map((area) => area.value);
+    return window.kyo.composer.boxes().map((box) => box.text);
   })()`);
   assert.deepEqual(texts, ["plain"]);
 });
 
-const order = `[...document.querySelectorAll("#boxes textarea")].map((area) => area.value).filter(Boolean)`;
+const order = `window.kyo.composer.boxes().map((box) => box.text).filter(Boolean)`;
 
 test("a prompt taken back is the prompt again, and what was typed since becomes a scratchpad (KYO-903)", async (t) => {
   if (!page) return t.skip("no Chrome here");
   await page.reload();
-  const seen = await page.run<{ texts: string[]; kinds: string[] }>(`(() => {
+  await page.run(`(() => {
     window.kyo.project({ project: "p", scope: "server/p" });
     window.kyo.screen({ screen: { state: "working" } });
     window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "kept" } }, { id: "b", text: "sent" }], etag: "e" });
     document.querySelector("#boxes .box.main .box-send").click();
     window.kyo.sent({ id: "m1" });
-    const fresh = document.querySelector("#boxes .box.main textarea");
-    fresh.value = "typed since";
-    fresh.dispatchEvent(new InputEvent("input", { inputType: "insertText" }));
+    window.kyo.composer.select(window.kyo.composer.boxes().findIndex((box) => box.kind === "prompt"), 0);
+  })()`);
+  await page.type("typed since");
+  const seen = await page.run<{ texts: string[]; kinds: string[] }>(`(() => {
     window.kyo.retracted({ text: "sent" });
-    const areas = [...document.querySelectorAll("#boxes textarea")];
-    return {
-      texts: areas.map((area) => area.value),
-      kinds: areas.map((area) => (area.closest(".box").classList.contains("main") ? "prompt" : "scratch")),
-    };
+    const boxes = window.kyo.composer.boxes();
+    return { texts: boxes.map((box) => box.text), kinds: boxes.map((box) => box.kind) };
   })()`);
   assert.deepEqual(seen.texts, ["notes", "typed since", "sent"]);
   assert.deepEqual(seen.kinds, ["scratch", "scratch", "prompt"]);
