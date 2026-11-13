@@ -342,8 +342,9 @@ body.terminal-open #jump-bottom { display: none; }
 
 .box-actions { display: flex; justify-content: space-between; align-items: center; }
 .box-actions button { padding: 4px 0; border: 0; background: none; font-size: 13px; }
-/* The prompt's text starts 18px in from the box's padding, past the gutter that holds the marks. */
-.box-delete { margin-left: 18px; color: var(--muted); font-weight: 500; }
+/* The prompt's text starts 24px in from the box's padding, past the gutters that hold the fold
+   toggles and the marks. */
+.box-delete { margin-left: 24px; color: var(--muted); font-weight: 500; }
 .box-delete:hover { color: var(--apple-red); text-decoration: underline; }
 /* Bare text in the accent colour, with the keys that do the same beside it. */
 .box-send { color: var(--link); font-weight: 600; }
@@ -393,16 +394,16 @@ body.terminal-open #jump-bottom { display: none; }
 .box-create:disabled { color: var(--muted); cursor: default; }
 
 .box { position: relative; }
-.box-body { display: flex; }
-
-/* KYO-910: a box's text is an editor (web/src/editor.ts), whose own theme draws its gutter,
-   the hanging indent of wrapped rows, the indent guides and the heading rules. Its marks
-   gutter stands 6px into the box's padding, so the text starts 18px in from the padding, as
-   the Delete button below it does. */
+/* KYO-910: a box's text is an editor (web/src/editor.ts), whose own theme draws its gutters,
+   the hanging indent of wrapped rows, the indent guides, the heading rules and the folds. Its
+   fold gutter, 12px wide, stands in the box's padding, and its marks gutter after it, so the
+   text starts 24px in from the padding, as the Delete button below it does (KYO-913). The
+   body, not the editor, reaches into the padding: the prompt's body scrolls, and would clip
+   what stood past its own edge. */
+.box-body { display: flex; margin-left: -12px; }
 .box .cm-editor {
   flex: 1;
   min-width: 0;
-  margin-left: -6px;
   font: 15px/1.45 -apple-system, system-ui, sans-serif;
   color: var(--text);
 }
@@ -424,9 +425,10 @@ body.terminal-open #jump-bottom { display: none; }
   text-align: center;
 }
 .mark[hidden] { display: none; }
-/* The paragraph the next anchor lands on, shown while the composer has no caret. It covers
-   the paragraph's own mark and takes no press, so the mark under it still opens. */
-.mark.mark-landing { z-index: 1; background: var(--background); color: var(--link); font-size: 17px; font-weight: 300; pointer-events: none; }
+/* The paragraph the next anchor lands on, shown while the composer has no caret. The editor
+   draws it in the fold gutter, beside the paragraph's own mark (KYO-913); it may cover a fold
+   toggle, and takes no press, so the toggle under it still folds. */
+.mark-landing { background: var(--background); color: var(--link); font-weight: 600; }
 .mark.ghost { opacity: 0.45; }
 .mark.ghost:hover { opacity: 1; background: var(--line); }
 .mark.held { color: var(--pastel-blue); font-size: 13px; font-weight: 700; }

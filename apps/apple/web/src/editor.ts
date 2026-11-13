@@ -2,8 +2,8 @@
  * A composer box's editor on CodeMirror 6 (KYO-906, KYO-909). The document is the text as
  * typed, which is what is saved and sent; everything else here is drawn over it or kept beside
  * it: the marks each line holds, the gutter that shows them, the hanging indent of wrapped
- * rows, the indent guides and the heading rules. The page does not use this module yet; the
- * composer moves onto it in a later change.
+ * rows, the indent guides, the heading rules and the folded sections (KYO-913). The composer's
+ * boxes are built here (KYO-910).
  *
  * What the composer decides (drafts, sending, the mark's panel, uploads) stays in `chat.ts`,
  * which reaches this module through the callbacks of `EditorOptions` and the functions below.
@@ -13,14 +13,17 @@ import {
   type Transaction,
 } from "@codemirror/state";
 import {
-  Decoration, type DecorationSet, EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter,
+  Decoration, type DecorationSet, EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter, gutters,
   keymap, placeholder,
 } from "@codemirror/view";
 import {
   history, historyKeymap, insertNewline, invertedEffects, isolateHistory, standardKeymap,
 } from "@codemirror/commands";
+import {
+  codeFolding, foldEffect, foldKeymap, foldService, foldable, foldedRanges, unfoldEffect,
+} from "@codemirror/language";
 import { shiftLines } from "./marks.ts";
-import { INDENT_WIDTH, lineShapes } from "./outline.ts";
+import { INDENT_WIDTH, lineShapes, sectionEnd } from "./outline.ts";
 
 // ---------------------------------------------------------------- marks (proposal 5.2)
 
@@ -219,20 +222,22 @@ export function refreshMarks(view: EditorView): void {
 interface Cues {
   /** The start of the line under the pointer, which holds nothing yet; null when none. */
   ghost: number | null;
+  /** The start of the line under the pointer, whatever it holds; null when none (KYO-913). */
+  hover: number | null;
   /** Whether the caret's line is shown as where the next anchor or attachment lands. */
   landing: boolean;
 }
 
-const ghostEffect = StateEffect.define<number | null>();
+const pointerEffect = StateEffect.define<{ ghost: number | null; hover: number | null }>();
 const landingEffect = StateEffect.define<boolean>();
 
 const cuesField = StateField.define<Cues>({
-  create: () => ({ ghost: null, landing: false }),
+  create: () => ({ ghost: null, hover: null, landing: false }),
   update(value, tr) {
     // An edit moves the lines under the pointer, which the next move of the mouse finds again.
-    let cues = tr.docChanged && value.ghost !== null ? { ...value, ghost: null } : value;
+    let cues = tr.docChanged && (value.ghost !== null || value.hover !== null) ? { ...value, ghost: null, hover: null } : value;
     for (const effect of tr.effects) {
-      if (effect.is(ghostEffect)) cues = { ...cues, ghost: effect.value };
+      if (effect.is(pointerEffect)) cues = { ...cues, ...effect.value };
       else if (effect.is(landingEffect)) cues = { ...cues, landing: effect.value };
     }
     return cues;
@@ -246,9 +251,8 @@ export function showLanding(view: EditorView, on: boolean): void {
 }
 
 /**
- * The line (counted from 0) the landing arrow stands on, or null while it is not shown. Any
- * gutter may draw it: the marks gutter does unless `drawLanding` is null, and a later gutter
- * (the fold toggles of KYO-906's third dispatch) can read this instead.
+ * The line (counted from 0) the landing arrow stands on, or null while it is not shown. The
+ * fold gutter draws it (KYO-913), beside the line's mark rather than over it.
  */
 export function landingLine(state: EditorState): number | null {
   return state.field(cuesField).landing ? state.doc.lineAt(state.selection.main.head).number - 1 : null;
@@ -258,6 +262,12 @@ export function landingLine(state: EditorState): number | null {
 export function ghostLine(state: EditorState): number | null {
   const ghost = state.field(cuesField).ghost;
   return ghost === null ? null : state.doc.lineAt(Math.min(ghost, state.doc.length)).number - 1;
+}
+
+/** The line (counted from 0) under the pointer, or null while the pointer is not on the box. */
+export function hoverLine(state: EditorState): number | null {
+  const hover = state.field(cuesField).hover;
+  return hover === null ? null : state.doc.lineAt(Math.min(hover, state.doc.length)).number - 1;
 }
 
 // ---------------------------------------------------------------------- the gutter
@@ -471,10 +481,12 @@ function newLine(view: EditorView, shift: boolean): boolean {
 }
 
 /**
- * The editor's own keys, above the history's and the standard ones. Command-Return is bound
- * by none of them: the page's own handler sends the prompt with it, and refuses to in a
- * scratchpad (KYO-903, KYO-904). `defaultKeymap` is not used for that reason, and the
- * standard keymap's Return, which copies the line's indent, is replaced by `newLine`.
+ * The editor's own keys, above the fold keys, the history's and the standard ones. The fold
+ * keys are CodeMirror's: Command-Option-[ folds the caret's section and Command-Option-]
+ * unfolds it (KYO-913). Command-Return is bound by none of them: the page's own handler sends
+ * the prompt with it, and refuses to in a scratchpad (KYO-903, KYO-904). `defaultKeymap` is
+ * not used for that reason, and the standard keymap's Return, which copies the line's indent,
+ * is replaced by `newLine`.
  */
 const composerKeys: Extension = [
   keymap.of([
@@ -483,9 +495,223 @@ const composerKeys: Extension = [
     { key: "Mod-[", run: outdentLines },
     { key: "Enter", run: (view) => newLine(view, false), shift: (view) => newLine(view, true) },
   ]),
+  keymap.of(foldKeymap),
   keymap.of(historyKeymap),
   keymap.of(standardKeymap.filter((binding) => binding.key !== "Enter")),
 ];
+
+// -------------------------------------------------------------- folding (proposal 5.5)
+
+/** The section ends of one document, computed as asked and kept while the document is the same. */
+const sectionEnds = new WeakMap<Text, { text: string; ends: Map<number, number> }>();
+
+function sectionEndIn(doc: Text, line: number): number {
+  let known = sectionEnds.get(doc);
+  if (!known) {
+    known = { text: doc.toString(), ends: new Map() };
+    sectionEnds.set(doc, known);
+  }
+  let end = known.ends.get(line);
+  if (end === undefined) {
+    end = sectionEnd(known.text, line);
+    known.ends.set(line, end);
+  }
+  return end;
+}
+
+/**
+ * What a line folds (KYO-913): from its end to the end of the last line of its section, as
+ * `sectionEnd` gives it and Send to prompt moves it (KYO-904). A heading folds up to the next
+ * heading of its level or above, and a list item the lines nested under it. A line whose
+ * section is itself alone folds nothing, and a blank line, which has no words to stand for
+ * what it hides, folds nothing either.
+ */
+const sections = foldService.of((state, lineStart) => {
+  const line = state.doc.lineAt(lineStart);
+  if (!line.text.trim()) return null;
+  const end = sectionEndIn(state.doc, line.number - 1);
+  return end > line.number ? { from: line.to, to: state.doc.line(end).to } : null;
+});
+
+/** A folded line, by its index and its words, so that a box drawn again can fold it again. */
+export interface FoldedLine { line: number; text: string }
+
+/** The lines whose sections are folded now, each the line that stays in view. */
+export function foldedLines(state: EditorState): FoldedLine[] {
+  const lines: FoldedLine[] = [];
+  foldedRanges(state).between(0, state.doc.length, (from) => {
+    const line = state.doc.lineAt(from);
+    lines.push({ line: line.number - 1, text: line.text });
+  });
+  return lines;
+}
+
+/**
+ * The folds that put `wanted` back on this document: each on the line of the same index if it
+ * still reads the same, or else on the nearest line that does, and only where that line folds.
+ */
+function refoldEffects(state: EditorState, wanted: readonly FoldedLine[]): StateEffect<unknown>[] {
+  const taken = new Set<number>();
+  const effects: StateEffect<unknown>[] = [];
+  const count = state.doc.lines;
+  for (const { line, text } of wanted) {
+    let found = -1;
+    for (let distance = 0; found < 0 && distance < count; distance++) {
+      for (const at of distance ? [line - distance, line + distance] : [line]) {
+        if (at >= 0 && at < count && !taken.has(at) && state.doc.line(at + 1).text === text) {
+          found = at;
+          break;
+        }
+      }
+    }
+    if (found < 0) continue;
+    const { from, to } = state.doc.line(found + 1);
+    const range = foldable(state, from, to);
+    if (!range) continue;
+    taken.add(found);
+    effects.push(foldEffect.of(range));
+  }
+  return effects;
+}
+
+/** Folds again the lines a box had folded before it was drawn again. */
+export function refold(view: EditorView, wanted: readonly FoldedLine[]): void {
+  const effects = refoldEffects(view.state, wanted);
+  if (effects.length) view.dispatch({ effects });
+}
+
+/** The folded section that begins on the line from `from` to `to`, if one does. */
+function foldOn(state: EditorState, from: number, to: number): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  foldedRanges(state).between(from, to, (start, end) => {
+    if (!found && start >= from && start <= to) found = { from: start, to: end };
+  });
+  return found;
+}
+
+/** What a fold's placeholder says: how many of its lines hold a mark, and what they hold. */
+interface FoldSummary { marks: number; title: string }
+
+function foldSummary<T>(state: EditorState, range: { from: number; to: number }, describe: (items: T[]) => string): FoldSummary {
+  const marks = marksOf<T>(state);
+  const first = state.doc.lineAt(range.from).number;
+  const last = state.doc.lineAt(Math.min(range.to, state.doc.length)).number;
+  const held: string[] = [];
+  for (let number = first + 1; number <= last; number++) {
+    const items = marks.items.get(marks.ids[number - 1]);
+    if (items?.length) held.push(describe(items));
+  }
+  return { marks: held.length, title: held.length ? held.join("\n") : "Unfold" };
+}
+
+function paintFold(element: HTMLElement, summary: FoldSummary): void {
+  const text = summary.marks ? `… ${summary.marks} ${summary.marks === 1 ? "mark" : "marks"}` : "…";
+  if (element.textContent !== text) element.textContent = text;
+  if (element.title !== summary.title) element.title = summary.title;
+  element.classList.toggle("holds-marks", summary.marks > 0);
+}
+
+/**
+ * Folding: CodeMirror's fold state and its placeholder, which names how many of the folded
+ * lines hold a mark, since their markers are not drawn while they are hidden. CodeMirror
+ * draws a placeholder from what it was given when the section was folded, so each update
+ * paints the placeholders again from the marks as they are now.
+ */
+function folding<T>(describe: (items: T[]) => string): Extension {
+  return [
+    codeFolding({
+      preparePlaceholder: (state, range) => foldSummary(state, range, describe),
+      placeholderDOM(_view, onclick, prepared: FoldSummary) {
+        const element = document.createElement("span");
+        element.className = "cm-foldPlaceholder kyo-fold";
+        element.setAttribute("aria-label", "folded lines");
+        element.onclick = onclick;
+        paintFold(element, prepared);
+        return element;
+      },
+    }),
+    sections,
+    EditorView.updateListener.of((update) => {
+      const { view, state } = update;
+      for (const element of view.contentDOM.querySelectorAll<HTMLElement>(".kyo-fold")) {
+        const pos = view.posAtDOM(element);
+        const range = foldOn(state, pos, pos) ?? foldOn(state, state.doc.lineAt(pos).from, state.doc.lineAt(pos).to);
+        if (range) paintFold(element, foldSummary(state, range, describe));
+      }
+    }),
+  ];
+}
+
+class FoldToggle extends GutterMarker {
+  constructor(readonly folded: boolean) { super(); }
+  eq(other: GutterMarker): boolean {
+    return other instanceof FoldToggle && other.folded === this.folded;
+  }
+  toDOM(): Node {
+    const toggle = document.createElement("span");
+    toggle.className = this.folded ? "fold-toggle folded" : "fold-toggle";
+    toggle.textContent = "›";
+    toggle.title = this.folded ? "Unfold (⌥⌘])" : "Fold (⌥⌘[)";
+    return toggle;
+  }
+}
+
+const openToggle = new FoldToggle(false);
+const foldedToggle = new FoldToggle(true);
+
+/**
+ * The fold gutter, left of the marks: a chevron on the line under the pointer when it can
+ * fold, and on every folded line always. A press on it folds or unfolds that line's section.
+ * The landing arrow is drawn here too (KYO-913), over the chevron where the two meet, so that
+ * it no longer covers the line's mark; it takes no press, which reaches the chevron under it.
+ */
+function foldsGutter<T>(options: EditorOptions<T>): Extension {
+  const drawLanding = options.drawLanding === undefined ? defaultLanding : options.drawLanding;
+  return gutter({
+    class: "kyo-folds",
+    markers(view) {
+      const { state } = view;
+      const found: { pos: number; marker: GutterMarker }[] = [];
+      const folded = new Set<number>();
+      foldedRanges(state).between(0, state.doc.length, (from) => {
+        const start = state.doc.lineAt(from).from;
+        folded.add(start);
+        found.push({ pos: start, marker: foldedToggle });
+      });
+      const hover = hoverLine(state);
+      if (hover !== null) {
+        const line = state.doc.line(hover + 1);
+        if (!folded.has(line.from) && foldable(state, line.from, line.to)) found.push({ pos: line.from, marker: openToggle });
+      }
+      const landing = landingLine(state);
+      if (drawLanding && landing !== null) {
+        // A caret inside a folded section is shown on the line that stands for the section.
+        const pos = view.lineBlockAt(lineStart(state, landing)).from;
+        found.push({ pos, marker: new DrawnMarker("landing", [], drawLanding) });
+      }
+      return RangeSet.of(found.map(({ pos, marker }) => marker.range(pos)), true);
+    },
+    domEventHandlers: {
+      mousedown: (_view, _line, event) => {
+        // The focus and the caret stay where they are; the press is the click's.
+        event.preventDefault();
+        return true;
+      },
+      click(view, block) {
+        const line = view.state.doc.lineAt(block.from);
+        const folded = foldOn(view.state, line.from, line.to);
+        if (folded) {
+          view.dispatch({ effects: unfoldEffect.of(folded) });
+          return true;
+        }
+        const range = foldable(view.state, line.from, line.to);
+        if (!range) return false;
+        view.dispatch({ effects: foldEffect.of(range) });
+        return true;
+      },
+    },
+  });
+}
 
 // ------------------------------------------------------------------------- the editor
 
@@ -502,10 +728,16 @@ export interface EditorOptions<T> {
   /** The ghost `+` on the line under the pointer that holds nothing; none without it. */
   drawGhost?: (view: EditorView, id: number) => HTMLElement;
   /**
-   * The landing arrow on the caret's line while `showLanding` has it on. Null leaves it to
-   * another gutter, which reads `landingLine`; left out, an arrow is drawn in the marks gutter.
+   * The landing arrow on the caret's line while `showLanding` has it on, drawn in the fold
+   * gutter (KYO-913). Left out, an arrow is drawn; null draws none.
    */
   drawLanding?: ((view: EditorView) => HTMLElement) | null;
+  /** What one line's items are, for the title of a fold whose hidden lines hold them. */
+  describeItems?: (items: T[]) => string;
+  /** Lines to fold once the box is built: those it had folded before it was drawn again. */
+  folds?: readonly FoldedLine[];
+  /** The folded lines, each time a section is folded or unfolded or a folded box is edited. */
+  onFolds?: (view: EditorView, lines: FoldedLine[]) => void;
   /** A right-click in the marks gutter, with the line under the pointer and its id. True takes it. */
   onGutterMenu?: (view: EditorView, line: number, id: number, event: MouseEvent) => boolean;
   /**
@@ -517,7 +749,7 @@ export interface EditorOptions<T> {
   onPaste?: (view: EditorView, text: string, from: number) => void;
   /** Every update of the view: edits, the selection, the marks, the focus. */
   onUpdate?: (update: ViewUpdate) => void;
-  /** Further extensions, as the later folding work adds. */
+  /** Further extensions. */
   extensions?: Extension[];
 }
 
@@ -530,16 +762,18 @@ function defaultMark(_view: EditorView, _id: number, items: unknown[]): HTMLElem
 
 function defaultLanding(): HTMLElement {
   const arrow = document.createElement("span");
-  arrow.className = "mark mark-landing";
+  arrow.className = "mark-landing";
   arrow.textContent = "→";
   arrow.title = "An anchor or an attachment made now lands on this paragraph";
   return arrow;
 }
 
-/** The marks gutter: a marker per line that holds something, the ghost and the landing arrow. */
+/**
+ * The marks gutter: a marker per line that holds something, and the ghost. CodeMirror draws a
+ * line's markers at the top of its block, so a line hidden in a folded section shows none.
+ */
 function marksGutter<T>(options: EditorOptions<T>): Extension {
   const drawMark = options.drawMark ?? defaultMark;
-  const drawLanding = options.drawLanding === undefined ? defaultLanding : options.drawLanding;
   return gutter({
     class: "kyo-marks",
     markers(view) {
@@ -557,10 +791,6 @@ function marksGutter<T>(options: EditorOptions<T>): Extension {
         const draw = options.drawGhost;
         found.push({ pos: lineStart(state, ghost), marker: new DrawnMarker(`ghost:${ghostId}`, [], (v) => draw(v, ghostId)) });
       }
-      const landing = landingLine(state);
-      if (drawLanding && landing !== null) {
-        found.push({ pos: lineStart(state, landing), marker: new DrawnMarker("landing", [], drawLanding) });
-      }
       return RangeSet.of(found.map(({ pos, marker }) => marker.range(pos)), true);
     },
     domEventHandlers: {
@@ -573,7 +803,7 @@ function marksGutter<T>(options: EditorOptions<T>): Extension {
   });
 }
 
-/** Follows the pointer over the box, gutter and text, for the ghost `+`. */
+/** Follows the pointer over the box, gutters and text, for the ghost `+` and the fold chevron. */
 const followPointer = ViewPlugin.fromClass(class {
   constructor(readonly view: EditorView) {
     view.dom.addEventListener("mousemove", this.move);
@@ -585,10 +815,12 @@ const followPointer = ViewPlugin.fromClass(class {
     const line = view.state.doc.lineAt(block.from);
     const marks = marksOf(view.state);
     const ghost = marks.items.get(marks.ids[line.number - 1])?.length ? null : line.from;
-    if (view.state.field(cuesField).ghost !== ghost) view.dispatch({ effects: ghostEffect.of(ghost) });
+    const cues = view.state.field(cuesField);
+    if (cues.ghost !== ghost || cues.hover !== line.from) view.dispatch({ effects: pointerEffect.of({ ghost, hover: line.from }) });
   };
   leave = () => {
-    if (this.view.state.field(cuesField).ghost !== null) this.view.dispatch({ effects: ghostEffect.of(null) });
+    const cues = this.view.state.field(cuesField);
+    if (cues.ghost !== null || cues.hover !== null) this.view.dispatch({ effects: pointerEffect.of({ ghost: null, hover: null }) });
   };
   destroy() {
     this.view.dom.removeEventListener("mousemove", this.move);
@@ -649,6 +881,27 @@ const look = EditorView.theme({
   ".cm-gutters": { background: "none", border: "none", color: "inherit" },
   ".cm-gutter.kyo-marks": { width: "24px" },
   ".cm-gutter.kyo-marks .cm-gutterElement": { position: "relative" },
+  // KYO-913: the fold gutter, 12 pixels wide, left of the marks. Its chevron points right on a
+  // folded line and down on one that can fold; the landing arrow covers it where both stand.
+  ".cm-gutter.kyo-folds": { width: "12px" },
+  ".cm-gutter.kyo-folds .cm-gutterElement": { position: "relative", cursor: "default" },
+  ".fold-toggle": {
+    position: "absolute", left: "0", top: "1px", width: "12px", height: "20px", lineHeight: "20px",
+    textAlign: "center", fontSize: "14px", color: "var(--muted, #888)", cursor: "pointer",
+    transform: "rotate(90deg)",
+  },
+  ".fold-toggle.folded": { transform: "none" },
+  ".fold-toggle:hover": { color: "var(--text, currentColor)" },
+  ".cm-gutter.kyo-folds .mark-landing": {
+    position: "absolute", left: "0", top: "1px", zIndex: "1", width: "12px", height: "20px",
+    lineHeight: "20px", textAlign: "center", fontSize: "12px", overflow: "hidden", pointerEvents: "none",
+  },
+  ".cm-foldPlaceholder.kyo-fold": {
+    margin: "0 0 0 4px", padding: "0 5px", border: "none", borderRadius: "4px",
+    background: "color-mix(in srgb, var(--text, currentColor) 8%, transparent)",
+    color: "var(--muted, #888)", fontWeight: "400", cursor: "pointer",
+  },
+  ".cm-foldPlaceholder.kyo-fold.holds-marks": { color: "var(--pastel-blue, #4a7fd6)", fontWeight: "600" },
   ".cm-line.heading": {
     fontWeight: "600",
     borderRadius: "0 0 4px 4px",
@@ -681,10 +934,17 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
     cuesField,
     history(),
     Prec.high(composerKeys),
+    // The rows wrap, so nothing scrolls sideways, and gutters held fixed would stick to the
+    // left edge of a scrolling box around the editor: the prompt's body, past whose edge the
+    // composer's stylesheet sets the gutters, so that they came to stand over the text.
+    gutters({ fixed: false }),
+    folding(options.describeItems ?? ((items: T[]) => `${items.length} ${items.length === 1 ? "item" : "items"}`)),
+    foldsGutter(options),
     marksGutter(options),
     followPointer,
     outline,
     transfers(options),
+    ...(options.onFolds ? [foldWatch(options.onFolds)] : []),
     EditorView.lineWrapping,
     textFeatures,
     look,
@@ -693,10 +953,23 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
   ];
 }
 
-/** Builds a box's editor from its text, its saved marks and the composer's callbacks. */
+/** Calls `onFolds` when the folded lines may have changed: a fold, an unfold, or an edit. */
+function foldWatch(onFolds: (view: EditorView, lines: FoldedLine[]) => void): Extension {
+  return EditorView.updateListener.of((update) => {
+    if (foldedRanges(update.startState) === foldedRanges(update.state)) return;
+    onFolds(update.view, foldedLines(update.state));
+  });
+}
+
+/**
+ * Builds a box's editor from its text, its saved marks and the composer's callbacks, and folds
+ * the lines `folds` names where they still fold.
+ */
 export function createEditor<T>(options: EditorOptions<T> = {}): EditorView {
-  return new EditorView({
+  const view = new EditorView({
     parent: options.parent,
     state: EditorState.create({ doc: options.text ?? "", extensions: editorExtensions(options) }),
   });
+  if (options.folds?.length) refold(view, options.folds);
+  return view;
 }
