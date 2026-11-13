@@ -217,14 +217,14 @@ of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/
 
 The composer has one prompt, its last box, which is the only box sent (KYO-903): Send and
 Command-Return send it, and an empty one takes its place after a send or a delete.
-Command-Return with the caret in a scratchpad sends nothing (KYO-904). It stays at the foot of the composer while the boxes above it scroll, and
-grows to half the composer's height, past which its text scrolls inside it.
+Command-Return with the caret in a scratchpad sends nothing (KYO-904). It stands at the foot
+of the composer; the room it takes is set as described in "The composer's sections" below.
 
 Each box is an editor built by `web/src/editor.ts` on CodeMirror (KYO-910), whose document is
 the text as typed; what is saved and sent is that text. The page keeps each box's id, its
 scratchpad and its pastes beside its editor, and reads its text, caret and marks from the
 editor's state. The editor is as tall as its text, and it scrolls the caret's line into view
-by the least that shows it, in a scratchpad above the prompt. Tab and Shift-Tab, and
+by the least that shows it. Tab and Shift-Tab, and
 Command-] and Command-[, indent and outdent the lines the caret or the selection touches and
 keep the caret in the box (KYO-905). Return continues a list and ends it on an empty item.
 The page's tests read and set a box through `window.kyo.composer`.
@@ -262,6 +262,39 @@ several boxes that are not scratchpads. The last of them that holds anything is 
 the others are shown as scratchpads, which is saved with the next edit. A held prompt taken
 back to edit is the prompt again, and what was typed in the prompt meanwhile becomes a
 scratchpad above it.
+
+### The composer's sections
+
+<!-- governs:
+- apps/apple/web/src/chat.ts#sectionAt
+- apps/apple/web/src/chat.ts#drawSections
+- apps/apple/web/src/chat.ts#enterScratch
+- apps/apple/web/src/chat.ts#drawPromptSummary
+- apps/apple/web/src/chat.ts#dragScratch
+- apps/apple/web/src/chat.ts#placeBoxes
+- apps/apple/web/src/agenda.ts#agendaSummary
+-->
+
+The composer's column holds three sections, from the top: the session's task list, the
+scratchpads and the prompt (KYO-925). The section in use is the one the focus last entered,
+and the prompt when the page opens; it changes when the focus enters another section, and not
+when the focus leaves the composer. It grows to two thirds of the column's height as its
+content needs, and scrolls within that. Each other section is drawn as a summary of about one
+line: the task list as an italic grey line counting its unchecked items by whose they are, as
+"4 of yours, 2 of Claude's…"; each scratchpad as its head, one under another; and the prompt
+as its first line that holds words followed by an ellipsis, italic and grey, above its Delete
+and Send. A press on a summary, or on a scratchpad's head while the scratchpads are drawn as heads,
+goes into that section with the caret where it was, and a collapsed scratchpad pressed this
+way is opened. The text of a
+section drawn as its summary stays in the page out of sight, so that anything that puts the
+caret in it, such as an anchor chosen in the chat, opens the section. The column does not
+scroll; the scratchpads scroll together within their own part of it.
+
+A scratchpad is moved among the others by dragging its head, its fold toggle included
+(KYO-926). The box follows the pointer, a line shows where it will land, and when the button is
+let go it is put there and the draft is saved in its new order, which another device showing
+the draft then takes. A press on the head that moves less than four pixels folds or opens the
+scratchpad as before.
 
 ### Anchors in an unsent prompt
 
@@ -346,8 +379,8 @@ chevron and a line's first character stand at least four pixels apart, and the t
 -->
 
 A live session's task list (KYO-770, KYO-771) is drawn above the composer's prompts, in a
-slightly dimmed bubble that is the first thing in the prompts' own scrolling column: it rises
-as the prompts grow and scrolls out of view with them when they need the room. The person
+slightly dimmed bubble that is the first of the composer's sections; while another section is
+in use it is a single line counting its unchecked items (KYO-925). The person
 adds items and edits, checks and removes their own; the orchestrator's items show their state
 and take no press, since the server refuses a device's change to one. The app reads the list
 when it turns to a live session and again when the session's stream says its etag changed,

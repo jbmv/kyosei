@@ -171,7 +171,7 @@ test("with sections folded, the saved draft and the posted send body are those o
     await page.reload();
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(BOXES)}, etag: "e" }); })()`);
     // Both boxes have headings, whose sections' lines are drawn beside them.
-    const lined = `[...document.querySelectorAll("#boxes > .box")].map((box) => box.querySelectorAll(".cm-gutter.kyo-sections .section-line").length)`;
+    const lined = `[...document.querySelectorAll("#boxes .box")].map((box) => box.querySelectorAll(".cm-gutter.kyo-sections .section-line").length)`;
     assert.deepEqual(await page.run(lined), [6, 5]);
     const plain = await saveAndSend(page);
 
