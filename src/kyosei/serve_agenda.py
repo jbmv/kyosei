@@ -1,8 +1,13 @@
 """``kyo serve``'s route for a session's task list (KYO-770).
 
 ``/v1/projects/{project}/sessions/{id}/agenda``: ``GET`` reads the list, ``PUT`` saves it as
-the person. The list, its file and who may change which item are :mod:`kyosei.cmd_agenda`'s;
-this module maps HTTP onto it.
+the person. ``/v1/projects/{project}/agenda`` (KYO-901) is the same two methods on the list
+of the project's most recent session (:func:`kyosei.cmd_agenda.latest_session`), live or
+ended, so a device shows and edits the list while no session runs, and the next session's
+first brief carries what the person left unchecked. Its response names the session it
+resolved to. A project that has had no session answers a ``GET`` with no items and
+``session_id: null``, and refuses a ``PUT`` with 409. The list, its file and who may change
+which item are :mod:`kyosei.cmd_agenda`'s; this module maps HTTP onto it.
 
 WHO. A device token holding the ``send`` permission, as for the session's draft, and the
 machine's ``serve_send`` setting is not consulted, because a list does not touch a session.
@@ -22,7 +27,9 @@ read again and not that its change is forbidden.
 
 A CHANGE IS ANNOUNCED on the session's event stream as ``agenda``, carrying the new etag and
 no item (:mod:`kyosei.serve_sessions`), because that stream is open to a device token of any
-permission (KYO-791) and the list is read with one holding ``send``.
+permission (KYO-791) and the list is read with one holding ``send``. The project's event
+stream says ``changed`` with kind ``agenda`` when any list was saved (KYO-901), which is what
+a device with no live session to follow hears.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ from .serve import Refusal
 from .serve_sessions import ProjectSessions
 
 
-def _response(session_id: str, document: dict | None, etag: str | None) -> dict[str, Any]:
+def _response(session_id: str | None, document: dict | None, etag: str | None) -> dict[str, Any]:
     held = document or {}
     return {
         "ok": True,
@@ -59,7 +66,7 @@ def _sent(raw: bytes) -> object:
 def perform(
     environ: dict[str, str],
     root_of: Callable[[], str],
-    session_id: str,
+    session_id: str | None,
     method: str,
     authorization: str | None,
     *,
@@ -67,11 +74,27 @@ def perform(
     if_none_match: str | None,
     read_body: Callable[[], bytes],
 ) -> tuple[int, dict[str, Any]]:
-    """Carry out one request for a session's list; the status and the response document."""
+    """Carry out one request for a session's list; the status and the response document.
+
+    ``session_id`` None asks for the project's list, that of its most recent session.
+    """
     body = serve_send.Body(read_body)
     try:
         serve_send.require_device(environ, authorization)
-        ProjectSessions(root_of(), environ).require(session_id)
+        project = ProjectSessions(root_of(), environ)
+        if session_id is None:
+            session_id = cmd_agenda.latest_session(project.paths.db)
+            if session_id is None:
+                if method == "GET":
+                    return 200, _response(None, None, None)
+                raise Refusal(
+                    409,
+                    "this project has had no session, so it has no list to add to; the "
+                    "list begins with the project's first session",
+                    reason="no-session",
+                )
+        else:
+            project.require(session_id)
         # The same refusal a draft gives for an id that cannot name a file.
         serve_files.composer_path(environ, cmd_agenda.AGENDAS, session_id)
         try:

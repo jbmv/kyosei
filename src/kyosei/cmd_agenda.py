@@ -880,6 +880,40 @@ def carry_lines(
     return lines
 
 
+def latest_session(db_path: Path) -> str | None:
+    """The project's most recent session, by its opening brief; None when it has had none.
+
+    Its list is the project's list between sessions (KYO-901): the next session's first
+    brief carries the person's unchecked items from exactly this one (:func:`carry_lines`
+    reads :func:`previous_session`, the same row), so an item a device adds while no session
+    runs is carried. Read without opening a store, as :func:`dispatches_in_flight` is.
+    """
+    if not db_path.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=1)
+    except sqlite3.Error:
+        return None
+    try:
+        return previous_session(conn, "")
+    finally:
+        conn.close()
+
+
+def directory_stamp(environ: dict[str, str]) -> str:
+    """A stamp of the directory holding every list, which differs after a save of any.
+
+    What a project's event stream compares (KYO-901). A list is written by rename, which
+    changes its directory's modification time. A save of another project's list changes it
+    too, and costs a device one read of a list that has not changed.
+    """
+    try:
+        info = os.stat(store_home(environ) / COMPOSER_DIRNAME / AGENDAS)
+    except OSError:
+        return "gone"
+    return str(info.st_mtime_ns)
+
+
 def previous_session(conn: Any, session_id: str) -> str | None:
     """The session whose opening brief most recently preceded ``session_id``'s, if any."""
     try:

@@ -137,13 +137,27 @@ final class SessionFeed {
     /// Whether the composer was given prompts kept at the last quit, which the next
     /// acknowledged save then holds.
     private var restoredDraft = false
-    /// The live session whose task list the composer shows, or nil when it shows none
-    /// (KYO-771). The list is the session's, so there is none between sessions.
-    private var agendaSession: String?
-    /// The etag of each list read or saved, by its session. A change announced on the
+    /// Whose task list the composer shows: a live session's (KYO-771), or the project's, which
+    /// the server answers with the list of the project's most recent session (KYO-901), so
+    /// the person reads and adds reminders between sessions and the next session carries them.
+    private enum AgendaPlace: Equatable {
+        case session(String)
+        case project
+
+        /// The key its etag is held under; no session id is this word.
+        var key: String {
+            switch self {
+            case .session(let session): session
+            case .project: "project"
+            }
+        }
+    }
+    /// The list the composer shows, or nil before a project's sessions have been read.
+    private var agendaPlace: AgendaPlace?
+    /// The etag of each list read or saved, by its place. A change announced on the
     /// stream with the etag held here is this window's own save and is not read again.
     private var agendaEtags: [String: String] = [:]
-    /// Whether the server has answered for the list of `agendaSession`. Until it has, the
+    /// Whether the server has answered for the list of `agendaPlace`. Until it has, the
     /// stream's next word of the list is a reason to ask again, whatever etag it states.
     private var agendaAnswered = false
     /// The reads and saves of the list, which run one at a time in the order they were asked.
@@ -600,19 +614,34 @@ final class SessionFeed {
         if draftPlace == nil || draftPlace == (live ? .project : .session(session)) {
             loadDraft(place)
         }
-        showAgenda(live ? session : nil)
+        showAgenda(live ? .session(session) : .project)
     }
 
-    /// Turns the composer's task list to that of `session`, a live one, or to none (KYO-771).
-    private func showAgenda(_ session: String?) {
-        guard session != agendaSession else { return }
-        agendaSession = session
+    /// Turns the composer's task list to that of `place`, or to none while a project's
+    /// sessions are not yet read (KYO-771, KYO-901).
+    private func showAgenda(_ place: AgendaPlace?) {
+        guard place != agendaPlace else { return }
+        agendaPlace = place
         agendaAnswered = false
-        guard let session else {
+        guard let place else {
             send("agenda", #"{"state": "absent"}"#)
             return
         }
-        loadAgenda(session)
+        loadAgenda(place)
+    }
+
+    private func agendaPath(_ place: AgendaPlace) -> String {
+        switch place {
+        case .session(let session): sessionPath(session, "agenda")
+        case .project: "v1/projects/\(project)/agenda"
+        }
+    }
+
+    /// The project's stream said a list was saved, or was reconnected: read the project's
+    /// list again when it is the one shown. A live session's list is announced on its own
+    /// stream with its etag.
+    private func projectAgendaChanged() {
+        if agendaPlace == .project { loadAgenda(.project) }
     }
 
     private func agendaFrame(_ fields: [String: Any]) -> String {
@@ -625,10 +654,10 @@ final class SessionFeed {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
     }
 
-    /// Reads the list of `session` and hands it to the page, or says why it cannot be read.
+    /// Reads the list of `place` and hands it to the page, or says why it cannot be read.
     /// A list that could not be reached is left as the page shows it, and is read again when
     /// the stream next opens, since the stream's first event carries the list's etag.
-    private func loadAgenda(_ session: String) {
+    private func loadAgenda(_ place: AgendaPlace) {
         guard let token = Self.deviceToken() else {
             send(
                 "agenda",
@@ -639,20 +668,20 @@ final class SessionFeed {
             return
         }
         let client = client
-        let path = sessionPath(session, "agenda")
+        let path = agendaPath(place)
         let previous = agendaTask
         agendaTask = Task {
             await previous?.value
-            guard session == agendaSession, client.base == self.client.base,
+            guard place == agendaPlace, client.base == self.client.base,
                 let reply = try? await client.authorised("GET", path, token: token),
-                session == agendaSession, client.base == self.client.base
+                place == agendaPlace, client.base == self.client.base
             else { return }
-            showAgenda(reply: reply, session: session, saved: false)
+            showAgenda(reply: reply, place: place, saved: false)
         }
     }
 
     /// Hands the page a list the server answered with, or the reason it gave for not reading it.
-    private func showAgenda(reply: (data: Data, status: Int), session: String, saved: Bool) {
+    private func showAgenda(reply: (data: Data, status: Int), place: AgendaPlace, saved: Bool) {
         guard reply.status == 200 || reply.status == 201,
             var frame = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any]
         else {
@@ -664,8 +693,13 @@ final class SessionFeed {
             }
             return
         }
-        agendaEtags[session] = frame["etag"] as? String
+        agendaEtags[place.key] = frame["etag"] as? String
         agendaAnswered = true
+        // A project that has had no session has no list to add to.
+        guard frame["session_id"] is String else {
+            send("agenda", #"{"state": "absent"}"#)
+            return
+        }
         frame["state"] = "shown"
         frame["saved"] = saved
         send("agenda", agendaFrame(frame))
@@ -674,18 +708,18 @@ final class SessionFeed {
     /// The stream said the list of `session` has the etag in `event`: read it if this window
     /// does not hold that one. Its own saves are held already.
     private func agendaChanged(_ event: String, session: String) {
-        guard session == agendaSession,
+        guard agendaPlace == .session(session),
             let object = try? JSONSerialization.jsonObject(with: Data(event.utf8)) as? [String: Any]
         else { return }
         let stated = (object["agenda"] as? [String: Any] ?? object)["etag"] as? String
-        if !agendaAnswered || stated != agendaEtags[session] { loadAgenda(session) }
+        if !agendaAnswered || stated != agendaEtags[session] { loadAgenda(.session(session)) }
     }
 
     /// Saves the list as the person, with the etag of the copy the page was shown. The answer
     /// is the saved list. A save refused as stale is said to the page, which keeps what the
     /// person typed, and the list is then read again so that the newer one is shown.
     func saveAgenda(body: [String: Any]) {
-        guard let session = agendaSession,
+        guard let place = agendaPlace,
             let data = try? JSONSerialization.data(withJSONObject: body)
         else { return }
         guard let token = Self.deviceToken() else {
@@ -693,29 +727,29 @@ final class SessionFeed {
             return
         }
         let client = client
-        let path = sessionPath(session, "agenda")
+        let path = agendaPath(place)
         let previous = agendaTask
         agendaTask = Task {
             await previous?.value
-            let etag = agendaEtags[session]
+            let etag = agendaEtags[place.key]
             guard
                 let reply = try? await client.authorised(
                     "PUT", path, token: token, body: data, ifMatch: etag,
                     ifNoneMatch: etag == nil ? "*" : nil)
             else {
-                if session == agendaSession { send("agendaRefused", agendaFrame(["status": 0])) }
+                if place == agendaPlace { send("agendaRefused", agendaFrame(["status": 0])) }
                 return
             }
-            guard session == agendaSession, client.base == self.client.base else { return }
+            guard place == agendaPlace, client.base == self.client.base else { return }
             if reply.status == 200 || reply.status == 201 {
-                showAgenda(reply: reply, session: session, saved: true)
+                showAgenda(reply: reply, place: place, saved: true)
                 return
             }
             var refused: [String: Any] = ["status": reply.status]
             if let error = refusal(in: reply.data) { refused["error"] = error }
             send("agendaRefused", agendaFrame(refused))
             // The list as it is now, whoever changed it; this runs after the task that asked.
-            loadAgenda(session)
+            loadAgenda(place)
         }
     }
 
@@ -1463,6 +1497,7 @@ final class SessionFeed {
             if lost {
                 send("recordsChanged", #"{"kind": "store"}"#)
                 draftChanged(.project)
+                projectAgendaChanged()
             }
             do {
                 for try await event in client.projectEvents(project: project)
@@ -1472,6 +1507,8 @@ final class SessionFeed {
                     retry.reset()
                     if event.data.contains(#""draft""#) {
                         draftChanged(.project)
+                    } else if event.data.contains(#""agenda""#) {
+                        projectAgendaChanged()
                     } else {
                         send("recordsChanged", event.data)
                     }
@@ -1840,7 +1877,7 @@ final class SessionFeed {
                     send("clear", "null")
                     // A project with no session keeps its boxes in the project's draft.
                     loadDraft(.project)
-                    showAgenda(nil)
+                    showAgenda(.project)
                     state = .noSession
                     retry.reset()
                     try await Task.sleep(for: .seconds(3))
@@ -1857,7 +1894,7 @@ final class SessionFeed {
                 // With no live session the boxes are the project's, whichever ended session
                 // the chat shows (KYO-763).
                 loadDraft(row.live ? .session(row.session_id) : .project)
-                showAgenda(row.live ? row.session_id : nil)
+                showAgenda(row.live ? .session(row.session_id) : .project)
                 await sendMenu()
                 try Task.checkCancellation()
                 guard row.live else {

@@ -62,7 +62,8 @@ permission, and are logged; :mod:`kyosei.serve_send` holds all of that, and is t
 THE COMPOSER ROUTES (KYO-703). ``sessions/{id}/draft`` (GET, PUT) is a session's saved
 composer boxes, and ``draft`` (GET, PUT, KYO-763) the project's own, kept between its
 sessions (:mod:`kyosei.serve_drafts`); ``sessions/{id}/agenda`` (GET, PUT, KYO-770) is the
-session's task list, saved as the person (:mod:`kyosei.serve_agenda`);
+session's task list, saved as the person, and ``agenda`` (KYO-901) that of the project's
+most recent session (:mod:`kyosei.serve_agenda`);
 ``sessions/{id}/held`` (GET, POST, DELETE) is a
 message held until the turn ends (:mod:`kyosei.serve_held`), and ``sessions/{id}/held-now`` (POST,
 KYO-722) delivers it at once, during a turn. Each needs a device token.
@@ -364,6 +365,10 @@ SESSION_COMPOSER_ROUTES: dict[str, tuple[str, ...]] = {
 #: KYO-763: ``draft``, the project's own draft, kept between its sessions.
 PROJECT_DRAFT_ROUTE = "draft"
 PROJECT_DRAFT_METHODS = ("GET", "PUT")
+
+#: KYO-901: ``agenda``, the list of the project's most recent session, for a device to show
+#: and edit while no session runs (serve_agenda).
+PROJECT_AGENDA_ROUTE = "agenda"
 
 #: KYO-715: ``sessions/{id}/attachments`` (POST) and ``.../attachments/{id}`` (GET).
 SESSION_ATTACHMENTS_ROUTE = "attachments"
@@ -868,7 +873,11 @@ class ServeHandler(BaseHTTPRequestHandler):
             len(rest) >= 3 and rest[0] == "projects" and rest[2] == PROJECT_FILES_ROUTE
         ) or (len(rest) == 3 and rest[0] == "projects" and rest[2] == SEARCH_ROUTE):
             allowed = ("GET",)
-        elif len(rest) == 3 and rest[0] == "projects" and rest[2] == PROJECT_DRAFT_ROUTE:
+        elif (
+            len(rest) == 3
+            and rest[0] == "projects"
+            and rest[2] in (PROJECT_DRAFT_ROUTE, PROJECT_AGENDA_ROUTE)
+        ):
             allowed = PROJECT_DRAFT_METHODS
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == NOTES_ROUTE:
             if len(rest) == 3:
@@ -950,6 +959,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._history(method, rest[1], split.query)
         if rest[2] == PROJECT_DRAFT_ROUTE:
             return self._session_composer(method, rest[1], None, "draft", split.query)
+        if rest[2] == PROJECT_AGENDA_ROUTE:
+            return self._session_composer(method, rest[1], None, "agenda", split.query)
         if rest[2] == NOTES_ROUTE:
             return self._note_route(method, rest[1], rest[3:], split.query)
         if rest[2] == TAGS_ROUTE or (len(rest) == 5 and rest[4] == SESSION_MARKS_ROUTE):
@@ -1052,7 +1063,7 @@ class ServeHandler(BaseHTTPRequestHandler):
     def _events(self, paths, name: str) -> None:
         """A ``text/event-stream`` that lasts until the client leaves or the
         server stops. It takes no lock: a fingerprint reads no store content."""
-        from . import serve_drafts, serve_events
+        from . import cmd_agenda, serve_drafts, serve_events
 
         environ = self.server.environ
 
@@ -1074,7 +1085,11 @@ class ServeHandler(BaseHTTPRequestHandler):
             poll_seconds=self.server.poll_seconds,
             keepalive_seconds=self.server.keepalive_seconds,
             # KYO-798: the project's own composer draft, saved from another device.
-            more={"draft": lambda: serve_drafts.project_stamp(environ, name)},
+            # KYO-901: any session's task list, for a device with no live session to follow.
+            more={
+                "draft": lambda: serve_drafts.project_stamp(environ, name),
+                "agenda": lambda: cmd_agenda.directory_stamp(environ),
+            },
         )
 
     # ------------------------------------------------------------ session routes

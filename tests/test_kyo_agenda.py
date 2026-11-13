@@ -29,6 +29,7 @@ from .test_kyo329_accept import _docs_verdict, _met
 from .test_kyo_serve import body_json
 from .test_kyo_serve_send import issue
 from .test_kyo_serve_sessions import (  # noqa: F401 - the fixtures, by name
+    BASE,
     OLD,
     SESSIONS,
     Bed,
@@ -734,3 +735,65 @@ def test_the_stop_line_prints_again_only_when_the_person_s_items_changed(
         "Unchecked on the session list, yours (2): push; email"
     ), "a changed set prints"
     assert _stop_hook(kyo, OLD).out == ""
+
+
+# ------------------------------------------- KYO-901: the project's list, between sessions
+
+PROJECT_AGENDA = f"{BASE}/agenda"
+
+
+def test_a_project_that_has_had_no_session_reads_as_no_list_and_refuses_an_item(
+    bed: Bed, token: str
+) -> None:
+    status, _, read = request(bed, "GET", None, token, PROJECT_AGENDA)
+    assert (status, read["session_id"], read["items"], read["etag"]) == (200, None, [], None)
+
+    status, _, refused = request(
+        bed, "PUT", {"items": [{"text": "mine"}]}, token, PROJECT_AGENDA, If_None_Match="*"
+    )
+    assert status == 409 and "no session" in refused["error"]
+
+
+def test_the_project_s_list_is_its_most_recent_session_s_and_what_is_added_is_carried(
+    bed: Bed, kyo, token: str
+) -> None:
+    _open_session(kyo, OLD)
+    orchestrator(kyo, "add", "--text", "the wave")
+
+    status, _, read = request(bed, "GET", None, token, PROJECT_AGENDA)
+    assert (status, read["session_id"]) == (200, OLD)
+    assert [item["text"] for item in read["items"]] == ["the wave"]
+
+    # No session runs; the person adds a reminder from a device.
+    sent = {"items": [*read["items"], {"text": "ask about the icon"}]}
+    status, _, saved = request(bed, "PUT", sent, token, PROJECT_AGENDA, If_Match=read["etag"])
+    assert status == 200 and saved["session_id"] == OLD
+    assert saved == request(bed, "GET", None, token)[2]  # the session's route reads the same
+
+    _open_session(kyo, SESSION)  # the next session's first brief carries it
+    assert [item["text"] for item in items_of(kyo)] == ["ask about the icon"]
+    assert request(bed, "GET", None, token, PROJECT_AGENDA)[2]["session_id"] == SESSION
+
+
+def test_the_project_s_list_follows_the_session_route_s_rules(bed: Bed, kyo, token: str) -> None:
+    _open_session(kyo, OLD)
+    orchestrator(kyo, "add", "--text", "the wave")
+    read = request(bed, "GET", None, token, PROJECT_AGENDA)[2]
+
+    assert request(bed, "GET", None, None, PROJECT_AGENDA)[0] == 401
+    stale = request(bed, "PUT", {"items": read["items"]}, token, PROJECT_AGENDA, If_Match='"old"')
+    assert stale[0] == 412
+    without = request(bed, "PUT", {"items": []}, token, PROJECT_AGENDA, If_Match=read["etag"])
+    assert without[0] == 403  # the orchestrator's item may not be left out
+
+
+def test_a_saved_list_is_announced_on_the_project_s_stream(bed: Bed, kyo, token: str) -> None:
+    from .test_kyo_serve_drafts import next_change, project_changes
+
+    _open_session(kyo, OLD)
+    following = project_changes(bed)
+    request(bed, "PUT", {"items": [{"text": "mine"}]}, token, PROJECT_AGENDA, If_None_Match="*")
+    kinds = {next_change(following)}
+    if "agenda" not in kinds:  # the brief's own store write may be announced first
+        kinds.add(next_change(following))
+    assert "agenda" in kinds

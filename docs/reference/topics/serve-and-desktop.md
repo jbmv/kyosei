@@ -931,6 +931,12 @@ The route is under `/v1/projects/<name>/sessions/<id>/` and stands where the dra
 stand: a device token with the `send` permission, no query string, and a project that has
 opted in to reading transcripts and records the session. Sending need not be switched on.
 
+`/v1/projects/<name>/agenda` (KYO-901) answers the same two methods for the list of the
+project's most recent session, live or ended, and its response names that session. A device
+uses it while no session runs: the next session's first brief carries the person's unchecked
+items from that list. A project that has had no session answers a `GET` with no items and
+`session_id: null`, and refuses a `PUT` with 409.
+
 **A `PUT` carries the whole list**, in the order the person sees it. An item the list already
 holds carries the `id` a `GET` gave it; an item with no `id` is added as the person's and may
 not arrive checked. A device cannot state an author. The person's items take the text and the
@@ -949,7 +955,9 @@ holding an old copy is told to read again, and is not told that its change is fo
 `agenda: {"etag": ...}` and an `agenda` event carries `session_id` and the new `etag`, within
 one sampling interval of the save by either side. Neither carries an item, because the stream
 is open to a device token of any permission and the list is read with one holding `send`; a
-client reads the list again when the etag is not the one it holds.
+client reads the list again when the etag is not the one it holds. The project's event
+stream sends `changed` with kind `agenda` when any list was saved, for a device that has no
+live session to follow.
 
 **`kyo agenda`** is the orchestrator's side. With no action it prints the items with their
 ids. `add --text "..."` adds one at the end, or at `--to POSITION`; `edit <id> --text "..."`

@@ -25,8 +25,8 @@ adds the following.
   to the agent.
 - **Attachments.** A file or a pasted image can be attached to a paragraph. The server saves
   it on the machine the session runs on and types its path above the paragraph.
-- **The session's task list.** A live session has one list that the person and the
-  orchestrator both write. The person keeps reminders on it in the app, above the composer,
+- **The session's task list.** A session has one list that the person and the
+  orchestrator both write, and between sessions the app shows the last session's. The person keeps reminders on it in the app, above the composer,
   and the orchestrator keeps its plan there with `kyo agenda`. The hooks print the unchecked
   items into the session on each prompt and name the person's at each stop.
 - **Drafts kept on the server.** The server saves the unsent prompts of each session and of
@@ -245,8 +245,15 @@ as the prompts grow and scrolls out of view with them when they need the room. T
 adds items and edits, checks and removes their own; the orchestrator's items show their state
 and take no press, since the server refuses a device's change to one. The app reads the list
 when it turns to a live session and again when the session's stream says its etag changed,
-and a save the server refuses as stale leaves the typed words in their field and says so. With
-no live session there is no bubble, and a token that may not read the list is told why in it.
+and a save the server refuses as stale leaves the typed words in their field and says so. A
+token that may not read the list is told why in the bubble.
+
+With no live session the bubble shows the project's list (KYO-901), which the server answers
+with the list of the project's most recent session. The person reads and changes their items
+there on any device, and the next session's first brief carries what is unchecked into its
+own list. The project's event stream says when a list was saved, and the app then reads the
+project's list again, so an item added on one device appears on the other. A project that has
+had no session has no bubble.
 The app's part is `showAgenda` and `saveAgenda` in `SessionFeed.swift`; the page's is
 `web/src/agenda.ts` and the section of `web/src/chat.ts` that draws it.
 
