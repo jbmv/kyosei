@@ -86,7 +86,8 @@ test("the + panel's Anchor starts the mode; a hover shows the sentence and a pre
   const opened = await open();
   const button = await opened.run<boolean>(`(() => {
     const button = document.querySelector(".mark-panel .mark-anchor-mode");
-    const divider = button?.nextElementSibling?.classList.contains("mark-divider");
+    // The paragraph's other actions stand between the button and the divider (KYO-911).
+    const divider = Boolean(document.querySelector(".mark-panel .mark-anchor-mode ~ .mark-divider ~ input"));
     button?.click();
     return !!button && !!divider;
   })()`);
