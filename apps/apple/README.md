@@ -234,8 +234,8 @@ into the prompt, and is disabled while the prompt holds anything. One section is
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in a
 scratchpad's gutter also opens: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level, goes to the end of the prompt,
-outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad.
-What a section is and how its lines move are `sectionEnd` and `moveLines` in
+outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad;
+a section that was folded arrives folded (KYO-913). What a section is and how its lines move are `sectionEnd` and `moveLines` in
 `web/src/outline.ts`. A scratchpad is a box of
 the same draft with a `scratch` object holding the heading and the collapsed state, so it is
 saved, merged between devices and carried between sessions as a prompt is, and a change of
