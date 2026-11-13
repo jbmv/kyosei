@@ -520,6 +520,70 @@ extension ChatPage: @preconcurrency QLPreviewPanelDataSource {
     }
 }
 
+/// The Dock signal while the session waits on the person (KYO-883, KYO-922). A critical
+/// request alone was seen to bounce the icon once, so the request is made again every
+/// `interval` while the session waits and another app is in front. It stops when the app comes
+/// to the front, which ends a request by itself, and when the page says the session works again.
+@MainActor
+final class DockAttention {
+    static let interval: TimeInterval = 3
+
+    private let isActive: () -> Bool
+    private let request: () -> Int
+    private let cancel: (Int) -> Void
+    private var current: Int?
+    private var timer: Timer?
+    private var observer: NSObjectProtocol?
+
+    init(
+        isActive: @escaping () -> Bool = { NSApp.isActive },
+        request: @escaping () -> Int = { NSApp.requestUserAttention(.criticalRequest) },
+        cancel: @escaping (Int) -> Void = { NSApp.cancelUserAttentionRequest($0) },
+        center: NotificationCenter = .default
+    ) {
+        self.isActive = isActive
+        self.request = request
+        self.cancel = cancel
+        observer = center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stop() }
+        }
+    }
+
+    /// Whether the icon is being kept bouncing.
+    var bouncing: Bool { timer != nil }
+
+    /// The page's word that the session came to wait on the person, or that it works again.
+    func waiting(_ waiting: Bool) {
+        stop()
+        guard waiting, !isActive() else { return }
+        current = request()
+        timer = Timer.scheduledTimer(withTimeInterval: Self.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.renew() }
+        }
+    }
+
+    /// One tick of the wait: the request is made again, unless the app has come to the front.
+    func renew() {
+        guard timer != nil else { return }
+        if isActive() {
+            stop()
+            return
+        }
+        if let request = current { cancel(request) }
+        current = request()
+    }
+
+    /// Ends the bounce: the session works again, or the person has brought the app forward.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        if let request = current { cancel(request) }
+        current = nil
+    }
+}
+
 /// The read-only chat: a page drawn from the renderer in the app's resources. It loads
 /// nothing else, and a link in a message opens in the person's browser.
 struct ChatWebView: NSViewRepresentable {
@@ -561,7 +625,7 @@ struct ChatWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         /// The Dock bounce asked for when the session came to wait, until it is answered.
-        private var attentionRequest: Int?
+        private let attention = DockAttention()
         let feed: SessionFeed
 
         init(feed: SessionFeed) {
@@ -613,14 +677,7 @@ struct ChatWebView: NSViewRepresentable {
             // app is in front again, when another app is in front, on whichever screen; in
             // front, the red line says it. A session that works again before then stops it.
             if message.name == "attention" {
-                let waiting = (message.body as? [String: Any])?["waiting"] as? Bool ?? true
-                if let request = attentionRequest {
-                    NSApp.cancelUserAttentionRequest(request)
-                    attentionRequest = nil
-                }
-                if waiting, !NSApp.isActive {
-                    attentionRequest = NSApp.requestUserAttention(.criticalRequest)
-                }
+                attention.waiting((message.body as? [String: Any])?["waiting"] as? Bool ?? true)
                 return
             }
             // KYO-912: whether the right-click about to open WebKit's menu was on a box's words.
