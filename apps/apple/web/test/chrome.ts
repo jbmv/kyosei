@@ -2,7 +2,7 @@
 // box's own undo history and what is painted in the chat. Not a test file itself. A machine
 // with no Chrome gets `null` from `openPage`, and the tests that asked skip.
 import { spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -38,16 +38,29 @@ export interface Page {
   close(): Promise<void>;
 }
 
-/** Builds the renderer into a temporary folder and opens its page with a stub of the app. */
-export async function openPage(): Promise<Page | null> {
+/**
+ * Builds the renderer into a temporary folder and opens its page with a stub of the app.
+ * Given `entry`, a script of the tests' own, the page is built from that script instead: an
+ * empty page under the renderer's Content-Security-Policy, with the renderer's stylesheet,
+ * that runs it (KYO-909).
+ */
+export async function openPage(entry?: URL): Promise<Page | null> {
   const chrome = CHROMES.find((path) => path && existsSync(path));
   if (!chrome) return null;
   const folder = mkdtempSync(join(tmpdir(), "kyosei-renderer-"));
   const site = join(folder, "site");
   cpSync(fileURLToPath(new URL("../static", import.meta.url)), site, { recursive: true });
+  let html = "chat.html";
+  if (entry) {
+    const policy = readFileSync(join(site, "chat.html"), "utf8").match(/<meta\s+http-equiv="Content-Security-Policy"[^>]*>/)?.[0];
+    if (!policy) throw new Error("chat.html states no Content-Security-Policy to test under");
+    html = "entry.html";
+    writeFileSync(join(site, html), `<!doctype html><html lang="en"><head><meta charset="utf-8" />${policy}`
+      + `<link rel="stylesheet" href="chat.css" /></head><body><script src="entry.js"></script></body></html>`);
+  }
   await build({
-    entryPoints: [fileURLToPath(new URL("../src/chat.ts", import.meta.url))],
-    bundle: true, format: "iife", target: "safari18", outfile: join(site, "chat.js"), logLevel: "silent",
+    entryPoints: [entry ? fileURLToPath(entry) : fileURLToPath(new URL("../src/chat.ts", import.meta.url))],
+    bundle: true, format: "iife", target: "safari18", outfile: join(site, entry ? "entry.js" : "chat.js"), logLevel: "silent",
   });
   const child: ChildProcess = spawn(chrome, [
     "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${join(folder, "profile")}`,
@@ -105,7 +118,7 @@ export async function openPage(): Promise<Page | null> {
     });
     const reload = async () => {
       const load = new Promise<void>((done) => loaded.push(done));
-      await call("Page.navigate", { url: pathToFileURL(join(site, "chat.html")).href });
+      await call("Page.navigate", { url: pathToFileURL(join(site, html)).href });
       await load;
     };
     await reload();

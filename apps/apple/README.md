@@ -59,6 +59,7 @@ how the app draws each and where its code is.
 - apps/apple/web/src/start.ts
 - apps/apple/web/src/terminal.ts
 - apps/apple/web/src/history.ts
+- apps/apple/web/src/editor.ts
 -->
 
 `Sources/KyoseiClient` holds the code that does not draw: requests to the server and the
@@ -69,6 +70,11 @@ parsing of its event stream, with tests in `Tests/`. `Sources/KyoseiMac` holds t
 
 The terminal drawer is [xterm.js](https://github.com/xtermjs/xterm.js), whose MIT licence is
 kept in `web/LICENSE-xterm` and copied into the app beside the renderer.
+
+The composer's editor module is built on [CodeMirror 6](https://codemirror.net/), whose MIT
+licence, with the notices of the packages it brings, is kept in `web/LICENSE-codemirror` and
+copied into the app beside the renderer. The page does not use the module yet; the composer's
+boxes are still text areas.
 
 The files that the later sections do not name, with what each holds:
 
@@ -88,6 +94,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror, not yet used by the page: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
