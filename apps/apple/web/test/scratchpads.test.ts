@@ -42,6 +42,12 @@ test("an older draft's last prompt is the prompt and the others become scratchpa
     assert.deepEqual(boxes.map((box) => [box.kind, box.text, box.send]), [
       ["scratch", "long notes", false], ["scratch", "more", false], ["prompt", "next", true],
     ]);
+    // KYO-910.c1: nothing in the composer is a text area, and each box holds one editor.
+    const shape = await page.run(`[
+      document.querySelectorAll("#composer textarea").length,
+      [...document.querySelectorAll("#boxes > .box")].map((box) => box.querySelectorAll(".cm-editor .cm-content[contenteditable=true]").length),
+    ]`);
+    assert.deepEqual(shape, [0, [1, 1, 1]]);
     // Reading it is not an edit and saves nothing; the next edit saves the boxes as they are.
     await page.run(pause);
     assert.equal(await page.run(`${saved} ?? null`), null);
