@@ -1090,6 +1090,10 @@ notification, a subagent's report) is refused. A long turn is stored as its head
 a paste is left out. A second `kyo confirm` naming the same turn skips what the first applied.
 In a project that does not read transcripts, or outside a Claude Code session, the words still
 come from `--quote-file`, and a credit with neither is refused naming the flag.
+`--context-turn <id>` (KYO-914) cites a turn as context and leaves the person's latest turn as
+the approval; with `--turn`, the receipt says when the latest turn is not cited. A credit
+written wrongly in this session since the person's previous turn is replaced with `kyo credit
+--supersede <credit-id>` and the right turns, with no basis, and stays readable as superseded.
 
 **The words go in evidence, verbatim, and nowhere else.** The quote is read once -- so
 `--quote-file -` works although several steps need it -- and each step gets a temporary file

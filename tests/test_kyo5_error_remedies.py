@@ -4960,9 +4960,14 @@ RECORDED: dict[str, str] = {
         "a re-invocation naming the turn with --turn; proved by "
         "test_kyo644_an_ambiguous_quote_is_cleared_by_naming_the_turn"
     ),
-    "credits.py:_require_person_turn#0": (
-        "a decision file naming one of the person's turns; proved by "
-        "tests/test_kyo644_credits.py::test_a_refined_decision_cites_the_refining_turn"
+    # KYO-914: a refining turn is resolved by _resolve_turn, whose entry above covers it
+    # (proved again by tests/test_kyo644_credits.py::
+    # test_a_refined_decision_cites_the_refining_turn); and a --context-turn later than the
+    # approving turn.
+    "credits.py:_context_turns#1": (
+        "a re-invocation naming the later turn with --turn; proved by "
+        "tests/test_kyo900_turn_credits.py::"
+        "test_kyo914_a_context_turn_that_is_the_approval_or_later_is_refused"
     ),
     "credits.py:_span#2": (
         "a re-invocation giving --span-session; proved by "

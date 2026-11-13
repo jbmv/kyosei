@@ -639,3 +639,184 @@ def test_said_is_refused_in_a_project_that_reads_no_transcripts(
 ) -> None:
     refused = kyo("turns", "--said")
     assert refused.code == 64 and "has not opted in" in refused.err
+
+
+# ------------------------------------------------------- KYO-914: refining turn, context, fix
+
+REFINING_WORDS = "keep it, but key it by branch"
+PROMPT_5 = "bbbbbbbb-0000-4000-8000-000000000005"
+LATER_1 = "2099-01-01T00:00:00.000Z"
+LATER_2 = "2099-01-01T00:01:00.000Z"
+
+
+def _refined(kyo, *flags: str):
+    return kyo(
+        "new", "decision", "--title", "Key the cache", "--recommended", "keep it", *flags,
+        "--json",
+    )  # fmt: skip
+
+
+def test_kyo914_refining_turn_takes_whatever_turn_takes(kyo, talked: Path, tmp_path: Path) -> None:
+    """c1 and c2: a prompt id, a record uuid or a unique prefix, from the flag or the file,
+    stored as the turn's record uuid and its session."""
+    append_transcript([person("p-4", PROMPT_4, REFINING_WORDS, T4)])
+    prompt_hook(kyo, PROMPT_4)
+    by_prompt = _refined(kyo, "--outcome", "refined", "--refining-turn", PROMPT_1)
+    assert by_prompt.code == 0, by_prompt
+    credit = _credit(kyo, by_prompt.json["record_id"])
+    assert credit["outcome"] == "refined" and credit["source_turn"] == "p-4"
+    assert (credit["refining_session"], credit["refining_turn"]) == (SESSION, "p-1")
+    assert f"refined in turn p-3 of session {SESSION}" in kyo(
+        "new", "decision", "--title", "Again", "--recommended", "keep it", "--outcome",
+        "refined", "--refining-turn", "p-3",
+    ).out  # fmt: skip
+    for given, stored in (("bbbbbbbb", "p-4"), ("p-3", "p-3"), (PROMPT_3, "p-3")):
+        filed = kyo(
+            "new", "decision", "--title", f"Key it {given}", "--decision-file",
+            _file(tmp_path, "d.yml",
+                  f"recommended: keep it\noutcome: refined\nrefining_turn: {given}\n"),
+            "--json",
+        )  # fmt: skip
+        assert filed.code == 0, filed
+        assert _credit(kyo, filed.json["record_id"])["refining_turn"] == stored
+
+
+def test_kyo914_a_refining_turn_that_is_not_the_persons_or_not_refined_is_refused(
+    kyo, talked: Path
+) -> None:
+    not_theirs = _refined(kyo, "--outcome", "refined", "--refining-turn", PROMPT_2)
+    assert not_theirs.code == 2, not_theirs
+    assert credits.CONTRACT_CREDIT_TURN_NOT_THE_PERSONS in not_theirs.err
+    assert "refining_turn" in not_theirs.err
+    none = _refined(kyo, "--outcome", "refined", "--refining-turn", "cccccccc")
+    assert none.code == 64 and "refining_turn cccccccc names no turn" in none.err
+    missing = _refined(kyo, "--outcome", "refined")
+    assert missing.code == 64 and "--refining-turn ID" in missing.err
+    accepted = _refined(kyo, "--outcome", "accepted", "--refining-turn", PROMPT_1)
+    assert accepted.code == 64 and "belongs to outcome 'refined'" in accepted.err
+    alone = kyo("new", "decision", "--title", "t", "--refining-turn", PROMPT_1)
+    assert alone.code == 64 and "go with --outcome" in alone.err
+    on_a_task = kyo("new", "task", "--title", "t", "--refining-turn", PROMPT_1)
+    assert on_a_task.code == 64 and "--refining-turn" in on_a_task.err
+    assert _refined(kyo, "--outcome", "refined", "--refining-turn", PROMPT_1).code == 0
+
+
+def test_kyo914_context_turns_sit_beside_the_latest_turn_as_the_approval(
+    kyo, talked: Path
+) -> None:
+    """c4: --context-turn names context, and the person's latest turn stays the approval."""
+    record, cid = _criterion(kyo)
+    done = kyo("confirm", record, "--criterion", cid, "--context-turn", PROMPT_1, "--no-close")
+    assert done.code == 0, done
+    credit = _credit(kyo, record)
+    assert [(t["role"], t["turn"]) for t in credit["turns"]] == [
+        ("context", "p-1"), ("approval", "p-3"),
+    ]  # fmt: skip
+    assert credit["source_turn"] == "p-3"
+    assert _words(kyo, record, credit["quote_id"]) == APPROVAL
+    assert "is not cited" not in done.out
+    other, other_cid = _criterion(kyo)
+    verified = kyo(
+        "verify", other_cid, "--verdict", "met", "--method", "human-observed",
+        "--context-turn", "p-1",
+    )  # fmt: skip
+    assert verified.code == 0, verified
+    assert [t["role"] for t in _credit(kyo, other)["turns"]] == ["context", "approval"]
+    assert "can cite them as context" not in verified.out
+
+
+def test_kyo914_the_receipt_says_when_turn_left_the_latest_turn_uncited(
+    kyo, talked: Path
+) -> None:
+    record, cid = _criterion(kyo)
+    slipped = kyo("confirm", record, "--criterion", cid, "--turn", PROMPT_1, "--no-close")
+    assert slipped.code == 0, slipped
+    cue = [line for line in slipped.out.splitlines() if "is not cited" in line]
+    assert cue and f"prompt {PROMPT_3} of {T3}" in cue[0] and "--context-turn" in cue[0]
+    assert f"here prompt {PROMPT_1}" in cue[0]
+    other, other_cid = _criterion(kyo)
+    latest = kyo("confirm", other, "--criterion", other_cid, "--turn", PROMPT_3, "--no-close")
+    assert latest.code == 0 and "is not cited" not in latest.out
+    _third, third_cid = _criterion(kyo)
+    both = kyo(
+        "verify", third_cid, "--verdict", "met", "--method", "human-observed",
+        "--turn", PROMPT_1, "--turn", PROMPT_3,
+    )  # fmt: skip
+    assert both.code == 0 and "is not cited" not in both.out
+
+
+def test_kyo914_a_context_turn_that_is_the_approval_or_later_is_refused(
+    kyo, talked: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, cid = _criterion(kyo)
+    line = ("verify", cid, "--verdict", "met", "--method", "human-observed")
+    itself = kyo(*line, "--context-turn", PROMPT_3)
+    assert itself.code == 64 and "is the approving turn" in itself.err
+    later = kyo(*line, "--turn", PROMPT_1, "--context-turn", PROMPT_3)
+    assert later.code == 64 and "later than the approving turn" in later.err
+    assert kyo("show", record, "--json").json["credits"] == []
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    unknown = kyo(*line, "--context-turn", PROMPT_1)
+    assert unknown.code == 64 and "name the approving turn with --turn" in unknown.err
+    done = kyo(*line, "--turn", PROMPT_3, "--context-turn", PROMPT_1)
+    assert done.code == 0, done
+    assert [t["turn"] for t in _credit(kyo, record)["turns"]] == ["p-1", "p-3"]
+
+
+def test_kyo914_a_credit_written_in_this_turn_is_corrected_without_a_basis(
+    kyo, talked: Path
+) -> None:
+    """c3: the slip KYO-914 met, caught at once: the confirmation cited the earlier turn as
+    the approval, and the correction replaces it, keeping it readable as superseded."""
+    record, cid = _criterion(kyo)
+    assert kyo("confirm", record, "--criterion", cid, "--turn", PROMPT_1, "--no-close").code == 0
+    slip = _credit(kyo, record)
+    assert slip["source_turn"] == "p-1"
+    fixed = kyo("credit", "--supersede", slip["id"], "--context-turn", PROMPT_1, "--json")
+    assert fixed.code == 0, fixed
+    assert fixed.json["correction"] is True and fixed.json["basis_id"] is None
+    shown = kyo("show", record, "--json").json["credits"]
+    old = next(c for c in shown if c["id"] == slip["id"])
+    new = next(c for c in shown if c["id"] == fixed.json["credit_id"])
+    assert old["superseded_by"] == new["id"] and old["source_turn"] == "p-1"
+    assert [(t["role"], t["turn"]) for t in new["turns"]] == [
+        ("context", "p-1"), ("approval", "p-3"),
+    ]  # fmt: skip
+    assert [s["id"] for s in new["subjects"]] == [s["id"] for s in old["subjects"]]
+    # The correction stands in for the live credit, so it is not read as reconstructed.
+    assert new["created_at"] == old["created_at"] and new["basis_id"] is None
+    assert "reconstructed" not in kyo("show", record).out
+    text = kyo("credit", "--supersede", new["id"], "--context-turn", PROMPT_1).out
+    assert f"corrects {new['id']}" in text and "since the person's previous turn" in text
+
+
+def test_kyo914_outside_the_window_a_replacement_still_needs_a_basis(
+    kyo, talked: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, cid = _criterion(kyo)
+    assert kyo("confirm", record, "--criterion", cid, "--turn", PROMPT_1, "--no-close").code == 0
+    slip = _credit(kyo, record)
+    other_session = "9d9d9d9d-2222-4a2b-9c3d-0123456789ab"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", other_session)
+    elsewhere = kyo("credit", "--supersede", slip["id"], "--turn", PROMPT_3, "--session", SESSION)
+    assert elsewhere.code == 2, elsewhere
+    assert credits.CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS in elsewhere.err
+    assert f"this command runs in session {other_session}" in elsewhere.err
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    # The person speaks twice after the credit was written: it is two turns old.
+    append_transcript([person("p-5", PROMPT_5, "next thing", LATER_1)])
+    prompt_hook(kyo, PROMPT_5)
+    append_transcript([person("p-6", PROMPT_4, "and another", LATER_2)])
+    prompt_hook(kyo, PROMPT_4)
+    late = kyo("credit", "--supersede", slip["id"], "--turn", PROMPT_3)
+    assert late.code == 2, late
+    assert credits.CONTRACT_RECONSTRUCTED_CREDIT_REQUIRES_BASIS in late.err
+    assert "before the person's previous turn" in late.err and PROMPT_5 in late.err
+    assert _credit(kyo, record)["superseded_by"] is None
+    basis = kyo(
+        "new", "decision", "--title", "Correct the credit", "--outcome", "unprompted",
+        "--turn", PROMPT_4, "--json",
+    ).json["credit_id"]  # fmt: skip
+    done = kyo("credit", "--supersede", slip["id"], "--turn", PROMPT_3, "--basis", basis, "--json")
+    assert done.code == 0, done
+    assert done.json["correction"] is False and done.json["basis_id"] == basis

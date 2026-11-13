@@ -128,6 +128,11 @@ class _Quote:
             self.text = from_turns
             self.flag = [
                 part for ref in credits.turn_refs_of(args) for part in ("--turn", ref)
+            ] + [
+                # KYO-914: the context turns beside the latest, as they were given.
+                part
+                for ref in credits.context_refs_of(args)
+                for part in ("--context-turn", ref)
             ]
             self.source = "the transcript"
         elif quote_file is not None:
@@ -510,8 +515,9 @@ def _credit_flags(credit: credits.Credit | None) -> list[str]:
 
 def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     """``kyo confirm <record> [--turn ID ... | --quote TEXT | --quote-file FILE]
-    [--criterion ...] [--gate GID] [--no-close]`` — KYO-494. With no words given, they are
-    copied from the person's turn (KYO-900): the turns ``--turn`` names, or their latest.
+    [--context-turn ID ...] [--criterion ...] [--gate GID] [--no-close]`` — KYO-494. With no
+    words given, they are copied from the person's turn (KYO-900): the turns ``--turn``
+    names, or their latest, beside any ``--context-turn`` names as context (KYO-914).
 
     1. Resolve, writing nothing: retired record, running dispatch, the in-scope
        human gate, the targets — each refusal its own contract, with ready lines.
