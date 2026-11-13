@@ -43,8 +43,8 @@ import { moveLines, sectionEnd } from "./outline";
 import { Transaction } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import {
-  type LineMarks, createEditor, lineOfId, marksOf as lineMarks, placeItem, refreshMarks, removeEffect, removeItem,
-  showLanding,
+  type FoldedLine, type LineMarks, createEditor, foldedLines, lineOfId, marksOf as lineMarks, placeItem, refreshMarks,
+  removeEffect, removeItem, showLanding,
 } from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
@@ -1760,6 +1760,10 @@ const kyo = {
       editor.focus();
       editor.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
     },
+    /** The lines (counted from 0) of box `index` whose sections are folded (KYO-913). */
+    folds(index: number): number[] {
+      return foldedLines(editors()[index].state).map((fold) => fold.line);
+    },
     /** Where position `pos` of box `index` is drawn, as the editor's `coordsAtPos` gives it. */
     coords(index: number, pos: number): { left: number; top: number } | null {
       const rect = editors()[index].coordsAtPos(pos, 1);
@@ -2296,6 +2300,12 @@ function marksOf(editor: EditorView): LineMarks<Item> {
 
 /** Each box's id (KYO-798), which it keeps for as long as it is a draft on any device. */
 const boxIds = new WeakMap<EditorView, string>();
+/**
+ * KYO-913: the lines folded in each box, by the box's id, so that a box drawn again (by a
+ * merge that changed it, or by Send to prompt) folds them again. Folds are this window's and
+ * are not saved in the draft: the draft's shape, and its merge between devices, are unchanged.
+ */
+const foldsById = new Map<string, FoldedLine[]>();
 let openMark: { editor: EditorView; id: number } | null = null;
 const markPanel = document.createElement("div");
 markPanel.className = "mark-panel";
@@ -2348,15 +2358,20 @@ function itemIcon(item: Item): keyof typeof ICONS {
   return item.kind === "record" ? "records" : item.kind === "path" ? "page" : item.kind;
 }
 
-/** A paragraph's mark in the gutter: one thing shows as what it is, and several as their number. */
-function drawMark(editor: EditorView, id: number, items: Item[]): HTMLElement {
-  const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(editor, id));
-  if (items.length === 1) mark.append(icon(itemIcon(items[0])));
-  mark.title = items.map((item) => (item.kind === "tag" ? `#${item.name}`
+/** What a paragraph's mark holds, one line for each thing: its title, and a fold's (KYO-913). */
+function markTitle(items: Item[]): string {
+  return items.map((item) => (item.kind === "tag" ? `#${item.name}`
     : item.kind === "file" ? `attached: ${item.name}`
     : item.kind === "anchor" && !anchorOpens(item.session, menu?.current)
       ? `anchor: ${item.words} (${sessionRuns(item.session) ? "another session" : "session ended"})`
     : `anchor: ${item.words}`)).join("\n");
+}
+
+/** A paragraph's mark in the gutter: one thing shows as what it is, and several as their number. */
+function drawMark(editor: EditorView, id: number, items: Item[]): HTMLElement {
+  const mark = boxButton("mark held", items.length > 1 ? String(items.length) : "", () => showMark(editor, id));
+  if (items.length === 1) mark.append(icon(itemIcon(items[0])));
+  mark.title = markTitle(items);
   return mark;
 }
 
@@ -2387,8 +2402,9 @@ function boxUpdated(update: ViewUpdate): void {
 /**
  * While no box of the composer has the caret, an arrow in the gutter marks the paragraph an
  * anchor or an attachment made now would land on: the caret's paragraph of the box last
- * typed in, as `showAnchorMenu` chooses it. It stands over whatever mark that paragraph
- * holds, since without the caret nothing else says where the next one goes.
+ * typed in, as `showAnchorMenu` chooses it. The editor draws it in the fold gutter, beside
+ * whatever mark that paragraph holds and no longer over it (KYO-913), since without the caret
+ * nothing else says where the next one goes.
  */
 function drawLanding(): void {
   const all = editors();
@@ -3574,7 +3590,16 @@ function sendToPrompt(editor: EditorView, line: number): void {
   hideMark();
   const from = savedBox(editor);
   const to = savedBox(main);
-  const moved = moveLines(from, to, line, sectionEnd(textOf(editor), line));
+  const end = sectionEnd(textOf(editor), line);
+  const moved = moveLines(from, to, line, end);
+  // KYO-913: the section's folds go with it, and the folds below it move up.
+  const folds = foldsById.get(from.id) ?? [];
+  const lines = moved.target.text.split("\n");
+  const start = lines.length - (end - line);
+  foldsById.set(from.id, folds.filter((fold) => fold.line < line || fold.line >= end)
+    .map((fold) => (fold.line >= end ? { ...fold, line: fold.line - (end - line) } : fold)));
+  foldsById.set(to.id, [...(foldsById.get(to.id) ?? []), ...folds.filter((fold) => fold.line >= line && fold.line < end)
+    .map((fold) => ({ line: start + fold.line - line, text: lines[start + fold.line - line] }))]);
   const scratch = from.scratch ?? { heading: "" };
   const emptied = !moved.source.text.trim() && !moved.source.marks?.length && !scratch.heading;
   const old = boxOf(editor);
@@ -3647,6 +3672,14 @@ function addBox(
     // A paste is sent as a paste.
     onPaste: (view, pastedText) => pasted.set(view, [...(pasted.get(view) ?? []), pastedText]),
     onUpdate: boxUpdated,
+    // KYO-913: a fold's placeholder titles what its hidden marks hold, and the box's folds are
+    // kept by its id, so that the box drawn again folds them again.
+    describeItems: markTitle,
+    folds: foldsById.get(id),
+    onFolds: (_view, lines) => {
+      if (lines.length) foldsById.set(id, lines);
+      else foldsById.delete(id);
+    },
     extensions: [showAbovePrompt],
   });
   boxIds.set(editor, id);
@@ -3668,6 +3701,7 @@ function addBox(
     }
     disarm();
     const wasPrompt = !scratchOf.has(editor);
+    foldsById.delete(id);
     box.remove();
     ensureMain();
     // The prompt that was deleted leaves an empty one, which takes the caret.
