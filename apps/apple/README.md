@@ -340,8 +340,8 @@ same keys, and a stored value is read before a registered one, so a choice made 
 kept. Smart quotes, smart dashes and text replacement have their own keys and still follow
 the system-wide settings. A box of the composer is an editor whose text is in a
 `contenteditable` element marked `spellcheck="true"` (KYO-910), so WebKit checks it as it
-checked the text area, and nothing in the page handles a right-click on its words, so the
-menu keeps the checker's suggestions. `Tests/KyoseiMacTests` builds the web view without a
+checked the text area, and the page does not cancel a right-click on its words, so the menu
+keeps the checker's suggestions. `Tests/KyoseiMacTests` builds the web view without a
 window and checks the keys and that text typed into such an element is left as typed.
 
 A file dragged onto a box from the Finder is handled in two parts. The page attaches an image
@@ -349,6 +349,14 @@ or a PDF to the paragraph it fell on. The editor inserts no other file's content
 inserts no path into it, so `ChatPage.performDragOperation` reads the paths of the other
 files from the drag and hands them to the page with the point of the drop
 (`window.kyo.dropPaths`), which inserts them, one to a line, where they fell.
+
+WebKit's menu on a box's words gains Indent and Outdent at its top, above the spelling
+suggestions and WebKit's other items (KYO-912). On every right-click the page posts a
+`composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
+`ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
+`window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
+nothing when no box has the focus. `web/test/composermenu.test.ts` checks the page's part in
+headless Chrome; the menu itself is seen only in the app.
 
 ## Views
 
