@@ -174,8 +174,8 @@ def test_no_schema_bump_ships_with_this() -> None:
     # note's sent state). The bump to 32 is KYO-658's (a discussion's turn references).
     # The bump to 33 is KYO-663's (a credit's span_seal). The bump to 34 is KYO-661's (the
     # prompt a dispatch answered). The bump to 35 is KYO-882's (a closing reference's
-    # outcome).
-    assert SCHEMA_VERSION == 35
+    # outcome). The bump to 36 is KYO-900's (the turns a credit cites).
+    assert SCHEMA_VERSION == 36
 
 
 # ------------------------------------------------------------------------- c7, c8

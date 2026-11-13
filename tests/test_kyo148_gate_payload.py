@@ -487,6 +487,7 @@ def test_the_eliding_rule_is_shared_rather_than_copied() -> None:
     text = Path(render.__file__).read_text(encoding="utf-8")
     assert text.count("def elided_first_line(") == 1, "one definition"
     # The definition plus `claims_beside_gate`, `show_text`, `brief_text`'s gated section
-    # and its carried section (KYO-497), and a credit's quote in `kyo show` (KYO-647). If
-    # another surface starts eliding, raise this number — do not inline the rule there.
-    assert text.count("elided_first_line(") == 6, "one definition, five call sites"
+    # and its carried section (KYO-497), a credit's quote in `kyo show` (KYO-647), and
+    # each turn a credit cites (KYO-900). If another surface starts eliding, raise this
+    # number — do not inline the rule there.
+    assert text.count("elided_first_line(") == 7, "one definition, six call sites"

@@ -60,11 +60,11 @@ format held: a closing with a produced record, or with a reason stored under the
 **The Stop check is retired (KYO-899).** KYO-662 ran `kyo discuss check --hook` at each
 `Stop` and, from KYO-876, at each `UserPromptSubmit`, to mark a turn that put a choice to
 the person and have the agent open a discussion or dismiss the turn with `kyo discuss
-skip`. The packaged hooks no longer run it. Both commands remain so that a project's own
+skip`. The packaged hooks do not run it. Both commands remain so that a project's own
 copy of the hooks keeps working: `kyo discuss check --hook` prints nothing, writes nothing
 and exits 0, and `kyo discuss skip` writes nothing and says in one line that the check is
 retired. `kyo install-hooks` removes the line from a project's copy, and until then `kyo
-doctor` names it in a notice. `kyo doctor` no longer prints the weekly shares of decisions
+doctor` names it in a notice. `kyo doctor` does not print the weekly shares of decisions
 opened live, late and unindexed. It still reports as a problem a session that recorded two
 or more Stops, the last later than every line of the turn index, with no line of its own,
 which means the hooks that write the index did not run.
