@@ -508,6 +508,15 @@ def _pointer(
     )
 
 
+def _without_block(lines: list[str], block: list[str]) -> list[str]:
+    """``lines`` with the first run of ``block``, line for line, taken out."""
+    if block:
+        for start in range(len(lines) - len(block) + 1):
+            if lines[start : start + len(block)] == block:
+                return lines[:start] + lines[start + len(block) :]
+    return lines
+
+
 def _credit_flags(credit: credits.Credit | None) -> list[str]:
     """The flags naming ``credit`` to a composed step; none where no person is declared."""
     return credit.flags() if credit is not None else []
@@ -718,9 +727,9 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         f"confirmed {record_id}: {observed}, written by {ctx.actor}, with the words in "
         f"{quote.source} ({quote.chars} chars, sha256:{quote.sha256})"
     ]
-    if credit_id:
-        # KYO-900: each cited turn's time and first line, so a wrong turn is seen at once.
-        lines += credits.turn_lines(store, credit_id, credit)
+    # KYO-900: each cited turn's time and first line, so a wrong turn is seen at once.
+    shown_turns = credits.turn_lines(store, credit_id, credit) if credit_id else []
+    lines += shown_turns
     if not complete:
         lines.append(
             _incomplete_line(
@@ -773,7 +782,8 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     for n, step in enumerate(steps, start=1):
         suffix = "  — REFUSED" if step.refused else ""
         lines.append(_step_head(f"[{n}/{len(steps)}] {step.command}" + suffix, step))
-        lines += receipt.indented("  ", step.lines)
+        # The step that wrote the credit echoes the same turns; they are shown once, above.
+        lines += receipt.indented("  ", _without_block(step.lines, shown_turns))
     for item in gates_left:
         lines.append(f"left open: {item['gate_id']} ({item['gate_type']}) — {item['why']}")
     if close:

@@ -732,7 +732,11 @@ def test_kyo914_the_receipt_says_when_turn_left_the_latest_turn_uncited(
     slipped = kyo("confirm", record, "--criterion", cid, "--turn", PROMPT_1, "--no-close")
     assert slipped.code == 0, slipped
     cue = [line for line in slipped.out.splitlines() if "is not cited" in line]
-    assert cue and f"prompt {PROMPT_3} of {T3}" in cue[0] and "--context-turn" in cue[0]
+    # The headline shows the cited turns; the verify step that wrote the credit does not
+    # repeat them.
+    assert len(cue) == 1, slipped.out
+    assert slipped.out.count("turns cited (1)") == 1, slipped.out
+    assert f"prompt {PROMPT_3} of {T3}" in cue[0] and "--context-turn" in cue[0]
     assert f"here prompt {PROMPT_1}" in cue[0]
     other, other_cid = _criterion(kyo)
     latest = kyo("confirm", other, "--criterion", other_cid, "--turn", PROMPT_3, "--no-close")
