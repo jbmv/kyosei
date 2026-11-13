@@ -284,9 +284,9 @@ final class ChatPage: WKWebView {
 
     // MARK: Quick Look on an image (KYO-883)
 
-    /// WebKit's menu gains Indent and Outdent when the right-click was on a box's words
-    /// (KYO-912), and Quick Look for an image (KYO-883); the page says which. WebKit's own
-    /// items stay, and a misspelled word's suggestions stay above the added ones (KYO-918).
+    /// On a box's words the menu is rebuilt: the spelling suggestions, Indent and Outdent
+    /// (KYO-912), and Cut, Copy and Paste (KYO-918). Elsewhere WebKit's menu stays and gains
+    /// Quick Look for an image (KYO-883). The page says which right-click it was.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         if composerMenu {
@@ -294,29 +294,71 @@ final class ChatPage: WKWebView {
             let indent = NSMenuItem(title: "Indent", action: #selector(indentChosen), keyEquivalent: "")
             let outdent = NSMenuItem(title: "Outdent", action: #selector(outdentChosen), keyEquivalent: "")
             [indent, outdent].forEach { $0.target = self }
-            // KYO-918: a misspelled word's suggestions, with Ignore and Learn, open the menu
-            // and stay first, since they are what the person most often comes for; the two
-            // items follow them. With no such items they are the menu's first.
-            let spelling: Set<String> = [
-                "WKMenuItemIdentifierSpellingGuess", "WKMenuItemIdentifierNoGuessesFound",
-                "WKMenuItemIdentifierIgnoreSpelling", "WKMenuItemIdentifierLearnSpelling",
-                "WKMenuItemIdentifierIgnoreGrammar",
+            // KYO-918: on a box's words the menu is the misspelled word's suggestions with
+            // Ignore and Learn, then Indent and Outdent, then Cut, Copy and Paste, and nothing
+            // else of WebKit's. The suggestions carry no identifier this code can rely on, so
+            // they are taken by their place: the groups of items, as the separators divide
+            // them, that stand before the first group holding an item known not to be one or
+            // a submenu. The spelling settings stay in the Edit menu's Spelling and Grammar.
+            func name(_ item: NSMenuItem) -> String { item.identifier?.rawValue ?? "" }
+            let clipboardNames: Set<String> = [
+                "WKMenuItemIdentifierCut", "WKMenuItemIdentifierCopy", "WKMenuItemIdentifierPaste",
             ]
-            var at = 0
-            while at < menu.items.count,
-                menu.items[at].isSeparatorItem
-                    || spelling.contains(menu.items[at].identifier?.rawValue ?? "")
-            { at += 1 }
-            // A menu that only begins with a separator has no suggestions to keep first.
-            if !menu.items.prefix(at).contains(where: { !$0.isSeparatorItem }) { at = 0 }
-            if at > 0, !menu.items[at - 1].isSeparatorItem {
-                menu.insertItem(.separator(), at: at)
-                at += 1
+            let otherNames = clipboardNames.union([
+                "WKMenuItemIdentifierLookUp", "WKMenuItemIdentifierTranslate",
+                "WKMenuItemIdentifierSearchWeb", "WKMenuItemIdentifierSpellingMenu",
+                "WKMenuItemIdentifierSubstitutionsMenu", "WKMenuItemIdentifierTransformationsMenu",
+                "WKMenuItemIdentifierSpeechMenu", "WKMenuItemIdentifierShareMenu",
+                "WKMenuItemIdentifierFontMenu", "WKMenuItemIdentifierWritingDirectionMenu",
+                "WKMenuItemIdentifierInspectElement", "WKMenuItemIdentifierReload",
+            ])
+            var groups: [[NSMenuItem]] = [[]]
+            for item in menu.items {
+                if item.isSeparatorItem { groups.append([]) } else { groups[groups.count - 1].append(item) }
             }
-            menu.insertItem(indent, at: at)
-            menu.insertItem(outdent, at: at + 1)
-            if menu.items.count > at + 2, !menu.items[at + 2].isSeparatorItem {
-                menu.insertItem(.separator(), at: at + 2)
+            groups.removeAll { $0.isEmpty }
+            var suggestions: [[NSMenuItem]] = []
+            // An item's name is checked first and its English title second, since the names
+            // WebKit gives its items are not documented; the maintainer's menu is in English.
+            let otherTitles = ["Look Up", "Translate", "Search with", "Search With"]
+            let clipboardTitles: Set<String> = ["Cut", "Copy", "Paste"]
+            func isClipboard(_ item: NSMenuItem) -> Bool {
+                clipboardNames.contains(name(item)) || clipboardTitles.contains(item.title)
+            }
+            for group in groups {
+                if group.contains(where: { item in
+                    otherNames.contains(name(item)) || item.hasSubmenu || isClipboard(item)
+                        || otherTitles.contains(where: { item.title.hasPrefix($0) })
+                }) { break }
+                suggestions.append(group)
+            }
+            let clipboard = menu.items.filter(isClipboard)
+            if clipboard.isEmpty {
+                // Cut, Copy and Paste were not found by name, so WebKit's items are not known
+                // well enough to drop any: the two items go after the suggestions and all stay.
+                var at = 0
+                for group in suggestions {
+                    at = (menu.items.firstIndex(of: group[group.count - 1]) ?? at - 1) + 1
+                }
+                if at > 0 {
+                    menu.insertItem(.separator(), at: at)
+                    at += 1
+                }
+                menu.insertItem(indent, at: at)
+                menu.insertItem(outdent, at: at + 1)
+                if menu.items.count > at + 2, !menu.items[at + 2].isSeparatorItem {
+                    menu.insertItem(.separator(), at: at + 2)
+                }
+            } else {
+                menu.removeAllItems()
+                for group in suggestions {
+                    group.forEach { menu.addItem($0) }
+                    menu.addItem(.separator())
+                }
+                menu.addItem(indent)
+                menu.addItem(outdent)
+                menu.addItem(.separator())
+                clipboard.forEach { menu.addItem($0) }
             }
         }
         let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]

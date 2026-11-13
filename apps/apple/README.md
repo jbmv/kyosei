@@ -386,9 +386,12 @@ inserts no path into it, so `ChatPage.performDragOperation` reads the paths of t
 files from the drag and hands them to the page with the point of the drop
 (`window.kyo.dropPaths`), which inserts them, one to a line, where they fell.
 
-WebKit's menu on a box's words gains Indent and Outdent (KYO-912). A misspelled word's
-suggestions, with Ignore and Learn, stay first and the two items follow them (KYO-918); with
-no suggestions the two items are the menu's first, above WebKit's other items. On every right-click the page posts a
+The menu on a box's words is rebuilt from WebKit's (KYO-912, KYO-918): a misspelled word's
+suggestions with Ignore and Learn, then Indent and Outdent, then Cut, Copy and Paste. WebKit's
+other items, which suit a web page more than a prompt, are left out there. The suggestions
+are taken by their place, as the groups before the first one that holds Look Up, Cut or a
+submenu, because WebKit's names for its items are not documented; if Cut, Copy and Paste are
+not found, nothing is left out and the two items follow the suggestions. On every right-click the page posts a
 `composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
 `ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
 `window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
