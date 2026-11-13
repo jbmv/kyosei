@@ -86,3 +86,42 @@ test("each line is in the sections of the headings above it, outermost first, as
   }
   assert.deepEqual(headingSections("no headings\n- here"), [[], []]);
 });
+
+test("two blank lines in a row end every section above them, and the lines after are in none (KYO-923.c1)", () => {
+  const text = [
+    "# one",         // 0
+    "## inner",      // 1
+    "words",         // 2
+    "",              // 3: one blank line is still inside the sections
+    "more",          // 4
+    "",              // 5: the first of two blank lines ends both sections
+    "",              // 6
+    "after",         // 7: in no section
+    "- item",        // 8
+    "# two",         // 9
+    "last",          // 10
+  ].join("\n");
+  assert.equal(sectionEnd(text, 0), 5);
+  assert.equal(sectionEnd(text, 1), 5);
+  assert.equal(sectionEnd(text, 9), 11);
+  assert.deepEqual(headingSections(text), [[0], [0, 1], [0, 1], [0, 1], [0, 1], [], [], [], [], [9], [9]]);
+  // A line of spaces counts as blank, and a nested list does not run on past the break.
+  assert.equal(sectionEnd("# h\na\n  \n\t\nb", 0), 2);
+  assert.equal(sectionEnd("- a\n  - b\n\n\n  - c", 0), 2);
+  // A heading with the break right under it holds only itself.
+  assert.equal(sectionEnd("# h\n\n\nwords", 0), 1);
+});
+
+test("a line of three or more hyphens is a rule, which ends every section above it (KYO-923.c2)", () => {
+  const rules = (text: string) => lineShapes(text).map((shape) => shape.rule);
+  assert.deepEqual(rules("---\n-----\n   ---  \n--\n- - -\n    ---\n----a\n# ---\n- ---"),
+    [true, true, true, false, false, false, false, false, false]);
+  const text = "# one\n## inner\nwords\n\n---\nafter\n# two\n---";
+  assert.equal(sectionEnd(text, 0), 3, "the blank line before the rule is left behind");
+  assert.equal(sectionEnd(text, 1), 3);
+  assert.equal(sectionEnd(text, 6), 7);
+  assert.deepEqual(headingSections(text), [[0], [0, 1], [0, 1], [], [], [], [6], []]);
+  // A list item stops at a rule too, and the rule line itself is a section of one line.
+  assert.equal(sectionEnd("- a\n  - b\n  ---\n  - c", 0), 2);
+  assert.equal(sectionEnd(text, 4), 5);
+});

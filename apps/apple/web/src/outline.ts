@@ -12,9 +12,13 @@ export interface LineShape {
   depth: number;
   /** 1 to 6 for a line that begins with that many `#` and a space; 0 otherwise. */
   heading: number;
+  /** Whether the line is three or more hyphens alone, which is drawn as a rule (KYO-923). */
+  rule: boolean;
 }
 
 const HEADING = /^(#{1,6})\s+\S/;
+/** Markdown's thematic break in hyphens: up to three spaces, three or more `-`, nothing else. */
+const RULE = /^ {0,3}-{3,}[ \t]*$/;
 
 function indentOf(line: string): number {
   let columns = 0;
@@ -37,6 +41,7 @@ export function lineShapes(text: string): LineShape[] {
   const shapes = lines.map((line, index): LineShape => ({
     depth: blank[index] ? 0 : indentOf(line),
     heading: HEADING.exec(line)?.[1].length ?? 0,
+    rule: RULE.test(line),
   }));
   for (let index = 0; index < lines.length; index++) {
     if (!blank[index]) continue;
@@ -51,10 +56,21 @@ export function lineShapes(text: string): LineShape[] {
 }
 
 /**
+ * Whether a section break stands at line `at` of `lines` (KYO-923): a rule, or the first of
+ * two blank lines in a row. The break is the composer's, not markdown's, and changes nothing
+ * that is sent; it only ends the sections above it.
+ */
+function breaksAt(lines: readonly string[], at: number): boolean {
+  return RULE.test(lines[at]) || (lines[at].trim() === "" && at + 1 < lines.length && lines[at + 1].trim() === "");
+}
+
+/**
  * The line after the section that begins at `line` (KYO-904): a heading's section runs to the
  * next heading of its level or above, and any other line's to the next line that is not
- * indented more deeply than it, so a list item is taken with the items nested in it. Blank
- * lines at the section's end are left behind.
+ * indented more deeply than it, so a list item is taken with the items nested in it. A
+ * section break, which is two blank lines in a row or a line of three or more hyphens, ends
+ * every section above it (KYO-923), so the lines after it belong to none. Blank lines at the
+ * section's end are left behind.
  */
 export function sectionEnd(text: string, line: number): number {
   const lines = text.split("\n");
@@ -63,9 +79,9 @@ export function sectionEnd(text: string, line: number): number {
   if (!first) return line;
   let end = line + 1;
   if (first.heading) {
-    while (end < lines.length && !(shapes[end].heading && shapes[end].heading <= first.heading)) end++;
+    while (end < lines.length && !(shapes[end].heading && shapes[end].heading <= first.heading) && !breaksAt(lines, end)) end++;
   } else {
-    while (end < lines.length && !shapes[end].heading
+    while (end < lines.length && !shapes[end].heading && !breaksAt(lines, end)
       && (shapes[end].depth > first.depth || (lines[end].trim() === "" && shapes[end].depth >= first.depth && first.depth > 0)
         || (lines[end].trim() === "" && end + 1 < lines.length && shapes[end + 1].depth > first.depth && !shapes[end + 1].heading))) end++;
   }
@@ -77,7 +93,7 @@ export function sectionEnd(text: string, line: number): number {
  * For each line of `text`, the headings whose sections hold it, outermost first, each by the
  * line it is on (KYO-917). A heading's section is the one `sectionEnd` gives, which folding
  * and Send to prompt use too, so the heading's own line is in it and the blank lines at its
- * end are not. Sections nest, since a heading's ends at the next heading of its level or above,
+ * end are not, and a section break ends it (KYO-923). Sections nest, since a heading's ends at the next heading of its level or above,
  * so the list is each line's chain of sections from the outermost in. A line before the first
  * heading is in none.
  */
