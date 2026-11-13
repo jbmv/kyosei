@@ -70,7 +70,6 @@ test("a box holds its text, and the keys leave exactly the text they make (KYO-9
 test("Tab and Shift-Tab move every touched line, keep the focus and are one undo step each (KYO-909.c3)", async (t) => {
   if (!page) return t.skip("no Chrome here");
   const opened = await box("- a\n\n- b\n3. c\nlast");
-  await opened.type("");
   // A selection from inside the first line to the start of the last takes the lines between.
   await opened.run("ed.select(1, 13)");
   await opened.press("Tab");
