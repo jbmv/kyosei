@@ -366,3 +366,73 @@ test("the saved draft and the posted prompt are, field by field, those the text 
   }
   assert.deepEqual(Object.keys(sent).sort(), Object.keys(SENT_BY_TEXT_AREA).sort());
 });
+
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+test("a file pasted or dropped is attached to its paragraph as an undo step, and a path the app hands over is typed where it fell (KYO-910)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  await opened.type("first");
+  await opened.press("Enter", 0, "insertNewline");
+  await opened.type("second");
+  const file = (name: string, type: string) => `new File([Uint8Array.from(atob(${JSON.stringify(PNG)}), (c) => c.charCodeAt(0))], ${JSON.stringify(name)}, { type: ${JSON.stringify(type)} })`;
+  // A pasted image goes to the caret's paragraph, the second, and no text is inserted.
+  await opened.run(`(() => {
+    const data = new DataTransfer();
+    data.items.add(${file("shot.png", "image/png")});
+    document.activeElement.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  })()`);
+  await opened.run(`new Promise((done) => setTimeout(done, 200))`);
+  const attach = await opened.run<{ ref: string; name: string }[]>(
+    `window.posted.filter((m) => m.name === "attach").map((m) => ({ ref: m.body.ref, name: m.body.name }))`);
+  assert.deepEqual(attach.map((body) => body.name), ["shot.png"]);
+  await opened.run(`window.kyo.attached({ ref: ${JSON.stringify(attach[0].ref)}, id: "f1", path: "/tmp/shot.png" })`);
+  assert.deepEqual(await shown(opened), {
+    highlighted: [], bars: [], boxes: [{ text: "first\nsecond", anchors: ["attached: shot.png"] }],
+  });
+  const lines = `[...document.querySelectorAll("#boxes .mark.held")].map((mark) => {
+    const top = mark.getBoundingClientRect().top;
+    return [...document.querySelectorAll("#boxes .cm-line")].findIndex((line) => {
+      const box = line.getBoundingClientRect();
+      return top >= box.top - 2 && top < box.bottom;
+    });
+  })`;
+  assert.deepEqual(await opened.run(lines), [1]);
+  // The attaching is a step of the box's history: Command-Z takes it back, and the text stays.
+  await undo(opened);
+  assert.deepEqual((await shown(opened)).boxes, [{ text: "first\nsecond", anchors: [] }]);
+  await redo(opened);
+  assert.deepEqual((await shown(opened)).boxes, [{ text: "first\nsecond", anchors: ["attached: shot.png"] }]);
+
+  // A drop of an image and a Markdown file on the first paragraph attaches the image there and
+  // inserts nothing: the Markdown file's path is the app's to hand over.
+  await opened.run(`(() => {
+    const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
+    const data = new DataTransfer();
+    data.items.add(${file("drawn.png", "image/png")});
+    data.items.add(new File(["# notes"], "notes.md", { type: "text/markdown" }));
+    document.querySelector("#boxes .cm-content").dispatchEvent(new DragEvent("drop", {
+      dataTransfer: data, bubbles: true, cancelable: true, clientX: line.left + 20, clientY: line.top + line.height / 2,
+    }));
+  })()`);
+  await opened.run(`new Promise((done) => setTimeout(done, 200))`);
+  const names = await opened.run<string[]>(`window.posted.filter((m) => m.name === "attach").map((m) => m.body.name)`);
+  assert.deepEqual(names, ["shot.png", "drawn.png"]);
+  assert.deepEqual(await opened.run(lines), [0, 1]);
+  assert.equal((await shown(opened)).boxes[0].text, "first\nsecond");
+
+  // The app hands over the path with the point of the drop: past the end of the first line.
+  const point = await opened.run<{ x: number; y: number }>(`(() => {
+    const at = window.kyo.composer.coords(0, 5);
+    return { x: at.left + 40, y: at.top + 4 };
+  })()`);
+  await opened.run(`window.kyo.dropPaths({ paths: ["/Users/someone/notes.md"], x: ${point.x}, y: ${point.y} })`);
+  assert.equal((await shown(opened)).boxes[0].text, "first/Users/someone/notes.md\nsecond");
+  // A drop anywhere but on a box inserts nothing.
+  const chat = await opened.run<{ x: number; y: number }>(`(() => {
+    const box = document.querySelector("#chat .reply p").getBoundingClientRect();
+    return { x: box.left + 10, y: box.top + 5 };
+  })()`);
+  await opened.run(`window.kyo.dropPaths({ paths: ["/Users/someone/other.md"], x: ${chat.x}, y: ${chat.y} })`);
+  assert.equal((await shown(opened)).boxes[0].text, "first/Users/someone/notes.md\nsecond");
+});
