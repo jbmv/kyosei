@@ -13,7 +13,7 @@ import {
   type Transaction,
 } from "@codemirror/state";
 import {
-  Decoration, type DecorationSet, EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter,
+  Decoration, type DecorationSet, EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter, gutters,
   keymap, placeholder,
 } from "@codemirror/view";
 import {
@@ -934,6 +934,10 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
     cuesField,
     history(),
     Prec.high(composerKeys),
+    // The rows wrap, so nothing scrolls sideways, and gutters held fixed would stick to the
+    // left edge of a scrolling box around the editor: the prompt's body, past whose edge the
+    // composer's stylesheet sets the gutters, so that they came to stand over the text.
+    gutters({ fixed: false }),
     folding(options.describeItems ?? ((items: T[]) => `${items.length} ${items.length === 1 ? "item" : "items"}`)),
     foldsGutter(options),
     marksGutter(options),

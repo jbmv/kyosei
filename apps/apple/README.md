@@ -93,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
@@ -288,6 +288,17 @@ semibold. Each is a decoration of its line in the box's editor (KYO-910): the gu
 line's background, so they run down every row it wraps to, and the rows a long item wraps to
 start under its words. None of it changes the text. Which lines are indented and which are
 headings is decided in `web/src/outline.ts`.
+
+A heading's section and a list item's nested lines fold (KYO-913). The section is the one Send
+to prompt moves: a heading's runs to the next heading of its level or above, and an item's
+holds the lines nested under it. A chevron in a narrow gutter left of the marks folds the line
+under the pointer and stays on a folded line to unfold it; Command-Option-[ and
+Command-Option-] fold and unfold the caret's line. A folded section is drawn as a placeholder
+after its first line, which names how many of the hidden lines hold a mark, since their marks
+are not drawn. Folding changes nothing that is saved or sent. The window keeps each box's
+folds while the app runs, also when the box is drawn again after a merge or Send to prompt,
+and they are not saved in the draft. The arrow that marks where the next anchor lands is
+drawn in the same gutter, beside the paragraph's mark.
 
 ### A session's task list
 

@@ -394,16 +394,16 @@ body.terminal-open #jump-bottom { display: none; }
 .box-create:disabled { color: var(--muted); cursor: default; }
 
 .box { position: relative; }
-.box-body { display: flex; }
-
 /* KYO-910: a box's text is an editor (web/src/editor.ts), whose own theme draws its gutters,
    the hanging indent of wrapped rows, the indent guides, the heading rules and the folds. Its
    fold gutter, 12px wide, stands in the box's padding, and its marks gutter after it, so the
-   text starts 24px in from the padding, as the Delete button below it does (KYO-913). */
+   text starts 24px in from the padding, as the Delete button below it does (KYO-913). The
+   body, not the editor, reaches into the padding: the prompt's body scrolls, and would clip
+   what stood past its own edge. */
+.box-body { display: flex; margin-left: -12px; }
 .box .cm-editor {
   flex: 1;
   min-width: 0;
-  margin-left: -12px;
   font: 15px/1.45 -apple-system, system-ui, sans-serif;
   color: var(--text);
 }
