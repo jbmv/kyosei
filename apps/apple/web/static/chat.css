@@ -12,6 +12,7 @@
   --failed: #b3362b;
   --link: #2f62b5;
   --apple-green: #34c759;
+  --amber: #c98a1b;
   /* The bar of views above the top bar (KYO-732). */
   --views-height: 34px;
   /* One pastel for each kind of record, drawn as bare text. */
@@ -40,6 +41,7 @@
     --failed: #e8796e;
     --link: #82aeef;
     --apple-green: #30d158;
+    --amber: #e0a33c;
     --kind-task: #8fb8e8;
     --kind-bug: #eba39b;
     --kind-chore: #b5b4c0;
@@ -145,6 +147,23 @@ a { color: var(--link); }
 }
 
 .tool + .reply, .reply + .tool { margin-top: 12px; }
+
+/* KYO-922: a question asked with AskUserQuestion, drawn whole rather than as a tool row. */
+.question { margin: 12px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.question.waiting { border-color: var(--apple-red); }
+.question-item + .question-item { margin-top: 12px; }
+.question-header { color: var(--muted); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.question-text { margin: 2px 0 6px; font-weight: 600; }
+.question-options { margin: 0; padding-left: 22px; }
+.question-option { margin: 4px 0; }
+.question-option.chosen .question-label { font-weight: 600; }
+.question-description { display: block; color: var(--muted); font-size: 13px; }
+.question-answer { margin-top: 6px; color: var(--muted); }
+.question-state { margin-top: 10px; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; }
+.question-state[hidden] { display: none; }
+.question.waiting .question-state { color: var(--apple-red); font-style: italic; }
+.question-open { font: inherit; font-style: normal; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--background); color: var(--text); cursor: pointer; }
+.question-open:hover { border-color: var(--muted); }
 .tool.failed { color: var(--failed); }
 
 .tool summary {
@@ -916,6 +935,8 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .view-item:hover { color: var(--text); }
 .view-item[aria-current="page"] { color: var(--link); font-weight: 600; }
 .view-item .icon { width: 15px; height: 15px; vertical-align: 0; }
+/* KYO-922: the session waits on the person and nothing runs; amber in every view, Chat's own included. */
+#view-items .view-item.waiting { color: var(--amber); }
 
 .top-part { display: flex; align-items: center; min-width: 0; }
 #top-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

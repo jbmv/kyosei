@@ -1,6 +1,7 @@
 // Run with `npm test`. The line under the composer: what the session is doing, Interrupt
 // while it works, "Waiting for you…" when it is live and idle, and the subagent list a press
-// on its words opens (KYO-921).
+// on its words opens (KYO-921). Also the Chat item of the bar, amber while the session waits
+// on the person (KYO-922).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
@@ -166,6 +167,80 @@ test("the session coming to wait on the person asks the app to bounce its Dock i
   await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   assert.equal(await asked(), 3);
+});
+
+test("a question or a permission prompt in the terminal is a wait on the person: the line is red and the Dock is asked to bounce (KYO-922)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  for (const [state, words] of [
+    ["ask-user-question", "Waiting for your answer in the terminal"],
+    ["permission-prompt", "Waiting for permission in the terminal"],
+  ]) {
+    await page.reload();
+    await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+      window.kyo.screen({ screen: { state: "working" } }); })()`);
+    await page.run(`window.kyo.screen({ screen: { state: "${state}" } })`);
+    const now = await page.run<Status>(status);
+    assert.deepEqual([now.shown, now.idle, now.text, now.interrupt], [true, true, words, false], state);
+    assert.equal(await page.run<string>(`getComputedStyle(document.getElementById("working")).color`), "rgb(255, 59, 48)");
+    const attention = () => page!.run<boolean[]>(`window.posted.filter((p) => p.name === "attention").map((p) => p.body.waiting)`);
+    assert.deepEqual(await attention(), [true], state);
+    // Answered, the session works again and the bounce ends; the turn's end is no second wait
+    // before it.
+    await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+    assert.deepEqual(await attention(), [true, false], state);
+    // A question that follows the wait for the person at the end of a turn is the same wait.
+    await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+    await page.run(`window.kyo.screen({ screen: { state: "${state}" } })`);
+    assert.deepEqual(await attention(), [true, false, true], state);
+  }
+});
+
+interface ChatItem { waiting: boolean; colour: string; amber: string; current: boolean }
+const chatItem = `(() => {
+  const item = document.querySelector('#view-items [data-view-item="chat"]');
+  const probe = document.createElement("span");
+  probe.style.color = "var(--amber)";
+  document.body.append(probe);
+  const amber = getComputedStyle(probe).color;
+  probe.remove();
+  return { waiting: item.classList.contains("waiting"), colour: getComputedStyle(item).color, amber,
+    current: item.getAttribute("aria-current") === "page" };
+})()`;
+
+test("the Chat item of the bar is amber while the live session waits on the person and nothing runs, in every view (KYO-922)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
+  // Before a pane is read, and while the session works, it is as it was.
+  let item = await page.run<ChatItem>(chatItem);
+  assert.equal(item.waiting, false);
+  await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+  item = await page.run<ChatItem>(chatItem);
+  assert.equal(item.waiting, false);
+  assert.notEqual(item.colour, item.amber);
+  // Waiting with Chat shown: amber, though it is the current view.
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  item = await page.run<ChatItem>(chatItem);
+  assert.deepEqual([item.waiting, item.current, item.colour], [true, true, item.amber]);
+  // From another view too, and the bar drawn again keeps it.
+  await page.run(`document.querySelector('#view-items [data-view-item="records"]').click()`);
+  item = await page.run<ChatItem>(chatItem);
+  assert.deepEqual([item.waiting, item.current, item.colour], [true, false, item.amber]);
+  // A question in the terminal is a wait on the person.
+  await page.run(`window.kyo.screen({ screen: { state: "ask-user-question" } })`);
+  assert.equal((await page.run<ChatItem>(chatItem)).waiting, true);
+  // A subagent or a background shell still running is not everything waiting on the person.
+  for (const background of [`{ running: true, shells: 1, agents: [] }`, `{ running: true, shells: 0, agents: [{ type: "w", description: "x" }] }`]) {
+    for (const state of ["idle", "ask-user-question"]) {
+      await page.run(`window.kyo.screen({ screen: { state: "${state}", background: ${background} } })`);
+      assert.equal((await page.run<ChatItem>(chatItem)).waiting, false, `${state} ${background}`);
+    }
+  }
+  await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+  assert.equal((await page.run<ChatItem>(chatItem)).waiting, true);
+  // An ended session waits on no one.
+  await page.run(`(() => { ${session(false)}; })()`);
+  assert.equal((await page.run<ChatItem>(chatItem)).waiting, false);
 });
 
 const AGENT_AT = "2026-11-12T10:00:00.000Z";

@@ -427,6 +427,15 @@ chat stays drawn beneath the others and keeps following its session, so returnin
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
 
+The Chat item is amber, in every view and Chat's own included, while the followed session
+waits on the person and no subagent or background shell runs (KYO-922). The page counts the
+session as waiting when it is live, its pane has been read, and either nothing runs or the
+terminal shows a question or a permission prompt. The same wait makes the line under the
+composer red and has the app keep its Dock icon bouncing while another app is in front, until
+the app comes to the front or the session works again (`DockAttention` in `ChatView.swift`).
+A question asked with `AskUserQuestion` is drawn in the chat from the call's input in the
+transcript, with a button that opens the terminal, where it is answered.
+
 ### Search in a view
 
 <!-- governs:
