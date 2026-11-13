@@ -316,7 +316,8 @@ body.terminal-open #jump-bottom { display: none; }
   color: var(--text);
   font: inherit;
 }
-#agenda-add { margin-left: 21px; }
+/* The add field takes the row's width, so what is typed is not cut off short of the edge. */
+#agenda-add { box-sizing: border-box; width: calc(100% - 21px); margin-left: 21px; }
 #agenda-add::placeholder { color: var(--muted); }
 
 #held { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; background: var(--line); font-size: 13.5px; }
@@ -784,11 +785,11 @@ body.terminal-open #terminal { display: flex; }
 #find { margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; }
 #find[hidden] { display: none; }
 #find-field { width: 200px; }
-/* The count takes room only when it says something, so the arrows stand beside the field; and
-   while the bar is open the last-activity label gives it its room in a narrow window. */
-#find-count:empty { display: none; }
+/* The count keeps one width whatever it says, empty included, so the field and its arrows do
+   not move as the hits change while typing; and while the bar is open the last-activity label
+   gives it its room in a narrow window. */
 #top:has(#find:not([hidden])) #top-activity { display: none; }
-#find-count { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#find-count { flex: none; width: 6.5em; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* An anchor in a sent prompt: the server's line above the paragraph, drawn as a chip. */
 .turn-anchor { display: block; width: fit-content; max-width: 100%; margin: 2px 0; padding: 1px 9px; border-radius: 999px; background: color-mix(in srgb, var(--pastel-blue) 24%, transparent); color: var(--muted); font-size: 0.86em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }

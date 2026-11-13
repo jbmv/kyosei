@@ -344,3 +344,29 @@ test("in the chat of an ended session, which is dimmed, the hits are marked and 
   assert.ok(apart(ended.lit, live.lit) <= 2, `the current hit: ${ended.lit} ended, ${live.lit} live`);
   assert.deepEqual(ended.bare, live.bare);
 });
+
+// 2026-11-13: the field stayed right-aligned while the count beside it grew and shrank, so it
+// jumped as the person typed. The count keeps one width, and the field does not move.
+test("in the chat, the field does not move as the count changes", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = page;
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "t", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
+    ] } });
+    window.kyo.apply({ reset: true,
+      turns: [{ id: "u1", at: "2026-01-01T00:00:00Z", text: "Open a record, with care." }],
+      replies: [{ message_id: "m1", uuid: "x1", at: "2026-01-01T00:00:01Z", text: "a record, a record, a record" }] });
+    window.kyo.find();
+  })()`);
+  const left = () => opened.run<number>(`document.getElementById("find-field").getBoundingClientRect().left`);
+  const empty = await left();
+  const counted = await search(opened, "record");
+  assert.equal(counted.count, "1 of 4");
+  assert.equal(await left(), empty);
+  const none = await search(opened, "zzzz");
+  assert.equal(none.count, "No results");
+  assert.equal(await left(), empty);
+});

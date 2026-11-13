@@ -3776,9 +3776,14 @@ function addBox(
   boxIds.set(editor, id);
   editor.contentDOM.addEventListener("focus", () => { lastEditor = editor; });
   let armed: number | undefined;
+  // A press anywhere but on `Delete?` itself takes the question back at once.
+  const elsewhere = (event: MouseEvent) => {
+    if (event.target !== remove) disarm();
+  };
   const disarm = () => {
     if (armed !== undefined) clearTimeout(armed);
     armed = undefined;
+    document.removeEventListener("mousedown", elsewhere, true);
     remove.textContent = "Delete";
   };
   // A box leaves only by this button (KYO-727): an empty one that closed when the focus left
@@ -3788,6 +3793,7 @@ function addBox(
     if (armed === undefined && (editor.state.doc.length || marksOf(editor).items.size)) {
       remove.textContent = "Delete?";
       armed = window.setTimeout(disarm, 3000);
+      document.addEventListener("mousedown", elsewhere, true);
       return;
     }
     disarm();
@@ -4406,6 +4412,8 @@ let agendaEditing: { id: string; text: string } | null = null;
 let agendaSaving: Change | null = null;
 /** Whether the checked items are drawn; the list opens without them. */
 let agendaShowCompleted = false;
+/** Whether the list is being drawn again, which moves the add field and blurs it. */
+let agendaRedrawing = false;
 
 function agendaItemsNow(): AgendaItem[] {
   return agendaFrame?.state === "shown" ? agendaFrame.items : [];
@@ -4528,7 +4536,13 @@ function drawAgenda(): void {
   }
   agendaAddRow.hidden = !view.canAdd;
   drawn.splice(mineEnd, 0, agendaAddRow);
-  agendaList.replaceChildren(...drawn);
+  // Moving the add field blurs it, which is not the person leaving it.
+  agendaRedrawing = true;
+  try {
+    agendaList.replaceChildren(...drawn);
+  } finally {
+    agendaRedrawing = false;
+  }
   if (adding) {
     agendaAdd.focus();
     agendaAdd.setSelectionRange(adding[0], adding[1]);
@@ -4542,6 +4556,14 @@ function drawAgenda(): void {
     again.setSelectionRange(caret[0], caret[1]);
   }
 }
+
+// Leaving the add field with words in it adds them, as Return does, so that an item typed is
+// not left unsaved (2026-11-13). Switching to another app is not leaving it.
+agendaAdd.addEventListener("blur", () => {
+  if (agendaRedrawing || !document.hasFocus() || !agendaAdd.value.trim()) return;
+  if (agendaSaving?.kind === "add") return;
+  saveAgenda({ kind: "add", text: agendaAdd.value });
+});
 
 agendaAdd.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.isComposing) return;

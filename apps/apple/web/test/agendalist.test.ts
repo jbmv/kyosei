@@ -60,3 +60,34 @@ test("no divider with one group, and no control with nothing checked", async (t)
   assert.deepEqual(await painted(p), ["p1", "p3", "+"]);
   assert.equal((await control(p)).hidden, true);
 });
+
+// 2026-11-13: an item typed and left is added, as Return adds it, so it is not forgotten.
+test("leaving the add field with words in it adds them, and leaving it empty adds nothing", async (t) => {
+  const p = await open((r) => t.skip(r));
+  if (!p) return;
+  const adds = () => p.run<string[]>(`window.posted.filter((m) => m.name === "saveAgenda")
+    .map((m) => m.body.items.map((i) => i.text).join("|"))`);
+  // The page is not the focused window under test, which the field's blur would otherwise read
+  // as the person switching to another app.
+  await p.run(`document.hasFocus = () => true; window.posted = []`);
+  await p.run(`(() => { const f = document.getElementById("agenda-add"); f.focus(); f.blur(); })()`);
+  assert.deepEqual(await adds(), []);
+  await p.run(`(() => { const f = document.getElementById("agenda-add"); f.focus(); f.value = "new one"; f.blur(); })()`);
+  const saved = await adds();
+  assert.equal(saved.length, 1);
+  assert.ok(saved[0].includes("new one"), saved[0]);
+  // A redraw while typing moves the field; that is not leaving it.
+  await p.run(`window.posted = []`);
+  await p.run(`(() => { const f = document.getElementById("agenda-add"); f.value = "typing"; f.focus();
+    window.kyo.agenda({ state: "shown", session_id: "S1", items: ${JSON.stringify(ITEMS)}, etag: '"g"' }); })()`);
+  assert.deepEqual(await adds(), []);
+});
+
+test("the add field takes the row's width", async (t) => {
+  const p = await open((r) => t.skip(r));
+  if (!p) return;
+  const widths = await p.run<{ field: number; row: number }>(`(() => ({
+    field: document.getElementById("agenda-add").getBoundingClientRect().width,
+    row: document.querySelector(".agenda-add-row").getBoundingClientRect().width }))()`);
+  assert.ok(widths.row > 0 && widths.field >= widths.row - 22, JSON.stringify(widths));
+});
