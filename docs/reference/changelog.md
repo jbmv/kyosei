@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-13** — `KYO-909` (task) — Mac app: the editor module for composer boxes, on CodeMirror 6
 - **2026-11-13** — `KYO-906` (proposal) — Mac app: an editor component in place of the composer's text areas
 - **2026-11-13** — `KYO-899` (task) — Retire the discussion check and the rule that a decision needs a discussion
 - **2026-11-12** — `KYO-873` (plan) — Orchestrator friction from the session of 2026-11-12: output and attention
