@@ -1186,10 +1186,13 @@ function tokenWords(total: number): string {
     : `${(total / 1_000_000).toFixed(1)}M`;
 }
 
-/** The words of a subagent's second line. A running one's tokens come from its transcript. */
+/**
+ * The words of a subagent's second line. A running one's tokens come from its transcript, and
+ * `since` is when the call that started it was made, which its running time counts from.
+ */
 function agentMeta(
   agent: Subagent, running: boolean,
-): { parts: string[]; lines: HTMLElement[] | null } {
+): { parts: string[]; lines: HTMLElement[] | null; since: string | null } {
   const usage = deliveries.find((delivery) =>
     delivery.task_id === agent.agent_id && delivery.usage)?.usage;
   const dispatch = agentDispatches.get(agent.agent_id);
@@ -1200,7 +1203,13 @@ function agentMeta(
     parts: [kindOf(agent), tokens && `${tokens} tokens`, usage?.duration_ms ? duration(usage.duration_ms) : null]
       .filter((part): part is string => Boolean(part)),
     lines: dispatch ? counts(dispatch.added, dispatch.removed) : null,
+    since: running ? agentSince(agent) : null,
   };
+}
+
+/** When the call that started a subagent was made, if this page holds that call. */
+function agentSince(agent: Subagent): string | null {
+  return [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at ?? null;
 }
 
 /** `fable medium`, from what the subagent's route last stated, else what the turns listed. */
@@ -1238,23 +1247,30 @@ function drawAgents(): void {
 }
 
 /**
- * `Subagents: N` under the composer's Send, green while any runs. A press lists them, as
- * Chat's side bar did before it went (KYO-883): the running ones, then under a rule the
- * finished ones, newest first, each with what it ran on, its tokens, its time and its lines.
+ * The session's subagents, listed above the line under the composer when its words are pressed
+ * (KYO-921), as Chat's side bar listed them before it went (KYO-883): the running ones, then
+ * under a rule the finished ones, newest first, each with what it ran on, its tokens, its time
+ * and its lines. A running one's time counts up from the call that started it.
  */
 function drawRunningAgents(running: Subagent[], finished: Subagent[]): void {
-  const count = document.getElementById("running-agents-count")!;
-  count.textContent = `Subagents: ${running.length}`;
-  count.classList.toggle("running", running.length > 0);
   const list = document.getElementById("running-agents-list")!;
-  if (!running.length && !finished.length) list.hidden = true;
+  const any = running.length + finished.length > 0;
+  working.classList.toggle("has-agents", any);
+  if (!any) list.hidden = true;
   const row = (agent: Subagent, isRunning: boolean) => {
     const item = document.createElement("div");
     item.className = isRunning ? "running-agent running" : "running-agent";
     const words = agentMeta(agent, isRunning);
     const facts = span("running-agent-facts", words.parts.join("  ·  "));
-    if (words.lines) {
+    if (words.since) {
+      // The clock's tick rewrites every `data-since` each second, so this one counts up.
+      const time = span("running-agent-time", elapsed(words.since));
+      time.dataset.since = words.since;
       if (words.parts.length) facts.append("  ·  ");
+      facts.append(time);
+    }
+    if (words.lines) {
+      if (words.parts.length || words.since) facts.append("  ·  ");
       facts.append(...words.lines);
     }
     item.append(span("running-agent-name", agent.description || agent.agent_type), facts);
@@ -1269,7 +1285,9 @@ function drawRunningAgents(running: Subagent[], finished: Subagent[]): void {
   );
 }
 
-document.getElementById("running-agents-count")!.addEventListener("click", () => {
+// A press on the line's words, whether they say the session waits, works or has work in the
+// background, opens the list, and a second press or one anywhere else closes it.
+workingText.addEventListener("click", () => {
   const list = document.getElementById("running-agents-list")!;
   list.hidden = !list.hidden || !list.childElementCount;
   // A finished agent's lines and tokens are read when the list is first opened.
@@ -1283,7 +1301,8 @@ document.getElementById("running-agents-count")!.addEventListener("click", () =>
   }
 });
 document.addEventListener("mousedown", (event) => {
-  if (!document.getElementById("running-agents")!.contains(event.target as Node)) {
+  const target = event.target as Node;
+  if (!workingText.contains(target) && !document.getElementById("running-agents-list")!.contains(target)) {
     document.getElementById("running-agents-list")!.hidden = true;
   }
 });

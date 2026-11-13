@@ -707,9 +707,10 @@ body.terminal-open #terminal { display: flex; }
 .diff .add { background: rgba(47, 143, 78, 0.18); }
 .diff .del { background: rgba(194, 65, 58, 0.18); }
 
-/* Under the composer: what the session is doing at the left, Interrupt beside it while it
-   works, and the running subagents at the right, under Send. */
+/* Under the composer: what the session is doing, then Interrupt beside it while it works. A
+   press on the line's words lists the session's subagents above it (KYO-921). */
 #composer-status { flex: none; display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 2px 2px; font-size: 12.5px; }
+#running-agents { flex: 1; min-width: 0; display: flex; position: relative; }
 #working { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); }
 /* One row, so the composer above does not move as the line grows; the title holds it whole (KYO-883). */
 #working-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -717,16 +718,13 @@ body.terminal-open #terminal { display: flex; }
 /* KYO-883: nothing is happening and the session waits on the person: steady red, no motion. */
 #working.idle { font-style: italic; color: var(--apple-red); }
 #working.idle .pulse { display: none; }
-#running-agents { flex: none; position: relative; margin-left: auto; }
-#running-agents-count { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-variant-numeric: tabular-nums; cursor: default; }
-#running-agents-count.running { color: var(--apple-green); font-weight: 600; animation: agents-glow 1.8s ease-in-out infinite; }
-@keyframes agents-glow { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { #running-agents-count.running { animation: none; } }
-#running-agents-list { position: absolute; right: 0; bottom: 22px; z-index: 5; width: 320px; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
+/* KYO-921: the words open the subagent list once the session has had any subagent. */
+#working.has-agents #working-text { cursor: pointer; }
+#running-agents-list { position: absolute; left: 0; bottom: 22px; z-index: 5; width: 320px; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); }
 #running-agents-list[hidden] { display: none; }
 .running-agent { padding: 3px 0; }
 .running-agent-name { display: block; color: var(--text); }
-.running-agent-facts { display: block; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.running-agent-facts { display: block; font-variant-numeric: tabular-nums; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
 .running-agent:not(.running) .running-agent-name { color: var(--muted); }
 .running-agents-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--soft-line); }
 

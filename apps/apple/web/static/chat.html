@@ -230,15 +230,14 @@
       <div id="composer-actions">
         <span id="composer-note"></span>
       </div>
-      <!-- What the session is doing, under the prompt being written: the working line, Interrupt
-           while it works, and the running subagents. -->
+      <!-- What the session is doing, under the prompt being written: the working line, which a
+           press opens the session's subagents from, and Interrupt while it works (KYO-921). -->
       <div id="composer-status">
-        <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
-        <button id="interrupt" hidden>Interrupt</button>
         <div id="running-agents">
-          <button id="running-agents-count" type="button">Subagents: 0</button>
+          <div id="working" hidden><span class="pulse"></span><span id="working-text"></span></div>
           <div id="running-agents-list" hidden></div>
         </div>
+        <button id="interrupt" hidden>Interrupt</button>
       </div>
     </aside>
 

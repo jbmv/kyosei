@@ -1,5 +1,6 @@
 // Run with `npm test`. The line under the composer: what the session is doing, Interrupt
-// while it works, the running subagents, and "Waiting for you…" when it is live and idle.
+// while it works, "Waiting for you…" when it is live and idle, and the subagent list a press
+// on its words opens (KYO-921).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
@@ -9,20 +10,18 @@ let page: Page | null = null;
 before(async () => { page = await openPage(); });
 after(async () => { await page?.close(); });
 
-interface Status { inComposer: boolean; inChat: boolean; text: string; shown: boolean; idle: boolean; interrupt: boolean; agents: string; green: boolean }
+interface Status { inComposer: boolean; inChat: boolean; text: string; shown: boolean; idle: boolean; interrupt: boolean; count: boolean }
 
 const status = `(() => {
   const working = document.getElementById("working");
-  const count = document.getElementById("running-agents-count");
   return {
-    inComposer: ["working", "interrupt", "running-agents"].every((id) => document.getElementById(id).closest("#composer")),
+    inComposer: ["working", "interrupt", "running-agents-list"].every((id) => document.getElementById(id).closest("#composer")),
     inChat: Boolean(document.querySelector("#page #working, #composer-top #interrupt")),
     text: document.getElementById("working-text").textContent,
     shown: !working.hidden,
     idle: working.classList.contains("idle"),
     interrupt: !document.getElementById("interrupt").hidden,
-    agents: count.textContent,
-    green: count.classList.contains("running"),
+    count: Boolean(document.getElementById("running-agents-count")) || /Subagents:/.test(document.getElementById("composer").textContent),
   };
 })()`;
 
@@ -30,14 +29,14 @@ const session = (live: boolean) => `window.kyo.menu({ project: "p", current: "S1
   { session_id: "S1", title: "t", live: ${live}, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
 ] } })`;
 
-test("the working line, Interrupt and the subagent count stand under the composer, and an idle live session waits for the person", async (t) => {
+test("the working line and Interrupt stand under the composer, with no subagent count beside them, and an idle live session waits for the person", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   await page.reload();
   await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
   // Before the server has read a pane, nothing is said.
   let now = await page.run<Status>(status);
-  assert.deepEqual([now.inComposer, now.inChat, now.shown, now.interrupt, now.agents, now.green],
-    [true, false, false, false, "Subagents: 0", false]);
+  assert.deepEqual([now.inComposer, now.inChat, now.shown, now.interrupt, now.count],
+    [true, false, false, false, false]);
   // Working: the words, the pulse and Interrupt.
   await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
   now = await page.run<Status>(status);
@@ -52,6 +51,8 @@ test("the working line, Interrupt and the subagent count stand under the compose
     inChat: Boolean(document.querySelector("#page #background")),
   })`);
   assert.match(whole.under, /^Working.*  ·  1 agent, 1 shell in the background$/);
+  // KYO-921: the running subagents are named there and nowhere else under the composer.
+  assert.equal((await page.run<Status>(status)).count, false);
   // One row, cut with an ellipsis, and the whole line in the tooltip.
   const row = await page.run<{ title: string; wrap: string; overflow: string }>(`(() => {
     const text = document.getElementById("working-text");
@@ -165,4 +166,105 @@ test("the session coming to wait on the person asks the app to bounce its Dock i
   await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, agents: [] } } })`);
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   assert.equal(await asked(), 3);
+});
+
+const AGENT_AT = "2026-11-12T10:00:00.000Z";
+/** A running subagent started `ago` seconds before now, and a finished one that took 95s. */
+const agents = (ago: number) => `window.kyo.apply({
+  tool_calls: [
+    { call_id: "c1", uuid: "u1", at: new Date(Date.now() - ${ago} * 1000).toISOString(), name: "Agent", input: {}, result: null },
+    { call_id: "c2", uuid: "u2", at: "${AGENT_AT}", name: "Agent", input: {}, result: null },
+  ],
+  subagents: [
+    { agent_id: "a1", description: "Still working", agent_type: "kyosei-worker", tool_call_uuid: "u1" },
+    { agent_id: "a2", description: "Already done", agent_type: "kyosei-worker", tool_call_uuid: "u2" },
+  ],
+  deliveries: [{ uuid: "d1", at: "${AGENT_AT}", kind: "task", text: "done", sender: null, sender_id: null,
+    handback: false, task_id: "a2", call_id: "c2", status: "completed", summary: null,
+    usage: { total_tokens: 12000, duration_ms: 95000 } }],
+})`;
+
+interface Listed { hidden: boolean; rows: { name: string; facts: string; running: boolean }[]; rule: number; pointer: string }
+const listed = `(() => {
+  const list = document.getElementById("running-agents-list");
+  return {
+    hidden: list.hidden,
+    rows: [...list.querySelectorAll(".running-agent")].map((row) => ({
+      name: row.querySelector(".running-agent-name").textContent,
+      facts: row.querySelector(".running-agent-facts").textContent,
+      running: row.classList.contains("running"),
+    })),
+    rule: list.querySelectorAll("hr").length,
+    pointer: getComputedStyle(document.getElementById("working-text")).cursor,
+  };
+})()`;
+
+test("a press on the line's words opens the subagent list, running then finished, and a press elsewhere closes it (KYO-921)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+    window.kyo.screen({ screen: { state: "idle" } }); })()`);
+  // With no subagent, the words open nothing and do not look pressable.
+  await page.run(`document.getElementById("working-text").click()`);
+  let now = await page.run<Listed>(listed);
+  assert.deepEqual([now.hidden, now.pointer], [true, "auto"]);
+  await page.run(agents(65));
+  // Each of the line's states opens the list: the wait on the person, work, and background.
+  const screens = [
+    `{ state: "idle" }`,
+    `{ state: "working" }`,
+    `{ state: "idle", background: { running: true, shells: 0, agents: [{ type: "w", description: "x" }] } }`,
+  ];
+  for (const screen of screens) {
+    await page.run(`window.kyo.screen({ screen: ${screen} })`);
+    await page.run(`document.getElementById("working-text").click()`);
+    now = await page.run<Listed>(listed);
+    assert.equal(now.hidden, false, screen);
+    assert.equal(now.pointer, "pointer");
+    assert.deepEqual(now.rows.map((row) => [row.name, row.running]), [["Still working", true], ["Already done", false]]);
+    assert.equal(now.rule, 1);
+    // A second press on the words closes it.
+    await page.run(`document.getElementById("working-text").click()`);
+    assert.equal((await page.run<Listed>(listed)).hidden, true, screen);
+  }
+  // Open, a press inside the list keeps it, and a press anywhere else closes it.
+  await page.run(`document.getElementById("working-text").click()`);
+  const press = (selector: string) => page!.run(`document.querySelector("${selector}").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await press("#running-agents-list .running-agent");
+  assert.equal((await page.run<Listed>(listed)).hidden, false);
+  await press("#working-text");
+  assert.equal((await page.run<Listed>(listed)).hidden, false);
+  await press("#chat");
+  assert.equal((await page.run<Listed>(listed)).hidden, true);
+  // A session whose subagents have all finished still lists them.
+  await page.run(`window.kyo.apply({ deliveries: [{ uuid: "d2", at: "${AGENT_AT}", kind: "task", text: "done",
+    sender: null, sender_id: null, handback: false, task_id: "a1", call_id: "c1", status: "completed", summary: null }] })`);
+  await page.run(`document.getElementById("working-text").click()`);
+  now = await page.run<Listed>(listed);
+  assert.equal(now.hidden, false);
+  assert.deepEqual(now.rows.map((row) => row.running), [false, false]);
+  assert.equal(now.rule, 0);
+});
+
+test("a running subagent's row says how long it has run, counting up while the list is open, beside a finished row's time (KYO-921)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+    window.kyo.screen({ screen: { state: "working" } }); })()`);
+  await page.run(agents(65));
+  await page.run(`document.getElementById("working-text").click()`);
+  const first = await page.run<Listed>(listed);
+  assert.match(first.rows[0].facts, /^kyosei-worker  ·  1m 0?[56]s$/);
+  // The finished row keeps the time it took, as before.
+  assert.equal(first.rows[1].facts, "kyosei-worker  ·  12k tokens  ·  1m 35s");
+  const seconds = (facts: string) => {
+    const [, minutes, rest] = facts.match(/(\d+)m (\d+)s$/)!;
+    return Number(minutes) * 60 + Number(rest);
+  };
+  // The clock ticks each second, so what is shown may lag the true time by up to a second.
+  await new Promise((done) => setTimeout(done, 2200));
+  const later = await page.run<Listed>(listed);
+  assert.equal(later.hidden, false);
+  assert.ok(seconds(later.rows[0].facts) >= seconds(first.rows[0].facts) + 1,
+    `${later.rows[0].facts} after ${first.rows[0].facts}`);
 });

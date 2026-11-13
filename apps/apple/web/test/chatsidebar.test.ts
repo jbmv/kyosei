@@ -1,5 +1,5 @@
 // Run with `npm test`. KYO-883: Chat's side bar is gone. Its subagents are listed in the
-// popover under the composer's Send, running ones and then, under a rule, finished ones; a
+// popover a press on the line under the composer opens (KYO-921), running ones and then, under a rule, finished ones; a
 // project with more than one live session lists them in the project dropdown, under the
 // project, and one with a single session lists none. A machine with no Chrome skips these.
 import assert from "node:assert/strict";
@@ -32,7 +32,7 @@ test("the subagent popover lists the running ones, a rule, then the finished one
       deliveries: [{ uuid: "d1", at: "${AT}", kind: "task", text: "done", sender: null, sender_id: null,
         handback: false, task_id: "a2", call_id: "c2", status: "completed", summary: null }],
     });
-    document.getElementById("running-agents-count").click();
+    document.getElementById("working-text").click();
     const list = document.getElementById("running-agents-list");
     return {
       rows: [...list.querySelectorAll(".running-agent-name")].map((row) => row.textContent),
@@ -41,7 +41,6 @@ test("the subagent popover lists the running ones, a rule, then the finished one
     };
   })()`);
   assert.deepEqual(listed, { rows: ["Still working", "Already done"], rule: 1, hidden: false });
-  assert.equal(await page.run<string>(`document.getElementById("running-agents-count").textContent`), "Subagents: 1");
 });
 
 test("the project dropdown lists the project's live sessions only when it has more than one", async (t) => {
