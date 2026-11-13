@@ -76,7 +76,8 @@ test("a prompt taken back is the prompt again, and what was typed since becomes 
     const boxes = window.kyo.composer.boxes();
     return { texts: boxes.map((box) => box.text), kinds: boxes.map((box) => box.kind) };
   })()`);
-  assert.deepEqual(seen.texts, ["notes", "typed since", "sent"]);
+  // The scratchpad's heading, from an earlier build, is its first line (KYO-917).
+  assert.deepEqual(seen.texts, ["kept\nnotes", "typed since", "sent"]);
   assert.deepEqual(seen.kinds, ["scratch", "scratch", "prompt"]);
 });
 
