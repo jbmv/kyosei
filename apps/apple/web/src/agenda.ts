@@ -84,7 +84,8 @@ export function agendaView(frame: AgendaFrame | null, showCompleted = false): Ag
     text: item.text,
     checked: item.checked,
     mine: item.author === "person",
-    whose: item.author === "person" ? "you" : "orchestrator",
+    // The label matches the list's summary, "N of Claude's" (KYO-925, 2026-11-13).
+    whose: item.author === "person" ? "you" : "Claude",
   });
   const completed = frame.items.filter((item) => item.checked).length;
   // Within a group the list's own order holds: the unchecked items, then, when they are

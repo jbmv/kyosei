@@ -37,11 +37,11 @@ test("each item shows its text, its check and whose it is", () => {
   assert.equal(view.canAdd, true);
   assert.deepEqual(view.rows, [
     { id: "1", text: "push before close", checked: false, mine: true, whose: "you" },
-    { id: "2", text: "dispatch wave 3", checked: false, mine: false, whose: "orchestrator" },
+    { id: "2", text: "dispatch wave 3", checked: false, mine: false, whose: "Claude" },
   ]);
   assert.equal(view.completed, 1);
   const all = agendaView({ state: "shown", session_id: "s", items, etag: '"e"' }, true);
-  assert.deepEqual(all.rows[2], { id: "3", text: "merge wave 2", checked: true, mine: false, whose: "orchestrator" });
+  assert.deepEqual(all.rows[2], { id: "3", text: "merge wave 2", checked: true, mine: false, whose: "Claude" });
 });
 
 test("an empty list is still a bubble the person can add to", () => {
