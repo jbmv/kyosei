@@ -3,7 +3,7 @@
 // (KYO-903). A machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { META, openPage } from "./chrome.ts";
+import { META, SHIFT, openPage } from "./chrome.ts";
 import { boxSignature } from "../src/drafts.ts";
 
 const STATE = `(() => [...document.querySelectorAll("#boxes .box")].map((box) => ({
@@ -188,5 +188,27 @@ test("the prompt stays at the foot of the composer and grows to half its height,
     assert.ok(Math.abs(seen.prompt - seen.column / 2) <= 2, `${seen.prompt} of ${seen.column}`);
     assert.equal(seen.bottom, seen.foot);  // in view although the column is scrolled to its top
     assert.deepEqual([seen.inner, seen.send], [true, true]);
+  } finally { await page.close(); }
+});
+
+test("Tab and Shift-Tab indent and outdent the caret's line or the selected lines and stay in the box (KYO-905)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    const read = `(() => { const a = document.activeElement; return [a.value, a.selectionStart, a.selectionEnd, a.closest(".box").classList.contains("scratch")]; })()`;
+    await page.run(`(() => { ${START} document.getElementById("new-prompt").click();
+      document.querySelector("#boxes .box.scratch textarea").focus(); })()`);
+    await page.type("plain");
+    await page.press("Tab");  // not a list item: indented all the same, and the caret stays
+    assert.deepEqual(await page.run(read), ["  plain", 7, 7, true]);
+    await page.press("Tab", SHIFT);
+    assert.deepEqual(await page.run(read), ["plain", 5, 5, true]);
+    await page.run(`(() => { const a = document.activeElement; a.value = "- a\\n- b\\n3. c\\n- d";
+      a.dispatchEvent(new InputEvent("input", { inputType: "insertText" })); a.setSelectionRange(5, 12); })()`);
+    await page.press("Tab");  // the selection touches the second and third lines
+    assert.deepEqual(await page.run(read), ["- a\n  - b\n  1. c\n- d", 4, 16, true]);
+    await page.press("Tab", SHIFT);
+    await page.press("Tab", SHIFT);  // nothing left to outdent: still in the box
+    assert.deepEqual(await page.run(read), ["- a\n- b\n1. c\n- d", 4, 12, true]);
   } finally { await page.close(); }
 });

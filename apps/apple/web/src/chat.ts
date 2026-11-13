@@ -4662,24 +4662,40 @@ function replaceRange(area: HTMLTextAreaElement, from: number, to: number, text:
 
 /** Numbered and bulleted lists: Return continues one, and an empty item ends it. */
 function listKeys(area: HTMLTextAreaElement, event: KeyboardEvent): void {
+  if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    // Tab and Shift-Tab indent and outdent every line the caret or the selection touches, a
+    // list item or not, and never leave the box: with several boxes in the composer the key
+    // otherwise moved the caret to the next one (KYO-905).
+    event.preventDefault();
+    const caret = area.selectionStart;
+    const selected = area.selectionEnd > caret;
+    const from = area.value.lastIndexOf("\n", caret - 1) + 1;
+    // A selection that ends at the start of a line does not take that line.
+    const last = selected && area.value[area.selectionEnd - 1] === "\n" ? area.selectionEnd - 1 : area.selectionEnd;
+    const nextEnd = area.value.indexOf("\n", last);
+    const to = nextEnd < 0 ? area.value.length : nextEnd;
+    const lines = area.value.slice(from, to).split("\n");
+    const moved = lines.map((line) => {
+      if (event.shiftKey) return line.startsWith(INDENT) ? line.slice(INDENT.length) : line.replace(/^[ \t]/, "");
+      if (!line.trim() && lines.length > 1) return line;
+      // A numbered item starts a new count where it is nested.
+      return INDENT + (LIST_ITEM.exec(line)?.[2] ? line.replace(/\d+\./, "1.") : line);
+    });
+    const text = moved.join("\n");
+    if (text === lines.join("\n")) return;
+    replaceRange(area, from, to, text);
+    if (selected) area.setSelectionRange(from, from + text.length);
+    else {
+      const at = Math.max(from, caret + moved[0].length - lines[0].length);
+      area.setSelectionRange(at, at);
+    }
+    return;
+  }
   if (event.metaKey || area.selectionStart !== area.selectionEnd) return;
   const caret = area.selectionStart;
   const start = area.value.lastIndexOf("\n", caret - 1) + 1;
   const line = area.value.slice(start, caret);
   const item = line.match(LIST_ITEM);
-  if (event.key === "Tab" && item) {
-    event.preventDefault();
-    const nextEnd = area.value.indexOf("\n", caret);
-    const end = nextEnd < 0 ? area.value.length : nextEnd;
-    const whole = area.value.slice(start, end);
-    if (event.shiftKey) {
-      if (whole.startsWith(INDENT)) replaceRange(area, start, end, whole.slice(INDENT.length));
-    } else {
-      const renumbered = item[2] ? whole.replace(/\d+\./, "1.") : whole;
-      replaceRange(area, start, end, INDENT + renumbered);
-    }
-    return;
-  }
   if (event.key !== "Enter" || !item) return;
   const [, indent, number, bullet, content] = item;
   if (!content) {
