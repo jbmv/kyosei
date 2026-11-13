@@ -93,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides and heading rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides, heading rules and horizontal rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
@@ -247,7 +247,7 @@ attachments and tags into the prompt, a file still uploading included (KYO-920),
 disabled while the prompt holds anything. One section is moved with
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
 gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
-with what follows it up to the next heading of its level, goes to the end of the prompt,
+with what follows it up to the next heading of its level or a section break, goes to the end of the prompt,
 outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad;
 a section that was folded arrives folded (KYO-913). What a section is and how its lines move are `sectionEnd` and `moveLines` in
 `web/src/outline.ts`. A scratchpad is a box of
@@ -300,7 +300,8 @@ A prompt is sent as typed, so a nested list and a line beginning with `#` reach 
 markdown. The composer draws them (KYO-902): each indented line has one light vertical guide
 for each level of indentation, under the marker of the item it is nested in, and a heading
 line has a rule above it and a tint behind it, stronger for `#` than for `##`, and is set in
-semibold. Each is a decoration of its line in the box's editor (KYO-910): the guides are the
+semibold. A line of three or more hyphens alone, markdown's thematic break, is drawn as a
+horizontal rule across the box, with its hyphens kept faintly beneath it (KYO-923). Each is a decoration of its line in the box's editor (KYO-910): the guides are the
 line's background, so they run down every row it wraps to, and the rows a long item wraps to
 start under its words. None of it changes the text. Which lines are indented and which are
 headings is decided in `web/src/outline.ts`.
@@ -312,12 +313,17 @@ gutter of their own, the innermost, directly left of the text (KYO-918), so they
 down wrapped rows and lie over neither the guides nor the marks. A heading's bar reaches left
 over that strip to the line of its own section, a `#` bar to the first line and a deeper
 heading's to the second, so each line runs down from the end of its bar; a line before the
-first heading has none. Which lines a section holds is `headingSections` in
-`web/src/outline.ts`, from the same `sectionEnd` that folding and Send to prompt use.
+first heading has none. A section break ends every section above it (KYO-923): two blank
+lines in a row, or a line of three or more hyphens. The section lines stop above the break,
+and the lines after it, up to the next heading, belong to no section. A single blank line
+does not end a section. The break is the composer's rule rather than markdown's, in which a
+heading's section runs to the next heading, and it changes nothing in the text that is sent. Which
+lines a section holds is `headingSections` in `web/src/outline.ts`, from the same
+`sectionEnd` that folding and Send to prompt use.
 
 A heading's section and a list item's nested lines fold (KYO-913). The section is the one Send
 to prompt moves: a heading's runs to the next heading of its level or above, and an item's
-holds the lines nested under it. A chevron in a narrow gutter between the marks and the text
+holds the lines nested under it, and neither runs past a section break. A chevron in a narrow gutter between the marks and the text
 (KYO-917) folds the line under the pointer and stays on a folded line to unfold it; Command-Option-[ and
 Command-Option-] fold and unfold the caret's line. A folded section is drawn as a placeholder
 after its first line, which names how many of the hidden lines hold a mark, since their marks

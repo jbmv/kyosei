@@ -350,16 +350,16 @@ function guides(depth: number, step: number): string {
 
 const lineDecorations = new Map<string, Decoration>();
 
-function lineDecoration(hang: number, depth: number, heading: number, step: number): Decoration | null {
-  if (!hang && !depth && !heading) return null;
-  const key = `${hang.toFixed(2)}|${depth}|${heading}|${step.toFixed(2)}`;
+function lineDecoration(hang: number, depth: number, heading: number, rule: boolean, step: number): Decoration | null {
+  if (!hang && !depth && !heading && !rule) return null;
+  const key = `${hang.toFixed(2)}|${depth}|${heading}|${rule}|${step.toFixed(2)}`;
   let decoration = lineDecorations.get(key);
   if (!decoration) {
     let style = "";
     if (hang) style += `padding-left: ${(LINE_PADDING + hang).toFixed(2)}px; text-indent: ${(-hang).toFixed(2)}px; `;
     if (depth) style += guides(depth, step);
     decoration = Decoration.line({
-      class: [depth ? `depth-${depth}` : "", heading ? `heading level-${heading}` : ""].filter(Boolean).join(" "),
+      class: [depth ? `depth-${depth}` : "", heading ? `heading level-${heading}` : "", rule ? "rule" : ""].filter(Boolean).join(" "),
       attributes: style ? { style, "data-depth": String(depth) } : { "data-depth": String(depth) },
     });
     lineDecorations.set(key, decoration);
@@ -370,7 +370,9 @@ function lineDecoration(hang: number, depth: number, heading: number, step: numb
 /**
  * Turns `lineShapes` of the document into a decoration for each visible line: the hanging
  * indent, so a wrapped row starts under the line's words; one guide for each level of
- * nesting, as the line's background, so it runs down every row; and a heading's classes.
+ * nesting, as the line's background, so it runs down every row; a heading's classes; and
+ * the class of a line of three or more hyphens, which is drawn as a horizontal rule and ends
+ * the sections above it (KYO-923).
  */
 const outline = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
@@ -403,7 +405,7 @@ const outline = ViewPlugin.fromClass(class {
         const prefix = PREFIX.exec(line.text)?.[0] ?? "";
         // A line of only spaces has no words to hang under.
         const hang = this.font && prefix && prefix.length < line.text.length ? widthOf(this.font, prefix, tabSize) : 0;
-        const decoration = shape && lineDecoration(hang, shape.depth, shape.heading, step);
+        const decoration = shape && lineDecoration(shape.rule ? 0 : hang, shape.depth, shape.heading, shape.rule, step);
         if (decoration) ranges.push(decoration.range(line.from));
         pos = line.to + 1;
       }
@@ -480,7 +482,9 @@ const sectionLinesField = StateField.define<RangeSet<GutterMarker>>({
 /**
  * The section lines (KYO-917): a heading's section, as `sectionEnd` gives it to folding and
  * Send to prompt, has a line at the box's edge down every row it holds, the heading's
- * included, and a section nested in it a second line beside the first. They are markers of
+ * included, and a section nested in it a second line beside the first. A section break, two
+ * blank lines in a row or a line of hyphens, ends every section above it (KYO-923), so the
+ * lines stop above the break and the lines after it have none. They are markers of
  * the outermost gutter, so they lie in no line's background, beside the indent guides and the
  * heading's rule and tint and over none of them. CodeMirror sizes a gutter's element to its
  * line's block, wrapped rows and all, so the line of a section runs unbroken, and draws a
@@ -634,7 +638,8 @@ function sectionEndIn(doc: Text, line: number): number {
 /**
  * What a line folds (KYO-913): from its end to the end of the last line of its section, as
  * `sectionEnd` gives it and Send to prompt moves it (KYO-904). A heading folds up to the next
- * heading of its level or above, and a list item the lines nested under it. A line whose
+ * heading of its level or above, and a list item the lines nested under it, and neither past
+ * a section break: two blank lines in a row or a line of hyphens (KYO-923). A line whose
  * section is itself alone folds nothing, and a blank line, which has no words to stand for
  * what it hides, folds nothing either.
  */
@@ -1059,6 +1064,13 @@ const look = EditorView.theme({
     backgroundColor: "color-mix(in srgb, var(--text, currentColor) 8%, transparent)",
   },
   ".cm-line.heading.level-2": { boxShadow: "inset 0 1px 0 var(--muted, rgba(128, 128, 128, 0.8))" },
+  // KYO-923: a line of three or more hyphens is drawn as a horizontal rule across the box,
+  // over its hyphens, which stay as typed and are shown faintly under it.
+  ".cm-line.rule": { position: "relative", color: "color-mix(in srgb, var(--muted, #888) 45%, transparent)" },
+  ".cm-line.rule::after": {
+    content: '""', position: "absolute", left: `${LINE_PADDING}px`, right: "2px", top: "50%", height: "0",
+    borderTop: "1px solid var(--muted, rgba(128, 128, 128, 0.8))", pointerEvents: "none",
+  },
   ".cm-placeholder": { color: "var(--muted, #888)" },
 });
 

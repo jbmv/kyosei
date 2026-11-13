@@ -437,3 +437,66 @@ test("a heading's section has a line at the box's edge down all its rows, a nest
   await opened.press("]", META | 1);
   assert.deepEqual((await opened.run<Row[]>(SECTIONS)).map((row) => row.bars.length), [0, 1, 2, 2, 2, 2, 2, 2, 0, 1, 1]);
 });
+
+test("two blank lines typed after a heading's section end it: its lines stop above them, the line typed after has none, and the heading folds only to them (KYO-923.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const source = "# plan\n## inner\nwords\n\nmore words";
+  const opened = await box(source);
+  type Row = { line: number; bars: unknown[] };
+  const counts = async () => (await opened.run<Row[]>(SECTIONS)).map((row) => row.bars.length);
+  // One blank line stays inside the section, as a paragraph's break does.
+  assert.deepEqual(await counts(), [1, 2, 2, 2, 2]);
+  // Typed at the bottom of the box: a line after one blank line is still in the heading's
+  // section, and after a second it is in none.
+  await opened.run(`ed.select(${source.length})`);
+  await opened.press("Enter");
+  await opened.press("Enter");
+  await opened.type("a line");
+  assert.equal(await text(opened), `${source}\n\na line`);
+  assert.deepEqual(await counts(), [1, 2, 2, 2, 2, 2, 2]);
+  await opened.run(`ed.select(${source.length + 1})`);
+  await opened.press("Enter");
+  const typed = `${source}\n\n\na line`;
+  assert.equal(await text(opened), typed, "the text is as typed");
+  assert.deepEqual(await counts(), [1, 2, 2, 2, 2, 0, 0, 0]);
+
+  // Folding the heading hides its section up to the break, and the line after stays drawn.
+  await opened.run("ed.select(0)");
+  await opened.press("[", META | 1);
+  const shown = await opened.run<Row[]>(SECTIONS);
+  assert.deepEqual(shown.map((row) => [row.line, row.bars.length]), [[0, 1], [5, 0], [6, 0], [7, 0]]);
+  assert.equal(await text(opened), typed, "folding changes nothing in the text");
+});
+
+test("a line of three or more hyphens is drawn as a rule across the box and ends the sections above it (KYO-923.c2)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const source = "# plan\n## inner\nwords\n---\nafter the rule\n--\n# next\nlast";
+  const opened = await box(source);
+  type Row = { line: number; bars: unknown[] };
+  assert.deepEqual((await opened.run<Row[]>(SECTIONS)).map((row) => row.bars.length), [1, 2, 2, 0, 0, 0, 1, 1]);
+  const drawn = await opened.run<{ rule: boolean; width: number; border: string; left: number; textLeft: number; textRight: number }[]>(`(() => {
+    const view = ed.view();
+    const content = view.contentDOM.getBoundingClientRect();
+    return [...view.contentDOM.querySelectorAll(".cm-line")].map((line) => {
+      const after = getComputedStyle(line, "::after");
+      const rect = line.getBoundingClientRect();
+      return {
+        rule: line.classList.contains("rule"),
+        width: parseFloat(after.width) || 0,
+        border: after.borderTopWidth + " " + after.borderTopStyle,
+        left: rect.left - content.left,
+        textLeft: rect.left, textRight: rect.right,
+      };
+    });
+  })()`);
+  assert.deepEqual(drawn.map((line) => line.rule), [false, false, false, true, false, false, false, false],
+    "only the line of three hyphens is a rule; two hyphens are not");
+  const rule = drawn[3];
+  assert.equal(rule.border, "1px solid");
+  assert.ok(rule.width > (rule.textRight - rule.textLeft) * 0.9, `the rule runs across the box (${rule.width}px of ${rule.textRight - rule.textLeft}px)`);
+  // A heading folds only up to the rule, and the rule stays drawn below the fold.
+  await opened.run("ed.select(0)");
+  await opened.press("[", META | 1);
+  assert.deepEqual((await opened.run<Row[]>(SECTIONS)).map((row) => row.line), [0, 3, 4, 5, 6, 7]);
+  assert.equal(await text(opened), source, "the hyphens are kept as typed");
+});
