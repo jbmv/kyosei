@@ -529,9 +529,11 @@ takes three commands: `kyo verify` on the criterion as `human-observed` with
 the maintainer's words as evidence, `kyo ungate`, and `kyo move` (of 46 human-gate
 clearings measured across two stores, 39 were followed by a move within fifteen
 minutes). Approving a proposal is the same act with no gate in it.
-`kyo confirm <record-id> --quote-file q.txt` (or `--quote TEXT` for one line,
-`--quote-file -` for stdin) is that act, composed the way `kyo accept` is: each
-write is `kyo verify`, `kyo attach`, `kyo ungate` or `kyo move`, reached through
+`kyo confirm <record-id>` is that act. In a project that reads transcripts it takes the
+maintainer's words from the transcript: from the turns `--turn <id>` names, or from their
+latest turn of the session when none is named (KYO-900). Elsewhere the words are given with
+`--quote-file q.txt` (or `--quote TEXT` for one line, `--quote-file -` for stdin). It is
+composed the way `kyo accept` is: each write is `kyo verify`, `kyo attach`, `kyo ungate` or `kyo move`, reached through
 the same parser and handler, printed with its argv, refusing in its own words
 (off a terminal, as [its receipt](operating.md#a-writes-text-output-off-a-terminal-is-a-receipt-kyo-874)).
 It records `met` with method `human-observed` and nothing else; there is no
@@ -579,8 +581,11 @@ the whole act before anything is written, and the credit names every verificatio
 act records and the gate it clears. `--person KEY` names the person and defaults to the
 only one declared. `--session ID` names the Claude Code session the words were said in
 and defaults to `$CLAUDE_CODE_SESSION_ID`; in a project that has opted in to reading
-transcripts the quote is checked against that session's transcript, and `--turn UUID`
-names the transcript record when the words occur in several turns. `--source-other
+transcripts `--turn ID`, repeatable, names the turns the credit cites, by prompt id or
+transcript record uuid, and the words are copied from them; a quote given beside it must
+occur in a named turn, and a quote given alone is checked against the session's
+transcript. A second `kyo confirm` naming the same turn skips what the first applied, as
+it does for the same quote. `--source-other
 WHERE` is one line saying where the words were said when that was not a Claude Code
 session, and it cannot be combined with `--session`. A confirmation with no resolvable
 credit is refused with `human-observed-requires-credit`, which prints the same `kyo

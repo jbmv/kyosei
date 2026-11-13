@@ -29,9 +29,9 @@
 #       requires_credit: bool   # optional, either archetype; true = `kyo new`/`kyo spawn` of
 #                               # this kind needs a decided credit: --person, --quote-file,
 #                               # --decision-file, --session or --source-other (KYO-644)
-#       requires_discussion: bool   # optional, either archetype; true = `kyo new`/`kyo spawn`
-#                                   # of this kind names its discussion: spawned from one,
-#                                   # --discussion ID, or --opened-late (KYO-658)
+#       requires_discussion: bool   # retired (KYO-899): accepted so that a store that sets
+#                                   # it still loads, and read by nothing. A discussion is
+#                                   # optional for every kind
 #       raises_docs_obligations: bool   # optional, default false; true = filing or editing a
 #                                       # record raises a standing docs obligation on each ssot
 #                                       # section it names by id, and on each doc-ref (KYO-554)
@@ -258,7 +258,8 @@ kinds:
     # needs design work first still goes through a `proposal`. Symmetric with
     # `reminder.produces` above.
     # KYO-658: `discussion` added, symmetric with `discussion.produces` below. A decision
-    # spawned from the discussion it came from closes that discussion.
+    # spawned from the discussion it came from closes that discussion. A decision needs no
+    # discussion (KYO-899).
     accepts_from: [intake, proposal, investigation, reminder, discussion]
     produces: []
     policy:
@@ -266,9 +267,6 @@ kinds:
       requires_evidence_links: true   # consumed by `kyo new`: filing directly needs --evidence-file
       requires_credit: true           # KYO-644: `kyo new`/`kyo spawn` need the person's decided
                                       # credit; --quote-file can serve as the evidence
-      requires_discussion: true       # KYO-658: `kyo new`/`kyo spawn` name the discussion the
-                                      # decision came from, or open one late (--opened-late),
-                                      # where `people:` declares someone
       raises_docs_obligations: true   # KYO-554: a decision naming a section obliges someone to
                                       # bring that section into line, or say it needs no change
       swept: false

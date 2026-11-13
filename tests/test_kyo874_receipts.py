@@ -646,10 +646,11 @@ def test_the_script_prints_fewer_bytes_as_receipts(
 
 # ------------------------------------------------------------------------ KYO-880
 #
-# KYO-880 adds `kyo spawn`, `kyo edit`, `kyo discuss` (note, close, skip; open is run as
-# a step of the script), `kyo note --shift` and `kyo close-wave`. They run in their own
-# script, on the same plan: once as a pipe reads it, once with `--full`, over two
-# identical histories, on inputs that warn and on inputs that do not.
+# KYO-880 adds `kyo spawn`, `kyo edit`, `kyo discuss` (note and close; open is a step
+# of the script; skip was in it until KYO-899 retired the discussion check), `kyo note
+# --shift` and `kyo close-wave`. They run in their own script, on the same plan: once as a
+# pipe reads it, once with `--full`, over two identical histories, on inputs that warn and
+# on inputs that do not.
 
 MORE = (
     "spawn",
@@ -657,7 +658,6 @@ MORE = (
     "discuss open",
     "discuss note",
     "discuss close",
-    "discuss skip",
     "note",
     "close-wave",
 )
@@ -667,7 +667,7 @@ PROMPT = "aaaaaaaa-0000-4000-8000-000000000001"
 
 
 def _discussion_turn(root: Path, kyo) -> None:
-    """One prompt of the session in the turn index, which `kyo discuss skip` marks."""
+    """One prompt of the session in the turn index, which `kyo discuss open` stamps."""
     from .test_kyo658_discussions import (
         agent_text,
         person,
@@ -759,12 +759,6 @@ def script_more(
     second = setup("discuss", "open", "--title", "Where the declaration belongs")["record_id"]
     run("discuss close", "discuss", "close", second, "--produced", record)
 
-    # 4. discuss skip: the reason names an absolute path when the script warns.
-    run(
-        "discuss skip", "discuss", "skip", "--at-prompt", PROMPT, "--why",
-        f"a question about a log line under {PATH}" if warns else "a question about a log line",
-    )  # fmt: skip
-
     # 5. edit: a title, a note and a criterion that warns.
     run(
         "edit", "edit", record, "--title",
@@ -809,7 +803,6 @@ FIRST_LINE_MORE = {
     "discuss open": ("opened TST-1", ["TST-1"]),
     "discuss note": ("noted on TST-1: TST-1.n1", ["TST-1", "TST-1.n1"]),
     "discuss close": ("closed TST-3, produced TST-2", ["TST-3", "TST-2"]),
-    "discuss skip": (f"skipped prompt {PROMPT} at ", [PROMPT]),
     "note": ("appended shift note TST-S1", ["TST-S1"]),
     "close-wave": ("suite pass recorded: `true` at ", []),
 }
@@ -834,7 +827,6 @@ WARNINGS_MORE = {
     "discuss open": [_ABSOLUTE],
     "discuss note": [_ABSOLUTE],
     "discuss close": ["link: TST-L2  TST-2 produced-by TST-3", "produced TST-2"],
-    "discuss skip": [_ABSOLUTE],
     "note": [_ABSOLUTE],
     "close-wave": [
         "after-steps (not run; pass --run-after to run them):",

@@ -147,8 +147,6 @@ decides, and how a setup agent can find the answer before asking.
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
   | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |
-  | The session stops | `kyo discuss check --hook` | Where D14 is yes, marks a turn that put a choice to you while no discussion was open as a candidate. |
-  | You send a prompt | `kyo discuss check --hook` | Names the candidate once, for the orchestrator to open a discussion or record why the turn is not one. |
   | Session start, stop and end | `kyo sessions --hook` | Silent; records the session in the store's local `sessions.json`. At a stop it also announces the session's task list when there is something to say. |
   | The session ends | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index from the transcript and copies the transcript to the local archive. |
 
@@ -322,10 +320,10 @@ governs: src/kyosei/cmd_install_agents.py, src/kyosei/defaults/agents/worker.md,
 - **Knowledge kinds** are current or void, never done:
   - `decision`: shapes architecture and cites its evidence. Filed directly only with the
     operator's words as evidence (`kyo new decision --evidence-file`); one that needs
-    design work first is spawned from an approved proposal. Where `people:` declares
-    someone, it names the discussion it came from, or is filed `--opened-late`.
-  - `discussion`: a conversation in which the operator is asked to choose, opened by `kyo
-    discuss open` at their turn in the turn index and closed by what it produces.
+    design work first is spawned from an approved proposal. It needs no discussion.
+  - `discussion`: a conversation in which the operator is asked to choose, kept as a
+    record when someone opens one on purpose with `kyo discuss open`, at their turn in the
+    turn index, and closed by what it produces.
   - `evidence`: a recorded fact that other records cite.
 - **Why kinds exist:** each one declares what it accepts, what it can produce, whether it
   counts toward the board, and its own policy (worker model, carried). That is what stops a

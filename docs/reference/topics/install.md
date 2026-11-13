@@ -252,8 +252,10 @@ it will and will not rewrite.
 **Until those copies are refreshed, `kyo doctor` reports an earlier build's text as a
 notice rather than a problem (KYO-604)**, so an upgrade does not fail the `Stop` hook
 that `kyo doctor --hook` ends. A hook whose command is exactly a line an earlier build
-installed is reported under `hook_config_superseded`, naming `kyo install-hooks`. A
-`/kyosei` skill file still matching the digest `kyo install-skill` recorded when it
+installed is reported under `hook_config_superseded`, naming `kyo install-hooks`. So is a
+hook whose command a build retired with no replacement, which is `kyo discuss check --hook`
+since KYO-899: the command still exits 0 and does nothing, and `kyo install-hooks` removes
+the line. A `/kyosei` skill file still matching the digest `kyo install-skill` recorded when it
 wrote it is reported under `skill_superseded`, naming `kyo install-skill`; the digest is
 the file's last line, a Markdown comment, so it travels with the file and needs no
 separate file committed. Both notices exit 0. What stays a problem, and fails the
@@ -322,8 +324,9 @@ described where the registry is, in [registries.md](registries.md).
    the record carries an open gate, naming it. Clear it with `kyo ungate <gate-id> --why`
    once its condition is met, or pass `--force` to settle with the gate left open.
 4. **`kyo confirm` closes a person's look in one act (KYO-494).** `kyo confirm <id>
-   --quote-file q.txt` verifies the gate's criterion `human-observed` with the
-   maintainer's words as evidence, clears the answered human gate, and walks the record
+   --quote-file q.txt` (or, in a project that reads transcripts, `kyo confirm <id>` alone,
+   which copies the words from the person's turn, KYO-900) verifies the gate's criterion
+   `human-observed` with the maintainer's words as evidence, clears the answered human gate, and walks the record
    to completion; it also approves a proposal's decision criterion (`--criterion`).
 5. **Workers can check a report before handing it back (KYO-477).** Every brief now
    carries `kyo report <dispatch> --file .kyosei-report.json --check` (writes nothing)

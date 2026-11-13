@@ -280,8 +280,13 @@ def _evidence_at_filing(
     *,
     spawn_source: str | None = None,
     spawn_source_kind: str | None = None,
+    from_turns: str | None = None,
 ) -> str | None:
     """KYO-521: the ``--evidence-file`` text `kyo new` stores with the record, or ``None``.
+
+    KYO-900: ``from_turns`` is the person's words as kyo copied them from the turn a
+    credit cites (:func:`_words_from_turns`). With neither ``--evidence-file`` nor
+    ``--quote-file`` they are the evidence, as ``--quote-file`` given alone is.
 
     KYO-522: `kyo spawn` reuses this one path. A spawn whose source kind is ``carried``
     (a reminder) is refused exactly as `kyo new` is, since a reminder that was waiting on
@@ -308,6 +313,8 @@ def _evidence_at_filing(
     kind_def = registry.require(kind)
     if source is None and kind_def.requires_credit:
         source = getattr(args, "quote_file", None)
+    if source is None and from_turns:
+        return from_turns
     if source is None:
         if spawn_source is None:
             if kind_def.requires_evidence_links:
@@ -359,6 +366,18 @@ def _evidence_at_filing(
     if not text.strip():
         raise UsageError("--evidence-file must not be empty: it is stored as evidence")
     return text
+
+
+def _words_from_turns(ctx: Context, store: Store, kind_def, args: Namespace) -> str | None:
+    """KYO-900: for a filing of a kind that takes a credit, with no ``--evidence-file`` and
+    no ``--quote-file``: the person's words copied from the turn the credit cites, or None
+    where no turn can be read, where the filing asks for no credit, or where a file gives
+    the words."""
+    if not kind_def.requires_credit or credits.exempt(store, args):
+        return None
+    if getattr(args, "evidence_file", None) or getattr(args, "quote_file", None):
+        return None
+    return credits.words_from_turns(ctx, store, args, None)
 
 
 def _write_filing_credit(
@@ -798,12 +817,17 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
             "(defined in kyosei/kinds.yml)"
         )
     _check_kind_accepts_intake(store, registry, kind)
-    evidence_text = _evidence_at_filing(registry, kind, args)
+    evidence_text = _evidence_at_filing(
+        registry,
+        kind,
+        args,
+        from_turns=_words_from_turns(ctx, store, registry.require(kind), args),
+    )
     credits.filing_credit_flag_problem(args, registry.require(kind))
     credit = credits.filing_credit(
         ctx, store, registry.require(kind), args, evidence_text, f"kyo new {kind}"
     )
-    # KYO-658: after the credit, so a filing missing both is told about the credit first.
+    # KYO-658: the discussion this filing names, if any; none is required (KYO-899).
     discussion = cmd_discuss.filing_discussion(
         ctx, store, registry.require(kind), args, command=f"kyo new {kind}"
     )
@@ -2369,7 +2393,12 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     # KYO-522: the same evidence path `kyo new` uses (KYO-521), read before anything else
     # reads stdin; required only when the source is a carried kind (a reminder).
     evidence_text = _evidence_at_filing(
-        registry, args.kind, args, spawn_source=source_id, spawn_source_kind=source_kind
+        registry,
+        args.kind,
+        args,
+        spawn_source=source_id,
+        spawn_source_kind=source_kind,
+        from_turns=_words_from_turns(ctx, store, registry.require(args.kind), args),
     )
     # KYO-644: approving a proposal into a decision is the person's decision, so a kind
     # that requires a credit asks for it on every spawn, whatever the source.
@@ -2377,7 +2406,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     credit = credits.filing_credit(
         ctx, store, target, args, evidence_text, f"kyo spawn {source_id} --kind {args.kind}"
     )
-    # KYO-658: a spawn from a discussion closes it; a kind that requires one names it.
+    # KYO-658: a spawn from a discussion closes it; no kind requires one (KYO-899).
     discussion = cmd_discuss.filing_discussion(
         ctx,
         store,

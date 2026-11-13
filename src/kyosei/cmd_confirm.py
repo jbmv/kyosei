@@ -110,17 +110,27 @@ RULE_NO_TARGET = "no-target"
 class _Quote:
     """The maintainer's words, read once, and how to name them again in a remedy line."""
 
-    def __init__(self, args: Namespace) -> None:
+    def __init__(self, args: Namespace, from_turns: str | None = None) -> None:
         quote = getattr(args, "quote", None)
         quote_file = getattr(args, "quote_file", None)
         if quote is not None and quote_file is not None:
             raise UsageError("pass --quote or --quote-file, not both")
-        if quote is None and quote_file is None:
+        if quote is None and quote_file is None and from_turns is None:
             raise UsageError(
-                "kyo confirm needs the maintainer's words: --quote TEXT for one line, or "
-                "--quote-file FILE ('-' for stdin) for anything longer"
+                "kyo confirm needs the maintainer's words. In a Claude Code session of a "
+                "project that reads transcripts it copies them from their latest turn, or "
+                "from the turns --turn <id> names; here it cannot, so give --quote TEXT "
+                "for one line, or --quote-file FILE ('-' for stdin) for anything longer"
             )
-        if quote_file is not None:
+        if quote is None and quote_file is None:
+            # KYO-900: copied from the transcript at the turn the credit cites.
+            assert from_turns is not None
+            self.text = from_turns
+            self.flag = [
+                part for ref in credits.turn_refs_of(args) for part in ("--turn", ref)
+            ]
+            self.source = "the transcript"
+        elif quote_file is not None:
             self.text = read_prose(quote_file, what="--quote-file")
             self.flag = ["--quote-file", quote_file]
             self.source = "stdin" if quote_file == STDIN else quote_file
@@ -499,8 +509,9 @@ def _credit_flags(credit: credits.Credit | None) -> list[str]:
 
 
 def cmd_confirm(ctx: Context, args: Namespace) -> Output:
-    """``kyo confirm <record> (--quote TEXT | --quote-file FILE) [--criterion ...]
-    [--gate GID] [--no-close]`` — KYO-494.
+    """``kyo confirm <record> [--turn ID ... | --quote TEXT | --quote-file FILE]
+    [--criterion ...] [--gate GID] [--no-close]`` — KYO-494. With no words given, they are
+    copied from the person's turn (KYO-900): the turns ``--turn`` names, or their latest.
 
     1. Resolve, writing nothing: retired record, running dispatch, the in-scope
        human gate, the targets — each refusal its own contract, with ready lines.
@@ -513,10 +524,12 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
        ``close_wave: generate:``, those lines run and their output is committed with
        the store: :func:`cmd_close_wave.refresh_after_completion` (KYO-577).
     """
-    quote = _Quote(args)
     if getattr(args, "all_unobserved", False) and args.criterion:
         raise UsageError("pass --criterion or --all-unobserved, not both")
     store = ctx.store()
+    typed = getattr(args, "quote", None) is not None or getattr(args, "quote_file", None)
+    # KYO-900: with no words given, they are the person's own, copied from the turn.
+    quote = _Quote(args, None if typed else credits.words_from_turns(ctx, store, args, None))
     record_id = args.record_id
     row = store.record(record_id)
     ladder = _load_status_ladder(store)
@@ -699,6 +712,9 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         f"confirmed {record_id}: {observed}, written by {ctx.actor}, with the words in "
         f"{quote.source} ({quote.chars} chars, sha256:{quote.sha256})"
     ]
+    if credit_id:
+        # KYO-900: each cited turn's time and first line, so a wrong turn is seen at once.
+        lines += credits.turn_lines(store, credit_id, credit)
     if not complete:
         lines.append(
             _incomplete_line(

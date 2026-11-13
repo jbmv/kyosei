@@ -346,7 +346,7 @@ kinds:
     accepts_from: [intake, proposal, investigation, reminder, discussion]   # KYO-521, KYO-658
     produces: []
     policy: { amendable: true, requires_evidence_links: true, requires_credit: true,   # KYO-644
-              requires_discussion: true, swept: false, counted: false }               # KYO-658
+              swept: false, counted: false }
   evidence:
     archetype: knowledge
     summary: Captured observations with method and instrument. Can be marked wrong.
@@ -409,9 +409,9 @@ kinds:
   `kyo spawn` asks for none; its `produced-by` link names the record the decision came from.
   KYO-644 adds `requires_credit`, consumed by both: a decision is filed only with a `decided`
   credit naming the declared person who decided it, their words, and what was recommended.
-- **A decision names the discussion it came from** (KYO-658, decision KYO-654 DC2 and DC3).
-  Reconstructing where a discussion began from the transcript after the decision proved both
-  unreliable and a cost the person could not carry, so its start is recorded when it starts. A
+- **A discussion is a record someone opens on purpose** (KYO-658, decision KYO-654 DC2;
+  KYO-899, decision KYO-898). Reconstructing where a discussion began from the transcript
+  after the decision proved unreliable, so its start can be recorded when it starts. A
   `discussion` is a knowledge kind, not counted and swept, filed only by `kyo discuss open`
   (its `accepts_from` is empty), which stamps a turn reference at the person's latest confirmed
   turn in the turn index: session, prompt id, transcript record uuid and the hook's time, none
@@ -419,14 +419,16 @@ kinds:
   Spawning a decision, proposal, plan or task from it closes it. `kyo discuss close
   --produced` closes one that led to records without a decision and links each to it, and
   `--dropped --why` closes one that produced nothing (KYO-878); open and closed are read from its turn
-  references, since a knowledge kind has no status flow. `requires_discussion`, set on the
-  shipped `decision`, is consumed by `kyo new` and `kyo spawn`: a decision is filed from its
-  discussion (spawned from it, from a record it produced, or `--discussion`), or with
-  `--opened-late`, which opens one in the same transaction at the turn `--at-prompt` names and marks
-  it late for good, `index_state: absent` where there is no index. Otherwise the filing is
-  refused (`decision-requires-discussion`). It applies where `people:` declares someone, as
-  credits do, so an upgrade refuses nothing before the operator has chosen. A decided credit
-  filed from a discussion takes its span from the discussion's turn references.
+  references, since a knowledge kind has no status flow. KYO-658 also required a decision
+  to be filed from a discussion (`requires_discussion`, DC3), and KYO-662 added a check at
+  every stop that marked a turn in which a choice was put to the person. Decision KYO-898
+  retired both: the check's cues produced candidates the agent then had to open or dismiss
+  at the next prompt, and the requirement made every decision open a discussion first or
+  declare one late. A decision is now filed with or without a discussion, a `kinds.yml`
+  that still sets `requires_discussion` loads and the key is read by nothing, and the
+  hooks no longer run the check. `--discussion` and `--opened-late` remain for a filing
+  that names one, and a decided credit filed from a discussion takes its span from the
+  discussion's turn references.
 
 ### Status and gates are orthogonal dimensions
 
@@ -531,6 +533,20 @@ governs: src/kyosei/schema.py
   is a field set once, when the message holding it is delivered, with the time, the session and
   the held message; it replaced a `sent` tag, which a person could remove. A note sent after
   filing gets the field from a `notes sent` event, so its own ledger line is not rewritten.
+- **credit_turns** (schema_version 36, KYO-900, decision KYO-898): the turns of the person's
+  that a credit cites, one row each in transcript order. Until then every credit took its
+  words from a file the agent typed, which kyo then checked against the transcript; the
+  retyping cost the agent a step, a one-word answer kept none of its context, and one
+  credit could name one turn. The turn index already names each prompt and the transcript
+  holds its text, so a credit is given the turn (`--turn`, repeatable, a prompt id or a
+  record uuid) or none, which takes the person's latest, and kyo copies the words. One row
+  is the `approval`, the turn that carries the judgement and the credit's own
+  `source_turn`; the others are `context`, earlier turns in which what was approved was
+  specified. Each row holds the session, the record uuid, the time, the words as an
+  evidence artifact and the index line's commitment where it has one. A long turn is
+  stored as its head and tail and a paste is left out, each marked `[...]`. `--quote-file`
+  remains for a project that does not read transcripts, for words said elsewhere, and to
+  narrow what is stored of a turn.
 - **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a
   verification, a gate clearing or a decision record rests on, as a row of its own rather than
   columns on the rows it credits, so crediting a historical verdict updates nothing already
@@ -611,9 +627,6 @@ kyo dossier <id>                  # one decision as a Markdown page for a reader
                                   #   each part naming its source in the store (KYO-659)
 kyo excerpt <credit> --draft|--preview|--pack   # the lines of a credit's discussion the person shares,
                                   #   with salts and proofs a reader checks against span_seal (KYO-660)
-kyo discuss check --hook          # at Stop: marks a turn that put a choice to the person while none
-                                  #   was open; at the next prompt: names it once, to open one or
-                                  #   `kyo discuss skip --why` (KYO-662, KYO-876)
 kyo wont-do <id> --why            # terminal; ID retired forever
 kyo split <id> --to-successor <criterion-id>...   # met criteria close with evidence; rest leave with history; back-pointers both ways
 kyo link <id> <edge-type> <id>    # refuses cycles
@@ -997,15 +1010,10 @@ and integrates via:
     Layer 2. In hook mode doctor ends by committing what is uncommitted in a store that is
     its own repository, as one commit named by the records changed; a store inside the code
     repository is named and never committed, and a worker's session commits nothing (KYO-879).
-  - `Stop` → `kyo discuss check --hook` (KYO-662, KYO-876). It prints nothing at Stop. When
-    the turn that ended put a choice to the person and no discussion is open in the session,
-    it writes a `candidate` mark on the turn's line of the turn index. The first build
-    printed hook feedback at Stop, which Claude Code answers by continuing the conversation;
-    the agent's reply to a skip was then visible text the person had to read, so the
-    continuation was removed. The same command under `UserPromptSubmit` names the newest
-    unanswered candidate once, as one line of context with the commands `kyo discuss open
-    --at-prompt` and `kyo discuss skip --at-prompt`, and the agent acts inside the turn it
-    is already taking. It is in its own group so a failing sweep or doctor does not skip it.
+  - The discussion check that KYO-662 and KYO-876 ran under `Stop` and `UserPromptSubmit`
+    is retired (KYO-899). `kyo discuss check --hook` still exits 0, prints nothing and
+    writes nothing, so a project's own copy of the hooks that carries the line keeps
+    working until `kyo install-hooks` removes it.
   - `Stop`, `SessionEnd` and `UserPromptSubmit` → `kyo turns --hook`, which appends to the turn
     index in a project that opted in to reading transcripts and does nothing elsewhere
     (KYO-657).

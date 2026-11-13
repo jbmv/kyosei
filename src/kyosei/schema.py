@@ -371,7 +371,18 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: begins with the prefix, is ``produced`` and the prefix is taken off the reason; any
 #: other closing is ``dropped``; a reference that is not a closing has none
 #: (:data:`TURN_REF_FIELD_DEFAULTS` [35]). A real DDL change, so a real new hash.
-SCHEMA_VERSION = 35
+#: Bumped to 36 for KYO-900 (decision KYO-898): the ``credit_turns`` table, the turns of the
+#: person's that a credit cites, in transcript order: the one that carries the approval and
+#: the earlier ones in which the matter was specified, each with its session, transcript
+#: record uuid, time, stored words and, where the turn index committed the prompt when it
+#: was sent, that commitment. Until then a credit named one turn (``credits.source_turn``),
+#: which stays and is the approving turn. A record document written at 35 or earlier
+#: carries no ``turns`` on its credits (:data:`CREDIT_FIELD_DEFAULTS` [36]); the empty list
+#: is what was true of it, and nothing is derived from ``source_turn`` at load time: a row
+#: here says kyo copied the words from the transcript at that turn, which is not what a
+#: quote typed into a file and matched afterwards records. A real DDL change, so a real
+#: new hash.
+SCHEMA_VERSION = 36
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -981,6 +992,37 @@ CREATE TABLE credit_subjects (
     PRIMARY KEY (credit_id, subject_id)
 );
 
+-- KYO-900: the turns of the person's that one credit cites, when the credit was given by
+-- turn reference and kyo copied the words from the transcript. One row per turn, numbered
+-- in transcript order whatever order the turns were named in.
+--   role        approval: the turn that carries the person's judgement, which is also
+--               `credits.source_turn`; context: an earlier turn in which what was approved
+--               was specified. Exactly one row of a credit is the approval
+--   session     the Claude Code session the turn is in; a credit may cite several
+--   turn        the transcript record's uuid
+--   prompt_id   the prompt id the turn index keys the turn on; NULL for a message sent
+--               mid-turn and for an answer to a question, which have none
+--   at          the transcript record's own timestamp
+--   words_form  typed | mid-turn | choice | accepted-suggestion, as `credits.words_form`
+--   quote_id    the turn's words as stored, an evidence artifact; for the approval this
+--               is the credit's own `quote_id`
+--   root, lines the commitment the turn index made to the prompt's text when it was sent
+--               (KYO-663), copied from the index line; NULL where the line has none
+CREATE TABLE credit_turns (
+    credit_id   TEXT NOT NULL REFERENCES credits(id),
+    position    INTEGER NOT NULL,
+    role        TEXT NOT NULL CHECK (role IN ('approval', 'context')),
+    session     TEXT NOT NULL,
+    turn        TEXT NOT NULL,
+    prompt_id   TEXT,
+    at          TEXT NOT NULL,
+    words_form  TEXT,
+    quote_id    TEXT NOT NULL REFERENCES evidence_artifacts(id),
+    root        TEXT,
+    lines       INTEGER,
+    PRIMARY KEY (credit_id, position)
+);
+
 -- KYO-137.c2-c5: one document SECTION a dispatch's work put a question to. Raised
 -- by `kyo report` at the moment the work is fresh in memory -- a document is updated
 -- at report time, while the change is fresh -- never by a sweep, which is the next
@@ -1443,6 +1485,21 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "credit_id": ("export.record_document", "store.Store.credit_subjects"),
         "subject_kind": ("export.record_document", "store.Store.credit_subjects"),
         "subject_id": ("export.record_document", "store.Store.credit_subjects"),
+    },
+    # KYO-900: the turns a credit cites. `kyo show` prints each, the receipt echoes them,
+    # and `kyo turns --verify` checks each stored commitment against the turn index.
+    "credit_turns": {
+        "credit_id": ("export.record_document", "store.Store.credit_turns"),
+        "position": ("export.record_document", "store.Store.credit_turns"),
+        "role": ("export.record_document", "render.credit_turn_lines"),
+        "session": ("export.record_document", "render.credit_turn_lines", "cmd_turns._verify"),
+        "turn": ("export.record_document", "render.credit_turn_lines", "cmd_turns._verify"),
+        "prompt_id": ("export.record_document", "render.credit_turn_lines"),
+        "at": ("export.record_document", "render.credit_turn_lines"),
+        "words_form": ("export.record_document", "render.credit_turn_lines"),
+        "quote_id": ("export.record_document", "render.credit_turn_lines"),
+        "root": ("export.record_document", "render.credit_turn_lines", "cmd_turns._verify"),
+        "lines": ("export.record_document", "render.credit_turn_lines"),
     },
     # KYO-658: a discussion's turn references. `kyo show` draws them, a decision's header
     # names its discussion and whether it was opened late, and a decided credit filed
@@ -2416,6 +2473,9 @@ CREDIT_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     #: Never computed from the turn index at load time: a seal is worth what it is worth
     #: because it was written when the credit was.
     33: {"span_seal": None},
+    #: KYO-900: a credit exported before turn references existed cites no turn that kyo
+    #: copied words from, and the empty list says so. Never derived from ``source_turn``.
+    36: {"turns": []},
 }
 
 #: KYO-882: a field *within* each turn reference, the per-child shape again. A reference

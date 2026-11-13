@@ -116,11 +116,11 @@ WORK_POLICY_KEYS: frozenset[str] = frozenset(
 #: this kind, by `kyo new` or `kyo spawn`, needs a ``decided`` credit naming the person who
 #: decided it (``credits.filing_credit``). Set on the shipped ``decision``.
 #:
-#: KYO-658: ``policy.requires_discussion`` (optional, either archetype) -- filing a record
-#: of this kind names the discussion it came from, by spawning from it, ``--discussion``, or
-#: ``--opened-late``, which opens one at the filing and marks it late for good
-#: (``cmd_discuss.filing_discussion``, contract ``decision-requires-discussion``). Set on the
-#: shipped ``decision``; enforced where ``people:`` declares someone, as credits are.
+#: KYO-658, retired by KYO-899: ``policy.requires_discussion`` (optional, either archetype)
+#: once made filing a record of this kind name the discussion it came from. No command
+#: reads it now and the shipped ``decision`` no longer sets it. It stays among the keys a
+#: policy may carry, and must be a boolean, so that a store whose ``kinds.yml`` sets it
+#: loads without an edit.
 WORK_POLICY_OPTIONAL_KEYS: frozenset[str] = frozenset(
     {"worker_model", "carried", "requires_credit", "requires_discussion"}
 )
@@ -254,12 +254,6 @@ class Kind:
         """``policy.requires_credit`` (KYO-644): `kyo new` and `kyo spawn` refuse to file
         this kind without a ``decided`` credit; false when absent."""
         return self.policy.get("requires_credit", False) is True
-
-    @property
-    def requires_discussion(self) -> bool:
-        """``policy.requires_discussion`` (KYO-658): `kyo new` and `kyo spawn` refuse to
-        file this kind without naming its discussion; false when absent."""
-        return self.policy.get("requires_discussion", False) is True
 
     @property
     def raises_docs_obligations(self) -> bool:

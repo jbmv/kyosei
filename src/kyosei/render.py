@@ -651,6 +651,50 @@ def _quote_clause(credit: dict, evidence: dict[str, str]) -> str:
     return f": {shown}{suffix}"
 
 
+#: How a cited turn's role reads beside it (KYO-900): the turn that carries the person's
+#: judgement, and an earlier turn in which what was approved was specified.
+_TURN_ROLE_WORDS = {"approval": "approval", "context": "context "}
+
+
+def turn_label(turn: dict) -> str:
+    """How one cited turn is named: its prompt id, or its transcript record's uuid for a
+    message sent mid-turn or an answer, which have no prompt id; eight characters."""
+    if turn.get("prompt_id"):
+        return f"prompt {turn['prompt_id'][:8]}"
+    return f"turn {turn['turn'][:8]}"
+
+
+def credit_turn_lines(credit: dict, evidence: dict[str, str], *, indent: str) -> list[str]:
+    """KYO-900: the turns a credit cites, one line each in transcript order: whether the
+    turn carries the approval or is context it approved, its time, how it is named, the
+    form of its words where that is not typing, and the first line of the words as
+    stored. A credit that cites one turn prints one line; a credit given by a quoted file
+    cites none here and prints nothing."""
+    turns = credit.get("turns") or []
+    if not turns:
+        return []
+    sessions = {turn["session"] for turn in turns}
+    out = [f"{indent}turns cited ({len(turns)}), in transcript order:"]
+    for turn in turns:
+        words = evidence.get(turn["quote_id"])
+        if words is None:
+            shown = "(words removed)"
+        else:
+            first, more = elided_first_line(words, more_at=f"in {turn['quote_id']}")
+            shown = f'"{first}"{more}'
+        form = turn.get("words_form")
+        marks = [turn_label(turn)]
+        if len(sessions) > 1:
+            marks.append(f"session {turn['session'][:8]}")
+        if form and form != "typed":
+            marks.append(form)
+        if turn.get("root"):
+            marks.append(f"committed {turn['root'][:8]}")
+        role = _TURN_ROLE_WORDS.get(turn["role"], turn["role"])
+        out.append(f"{indent}  {role}  {turn['at']}  {', '.join(marks)}: {shown}")
+    return out
+
+
 def credit_lines(
     doc: dict, credit: dict, *, verb: str, indent: str, evidence: dict[str, str]
 ) -> list[str]:
@@ -675,6 +719,7 @@ def credit_lines(
         where.append(credit["source_note"])
     where.append(_TRANSCRIPT_WORDS.get(credit["transcript_check"], credit["transcript_check"]))
     out.append(f"{indent}{', '.join(where)}")
+    out.extend(credit_turn_lines(credit, evidence, indent=indent))
     discussion = span_text(credit)
     if discussion:
         out.append(f"{indent}discussion: {discussion}")
@@ -733,6 +778,7 @@ def decision_header_lines(doc: dict, evidence: dict[str, str]) -> list[str]:
             out.append("  words:        accepted a suggestion (their choice, not their writing)")
         elif form == "choice":
             out.append("  words:        a choice among offered options")
+        out.extend(credit_turn_lines(credit, evidence, indent="  "))
         discussion = span_text(credit)
         if discussion:
             out.append(f"  discussion:   {discussion}")

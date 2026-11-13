@@ -13,8 +13,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import yaml
 
-from kyosei import cmd_turns
+from kyosei import cmd_discuss, cmd_turns
 from kyosei.cli import build_parser
 
 from .conftest import TEST_PERSON, declare_person, new_record, opt_in_transcripts
@@ -258,13 +259,45 @@ def _decision_flags(project: Path, tmp: Path, *, words: str = DECIDING_WORDS) ->
     ]  # fmt: skip
 
 
-def test_a_decision_with_no_discussion_is_refused_and_opened_late_files_it(
+def _require_a_discussion(project: Path, value: bool) -> None:
+    """Set ``policy.requires_discussion`` on this store's `decision`, as a store scaffolded
+    between KYO-658 and KYO-899 carries it."""
+    path = project / "kyosei" / "kinds.yml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["kinds"]["decision"]["policy"]["requires_discussion"] = value
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def _discussions(kyo) -> list[str]:
+    return [row["id"] for row in kyo("list", "--kind", "discussion", "--json").json["records"]]
+
+
+@pytest.mark.parametrize("stored", [None, True, False])
+def test_a_decision_with_no_discussion_is_filed_whatever_the_registry_says(
+    kyo, project: Path, tmp_path: Path, stored: bool | None
+) -> None:
+    """KYO-899.c4: where a person is declared, `kyo new decision` and `kyo spawn --kind
+    decision` with no discussion file the decision, create no discussion and warn of
+    nothing, with the retired key absent, true or false."""
+    if stored is not None:
+        _require_a_discussion(project, stored)
+    flags = [*_decision_flags(project, tmp_path), "--source-other", "a call"]
+    filed = kyo("new", "decision", "--title", "Keep the cache", *flags)
+    assert filed.code == 0 and filed.err == "", filed
+    assert "discussion" not in filed.out and "warning" not in filed.out.lower()
+    proposal = kyo("new", "proposal", "--title", "A proposal", "--json").json["record_id"]
+    spawned = kyo("spawn", proposal, "--kind", "decision", "--title", "Keep it", *flags)
+    assert spawned.code == 0 and spawned.err == "", spawned
+    assert "discussion" not in spawned.out and "warning" not in spawned.out.lower()
+    assert _discussions(kyo) == []
+    assert kyo("doctor").code == 0
+    assert not hasattr(cmd_discuss, "CONTRACT_DECISION_REQUIRES_DISCUSSION")
+
+
+def test_opened_late_files_a_decision_and_its_late_discussion(
     kyo, project: Path, tmp_path: Path
 ) -> None:
     flags = [*_decision_flags(project, tmp_path), "--source-other", "a call"]
-    refused = kyo("new", "decision", "--title", "Keep the cache", *flags)
-    assert refused.code == 2 and "decision-requires-discussion" in refused.err, refused
-    assert "--opened-late" in refused.err and "--discussion" in refused.err
     filed = kyo("new", "decision", "--title", "Keep the cache", *flags, "--opened-late", "--json")
     assert filed.code == 0, filed
     discussion = filed.json["discussion_id"]
@@ -297,7 +330,8 @@ def test_opened_late_with_an_index_names_where_it_began(
 ) -> None:
     flags = _decision_flags(indexed, tmp_path)
     refused = kyo("new", "decision", "--title", "Keep the cache", *flags, "--opened-late")
-    assert refused.code == 2 and "--at-prompt <prompt>" in refused.err and PROMPT_1 in refused.err
+    assert refused.code == 64 and "--at-prompt <prompt>" in refused.err and PROMPT_1 in refused.err
+    assert "decision-requires-discussion" not in refused.err
     filed = kyo(
         "new", "decision", "--title", "Keep the cache", *flags, "--opened-late",
         "--at-prompt", PROMPT_1, "--json",
@@ -319,8 +353,11 @@ def test_a_named_discussion_is_linked_and_closed(kyo, project: Path, tmp_path: P
     assert shown["discussion"] == {
         **shown["discussion"], "id": discussion, "late": False, "open": False,
     }  # fmt: skip
-    task = kyo("new", "task", "--title", "t", "--discussion", discussion)
-    assert task.code == 64 and "requires_discussion" in task.err
+    # KYO-899: the flag is accepted on every kind; the discussion is closed already, so the
+    # task is linked to it and nothing is closed twice.
+    task = kyo("new", "task", "--title", "t", "--discussion", discussion, "--json")
+    assert task.code == 0, task
+    assert kyo("show", task.json["record_id"], "--json").json["discussion"]["id"] == discussion
 
 
 # ------------------------------------------------------------------ KYO-658.c4
@@ -406,8 +443,8 @@ def test_each_usage_refusal_is_cleared_by_the_invocation_it_names(
     assert both.code == 64 and "give one" in both.err
     assert kyo("new", "decision", "--title", "d", *flags, "--discussion", discussion).code == 0
 
-    task = kyo("new", "task", "--title", "t", "--opened-late")
-    assert task.code == 64 and "requires_discussion" in task.err
+    stray = kyo("new", "task", "--title", "t", "--at-prompt", "aaaa")
+    assert stray.code == 64 and "--opened-late" in stray.err
     assert kyo("new", "task", "--title", "t").code == 0
 
     again = kyo("discuss", "open", "--title", "y", "--json").json["id"]

@@ -58,6 +58,10 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # store; single-line, and refused on shell residue by `cmd_agenda._text_of`, which
         # names its --text-file twin (tests/test_kyo_agenda.py).
         "--text",
+        # KYO-900: what was recommended, one line, single-line enforced by
+        # `credits._decision` as a decision file's `recommended` is; a decision with
+        # more to say takes --decision-file.
+        "--recommended",
     }  # fmt: skip
     file_bearing = {f for f in value_flags if f.endswith("-file")}
     structural = {
@@ -71,7 +75,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         "--supersede-note",
         "--basis",  # a credit id (KYO-644)
         "--supersede",  # a credit id (KYO-644)
-        "--turn",  # a transcript record uuid (KYO-644)
+        "--turn",  # a prompt id or transcript record uuid, repeatable (KYO-644, KYO-900)
+        "--outcome",  # accepted | refined | overrode | unprompted (KYO-900)
+        "--recommended-by",  # who recommended it: an author's name, one token (KYO-900)
         "--person",  # a key under `people:` (KYO-644)
         "--session",  # a Claude Code session id (KYO-644)
         "--span-first",  # a transcript record uuid (KYO-644)

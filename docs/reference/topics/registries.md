@@ -24,20 +24,21 @@ is the disposal (KYO-44). Each kind declares:
   `raises_docs_obligations`) for `knowledge` kinds; `requires_credit` (optional, either
   archetype, KYO-644) makes `kyo new` and `kyo spawn` refuse the kind
   (`filing-requires-credit`) without a `decided` credit naming the person who decided it.
-  `requires_discussion` (optional, either archetype, KYO-658, on the packaged `decision`)
-  makes them refuse it (`decision-requires-discussion`) unless it is filed from its
-  discussion: spawned from one, from a record one produced, or with `--discussion <id>`, or
-  with `--opened-late`, which opens one at the filing and marks it late for good. A spawn
-  closes the discussion it came from; `kyo spawn --keep-open` leaves it open for a discussion
-  that produces several records, and a spawn from a closed discussion is refused
-  (`spawn-from-closed-discussion`, KYO-749). Both apply
-  only where `people:` declares someone. `raises_docs_obligations` (KYO-554, on
+  It applies only where `people:` declares someone.
+  `requires_discussion` (KYO-658) is retired (KYO-899): a `kinds.yml` that sets it still
+  loads, and no command reads it, so every kind is filed with or without a discussion. A
+  record of any kind may name the discussion it came from: it is spawned from one, or
+  filed with `--discussion <id>`, or with `--opened-late`, which opens one at the filing
+  and marks it late for good. A spawn closes the discussion it came from; `kyo spawn
+  --keep-open` leaves it open for a discussion that produces several records, and a spawn
+  from a closed discussion is refused (`spawn-from-closed-discussion`, KYO-749). `raises_docs_obligations` (KYO-554, on
   the packaged `decision`) makes filing or editing a record raise a standing docs
   obligation on each ssot section it names by id and each of its doc-refs
   ([docs governance](docs-governance.md)).
 
-**Discussions (KYO-658).** A conversation in which the person is asked to choose is a
-record of the default `discussion` kind: `archetype: knowledge`, not counted, swept, and
+**Discussions (KYO-658).** A conversation in which the person is asked to choose can be
+kept as a record of the default `discussion` kind, when someone opens one on purpose; no
+command requires one (KYO-899). The kind is `archetype: knowledge`, not counted, swept, and
 filed only by `kyo discuss open --title "..."` (its `accepts_from` is empty). The command
 writes a turn reference (`KYO-n.sN`) to the person's latest confirmed turn of
 `$CLAUDE_CODE_SESSION_ID` in the turn index, or to the turn `--at-prompt <prompt>` names; where
@@ -56,35 +57,21 @@ schema_version 35 has no such field, and `kyo rebuild --force` supplies it from 
 format held: a closing with a produced record, or with a reason stored under the earlier
 `produced: ` prefix, is `produced` and loses the prefix, and any other is `dropped`.
 
-**The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
-ended: the person's words and any use of AskUserQuestion from the transcript, and the
-agent's final message from the hook payload. A cue fires when the person's words hold a
-phrase that opens a choice (a question mark alone does not fire it), when the reply holds a
-recommendation, a request for their choice or two or more labelled options (a closing
-question does not, nor does an offer to act, such as "want me to" or "shall I"), or when the
-turn used AskUserQuestion. The turn is attached when a discussion opened in this session is
-still open, or a turn reference already names the turn; a turn whose words name a record
-that no open discussion's title, description, notes or links mention is not attached. When
-a cue fires on an unattached turn, the check prints nothing and does not continue the
-conversation: it writes `candidate` (the cues and the time) on the turn's line of the turn
-index. At the session's next prompt the same command, run by the `UserPromptSubmit` hook,
-prints one line of context for the newest candidate that no discussion names and no skip
-covers: the turn's time and prompt id, the commands `kyo discuss open --at-prompt <prompt>
---title "<topic>"` and `kyo discuss skip --at-prompt <prompt> --why "<one line>"`, and the
-instruction that a skip is not reported to the person. The candidate is marked asked when
-named, so a turn is named once; a discussion opened at the turn, or a skip of it, clears it.
-The check is silent in a project that has not opted in to reading transcripts, in a
-worktree, and whenever it cannot read the store, the index or the transcript. `kyo discuss skip` writes its reason
-on the turn's line of the turn index (`skip`, with the time), `--at-prompt <prompt>` naming
-the turn and the session's latest prompt being the default. `kyo doctor` prints, as a
-notice per week, the share of decisions whose discussion was opened live, opened late or
-with no indexed turn, and the number of prompts skipped; and it reports as a problem a
-session that recorded two or more Stops, the last later than every line of the turn
-index, with no line of its own, which means the hooks that write the index did not run.
+**The Stop check is retired (KYO-899).** KYO-662 ran `kyo discuss check --hook` at each
+`Stop` and, from KYO-876, at each `UserPromptSubmit`, to mark a turn that put a choice to
+the person and have the agent open a discussion or dismiss the turn with `kyo discuss
+skip`. The packaged hooks do not run it. Both commands remain so that a project's own
+copy of the hooks keeps working: `kyo discuss check --hook` prints nothing, writes nothing
+and exits 0, and `kyo discuss skip` writes nothing and says in one line that the check is
+retired. `kyo install-hooks` removes the line from a project's copy, and until then `kyo
+doctor` names it in a notice. `kyo doctor` does not print the weekly shares of decisions
+opened live, late and unindexed. It still reports as a problem a session that recorded two
+or more Stops, the last later than every line of the turn index, with no line of its own,
+which means the hooks that write the index did not run.
 
-A store scaffolded by a build from before KYO-658 has no
-`discussion` entry and no `requires_discussion` key; copy both from the packaged
-`kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it produces.
+A store scaffolded by a build from before KYO-658 has no `discussion` entry; copy it from
+the packaged `kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it
+produces.
 
 **Reminders (KYO-497, KYO-521).** A decision waiting on the operator, or a reminder tied
 to a date or an event, that the next shift must see is a record of the default `reminder`
@@ -137,14 +124,49 @@ waiting on the operator becomes one with `kyo spawn <reminder-id> --kind decisio
 
 **The person who decided (KYO-644).** The packaged `decision` also sets `requires_credit`,
 so every filing of one, by `kyo new` or by any `kyo spawn`, carries a `decided` credit: the
-person's words alone in `--quote-file` (which also serves as the evidence when
-`--evidence-file` is not given), what was recommended, the outcome and the alternatives (each
+person's words, what was recommended, the outcome and the alternatives (each
 with `proposed_by` where the person's own words introduced the option, KYO-786) in
-`--decision-file`, the person (`--person`, defaulting to the only one declared under
+`--decision-file`, or `--outcome`, `--recommended` and `--recommended-by` for a decision
+that lists no alternatives (KYO-900), the person (`--person`, defaulting to the only one declared under
 `people:`), and where the words were said (`--session`, defaulting to
 `$CLAUDE_CODE_SESSION_ID`, whose transcript is checked where the project set
 `read_transcripts: true`, or `--source-other`). The command reference lists the decision
-file's keys. A project whose `people:` declares nobody files a decision with no credit.
+file's keys.
+
+**Where a credit's words come from (KYO-900).** In a project that reads transcripts, every
+command that writes a credit (`kyo confirm`, `kyo credit`, `kyo verify --method
+human-observed`, `kyo ungate` of a person's gate, and `kyo new` and `kyo spawn` of a kind
+that requires a credit) takes `--turn <id>`, once for each turn of the person's the credit
+cites. The id is a prompt id or a transcript record uuid from the turn index (`kyo turns
+--json`), whole or by a unique prefix of at least four characters; a message sent while the
+agent was working, and an answer to a question the agent put, have no prompt id and are
+named by their record uuid. kyo reads the words from the transcript and stores them, so no
+file is written. With neither `--turn` nor `--quote-file`, in a Claude Code session, the
+person's latest turn of that session is taken, after the session's transcript is folded
+into the turn index. A turn in another session is found through the index and stored with
+its own session.
+
+The turns are stored in transcript order whatever order they were named in. The latest is
+the `approval`, the turn that carries the person's judgement; the earlier ones are
+`context`, the turns in which what was approved was specified. `kyo show` prints each with
+its role, time and the first line of its words, and so does the receipt of the command
+that wrote the credit. A sole cited turn of four words or fewer adds one line to the
+receipt saying that earlier turns can be cited as context; it refuses nothing.
+
+What is stored of a turn is the person's typed words. Pasted content is left out and its
+place marked `[...]`; a turn longer than 4,000 characters keeps its first 3,000 and last
+1,000 around the same mark, and the receipt says so. A context turn's words are an
+evidence artifact of their own. Each turn also carries the commitment the turn index made
+to the prompt's text when it was sent, where its line has one, and `kyo turns --verify`
+checks that the line still holds it.
+
+`--quote-file` beside `--turn` narrows the credit: the words must occur in a named turn
+(`credit-quote-not-found` otherwise), the latest named turn that holds them is the
+approval, and they are what is stored for it. `--quote-file` alone is checked against the
+session's transcript as before, and is the only form in a project that does not read
+transcripts or outside a Claude Code session, where a credit with neither it nor a
+readable turn is refused naming the flag to pass. The filing's evidence, when
+`--evidence-file` is not given, is the words the credit stores. A project whose `people:` declares nobody files a decision with no credit.
 
 **Which spawn routes need evidence (KYO-522).** A reminder becomes a decision exactly when
 the operator answers in conversation, so `kyo spawn` from a source whose kind is `carried`

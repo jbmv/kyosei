@@ -863,125 +863,7 @@ def check_credit_transcripts_appeared(store: Store) -> list[str]:
     ]
 
 
-# ------------------------------------------------------------------ discussions (KYO-662)
-
-#: How many of the latest weeks :func:`check_discussion_shares` prints.
-DISCUSSION_SHARE_WEEKS = 4
-
-#: How a decision's discussion was opened, in the order the shares are printed.
-OPENED_LIVE = "live"
-OPENED_LATE = "late"
-OPENED_UNINDEXED = "unindexed"
-
-
-def _iso_week(stamp: object) -> str | None:
-    """``2026-W46`` for a stored UTC stamp; None when it does not parse."""
-    if not isinstance(stamp, str):
-        return None
-    try:
-        moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    year, week, _ = moment.astimezone(UTC).isocalendar()
-    return f"{year}-W{week:02d}"
-
-
-def _discussion_kinds(store: Store) -> set[str]:
-    """The kinds filed from a discussion: ``policy.requires_discussion``, and ``decision``
-    when the kind registry does not load (``kind_registry`` reports the file)."""
-    from . import kinds as kinds_module
-
-    try:
-        registry = kinds_module.load_kind_registry(store.config.kyosei_dir)
-    except KyoseiError:
-        return {"decision"}
-    return {name for name, kind in registry.kinds.items() if kind.requires_discussion}
-
-
-def discussion_shares(store: Store) -> dict[str, dict[str, int]]:
-    """Per ISO week (UTC) of filing, how the discussion behind each decision was opened.
-
-    ``live``: opened at an indexed turn before the decision was filed. ``late``: opened by
-    the filing itself (``--opened-late``) at an indexed turn. ``unindexed``: its opening
-    names no turn of the turn index, live or late, so its start is known only from the
-    time the opening was written. ``none`` counts decisions filed from no discussion, which
-    the shares leave out. ``skips`` counts the turns of that week the discussion check named
-    and the agent dismissed with ``kyo discuss skip``.
-    """
-    from . import cmd_discuss, cmd_turns
-
-    weeks: dict[str, dict[str, int]] = {}
-
-    def bump(week: str | None, key: str) -> None:
-        if week is not None:
-            row = weeks.setdefault(
-                week, {OPENED_LIVE: 0, OPENED_LATE: 0, OPENED_UNINDEXED: 0, "none": 0, "skips": 0}
-            )
-            row[key] += 1
-
-    kinds = sorted(_discussion_kinds(store))
-    if kinds:
-        marks = ", ".join("?" * len(kinds))
-        for row in store.conn.execute(
-            f"SELECT id, created_at FROM records WHERE kind IN ({marks}) ORDER BY seq",  # noqa: S608
-            kinds,
-        ):
-            discussion = cmd_discuss.discussion_of(store, row["id"])
-            if discussion is None:
-                bump(_iso_week(row["created_at"]), "none")
-                continue
-            opened = next(
-                (ref for ref in store.turn_refs(discussion) if ref["role"] == "opened"), None
-            )
-            if opened is None or opened["index_state"] != contracts.TURN_REF_INDEXED:
-                how = OPENED_UNINDEXED
-            elif opened["late"]:
-                how = OPENED_LATE
-            else:
-                how = OPENED_LIVE
-            bump(_iso_week(row["created_at"]), how)
-    for line in cmd_turns.read_lines(store.config.kyosei_dir.parent):
-        skip = line.get("skip")
-        if isinstance(skip, dict):
-            bump(_iso_week(skip.get("at")), "skips")
-    return weeks
-
-
-def check_discussion_shares(store: Store) -> list[str]:
-    """KYO-662: per week, the share of decisions whose discussion was opened live, opened
-    late or never indexed, and the number of Stop-check prompts dismissed with a skip.
-
-    A NOTICE, one line per week for the latest :data:`DISCUSSION_SHARE_WEEKS` weeks that
-    have a decision filed from a discussion or a skip. Nothing here is a fault of the
-    store: the shares say whether the Stop check (``kyo discuss check --hook``) is turning
-    late openings into live ones, and a week of skips with no live opening says its
-    detector is being dismissed. Silent in a store where no decision has a discussion and
-    no turn was skipped.
-    """
-    weeks = discussion_shares(store)
-    shown = [
-        week
-        for week in sorted(weeks)
-        if weeks[week]["skips"]
-        or weeks[week][OPENED_LIVE] + weeks[week][OPENED_LATE] + weeks[week][OPENED_UNINDEXED]
-    ][-DISCUSSION_SHARE_WEEKS:]
-    out: list[str] = []
-    for week in shown:
-        row = weeks[week]
-        total = row[OPENED_LIVE] + row[OPENED_LATE] + row[OPENED_UNINDEXED]
-        if total:
-            shares = ", ".join(
-                f"{how} {row[how]} ({round(100 * row[how] / total)}%)"
-                for how in (OPENED_LIVE, OPENED_LATE, OPENED_UNINDEXED)
-            )
-            text = f"week {week}: {total} decision(s) filed from a discussion, opened {shares}"
-        else:
-            text = f"week {week}: no decision filed from a discussion"
-        if row["none"]:
-            text += f"; {row['none']} more filed from none"
-        text += f"; {row['skips']} Stop-check prompt(s) skipped (KYO-662)"
-        out.append(text)
-    return out
+# ------------------------------------------------------------- the turn index (KYO-662)
 
 
 def check_sessions_unindexed(store: Store) -> list[str]:
@@ -998,8 +880,8 @@ def check_sessions_unindexed(store: Store) -> list[str]:
     needs two recorded Stops, since at a session's first Stop this check can run before
     the turn hook beside it has written. It names only a session whose last Stop is later
     than every line in the index: once any session's prompt is indexed after it, the hooks
-    are known to work again, and the earlier session's missing lines are counted by the
-    ``unindexed`` share of :func:`check_discussion_shares` rather than reported forever.
+    are known to work again, and the earlier session's missing lines are not reported
+    forever.
     """
     from . import cmd_sessions, cmd_turns
     from .config import transcripts_opted_in

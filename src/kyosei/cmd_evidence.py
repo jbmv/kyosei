@@ -774,6 +774,14 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
         text = read_prose(args.evidence_file, what="--evidence-file")
         if not text.strip():
             raise UsageError("--evidence-file must not be empty")
+    elif (
+        args.method == "human-observed"
+        and getattr(args, "credit", None) is None
+        and not credits.exempt(store, args)
+    ):
+        # KYO-900: no words were given, so they are copied from the person's turn, and
+        # stored as the verdict's evidence as a file's would be.
+        text = credits.words_from_turns(ctx, store, args, None)
     credit, joined = _credit_for_verdict(ctx, store, args, text)
 
     with store.transaction():
@@ -952,7 +960,8 @@ def _credit_for_verdict(
             "the person's words go in --evidence-file, with where they said them: "
             f"`kyo verify {cid} --verdict {verdict} --method human-observed --evidence-file "
             "FILE --person KEY --source-other <where>` (or --session ID for a Claude Code "
-            "session, whose transcript is checked)",
+            "session, whose transcript is checked; in a project that reads transcripts "
+            "--turn <id> names the turn they said it in, and no file is needed)",
             "an observation of your own, an agent's, is recorded as such: "
             f"`kyo verify {cid} --verdict {verdict} --method agent-observed`",
         ],

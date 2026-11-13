@@ -15,7 +15,7 @@ fails if a packaged fragment is missing from that list.
 
 Every command the hooks below name — `kyo brief`, `kyo doctor`, `kyo sweep`, (KYO-13.c5)
 `kyo check-branch`, (KYO-17) `kyo check-clean`, (KYO-60) `kyo check-push`, (KYO-298)
-`kyo check-command`, (KYO-186) `kyo sessions`, (KYO-398) `kyo check-build`, (KYO-657) `kyo turns` and (KYO-662) `kyo discuss` — is a
+`kyo check-command`, (KYO-186) `kyo sessions`, (KYO-398) `kyo check-build`, and (KYO-657) `kyo turns` — is a
 command of the installed CLI.
 
 ## Keeping them current
@@ -496,18 +496,12 @@ prompt hook did not index, and copies the session's transcript and subagent tran
 bytes only, to `$KYOSEI_HOME/transcript-archive/<project>/` (KYO-657, KYO-683). It prints
 nothing and always exits 0, since UserPromptSubmit's stdout is added to the session's context.
 
-### `Stop` and `UserPromptSubmit` → `kyo discuss check --hook`
+### Retired: `kyo discuss check --hook`
 
-KYO-662, KYO-876. In a project that opted in to reading transcripts, at `Stop` this reads the
-turn that ended and, when a cue says a choice was put to the person and no discussion is open
-in the session, writes a `candidate` mark on the turn's line of the turn index. It prints
-nothing, so the conversation is not continued. At the session's next `UserPromptSubmit` the
-same command prints one line of context naming the newest candidate once, with the commands
-`kyo discuss open --at-prompt <prompt>` and `kyo discuss skip --at-prompt <prompt> --why
-"<one line>"`, so that the agent acts inside the turn it is already taking. It is in its own
-group in each fragment, so a failing sweep or doctor does not skip it, and under `Stop` alone
-in `stop.json`, since at `SessionEnd` no later prompt is left. The cues and what counts as
-attached are in `docs/reference/topics/registries.md`.
+KYO-662 and KYO-876 ran this at `Stop` and at `UserPromptSubmit`. KYO-899 retired the
+discussion check, and no fragment runs it. The command still exits 0, prints nothing and
+writes nothing, so a copy of the hooks that carries the line keeps working; `kyo
+install-hooks` removes the line, and `kyo doctor` names it in a notice until then.
 
 ### `UserPromptSubmit` → `kyo check-build --hook`
 
@@ -553,11 +547,11 @@ warning.
 All in `src/kyosei/defaults/hooks/`:
 
 - `session-start.json` — `SessionStart` → `kyo brief --compact --session-start`
-- `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`; `kyo discuss check --hook` in a third group, under `Stop` alone (it is also the third group of `prompt-submit.json`)
+- `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`
 - `subagent-stop.json` — `SubagentStop` → `kyo check-clean --subagent-stop`, then `kyo check-branch --subagent-stop --against main`
 - `sessions.json` — `SessionStart`, `Stop` and `SessionEnd` → `kyo sessions --hook`
 - `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`
-- `prompt-submit.json` — `UserPromptSubmit` → `kyo check-build --hook`, `kyo turns --hook`, `kyo discuss check --hook`
+- `prompt-submit.json` — `UserPromptSubmit` → `kyo check-build --hook`, `kyo turns --hook`
 
 Each file is a standalone JSON fragment shaped like one event's value under `.claude/
 settings.json`'s `"hooks"` key. Its `comment` fields are for a reader of the fragment and are

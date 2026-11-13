@@ -108,7 +108,7 @@ named file/symbol against the repo *now*, and consumes what it promotes (KYO-228
 **Spawn** (`kyo spawn <source-id> --kind <k>`) is the kind-to-kind edge: refused unless the
 source's kind is in the target's `accepts_from` (`kyosei/kinds.yml`), linked back with
 `produced-by`, and copying neither the source's text (use `--description-file`) nor its status.
-Approving a proposal is `kyo confirm <proposal> --criterion <cid> --quote-file q.txt`, then spawn.
+Approving a proposal is `kyo confirm <proposal> --criterion <cid>`, then spawn.
 
 **Other relations are edges you add** with `kyo link <from> <edge> <to>` (`blocks`,
 `duplicates`, `supersedes`, `same-question-as`, `needs-same-change-as`); check the direction in
@@ -119,17 +119,20 @@ the echo, and `kyo unlink <id> --why` retracts one (KYO-21). Work a decision led
 its members, and carries no criteria of its own (KYO-210). Members join one by one, with
 `--plan <plan-id>` on `kyo new` or `kyo edit <id>`; `kyo list --plan <plan-id>` walks it.
 
-**Before answering a choice put to the person, run `kyo discuss open --title "<topic>"`**
-(KYO-658), and file the decision from it, credited: `kyo spawn <discussion> --kind decision
---quote-file words.md --decision-file d.yml` (KYO-644; `--keep-open`). The Stop check is silent;
-when it marked a turn of yours, the next prompt names it once (KYO-876), and you answer inside
-that turn with `kyo discuss open --at-prompt <id> --title "<topic>"` or
-`kyo discuss skip --at-prompt <id> --why "<why>"`, a skip going unreported. A discussion that
-led to records but no decision closes with `kyo discuss close <id> --produced <record>...`
-(KYO-878; `--why` for an idea file), and `--dropped` is for one that led to nothing. With no
-discussion open, `kyo new decision --opened-late --at-prompt <prompt>`. A choice needing design
-work first is a proposal. Sending a discussion off the machine is `kyo excerpt`, refused without
-the person's go-ahead recorded as a credit (KYO-660).
+**A decision the person made is filed directly, credited**: `kyo new decision --title "..."
+--outcome accepted --recommended "<what you recommended>"` (KYO-644; `--outcome unprompted` if
+you recommended nothing, `--decision-file d.yml` to list alternatives). **Never retype the
+person's words** (KYO-900): each credit (`kyo confirm`, `kyo new`/`kyo spawn` of a decision,
+`kyo verify --method human-observed`, `kyo ungate`, `kyo credit`) copies them from the
+transcript, from the person's latest turn. When a short approval rests on earlier
+turns, cite them all, `--turn <id>` once each (`kyo turns --said` lists the ids), and read the
+turns the receipt echoes; where no transcript is read, `kyo confirm --quote-file q.txt`. A
+choice needing design work first is a proposal.
+
+A discussion is optional: `kyo discuss open --title "<topic>"` records a long choice, `kyo
+spawn <discussion> --kind decision` closes it (`--keep-open`), and `kyo discuss close <id>
+--produced <record>...` or `kyo discuss close <id> --dropped --why "..."` closes one otherwise.
+Sending one off the machine is `kyo excerpt`, refused without the person's credited go-ahead.
 
 Stories: `${CLAUDE_SKILL_DIR}/REFERENCE.md`, "2. Filing vs. promotion".
 
@@ -285,10 +288,10 @@ Verdicts (`kyo verify <cid> --verdict <v> --method <m> --evidence-file f.txt`) f
 **A criterion recorded `unmet-unobserved` pending a person's look is gated in the same breath**
 (KYO-264, KYO-265) -- only gates are findable (Awaiting, `kyo list --gate-tag`):
 `kyo gate <id> awaiting:human-run --do "<what to look at>"` naming the criterion (`--do-file`,
-`--tag`). **When they approve, `kyo confirm <id> --quote-file q.txt` verifies met
+`--tag`). **When they approve, `kyo confirm <id>` verifies met
 (human-observed), ungates and moves the record** (KYO-494; `--no-close` for
-a decision gate on open work, `--gate` or `--all-unobserved` when it asks), crediting the person: q.txt is
-their words alone, checked against the session transcript (KYO-644). On completion it commits
+a decision gate on open work, `--gate` or `--all-unobserved` when it asks), crediting the person
+with their words, copied from their turn (KYO-900). On completion it commits
 the `close_wave: generate:` files (KYO-577). A "no" is `kyo verify`, credited; your own
 look `kyo verify --method agent-observed`; a lapsed wait `kyo ungate --withdrawn`;
 a credit after the fact `kyo credit <id> --basis <approval>`.

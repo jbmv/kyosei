@@ -42,7 +42,9 @@ payload's ``last_assistant_message``. Still no words are stored. A line the Stop
 from the transcript was not committed when it was sent, so it is chained with no root;
 that is every message sent mid-turn. Lines written before this are left as they are,
 unchained, and a session that spans the change has a chain that begins at its first new
-line. ``kyo turns --verify`` checks every chain and every credit's ``span_seal``;
+line. ``kyo turns --verify`` checks every chain, every credit's ``span_seal`` and, for a
+credit given by turn reference (KYO-900), that each commitment it copied from an index line
+is still the one that line holds;
 ``kyo turns --seal-key`` shows or chooses where the key is kept.
 
 The archive half of the Stop hook is :mod:`kyosei.transcript_archive`.
@@ -54,7 +56,7 @@ import json
 import os
 import sys
 from argparse import Namespace
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -155,90 +157,6 @@ def confirmed_paste_flags(store_root: Path | str, session_id: str) -> dict[str, 
             if isinstance(value, str):
                 flags[value] = pasted
     return flags
-
-
-#: KYO-662: the ``role`` of a line that stands for the agent's reply, not for a prompt. Such
-#: a line repeats its prompt's id, and a skip is never written on it.
-REPLY_ROLE = "assistant"
-
-
-def prompt_lines(store_root: Path | str, session_id: str) -> list[dict]:
-    """One session's lines that each stand for a prompt or a message sent mid-turn, in file
-    order: every line of the session but those whose ``role`` is :data:`REPLY_ROLE`."""
-    return [
-        line
-        for line in read_lines(store_root)
-        if line.get("session") == session_id and line.get("role") != REPLY_ROLE
-    ]
-
-
-def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) -> dict | None:
-    """KYO-662: write ``skip`` on one index line, the reason a turn the Stop check asked
-    about is not a discussion. ``key`` is the line's prompt id or record uuid. Returns the
-    line as written, or None when the session's index holds no such line. The reason and
-    the time it was given are the only words the index holds, and they are the agent's.
-    """
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in lines:
-            if (
-                line.get("session") == session_id
-                and line.get("role") != REPLY_ROLE
-                and key in (line.get("prompt_id"), line.get("turn"))
-            ):
-                line["skip"] = {"why": why, "at": _now()}
-                _rewrite(store_root, lines)
-                return line
-    return None
-
-
-def mark_candidate(store_root: Path | str, session_id: str, key: str, cues: list[str]) -> bool:
-    """KYO-876: write ``candidate`` on one index line, the cues that fired at the Stop that
-    ended the turn, so the session's next prompt can ask about it (:func:`next_candidate`).
-    A line that already carries a candidate or a skip is left as it is. Returns whether it
-    wrote."""
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in lines:
-            if (
-                line.get("session") == session_id
-                and line.get("role") != REPLY_ROLE
-                and key in (line.get("prompt_id"), line.get("turn"))
-            ):
-                if "candidate" in line or "skip" in line:
-                    return False
-                line["candidate"] = {"cues": list(cues), "at": _now(), "asked": None}
-                _rewrite(store_root, lines)
-                return True
-    return False
-
-
-def next_candidate(
-    store_root: Path | str, session_id: str, answered: Callable[[str], bool]
-) -> dict | None:
-    """KYO-876: the newest line of the session whose candidate has not been asked about,
-    that carries no skip and whose prompt ``answered`` does not call attached to a
-    discussion; and, marked asked under the lock, so that it is named once. None when
-    there is none."""
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in reversed(lines):
-            candidate = line.get("candidate")
-            prompt_id = line.get("prompt_id")
-            if (
-                line.get("session") != session_id
-                or line.get("role") == REPLY_ROLE
-                or not isinstance(candidate, dict)
-                or candidate.get("asked")
-                or "skip" in line
-                or not isinstance(prompt_id, str)
-                or answered(prompt_id)
-            ):
-                continue
-            candidate["asked"] = _now()
-            _rewrite(store_root, lines)
-            return line
-    return None
 
 
 def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
@@ -524,6 +442,8 @@ def cmd_turns(ctx: Context, args: Namespace) -> Output:
     lines = read_lines(ctx.root) if opted_in else []
     if getattr(args, "verify", False):
         return _verify(ctx, lines, opted_in, getattr(args, "session", None))
+    if getattr(args, "said", False):
+        return _said(ctx, opted_in, getattr(args, "session", None))
     wanted = getattr(args, "session", None)
     if wanted:
         lines = [line for line in lines if line.get("session") == wanted]
@@ -544,6 +464,54 @@ def cmd_turns(ctx: Context, args: Namespace) -> Output:
     return Output(
         lines=rendered,
         data={"ok": True, "opted_in": opted_in, "origins": origins, "turns": lines},
+    )
+
+
+def _said(ctx: Context, opted_in: bool, wanted: str | None) -> Output:
+    """``kyo turns --said``: the person's turns of one session as a credit can cite them
+    (KYO-900), oldest first: time, the id ``--turn`` takes, the form of the words where
+    they were not typed, and their first line. It reads the transcript, as a credit by
+    turn reference does, and folds it into the index first."""
+    from . import credits  # credits imports this module
+
+    session = wanted or ctx.environ.get(credits.ENV_SESSION) or None
+    if not opted_in:
+        raise UsageError(
+            "--said reads the person's words from a transcript, and this project has not "
+            "opted in to reading transcripts (D14), so it keeps no turn index either"
+        )
+    if session is None:
+        raise UsageError(
+            "--said lists one session's turns: give --session ID, or run it in a Claude "
+            f"Code session, where ${credits.ENV_SESSION} names it"
+        )
+    ctx.store()
+    turns = credits.session_turns(ctx, session)
+    rendered = [f"turns: {len(turns)} of the person's in session {session}"]
+    for turn in turns:
+        first = turn.words.splitlines()[0] if turn.words else ""
+        more = " ..." if first != turn.words else ""
+        form = f"  ({turn.words_form})" if turn.words_form not in (None, "typed") else ""
+        key = turn.prompt_id or turn.turn
+        rendered.append(f"  {turn.at}  {key}{form}  {first[:100]}{more}")
+    return Output(
+        lines=rendered,
+        data={
+            "ok": True,
+            "opted_in": True,
+            "session": session,
+            "said": [
+                {
+                    "at": turn.at,
+                    "id": turn.prompt_id or turn.turn,
+                    "prompt_id": turn.prompt_id,
+                    "turn": turn.turn,
+                    "words_form": turn.words_form,
+                    "first_line": turn.words.splitlines()[0] if turn.words else "",
+                }
+                for turn in turns
+            ],
+        },
     )
 
 
@@ -610,7 +578,8 @@ def _seal_key(ctx: Context, args: Namespace) -> Output:
 
 
 def _verify(ctx: Context, lines: list[dict], opted_in: bool, wanted: str | None) -> Output:
-    """``kyo turns --verify``: every session's chain, and every credit's ``span_seal``."""
+    """``kyo turns --verify``: every session's chain, every credit's ``span_seal``, and
+    the commitment each credit copied for a turn it cites (KYO-900)."""
     by_session: dict[str, list[dict]] = {}
     for line in lines:
         session = line.get("session")
@@ -634,12 +603,40 @@ def _verify(ctx: Context, lines: list[dict], opted_in: bool, wanted: str | None)
                     "chained line, does not reach the hash its span_seal holds, so a line "
                     "at or before the span's last was changed or removed"
                 )
+    turns_checked = 0
+    if opted_in:
+        for turn in ctx.store().committed_credit_turns():
+            session = turn["session"]
+            if wanted and session != wanted:
+                continue
+            turns_checked += 1
+            held = [
+                line
+                for line in by_session.get(session, [])
+                if line.get("role") != seal.ROLE_ASSISTANT
+                and (
+                    line.get("turn") == turn["turn"]
+                    or (turn["prompt_id"] and line.get("prompt_id") == turn["prompt_id"])
+                )
+            ]
+            if not any(line.get("root") == turn["root"] for line in held):
+                failures.append(
+                    f"credit {turn['credit_id']}: the turn it cites at position "
+                    f"{turn['position']} ({turn['prompt_id'] or turn['turn']}, session "
+                    f"{session}) carries a commitment that "
+                    + (
+                        "its line of the turn index no longer holds, so the line was changed"
+                        if held
+                        else "no line of the turn index holds, so the line was removed"
+                    )
+                )
     data = {
         "ok": not failures,
         "opted_in": opted_in,
         "sessions": len(by_session),
         "chained_lines": chained,
         "credits_checked": credits_checked,
+        "credit_turns_checked": turns_checked,
         "failures": failures,
     }
     if failures:
@@ -649,6 +646,11 @@ def _verify(ctx: Context, lines: list[dict], opted_in: bool, wanted: str | None)
         lines=[
             f"turns: {chained} chained line(s) in {len(by_session)} session(s) verify, "
             f"and {credits_checked} credit seal(s) match"
+            + (
+                f", and {turns_checked} commitment(s) of turns that credits cite match"
+                if turns_checked
+                else ""
+            )
         ],
         data=data,
     )

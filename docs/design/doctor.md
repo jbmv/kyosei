@@ -189,7 +189,8 @@ arguments: an earlier build's unedited text is the expected state after any upgr
 on it costs a hook-error block on every stop. A hook is superseded only when its command is
 exactly a `SUPERSEDED_HOOK_COMMANDS` key; a packaged command missing only because a superseded
 line runs its earlier form (the earlier `Stop` chain lacks `kyo sweep --hook`) is not reported a
-second time. Nothing recorded earlier builds' skill text, so `kyo install-skill` now ends each
+second time. A hook whose action is exactly a `RETIRED_HOOK_COMMANDS` key, a command a build
+dropped with no replacement, is reported in the same notice (KYO-899). Nothing recorded earlier builds' skill text, so `kyo install-skill` now ends each
 file it writes with the digest of that text. The digest is in the file rather than beside it,
 because a sidecar is one more file a consumer must commit and a record outside the repository
 is absent on every other machine. A copy that differs and has no digest, or no longer matches

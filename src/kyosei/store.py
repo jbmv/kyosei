@@ -558,6 +558,62 @@ class Store:
         )
         return ref_id
 
+    def add_credit_turn(
+        self,
+        credit_id: str,
+        *,
+        position: int,
+        role: str,
+        session: str,
+        turn: str,
+        at: str,
+        quote_id: str,
+        prompt_id: str | None = None,
+        words_form: str | None = None,
+        root: str | None = None,
+        lines: int | None = None,
+    ) -> None:
+        """KYO-900: one turn a credit cites, in the credit's own transaction. ``position``
+        numbers the credit's turns in transcript order from 1; the table's checks hold
+        ``role`` to approval or context."""
+        self.conn.execute(
+            "INSERT INTO credit_turns (credit_id, position, role, session, turn, prompt_id,"
+            " at, words_form, quote_id, root, lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                credit_id,
+                position,
+                role,
+                session,
+                turn,
+                prompt_id,
+                at,
+                words_form,
+                quote_id,
+                root,
+                lines,
+            ),
+        )
+
+    def credit_turns(self, credit_id: str) -> list[sqlite3.Row]:
+        """KYO-900: the turns one credit cites, in transcript order."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM credit_turns WHERE credit_id = ? ORDER BY position", (credit_id,)
+            )
+        )
+
+    def committed_credit_turns(self) -> list[sqlite3.Row]:
+        """KYO-900: the turns of current credits that carry the turn index's commitment,
+        for `kyo turns --verify`."""
+        return list(
+            self.conn.execute(
+                "SELECT t.credit_id, t.position, t.session, t.turn, t.prompt_id, t.root"
+                " FROM credit_turns t JOIN credits c ON c.id = t.credit_id"
+                " WHERE t.root IS NOT NULL AND c.superseded_by IS NULL"
+                " AND c.withdrawn_at IS NULL ORDER BY c.created_at, c.id, t.position"
+            )
+        )
+
     def add_credit_subject(self, credit_id: str, kind: str, subject_id: str) -> None:
         """KYO-644: one more row a credit answers, for `kyo confirm`'s one act that settles
         several rows through several composed steps (each step names the credit)."""

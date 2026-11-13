@@ -149,7 +149,7 @@ import json
 import os
 import re
 import unicodedata
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1208,26 +1208,7 @@ def read_turn_facts(path: Path, offset: int) -> tuple[list[TurnFact], int]:
     return facts, offset + end
 
 
-# ---------------------------------------------------------------- one turn, for the Stop check
-
-#: The tool whose use puts a multiple-choice question to the person.
-ASK_TOOL = "AskUserQuestion"
-
-_HUMAN_KIND = "human"
-
-
-@dataclass(frozen=True)
-class TurnView:
-    """KYO-662: one turn as the transcript holds it: the prompt that opened it and what followed
-    until the next prompt. ``person`` is the person's words in it: the opening prompt when
-    it is theirs, and each message they sent while the agent worked."""
-
-    prompt_id: str | None
-    origin: str | None
-    at: str | None
-    person: tuple[str, ...]
-    asked: bool
-    reply: str | None
+# ---------------------------------------------------------------- a session's message texts
 
 
 def _block_text(content: object) -> str:
@@ -1306,118 +1287,6 @@ def message_texts(paths: list[Path]) -> MessageTexts:
         if text.strip():
             replies.setdefault(current, []).append(text)
     return MessageTexts(records, replies)
-
-
-def split_turns(records: Iterator[dict] | list[dict]) -> Iterator[list[dict]]:
-    """Group a transcript's main-chain records into turns, in order. A turn starts at the
-    first record of each prompt id and holds everything up to the next one's."""
-    current: list[dict] = []
-    current_id: str | None = None
-    for record in records:
-        if not isinstance(record, dict) or record.get("isSidechain"):
-            continue
-        prompt_id = _opens_prompt(record)
-        if prompt_id is not None and prompt_id != current_id:
-            if current:
-                yield current
-            current, current_id = [], prompt_id
-        current.append(record)
-    if current:
-        yield current
-
-
-def turn_view(records: list[dict]) -> TurnView:
-    """What the detector reads of one turn of :func:`split_turns`."""
-    opening = records[0] if records else {}
-    prompt_id = _opens_prompt(opening)
-    origin = opening.get("origin")
-    kind = origin.get("kind") if isinstance(origin, dict) else None
-    person: list[str] = []
-    asked = False
-    reply: str | None = None
-    for record in records:
-        own = record.get("origin")
-        if (
-            record.get("type") == "user"
-            and record.get("toolUseResult") is None
-            and not record.get("isMeta")
-            and isinstance(own, dict)
-            and own.get("kind") == _HUMAN_KIND
-        ):
-            person.append(_block_text((record.get("message") or {}).get("content")))
-            continue
-        if record.get("type") == "attachment":
-            attachment = record.get("attachment")
-            if (
-                isinstance(attachment, dict)
-                and attachment.get("type") == "queued_command"
-                and attachment.get("commandMode") == "prompt"
-                and (attachment.get("origin") or {}).get("kind") == _HUMAN_KIND
-                and isinstance(attachment.get("prompt"), str)
-            ):
-                person.append(attachment["prompt"])
-        elif record.get("type") == "assistant":
-            content = (record.get("message") or {}).get("content")
-            if isinstance(content, list) and any(
-                isinstance(block, dict)
-                and block.get("type") == "tool_use"
-                and block.get("name") == ASK_TOOL
-                for block in content
-            ):
-                asked = True
-            text = _block_text(content)
-            if text.strip():
-                reply = text
-    stamp = opening.get("timestamp")
-    return TurnView(
-        prompt_id=prompt_id,
-        origin=kind,
-        at=stamp if isinstance(stamp, str) else None,
-        person=tuple(words for words in person if words.strip()),
-        asked=asked,
-        reply=reply,
-    )
-
-
-#: How much of a transcript's tail the check reads first; doubled until the turn's opening
-#: record is inside it.
-_TAIL_BYTES = 2 * 1024 * 1024
-
-
-def _parsed(data: bytes) -> Iterator[dict]:
-    for raw in data.split(b"\n"):
-        if not raw.strip():
-            continue
-        try:
-            record = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(record, dict):
-            yield record
-
-
-def read_turn(path: Path, prompt_id: str | None) -> TurnView | None:
-    """The turn ``prompt_id`` opened, or the transcript's last turn when it is None, read
-    from the end of the file. None when the transcript does not hold it. Raises
-    :class:`OSError`."""
-    size = path.stat().st_size
-    window = _TAIL_BYTES
-    while True:
-        start = max(0, size - window)
-        with path.open("rb") as handle:
-            handle.seek(start)
-            data = handle.read(size - start)
-        if start:
-            data = data[data.find(b"\n") + 1 :]  # the first line is cut somewhere inside
-        turns = list(split_turns(_parsed(data)))
-        # The first turn of a partial window may have lost its opening records.
-        whole = turns[1:] if start else turns
-        for records in reversed(whole):
-            if prompt_id is None or _opens_prompt(records[0]) == prompt_id:
-                return turn_view(records) if _opens_prompt(records[0]) is not None else None
-        if not start:
-            return None
-        window *= 2
 
 
 # ---------------------------------------------------------------- the session view
