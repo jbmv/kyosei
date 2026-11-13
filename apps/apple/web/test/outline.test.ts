@@ -26,3 +26,35 @@ test("a blank line inside a nested run keeps the run's guide and one after it do
 test("a heading is one to six # and a space before words", () => {
   assert.deepEqual(headings("# bugs\n## chat pane\n- a\n#tag\n####### seven\n# "), [1, 2, 0, 0, 0, 0]);
 });
+
+import { moveLines, sectionEnd } from "../src/outline.ts";
+
+test("a list item's section is the item and what is nested in it", () => {
+  const text = "- a\n  - b\n    - c\n  - d\n- e";
+  assert.equal(sectionEnd(text, 0), 4);
+  assert.equal(sectionEnd(text, 1), 3);
+  assert.equal(sectionEnd(text, 2), 3);
+  assert.equal(sectionEnd(text, 4), 5);
+});
+
+test("a plain line is its own section, and a blank line after a section is left behind", () => {
+  assert.equal(sectionEnd("one\ntwo", 0), 1);
+  assert.equal(sectionEnd("- a\n  - b\n\n- c", 0), 2);
+  assert.equal(sectionEnd("- a\n\n  - b\n- c", 0), 3);
+});
+
+test("a heading's section runs to the next heading of its level or above", () => {
+  const text = "# one\n- a\n## inner\n- b\n# two\n- c";
+  assert.equal(sectionEnd(text, 0), 4);
+  assert.equal(sectionEnd(text, 2), 4);
+  assert.equal(sectionEnd(text, 4), 6);
+  assert.equal(sectionEnd(text, 1), 2);  // an item stops at a heading
+});
+
+test("moved lines go to the end of the target with what they hold, outdented, and the rest close up", () => {
+  const source = { text: "- a\n  - b\n    - c\n- d", marks: [{ line: 1, items: ["x"] }, { line: 3, items: ["y"] }] };
+  const moved = moveLines(source, { text: "first", marks: [{ line: 0, items: ["z"] }] }, 1, 3);
+  assert.deepEqual(moved.source, { text: "- a\n- d", marks: [{ line: 1, items: ["y"] }] });
+  assert.deepEqual(moved.target, { text: "first\n- b\n  - c", marks: [{ line: 0, items: ["z"] }, { line: 1, items: ["x"] }] });
+  assert.deepEqual(moveLines(source, { text: "" }, 3, 4).target, { text: "- d", marks: [{ line: 0, items: ["y"] }] });
+});

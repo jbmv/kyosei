@@ -39,7 +39,7 @@ import {
   type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
   refusalText,
 } from "./agenda";
-import { INDENT_WIDTH, lineShapes } from "./outline";
+import { INDENT_WIDTH, lineShapes, moveLines, sectionEnd } from "./outline";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -2633,7 +2633,14 @@ function showMark(area: HTMLTextAreaElement, id: number): void {
   anchorButton.prepend(icon("anchor"));
   const divider = document.createElement("div");
   divider.className = "mark-divider";
-  markPanel.replaceChildren(...chips, anchorButton, divider, field, suggestions);
+  const actions: HTMLElement[] = [anchorButton];
+  if (scratchOf.has(area)) {
+    // KYO-904: a scratchpad's paragraph, with what is nested under it, goes to the prompt.
+    const move = boxButton("mark-to-prompt", "Send to prompt", () => sendToPrompt(area, marks.ids.indexOf(id)));
+    move.title = "Move this paragraph, with what is nested under it, to the end of the prompt";
+    actions.push(move);
+  }
+  markPanel.replaceChildren(...chips, ...actions, divider, field, suggestions);
   suggest();
   markPanel.style.top = `${marks.gutter.offsetTop + lineTop(marks, marks.ids.indexOf(id)) + 24}px`;
   area.closest(".box")!.append(markPanel);
@@ -3693,6 +3700,33 @@ function ensureMain(): boolean {
   return changed;
 }
 
+/**
+ * KYO-904: moves the section that begins at `line` of a scratchpad to the end of the prompt,
+ * with what each of its lines holds. Both boxes are drawn again from what they then hold; a
+ * scratchpad left with nothing leaves.
+ */
+function sendToPrompt(area: HTMLTextAreaElement, line: number): void {
+  const main = textAreas().find((other) => !scratchOf.has(other));
+  if (!main || line < 0) return;
+  hideMark();
+  const from = savedBox(area);
+  const to = savedBox(main);
+  const moved = moveLines(from, to, line, sectionEnd(area.value, line));
+  const scratch = from.scratch ?? { heading: "" };
+  const emptied = !moved.source.text.trim() && !moved.source.marks?.length && !scratch.heading;
+  const old = area.closest(".box")!;
+  if (emptied) old.remove();
+  else old.replaceWith(addBox(moved.source.text, moved.source.marks, from.id, scratch).closest(".box")!);
+  main.closest(".box")!.remove();
+  const prompt = addBox(moved.target.text, moved.target.marks, to.id);
+  ensureMain();
+  paintAnchors();
+  remember();
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  showCaret(prompt);
+}
+
 /** Moves a scratchpad's words and marks into the prompt, which is empty (KYO-903). */
 function createPrompt(area: HTMLTextAreaElement): void {
   const main = textAreas().find((other) => !scratchOf.has(other));
@@ -3740,6 +3774,15 @@ function addBox(
   body.append(gutter, words);
   body.addEventListener("mousemove", (event) => followMouse(area, event));
   body.addEventListener("mouseleave", () => { ghost.hidden = true; });
+  // KYO-904: a right-click in a scratchpad's gutter opens the panel of the paragraph under
+  // the pointer, which holds Send to prompt.
+  gutter.addEventListener("contextmenu", (event) => {
+    if (!scratchOf.has(area)) return;
+    event.preventDefault();
+    followMouse(area, event);
+    const id = Number(ghost.dataset.id);
+    if (marks.ids.includes(id)) showMark(area, id);
+  });
   // The height was fitted to the text as it wrapped at one width. At another the box is too
   // short or too tall, and a box shorter than its text scrolls the text inside itself when
   // the caret goes to the hidden part (KYO-727). A long draft restored into an empty
@@ -4692,7 +4735,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.metaKey) return;
   // A key typed in the terminal is the terminal's.
   if (event.target instanceof Node && terminalPane.contains(event.target)) return;
-  // KYO-903: only the prompt is sent, wherever in the composer the key was pressed.
+  // KYO-903, KYO-904: only the prompt is sent, and not from a scratchpad, where the key
+  // does nothing: the person goes to the prompt to send it.
+  if (event.target instanceof Element && event.target.closest(".box.scratch")) return;
   const target = textAreas().find((area) => !scratchOf.has(area));
   if (!target) return;
   event.preventDefault();

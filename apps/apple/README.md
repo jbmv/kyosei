@@ -201,20 +201,27 @@ of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/
 <!-- governs:
 - apps/apple/web/src/chat.ts#ensureMain
 - apps/apple/web/src/chat.ts#createPrompt
+- apps/apple/web/src/chat.ts#sendToPrompt
 - apps/apple/web/src/chat.ts#scratchOf
 - apps/apple/web/src/drafts.ts#Scratch
 -->
 
 The composer has one prompt, its last box, which is the only box sent (KYO-903): Send and
-Command-Return send it from wherever the caret is, and an empty one takes its place after a
-send or a delete. It stays at the foot of the composer while the boxes above it scroll, and
+Command-Return send it, and an empty one takes its place after a send or a delete.
+Command-Return with the caret in a scratchpad sends nothing (KYO-904). It stays at the foot of the composer while the boxes above it scroll, and
 grows to half the composer's height, past which its text scrolls inside it.
 
 The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
 adds one. A scratchpad has a heading, which names it and is never sent, and a button that
 collapses it to that heading; a scratchpad with no heading shows the first words of its text
 there. It has no Send. Its Create prompt button moves its text, anchors, attachments and tags
-into the prompt, and is disabled while the prompt holds anything. A scratchpad is a box of
+into the prompt, and is disabled while the prompt holds anything. One section is moved with
+Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in a
+scratchpad's gutter also opens: the paragraph with the lines nested under it, or a heading
+with what follows it up to the next heading of its level, goes to the end of the prompt,
+outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad.
+What a section is and how its lines move are `sectionEnd` and `moveLines` in
+`web/src/outline.ts`. A scratchpad is a box of
 the same draft with a `scratch` object holding the heading and the collapsed state, so it is
 saved, merged between devices and carried between sessions as a prompt is, and a change of
 either is merged as an edit of the text is.

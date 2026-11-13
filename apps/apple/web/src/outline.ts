@@ -49,3 +49,58 @@ export function lineShapes(text: string): LineShape[] {
   }
   return shapes;
 }
+
+/**
+ * The line after the section that begins at `line` (KYO-904): a heading's section runs to the
+ * next heading of its level or above, and any other line's to the next line that is not
+ * indented more deeply than it, so a list item is taken with the items nested in it. Blank
+ * lines at the section's end are left behind.
+ */
+export function sectionEnd(text: string, line: number): number {
+  const lines = text.split("\n");
+  const shapes = lineShapes(text);
+  const first = shapes[line];
+  if (!first) return line;
+  let end = line + 1;
+  if (first.heading) {
+    while (end < lines.length && !(shapes[end].heading && shapes[end].heading <= first.heading)) end++;
+  } else {
+    while (end < lines.length && !shapes[end].heading
+      && (shapes[end].depth > first.depth || (lines[end].trim() === "" && shapes[end].depth >= first.depth && first.depth > 0)
+        || (lines[end].trim() === "" && end + 1 < lines.length && shapes[end + 1].depth > first.depth && !shapes[end + 1].heading))) end++;
+  }
+  while (end > line + 1 && lines[end - 1].trim() === "") end--;
+  return end;
+}
+
+/** A box's words with what its lines hold, each by the line it is on. */
+export interface Lined<T> { text: string; marks?: { line: number; items: T[] }[] }
+
+/**
+ * Lines `from` up to `to` of `source` moved to the end of `target`, each with what it holds.
+ * The section is outdented to the left edge, since it leaves the item it was nested in.
+ */
+export function moveLines<T>(source: Lined<T>, target: Lined<T>, from: number, to: number): { source: Lined<T>; target: Lined<T> } {
+  const lines = source.text.split("\n");
+  const taken = lines.slice(from, to);
+  const indent = Math.min(...taken.filter((line) => line.trim()).map((line) => line.length - line.trimStart().length));
+  const moved = taken.map((line) => (line.trim() ? line.slice(Number.isFinite(indent) ? indent : 0) : line));
+  const kept = [...lines.slice(0, from), ...lines.slice(to)];
+  const held = target.text === "" && !(target.marks ?? []).length ? [] : target.text.split("\n");
+  const marks = source.marks ?? [];
+  return {
+    source: {
+      text: kept.join("\n"),
+      marks: marks.filter((mark) => mark.line < from || mark.line >= to)
+        .map((mark) => (mark.line >= to ? { ...mark, line: mark.line - (to - from) } : mark)),
+    },
+    target: {
+      text: [...held, ...moved].join("\n"),
+      marks: [
+        ...(target.marks ?? []),
+        ...marks.filter((mark) => mark.line >= from && mark.line < to)
+          .map((mark) => ({ ...mark, line: held.length + mark.line - from })),
+      ],
+    },
+  };
+}

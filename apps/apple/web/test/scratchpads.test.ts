@@ -109,21 +109,57 @@ test("Create prompt moves a scratchpad into an empty prompt and is refused while
   } finally { await page.close(); }
 });
 
-test("Command-Return in a scratchpad sends the prompt, and after a send an empty prompt is there", async (t) => {
+test("Command-Return in a scratchpad sends nothing; in the prompt it sends, and an empty prompt follows (KYO-904)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
+    const sent = `window.posted.filter((m) => m.name === "send").map((m) => m.body.segments.map((s) => s.text).join(""))`;
     await page.run(`(() => { ${START}
       window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "" } }, { id: "b", text: "the prompt" }], etag: "e" });
       document.querySelector("#boxes .box.scratch textarea").focus();
     })()`);
     await page.press("Enter", META);
-    const sent = await page.run<string[]>(
-      `window.posted.filter((m) => m.name === "send").map((m) => m.body.segments.map((s) => s.text).join(""))`);
-    assert.deepEqual(sent, ["the prompt"]);
+    await page.run(`document.querySelector(".scratch-heading").focus()`);
+    await page.press("Enter", META);
+    assert.deepEqual(await page.run<string[]>(sent), []);
+    await page.run(`document.querySelector("#boxes .box.main textarea").focus()`);
+    await page.press("Enter", META);
+    assert.deepEqual(await page.run<string[]>(sent), ["the prompt"]);
     await page.run(`window.kyo.sent({})`);
     const boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["scratch", "notes"], ["prompt", ""]]);
+  } finally { await page.close(); }
+});
+
+test("Send to prompt moves a paragraph with what is nested under it and its marks, by the panel a right-click in the gutter opens (KYO-904)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    const marks = (box: string) => `[...document.querySelectorAll("#boxes .box.${box} .mark.held")].map((mark) => mark.title)`;
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [
+        { id: "a", text: "- keep\\n- take\\n  - nested\\n- last", scratch: { heading: "topic" },
+          marks: [{ line: 2, items: [{ kind: "tag", name: "review" }] }, { line: 3, items: [{ kind: "tag", name: "stays" }] }] },
+        { id: "b", text: "already here" },
+      ], etag: "e" });
+      const gutter = document.querySelector("#boxes .box.scratch .box-gutter");
+      const lines = document.querySelector("#boxes .box.scratch .box-mirror").children;
+      const at = lines[1].getBoundingClientRect();
+      gutter.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: gutter.getBoundingClientRect().left + 5, clientY: at.top + at.height / 2 }));
+      document.querySelector(".mark-to-prompt").click();
+    })()`);
+    const boxes = await page.run<Box[]>(STATE);
+    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [
+      ["scratch", "- keep\n- last"], ["prompt", "already here\n- take\n  - nested"],
+    ]);
+    assert.deepEqual(await page.run<string[]>(marks("main")), ["#review"]);
+    assert.deepEqual(await page.run<string[]>(marks("scratch")), ["#stays"]);
+    // The prompt has no such button: its paragraphs are already where they are sent from.
+    const inPrompt = await page.run<boolean>(`(() => {
+      document.querySelector("#boxes .box.main .mark.held").click();
+      return Boolean(document.querySelector(".mark-to-prompt"));
+    })()`);
+    assert.equal(inPrompt, false);
   } finally { await page.close(); }
 });
 

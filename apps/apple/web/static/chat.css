@@ -1425,3 +1425,7 @@ body:not(.home-page) #menu-panel .files-home-side { display: none; }
 /* A search typed on the home lists its results in the home's pane and leaves the drawer's lists. */
 body.home-page #files-side.searching > .files-home-side { display: block; }
 #menu-panel .files-home-side { flex: 1; min-height: 0; width: auto; position: static; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; }
+
+/* KYO-904: Send to prompt in a scratchpad's mark panel, bare text as the box's own buttons are. */
+.mark-to-prompt { margin-left: 10px; padding: 2px 0; border: 0; background: none; color: var(--link); font-size: 13px; font-weight: 600; }
+.mark-to-prompt:hover { text-decoration: underline; }
