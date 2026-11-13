@@ -31,7 +31,7 @@ The defaults, in `kyosei/kinds.yml`, are eleven kinds in two groups.
 | Kind | For |
 |---|---|
 | `decision` | a choice that shapes the architecture, citing its evidence. One you made in conversation is filed directly with your words attached as evidence (`kyo new decision --evidence-file`); one that needs design work first comes from an approved proposal, and one can also come from a finished investigation or a reminder. Where `people:` declares you, it is filed from the discussion it came from, or marked as opened late. |
-| `discussion` | a conversation in which you are asked to choose. The orchestrator opens it when it starts (`kyo discuss open`), stamped at your message from the turn index, and it closes when the decision, proposal, plan or task it led to is filed from it. |
+| `discussion` | a conversation in which you are asked to choose, kept as a record of its own. It is optional: nothing requires one, and a decision is filed without it. When the orchestrator opens one (`kyo discuss open`) it is stamped at your message from the turn index, and it closes when the decision, proposal, plan or task it led to is filed from it. |
 | `evidence` | a recorded fact other records cite. |
 
 **How they relate.** Kinds connect along fixed edges, and the edges are the planning

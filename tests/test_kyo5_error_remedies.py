@@ -4128,21 +4128,10 @@ UNREACHED: dict[str, str] = {
         "`kyo agenda remove <id>`, then the same command; proved by "
         "tests/test_kyo_agenda.py::test_a_full_list_refuses_another_item_and_removing_one_clears_it"
     ),
-    # KYO-658: `decision-requires-discussion`; each named remedy is run by the test cited.
-    "cmd_discuss.py:_filing_discussion#5": (
-        "the same command with --opened-late, or with --discussion naming the discussion "
-        "`kyo discuss open` filed, or `kyo spawn <discussion-id> --kind decision`; proved by "
-        "test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one"
-    ),
-    # KYO-662: the Stop check's two invocation refusals; the re-invocation each spells is
-    # run by the test cited, with the hook's payload on stdin.
-    "cmd_discuss.py:_check#0": (
-        "running it as `kyo discuss check --hook`; proved by "
-        "tests/test_kyo662_stop_check.py::test_check_without_hook_is_refused_naming_the_flag"
-    ),
+    # KYO-662, KYO-899: --hook on an action other than the retired check.
     "cmd_discuss.py:cmd_discuss#0": (
         "moving --hook to `kyo discuss check`; proved by "
-        "tests/test_kyo662_stop_check.py::test_check_without_hook_is_refused_naming_the_flag"
+        "tests/test_kyo662_stop_check.py::test_hook_on_another_action_is_refused_naming_check"
     ),
     # KYO-653: remedies naming `kyo credit`, proved by the tests each reason names.
     "credits.py:recheck#6": (
@@ -4850,12 +4839,13 @@ RECORDED: dict[str, str] = {
         "by test_a_registry_without_the_discussion_kind_is_cleared_by_copying_the_entry"
     ),
     "cmd_discuss.py:_filing_discussion#0": (
-        "a re-invocation without the discussion flags; proved by "
-        "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
-    ),
-    "cmd_discuss.py:_filing_discussion#1": (
         "a re-invocation giving --discussion or --opened-late, not both; proved by "
         "test_each_usage_refusal_is_cleared_by_the_invocation_it_names"
+    ),
+    # KYO-899: a usage error since the discussion requirement was retired.
+    "cmd_discuss.py:_filing_discussion#3": (
+        "the same command with --at-prompt naming a listed turn; proved by "
+        "test_kyo658_opened_late_with_a_turn_index_is_cleared_by_at"
     ),
     "cmd_discuss.py:_open#1": (
         "a re-invocation giving --title; proved by "
@@ -4883,11 +4873,6 @@ RECORDED: dict[str, str] = {
         "a re-invocation giving --produced with its records, or --dropped with --why; "
         "proved by "
         "test_kyo878_c2_why_covers_what_is_not_a_record_and_the_two_flags_exclude_each_other"
-    ),
-    # KYO-662: `kyo discuss skip` with no reason.
-    "cmd_discuss.py:_skip#1": (
-        "a re-invocation giving --why; proved by "
-        "test_skip_refuses_without_a_reason_and_with_one_it_is_recorded"
     ),
     "store.py:Store.add_turn_ref#0": (
         "a call passing no stamp with index_state absent; proved by "
@@ -7720,27 +7705,22 @@ def test_kyo644_a_decision_without_a_credit_is_cleared_by_the_credit(tmp_path: P
     assert kyo("spawn", proposal, "--kind", "decision", "--title", "Use it", *credit).code == 0
 
 
-def test_kyo658_a_decision_without_a_discussion_is_cleared_by_naming_one(
-    tmp_path: Path,
-) -> None:
-    """`decision-requires-discussion`, at `kyo new` and at `kyo spawn`: each remedy the
-    message names files it -- `--opened-late` on the same command, `--discussion` naming
-    one `kyo discuss open` filed, and spawning from that discussion."""
+def test_kyo899_a_decision_without_a_discussion_is_filed(tmp_path: Path) -> None:
+    """KYO-658's `decision-requires-discussion` is retired (KYO-899): the filings it
+    refused go through at `kyo new` and at `kyo spawn`, and the forms it named as remedies
+    are still accepted."""
     root, record, kyo = _k644_project(tmp_path, discussions=True)
     words = _k644_file(tmp_path, "w", "use SQLite")
     decision = _k644_file(tmp_path, "d.yml", "outcome: unprompted\n")
     credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
-    refused = kyo("new", "decision", "--title", "Use SQLite", *credit)
-    assert refused.code == EXIT_CONTRACT and "decision-requires-discussion" in refused.err
-    for remedy in ("--opened-late", "--discussion <discussion-id>", "kyo spawn <discussion-id>"):
-        assert remedy in refused.err, remedy
-    assert kyo("new", "decision", "--title", "Use SQLite", *credit, "--opened-late").code == 0
+    filed = kyo("new", "decision", "--title", "Use SQLite", *credit)
+    assert filed.code == 0 and "decision-requires-discussion" not in filed.out + filed.err
+    assert kyo("new", "decision", "--title", "Use SQL", *credit, "--opened-late").code == 0
     opened = kyo("discuss", "open", "--title", "Which store", "--json").json["id"]
     named = kyo("new", "decision", "--title", "Use it", *credit, "--discussion", opened)
     assert named.code == 0, named
     proposal = new_record(kyo, kind="proposal", title="Pick", criteria=["picked"])
-    refused = kyo("spawn", proposal, "--kind", "decision", "--title", "Use it", *credit)
-    assert refused.code == EXIT_CONTRACT and "decision-requires-discussion" in refused.err
+    assert kyo("spawn", proposal, "--kind", "decision", "--title", "Pick it", *credit).code == 0
     again = kyo("discuss", "open", "--title", "Which store again", "--json").json["id"]
     spawned = kyo("spawn", again, "--kind", "decision", "--title", "Use it again", *credit)
     assert spawned.code == 0, spawned
@@ -7767,7 +7747,7 @@ def test_kyo658_opened_late_with_a_turn_index_is_cleared_by_at(
     credit = ("--quote-file", words, "--decision-file", decision, "--source-other", "a call")
     late = ("new", "decision", "--title", "Use SQLite", *credit, "--opened-late")
     refused = kyo(*late)
-    assert refused.code == EXIT_CONTRACT and "--at-prompt <prompt>" in refused.err
+    assert refused.code == 64 and "--at-prompt <prompt>" in refused.err
     assert "aaaaaaaa-0000-4000-8000-000000000001" in refused.err
     assert kyo(*late, "--at-prompt", "aaaaaaaa-0000-4000-8000-000000000001").code == 0
 

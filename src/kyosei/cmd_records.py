@@ -803,7 +803,7 @@ def cmd_new(ctx: Context, args: Namespace) -> Output:
     credit = credits.filing_credit(
         ctx, store, registry.require(kind), args, evidence_text, f"kyo new {kind}"
     )
-    # KYO-658: after the credit, so a filing missing both is told about the credit first.
+    # KYO-658: the discussion this filing names, if any; none is required (KYO-899).
     discussion = cmd_discuss.filing_discussion(
         ctx, store, registry.require(kind), args, command=f"kyo new {kind}"
     )
@@ -2377,7 +2377,7 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
     credit = credits.filing_credit(
         ctx, store, target, args, evidence_text, f"kyo spawn {source_id} --kind {args.kind}"
     )
-    # KYO-658: a spawn from a discussion closes it; a kind that requires one names it.
+    # KYO-658: a spawn from a discussion closes it; no kind requires one (KYO-899).
     discussion = cmd_discuss.filing_discussion(
         ctx,
         store,

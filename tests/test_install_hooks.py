@@ -26,7 +26,7 @@ from kyosei.scaffold import (
     defaults_dir,
 )
 
-from .test_hook_templates_sync import DISCUSS_RECIPE, SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
+from .test_hook_templates_sync import SESSIONS_RECIPE, STOP_RECIPE, TURNS_RECIPE
 
 
 def _settings_path(project: Path) -> Path:
@@ -299,7 +299,6 @@ def test_install_hooks_rewrites_the_doctor_first_stop_hook(kyo, project: Path) -
         expected = [
             guarded(STOP_RECIPE),
             guarded(TURNS_RECIPE),
-            guarded(DISCUSS_RECIPE),
             guarded(SESSIONS_RECIPE),
         ]
         assert commands == expected, f"{event}: {commands}"
@@ -345,7 +344,6 @@ def test_install_hooks_rewrites_a_stop_hook_that_still_runs_the_retired_kyo_html
         expected = [
             guarded(STOP_RECIPE),
             guarded(TURNS_RECIPE),
-            guarded(DISCUSS_RECIPE),
             guarded(SESSIONS_RECIPE),
         ]
         assert commands == expected, f"{event}: {commands}"
@@ -581,11 +579,8 @@ def test_an_existing_project_picks_up_the_guard_by_re_running_install_hooks(
             hook["command"] for group in before["hooks"][event] for hook in group["hooks"]
         }
         if event == "SessionEnd":
-            # KYO-774: the sweep and doctor chain left this event. KYO-662: the discussion
-            # check is installed under Stop alone, so a copy here is removed as well.
-            ran_before = {
-                c for c in ran_before if hook_action(c) not in (STOP_RECIPE, DISCUSS_RECIPE)
-            }
+            # KYO-774: the sweep and doctor chain left this event.
+            ran_before = {c for c in ran_before if hook_action(c) != STOP_RECIPE}
         commands = [h["command"] for g in settings["hooks"][event] for h in g["hooks"]]
         assert all(c.startswith(PATH_GUARD_PREFIX) for c in commands), f"{event}: {commands}"
         # One entry per check, not two: the bare line was REPLACED, not joined.

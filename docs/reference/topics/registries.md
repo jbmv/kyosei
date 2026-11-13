@@ -24,20 +24,21 @@ is the disposal (KYO-44). Each kind declares:
   `raises_docs_obligations`) for `knowledge` kinds; `requires_credit` (optional, either
   archetype, KYO-644) makes `kyo new` and `kyo spawn` refuse the kind
   (`filing-requires-credit`) without a `decided` credit naming the person who decided it.
-  `requires_discussion` (optional, either archetype, KYO-658, on the packaged `decision`)
-  makes them refuse it (`decision-requires-discussion`) unless it is filed from its
-  discussion: spawned from one, from a record one produced, or with `--discussion <id>`, or
-  with `--opened-late`, which opens one at the filing and marks it late for good. A spawn
-  closes the discussion it came from; `kyo spawn --keep-open` leaves it open for a discussion
-  that produces several records, and a spawn from a closed discussion is refused
-  (`spawn-from-closed-discussion`, KYO-749). Both apply
-  only where `people:` declares someone. `raises_docs_obligations` (KYO-554, on
+  It applies only where `people:` declares someone.
+  `requires_discussion` (KYO-658) is retired (KYO-899): a `kinds.yml` that sets it still
+  loads, and no command reads it, so every kind is filed with or without a discussion. A
+  record of any kind may name the discussion it came from: it is spawned from one, or
+  filed with `--discussion <id>`, or with `--opened-late`, which opens one at the filing
+  and marks it late for good. A spawn closes the discussion it came from; `kyo spawn
+  --keep-open` leaves it open for a discussion that produces several records, and a spawn
+  from a closed discussion is refused (`spawn-from-closed-discussion`, KYO-749). `raises_docs_obligations` (KYO-554, on
   the packaged `decision`) makes filing or editing a record raise a standing docs
   obligation on each ssot section it names by id and each of its doc-refs
   ([docs governance](docs-governance.md)).
 
-**Discussions (KYO-658).** A conversation in which the person is asked to choose is a
-record of the default `discussion` kind: `archetype: knowledge`, not counted, swept, and
+**Discussions (KYO-658).** A conversation in which the person is asked to choose can be
+kept as a record of the default `discussion` kind, when someone opens one on purpose; no
+command requires one (KYO-899). The kind is `archetype: knowledge`, not counted, swept, and
 filed only by `kyo discuss open --title "..."` (its `accepts_from` is empty). The command
 writes a turn reference (`KYO-n.sN`) to the person's latest confirmed turn of
 `$CLAUDE_CODE_SESSION_ID` in the turn index, or to the turn `--at-prompt <prompt>` names; where
@@ -56,35 +57,21 @@ schema_version 35 has no such field, and `kyo rebuild --force` supplies it from 
 format held: a closing with a produced record, or with a reason stored under the earlier
 `produced: ` prefix, is `produced` and loses the prefix, and any other is `dropped`.
 
-**The Stop check (KYO-662).** At each `Stop`, `kyo discuss check --hook` reads the turn that
-ended: the person's words and any use of AskUserQuestion from the transcript, and the
-agent's final message from the hook payload. A cue fires when the person's words hold a
-phrase that opens a choice (a question mark alone does not fire it), when the reply holds a
-recommendation, a request for their choice or two or more labelled options (a closing
-question does not, nor does an offer to act, such as "want me to" or "shall I"), or when the
-turn used AskUserQuestion. The turn is attached when a discussion opened in this session is
-still open, or a turn reference already names the turn; a turn whose words name a record
-that no open discussion's title, description, notes or links mention is not attached. When
-a cue fires on an unattached turn, the check prints nothing and does not continue the
-conversation: it writes `candidate` (the cues and the time) on the turn's line of the turn
-index. At the session's next prompt the same command, run by the `UserPromptSubmit` hook,
-prints one line of context for the newest candidate that no discussion names and no skip
-covers: the turn's time and prompt id, the commands `kyo discuss open --at-prompt <prompt>
---title "<topic>"` and `kyo discuss skip --at-prompt <prompt> --why "<one line>"`, and the
-instruction that a skip is not reported to the person. The candidate is marked asked when
-named, so a turn is named once; a discussion opened at the turn, or a skip of it, clears it.
-The check is silent in a project that has not opted in to reading transcripts, in a
-worktree, and whenever it cannot read the store, the index or the transcript. `kyo discuss skip` writes its reason
-on the turn's line of the turn index (`skip`, with the time), `--at-prompt <prompt>` naming
-the turn and the session's latest prompt being the default. `kyo doctor` prints, as a
-notice per week, the share of decisions whose discussion was opened live, opened late or
-with no indexed turn, and the number of prompts skipped; and it reports as a problem a
-session that recorded two or more Stops, the last later than every line of the turn
-index, with no line of its own, which means the hooks that write the index did not run.
+**The Stop check is retired (KYO-899).** KYO-662 ran `kyo discuss check --hook` at each
+`Stop` and, from KYO-876, at each `UserPromptSubmit`, to mark a turn that put a choice to
+the person and have the agent open a discussion or dismiss the turn with `kyo discuss
+skip`. The packaged hooks no longer run it. Both commands remain so that a project's own
+copy of the hooks keeps working: `kyo discuss check --hook` prints nothing, writes nothing
+and exits 0, and `kyo discuss skip` writes nothing and says in one line that the check is
+retired. `kyo install-hooks` removes the line from a project's copy, and until then `kyo
+doctor` names it in a notice. `kyo doctor` no longer prints the weekly shares of decisions
+opened live, late and unindexed. It still reports as a problem a session that recorded two
+or more Stops, the last later than every line of the turn index, with no line of its own,
+which means the hooks that write the index did not run.
 
-A store scaffolded by a build from before KYO-658 has no
-`discussion` entry and no `requires_discussion` key; copy both from the packaged
-`kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it produces.
+A store scaffolded by a build from before KYO-658 has no `discussion` entry; copy it from
+the packaged `kinds.yml`, with `discussion` in the `accepts_from` of the four kinds it
+produces.
 
 **Reminders (KYO-497, KYO-521).** A decision waiting on the operator, or a reminder tied
 to a date or an event, that the next shift must see is a record of the default `reminder`

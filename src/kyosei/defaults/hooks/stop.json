@@ -22,19 +22,6 @@
           "timeout": 20
         }
       ]
-    },
-    {
-      "events": [
-        "Stop"
-      ],
-      "hooks": [
-        {
-          "type": "command",
-          "comment": "KYO-662, changed by KYO-876: the discussion check. At each Stop it reads the turn that ended (the person's words and any AskUserQuestion from the transcript, the reply from the payload) and, when a cue says a choice was put to the person and no discussion is open in this session, writes a `candidate` mark on the turn's line of the turn index. It prints nothing and does not continue the conversation: asking at the stop made the harness request visible text after the agent's skip, which the person then read. The same command in the UserPromptSubmit fragment (prompt-submit.json) names the candidate once at the session's next prompt. The check says nothing in a project that has not opted in to reading transcripts, in a worktree, or when it cannot read what it needs. Always exits 0. Stop only (its `events` key): there is no later prompt to ask at SessionEnd. In its own group so that a failing sweep or doctor does not skip it.",
-          "command": "command -v kyo >/dev/null 2>&1 || { d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=\"$(git -C \"$d\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; { [ -n \"$c\" ] && { [ -e \"${c%/*}/kyosei/config.yml\" ] || [ -e \"${c%/*}/.kyosei\" ]; }; } || while [ ! -e \"$d/kyosei/config.yml\" ] && [ ! -e \"$d/.kyosei\" ]; do case \"$d\" in */*) d=\"${d%/*}\" ;; *) exit 0 ;; esac; done; echo 'Kyosei CLI (kyo) is not on PATH, so this hook did not run. Install it: uv tool install kyosei (or pipx install kyosei), then start a new session' >&2; exit 127; }; kyo discuss check --hook",
-          "timeout": 20
-        }
-      ]
     }
   ]
 }

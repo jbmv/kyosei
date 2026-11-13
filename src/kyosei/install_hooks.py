@@ -311,8 +311,6 @@ SUPERSEDED_HOOK_COMMANDS: dict[str, str] = {
     "kyo check-build --hook": guarded("kyo check-build --hook"),
     # KYO-657: the same: no build shipped it bare; the pairing is the invariant.
     "kyo turns --hook": guarded("kyo turns --hook"),
-    # KYO-662: the same again for the Stop check.
-    "kyo discuss check --hook": guarded("kyo discuss check --hook"),
     # KYO-362: containment cannot carry the new `--hook` flag, so without this every
     # post-KYO-316 install would gain a second doctor group; this supersedes the guarded
     # pre-`--hook` chain they carry (docs/design/scaffold.md#kyo-362).
@@ -404,6 +402,50 @@ def _drop_superseded_hooks(hooks_section: dict) -> tuple[list[str], dict[str, li
             else:
                 groups.remove(group)
     return changes, edited
+
+
+#: KYO-899: commands an earlier build packaged and this one packages nowhere, each with
+#: the reason. Unlike a superseded line a retired one has no replacement, so
+#: `install-hooks` removes it and adds nothing (:func:`_drop_retired_hooks`), and
+#: `kyo doctor` names it in the same notice as a superseded hook
+#: (:func:`hook_drift_by_tier`). Matched on the hook's action, the PATH guard aside, and
+#: only when the action is exactly the retired command: a line a consumer extended is
+#: theirs and is left alone. The command itself must keep exiting 0 for as long as it is
+#: listed here, since a copy nobody has re-installed still runs it.
+RETIRED_HOOK_COMMANDS: dict[str, str] = {
+    "kyo discuss check --hook": (
+        "the discussion check was retired (KYO-899); the command still exits 0 and does "
+        "nothing"
+    ),
+}
+
+
+def _drop_retired_hooks(hooks_section: dict) -> list[str]:
+    """KYO-899: remove every hook whose action is exactly a :data:`RETIRED_HOOK_COMMANDS`
+    key, under any event. A group left empty is dropped with it."""
+    changes: list[str] = []
+    for event, groups in list(hooks_section.items()):
+        if not isinstance(groups, list):
+            continue
+        for group in list(groups):
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            kept = []
+            for hook in group["hooks"]:
+                action = hook_action(hook.get("command")) if isinstance(hook, dict) else None
+                if isinstance(action, str) and action in RETIRED_HOOK_COMMANDS:
+                    changes.append(
+                        f"{event}: removed retired hook {action!r}: "
+                        f"{RETIRED_HOOK_COMMANDS[action]}"
+                    )
+                else:
+                    kept.append(hook)
+            if len(kept) == len(group["hooks"]):
+                continue
+            group["hooks"] = kept
+            if not kept:
+                groups.remove(group)
+    return changes
 
 
 def _drop_sessionend_chain(hooks_section: dict) -> list[str]:
@@ -707,6 +749,14 @@ def hook_drift_by_tier(root: Path) -> tuple[list[str], list[str]]:
                 continue
             for hook in group.get("hooks", []) or []:
                 command = hook.get("command") if isinstance(hook, dict) else None
+                action = hook_action(command)
+                if isinstance(action, str) and action in RETIRED_HOOK_COMMANDS:
+                    # KYO-899: it still runs and does nothing, so it is a notice.
+                    superseded.append(
+                        f"{event} runs {action!r}, a hook this build retired: "
+                        f"{RETIRED_HOOK_COMMANDS[action]} — {remedy}"
+                    )
+                    continue
                 if command in SUPERSEDED_HOOK_COMMANDS:
                     replaced_by |= command_elements(SUPERSEDED_HOOK_COMMANDS[command])
                     gone = _subcommands_this_build_lacks(command)
@@ -768,6 +818,7 @@ def merge_hooks(existing_settings: dict) -> tuple[dict, list[str]]:
     hooks_section = settings.setdefault("hooks", {})
     changes, edited = _drop_superseded_hooks(hooks_section)
     changes.extend(_drop_sessionend_chain(hooks_section))
+    changes.extend(_drop_retired_hooks(hooks_section))
     for event, source_name in HOOK_INSTALL_TARGETS:
         target_groups = hooks_section.setdefault(event, [])
         for group in _load_hook_fragment(source_name, event=event):

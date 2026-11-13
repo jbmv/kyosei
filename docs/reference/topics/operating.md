@@ -199,12 +199,7 @@ writes nothing.
    criteria), then `kyo doctor --hook` (invariant checks). `SessionEnd` runs neither
    (KYO-774). `Stop` also runs `kyo turns --hook`, which in a project that reads
    transcripts confirms the turn index and archives the transcript (KYO-657, KYO-683);
-   `kyo discuss check --hook`, which there marks a turn that put a choice to the person as a
-   candidate and prints nothing, a cue being a phrase in the person's words that opens a choice
-   or a recommendation or options in the reply (KYO-662, KYO-859, KYO-876); the same command
-   at `UserPromptSubmit` then names the candidate once, for the orchestrator to open a
-   discussion with `kyo discuss open` or to record with `kyo discuss skip` why the turn is
-   not one; and `kyo sessions --hook`, which shows the person the
+   and `kyo sessions --hook`, which shows the person the
    unchecked items of the session's task list when they differ from what the session's last
    stop showed (KYO-770, KYO-875). `SessionEnd` runs
    `kyo turns --hook` and `kyo sessions --hook` only. The order of sweep and doctor is load-bearing
@@ -813,7 +808,8 @@ kyo new task --from record.md --check      # validate record.md -- kind, scope, 
                                            # against the repo -- and file nothing
 kyo discuss open --title "Which store"     # a discussion, stamped at the person's turn
                                            # from the turn index; a decision spawned from
-                                           # it closes it (KYO-658)
+                                           # it closes it (KYO-658). Optional: no kind
+                                           # needs one (KYO-899)
 kyo new decision --title "Use SQLite" \
             --evidence-file words.md      # [refused where someone is declared]
                                            # a decision made in conversation, the operator's
@@ -829,16 +825,12 @@ kyo new decision --title "Use SQLite" --evidence-file words.md \
                                            # refused where nobody is declared: the decision
                                            # carries a credit (the person's words, and in
                                            # decision.md what was recommended and the
-                                           # outcome) and names the discussion it came
-                                           # from, which the filing closes. --opened-late
-                                           # replaces --discussion when none was opened,
+                                           # outcome). --discussion names the discussion
+                                           # it came from, which the filing closes, and
+                                           # is optional, as --opened-late is,
                                            # and --source-other WHERE says where the words
                                            # were said outside a Claude Code session
                                            # (KYO-644, KYO-658)
-kyo discuss skip --why "a question about a log line"   # [refused] where no turn index is kept.
-                                           # The discussion check named a turn
-                                           # that is not a discussion; the reason is kept
-                                           # on the turn's index line (KYO-662)
 kyo new reminder --title "Ask about the rollout date"   # waits on the operator, or a
                                            # date; the brief shows its age (KYO-497)
 kyo show KYO-1
@@ -1258,7 +1250,7 @@ every byte of that echo and reads it again on each later turn, and one that filt
 to shorten it keeps the lines it expected and drops a warning it did not. When stdout is not a
 terminal, `kyo new`, `kyo dispatch`, `kyo report`, `kyo accept`, `kyo verify`, `kyo gate`,
 `kyo attach`, `kyo confirm`, `kyo docs settle --from-report`, `kyo spawn`, `kyo edit`,
-`kyo discuss` (`open`, `note`, `close` and `skip`), `kyo note --shift` and `kyo close-wave`
+`kyo discuss` (`open`, `note` and `close`), `kyo note --shift` and `kyo close-wave`
 (when it writes) therefore print a receipt in place of the full output. Every other command, including each one a hook runs, prints the same
 text to every reader.
 

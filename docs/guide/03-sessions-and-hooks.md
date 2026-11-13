@@ -110,8 +110,6 @@ own. Outside a Kyosei project every one of them exits silently.
 | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks the store's invariants and reports any problem in one line. Where the store is its own repository, what is uncommitted in it is then committed as one commit; a store inside the code repository is never committed for you, and its uncommitted paths are named. |
 | The session stops | `kyo sessions --hook` | Looks again for the session's Remote Control page. Shows you the session's task list (`kyo agenda`) when items of yours are unchecked on it and differ from what the last stop showed, or when dispatches are running and the orchestrator has listed nothing of its own, without holding the session open. |
 | The session stops | `kyo turns --hook` | Where D14 is yes, confirms the turn index from the transcript, commits the agent's final reply to it, and copies the transcript and its subagent transcripts to the local archive. Silent. |
-| The session stops | `kyo discuss check --hook` | Where D14 is yes, and the turn put a choice to you while no discussion was open, marks the turn as a candidate. Silent. |
-| You send a prompt | `kyo discuss check --hook` | Names the newest candidate turn once, so that the orchestrator opens a discussion or records why the turn is not one within the turn it is already taking; you are not asked anything. |
 | The session ends | `kyo turns --hook` | Where D14 is yes, the same confirmation and archiving as at a stop. Silent. |
 | The session ends | `kyo sessions --hook` | Records that the session ended. Silent. |
 

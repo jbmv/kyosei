@@ -217,7 +217,7 @@ Kyosei's own repository found 74 documentation errors, 41 of the 71 it located i
 that governed no code. Do not choose for the person, and do not leave the block standing:
 
 1. Put the decision to the person before other work: draft the map, keep the reminder, or
-   decline. In a project that declares people this is a decision, so `kyo discuss open` it.
+   decline. In a project that declares people this is a decision, and it is filed as one.
 2. Run `kyo docs coverage`. It prints the ungoverned code by directory, the files reached
    only by a pointer comment, the targets so broad that they ask nothing specific, and the
    sections that govern nothing.
@@ -286,12 +286,14 @@ all three write paths enforce it: `kyo promote` requires `idea`, `kyo new` requi
 to the decision it implements can be added after filing with `kyo link`, as "Work a decision led
 to is linked to it" below describes. `kyo unlink` is also the remedy a cycle refusal names.
 
-**The discussion check (KYO-876).** At a stop, `kyo discuss check --hook` prints nothing and does
-not continue the conversation: when a cue says a choice was put to the person and no discussion
-is open, it marks the turn as a candidate. The prompt hook names the newest candidate once, at
-the session's next prompt, with the two commands the workflow gives. Asking at the stop made the
-harness request visible text after a skip, which the person then read; and a reply whose only
-cue is a closing question, or an offer to act, no longer fires the check.
+**A discussion is optional (KYO-899).** KYO-658 required a decision to be filed from a
+discussion and KYO-662 checked every stop for a choice put to the person; decision KYO-898
+retired both, because the check's cues produced turns the agent then had to open or dismiss and
+the requirement made every decision open a discussion first. Open one with `kyo discuss open`
+when a choice will take several turns and its start is worth a record; `--at-prompt <prompt>`
+stamps it at an earlier turn of the person's. `--discussion <id>` on `kyo new` and `kyo spawn`
+links a record to one, and `--opened-late --at-prompt <prompt>` opens one at the filing, marked
+late.
 
 ### Filing directly costs no structure (KYO-228)
 

@@ -27,16 +27,17 @@ to stamp from (no session, a project that has not opted in to reading transcript
 confirmed line for the session) the reference is ``index_state: absent`` and carries no
 time but its own ``created_at``.
 
-DECISIONS REQUIRE A DISCUSSION (DC3). A kind whose policy sets ``requires_discussion`` (the
-shipped ``decision``) is filed, by ``kyo new`` or ``kyo spawn``, from its discussion: spawned
-from it, or from a record the discussion produced, or naming it with ``--discussion``. With
-none, ``--opened-late`` opens one in the same transaction, at the turn ``--at-prompt`` names, and
-its ``opened`` reference is ``late`` for good; with no index it records ``index_state:
-absent``. Otherwise the filing is refused under ``decision-requires-discussion``
-(:func:`filing_discussion`). As with credits (KYO-656, DC12), the rule applies only where
-``people:`` declares someone, so an upgrade refuses nothing before the operator has chosen;
-and a store scaffolded before this build has no ``requires_discussion`` key until its
-operator adds it (``kyo doctor``'s kind-policy notice prints the line).
+A DISCUSSION IS OPTIONAL (KYO-899, decision KYO-898). KYO-658 (DC3) required a decision
+to be filed from a discussion, under ``decision-requires-discussion``, and that rule is
+retired: ``kyo new`` and ``kyo spawn`` file any kind with no discussion, whatever a store's
+``kinds.yml`` says for ``policy.requires_discussion``, which is still accepted there and
+read by nothing. A discussion is one somebody opened on purpose. A record spawned from it,
+or filed with ``--discussion``, is linked to it and closes it (:func:`filing_discussion`);
+``--opened-late`` still opens one in the filing's own transaction, at the turn
+``--at-prompt`` names, with its ``opened`` reference marked ``late`` for good. A kind that
+takes a credit (``policy.requires_credit``, the shipped ``decision``) spawned from a record
+that itself came from a discussion is filed from that discussion as well, which is where
+its credit's span comes from.
 
 A decided credit filed from a discussion takes its span from the discussion's references
 (:func:`kyosei.credits.discussion_span`) unless ``--span-first`` and ``--span-last`` give
@@ -52,43 +53,20 @@ holds no text and survives the transcript's deletion. It has nothing to digest, 
 integrity object for a whole prompt is the per-line commitment the index line will carry
 (KYO-663), which a reference cites by its session and prompt id rather than repeating.
 
-THE STOP CHECK (KYO-662, decision KYO-654 DC4, proposal section 5.1 Tier 2; moved to the next
-prompt by KYO-876). ``kyo discuss check --hook`` runs at every Stop, in its own hook group. It
-reads the turn that just ended (the person's words and whether AskUserQuestion was used, from
-the transcript through :func:`kyosei.harness.claude_code_transcript.read_turn`; the reply,
-from the payload's ``last_assistant_message``) and asks two things: does a cue say a choice
-was put to the person or raised by them (:func:`detect`), and is the turn attached, which
-means a discussion is open in this session or already names the turn. At Stop it prints
-nothing and does not continue the conversation: when a cue fires on an unattached turn it
-writes ``candidate`` on the turn's index line (:func:`kyosei.cmd_turns.mark_candidate`). The
-first version printed hook feedback at Stop, which Claude Code answers by asking the agent for
-visible text after the skip's tool call, so the person read a line about a skip (KYO-876).
-
-At the session's next UserPromptSubmit the same command, run in that event's hook group, names
-the newest candidate once, as one line of context (:func:`prompt_line`): the turn's time, its
-prompt id and the two commands. The agent then opens a discussion or skips inside the turn it is
-already taking, and says nothing about a skip. A candidate is marked asked when named, so it
-is named once, and is cleared by a discussion that names the turn or by a skip. The check says
-nothing when the turn is attached or its index line carries a skip. It never exits non-zero
-and never prints anything else: any failure to read the store, the index or the transcript
-is a pass, reported only under ``--json``.
-
-``kyo discuss skip --why "<one line>"`` writes the reason on the turn's index line
-(:func:`kyosei.cmd_turns.mark_skipped`), so a dismissal is kept, and ``kyo doctor`` counts
-them per week beside the shares of decisions opened live, late and unindexed
-(:func:`kyosei.doctor_records.check_discussion_shares`).
-
-The cue lists are deliberately broad. Measured on the maintainer's earlier transcripts by
-``tests/fixtures/kyo662_measure_detector.py`` (which reads private files named at run time
-and prints counts only), they are tuned for recall on the openings of known discussions
-against the number of turn ends outside any discussion at which the check would speak.
+THE STOP CHECK IS RETIRED (KYO-899). KYO-662 and KYO-876 ran ``kyo discuss check --hook`` at
+every Stop and every UserPromptSubmit: it looked for cues that a choice had been put to the
+person, marked the turn a candidate on its index line and named it at the next prompt, and
+the agent then opened a discussion or dismissed it with ``kyo discuss skip``. Decision
+KYO-898 dropped it. The packaged hooks no longer run it, and the cue detection, the
+candidate marks and doctor's weekly shares are removed. The two verbs stay in the parser
+because a project's own copy of the hooks may still call them: ``check --hook`` exits 0,
+prints nothing and writes nothing, and ``skip`` exits 0, writes nothing and says that the
+check is retired. An index line written by an earlier build may still carry ``candidate``
+or ``skip``; nothing reads either.
 """
 
 from __future__ import annotations
 
-import json
-import re
-import sys
 from argparse import Namespace
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -96,15 +74,7 @@ from pathlib import Path
 from . import commands, export
 from .clock import now
 from .cmd_sessions import recorded_transcript_path
-from .cmd_turns import (
-    HUMAN,
-    confirm_from_transcript,
-    mark_candidate,
-    mark_skipped,
-    next_candidate,
-    prompt_lines,
-    read_lines,
-)
+from .cmd_turns import HUMAN, confirm_from_transcript, read_lines
 from .commands import Context, Output, _load_registry, _load_status_ladder, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, transcripts_opted_in
 from .contracts import (
@@ -113,7 +83,7 @@ from .contracts import (
     TURN_REF_INDEXED,
     TURN_REF_PRODUCED,
 )
-from .credits import ENV_SESSION, enforced
+from .credits import ENV_SESSION
 from .errors import ContractViolation, KyoseiError, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
 from .kinds import DISCUSSION_KIND
@@ -121,8 +91,6 @@ from .prose import read_prose, single_line
 from .receipt import detail
 from .render import echo_block, echo_value, turn_ref_lines
 from .store import Store
-
-CONTRACT_DECISION_REQUIRES_DISCUSSION = "decision-requires-discussion"
 
 ROLE_OPENED = "opened"
 ROLE_NOTE = "note"
@@ -521,14 +489,15 @@ def add_filing_flags(parser) -> None:
     parser.add_argument(
         "--discussion",
         metavar="ID",
-        help="the discussion this record came from, which filing it closes; a kind whose "
-        "policy sets requires_discussion (the default `decision`) names one (KYO-658)",
+        help="the discussion this record came from, which filing it closes unless "
+        "--keep-open is given; optional for every kind (KYO-658, KYO-899)",
     )
     parser.add_argument(
         "--opened-late",
         action="store_true",
-        help="no discussion was opened: open one now, in the same act, marked late for "
-        "good. With a turn index, --at-prompt names the person's turn it began at",
+        help="open a discussion now, in the same act, marked late for good, for a matter "
+        "that was talked through with none open. With a turn index, --at-prompt names the "
+        "person's turn it began at",
     )
     parser.add_argument(
         "--at-prompt",
@@ -549,10 +518,9 @@ def filing_discussion(
     command: str,
     spawn_source: str | None = None,
 ) -> FilingDiscussion | None:
-    """KYO-658 (DC3): the discussion a filing of ``kind_def`` names, or None when it names
-    none and needs none. Refuses, writing nothing, a filing of a kind that sets
-    ``requires_discussion`` with no discussion where the rule applies
-    (``decision-requires-discussion``); and refuses the flags on a kind that does not."""
+    """The discussion a filing of ``kind_def`` names, or None when it names none. No kind
+    needs one (KYO-899): ``policy.requires_discussion`` is read by nothing, and the flags
+    are accepted on every kind."""
     resolved = _filing_discussion(
         ctx, store, kind_def, args, command=command, spawn_source=spawn_source
     )
@@ -595,24 +563,12 @@ def _filing_discussion(
     given = getattr(args, "discussion", None)
     late = bool(getattr(args, "opened_late", False))
     at = getattr(args, "at", None)
-    if spawn_source is not None and store.record(spawn_source)["kind"] == DISCUSSION_KIND:
+    source_is_discussion = (
+        spawn_source is not None and store.record(spawn_source)["kind"] == DISCUSSION_KIND
+    )
+    if source_is_discussion:
+        assert spawn_source is not None
         _refuse_closed_source(store, spawn_source)
-    if not kind_def.requires_discussion:
-        given_flags = (("--discussion", given), ("--opened-late", late), ("--at-prompt", at))
-        flags = [flag for flag, value in given_flags if value]
-        if flags:
-            raise UsageError(
-                f"{', '.join(flags)} name a discussion, and kind {kind_def.name!r} does not "
-                "set policy.requires_discussion"
-            )
-        if spawn_source is not None and store.record(spawn_source)["kind"] == DISCUSSION_KIND:
-            return FilingDiscussion(
-                current_stamp(ctx, store),
-                discussion_id=spawn_source,
-                via_source=True,
-                refs=_refs(store, spawn_source),
-            )
-        return None
     if given and late:
         raise UsageError(
             "--discussion names the discussion this came from and --opened-late says none was "
@@ -623,12 +579,12 @@ def _filing_discussion(
             "--at-prompt goes with --opened-late here: it names where the late discussion began"
         )
     from_source = None
-    via_source = False
-    if spawn_source is not None:
-        if store.record(spawn_source)["kind"] == DISCUSSION_KIND:
-            from_source, via_source = spawn_source, True
-        else:
-            from_source = discussion_of(store, spawn_source)
+    if source_is_discussion:
+        from_source = spawn_source
+    elif spawn_source is not None and kind_def.requires_credit:
+        # The discussion behind the record this one is spawned from, for the kind whose
+        # filing carries a decided credit: that credit's span is read from it.
+        from_source = discussion_of(store, spawn_source)
     if from_source is not None and (late or (given and given != from_source)):
         raise UsageError(
             f"{spawn_source} came from discussion {from_source}, which this filing is filed "
@@ -640,41 +596,28 @@ def _filing_discussion(
         return FilingDiscussion(
             current_stamp(ctx, store),
             discussion_id=discussion_id,
-            via_source=via_source,
+            via_source=source_is_discussion,
             refs=_refs(store, discussion_id),
         )
-    if late:
-        opening = current_stamp(ctx, store, at)
-        if opening.indexed and at is None:
-            lines = person_turns(ctx, store, opening.session or "")
-            raise ContractViolation(
-                CONTRACT_DECISION_REQUIRES_DISCUSSION,
-                [
-                    f"--opened-late opens the discussion at the person's turn it began at, and "
-                    f"session {opening.session} has a turn index, so `{command}` names that "
-                    "turn: nothing was written",
-                    f"add --at-prompt <prompt>, a prompt id from the index. The latest of the "
-                    f"person's {len(lines)} confirmed turns:",
-                    *_turn_listing(lines),
-                ],
-            )
-        current = current_stamp(ctx, store)
-        ref = {"role": ROLE_OPENED, "late": True, **opening.store_fields()}
-        return FilingDiscussion(current, late=True, opening=opening, refs=[ref])
-    if not enforced(store):
+    if not late:
         return None
-    raise ContractViolation(
-        CONTRACT_DECISION_REQUIRES_DISCUSSION,
-        [
-            f"kind {kind_def.name!r} sets policy.requires_discussion, so `{command}` names the "
-            "discussion it came from: nothing was written",
-            "file it from the discussion `kyo discuss open` filed: `kyo spawn <discussion-id> "
-            f"--kind {kind_def.name}`, or give the same command --discussion <discussion-id>",
-            "or, when no discussion was opened, give the same command --opened-late (with "
-            "--at-prompt <prompt> where the session has a turn index), which opens one now and "
-            "marks it late for good",
-        ],
-    )
+    opening = current_stamp(ctx, store, at)
+    if opening.indexed and at is None:
+        lines = person_turns(ctx, store, opening.session or "")
+        raise UsageError(
+            "\n".join(
+                [
+                    "--opened-late opens the discussion at the person's turn it began at, and "
+                    f"session {opening.session} has a turn index, so `{command}` names that "
+                    "turn: nothing was written. Add --at-prompt <prompt>, a prompt id from "
+                    f"the index. The latest of the person's {len(lines)} confirmed turns:",
+                    *_turn_listing(lines),
+                ]
+            )
+        )
+    current = current_stamp(ctx, store)
+    ref = {"role": ROLE_OPENED, "late": True, **opening.store_fields()}
+    return FilingDiscussion(current, late=True, opening=opening, refs=[ref])
 
 
 def filing_lines(store: Store, done: dict | None) -> list[str]:
@@ -913,316 +856,38 @@ def _close(ctx: Context, store: Store, args: Namespace) -> Output:
     )
 
 
-# ------------------------------------------------------------------ the Stop check (KYO-662)
+# ------------------------------------------------------- the retired Stop check (KYO-899)
 
-#: The cues, as the check names them in its message and under ``--json``.
-CUE_PERSON = "the person's message opens a choice"
-CUE_REPLY = "your reply puts a choice to the person"
-CUE_ASKED = "the turn used AskUserQuestion"
-
-#: Text the detector does not read: code, URLs and what the harness injected.
-_NOT_PROSE = re.compile(
-    r"```.*?(?:```|\Z)|`[^`\n]*`|https?://\S+"
-    r"|<(system-reminder|pasted-content|pasted_content)\b[^>]*>.*?</\1>",
-    re.S,
-)
-
-#: Phrases in the person's words that open a choice (proposal section 5.1, Tier 2).
-_PERSON_PHRASES = re.compile(
-    r"\b(?:what do you think|what would you|how about|what about|what if|should (?:we|i|it)"
-    r"|shall we|could we|would it|options?|i'?m leaning|i am leaning|leaning toward"
-    r"|let'?s discuss|let'?s talk|thoughts|i wonder|wondering|not sure|unsure"
-    r"|alternatives?|trade-?offs?|pros and cons|or (?:should|would|do|is|are) "
-    r"|i'?d (?:rather|prefer|like)|i would (?:rather|prefer|like)|prefer|rather than"
-    r"|instead of|maybe we|is there a (?:way|better)|which (?:one|is|would|do|should|of)"
-    r"|do you (?:think|recommend|suggest)|recommend|your (?:opinion|view|take)|decide|decision)\b",
-    re.I,
-)
-
-#: Phrases in the agent's final message that put a choice to the person. Offers and
-#: reports of waiting ("if you'd like", "waiting on you", "needs your") were measured and
-#: left out: they added turn ends outside any discussion and no opening of one. "do you
-#: want", "would you like", "want me to", "shall i", "should i" and "say the word" were
-#: offers of the same kind and were left out with KYO-859.
-_REPLY_PHRASES = re.compile(
-    r"\b(?:i recommend|my recommendation|recommendation:|i(?:'d| would) (?:recommend"
-    r"|suggest|go with|lean|pick|choose)|i suggest|which (?:do|would|should) you|which one"
-    r"|your call|up to you"
-    r"|your decision|for you to decide|yours to decide|you decide|let me know (?:which|if"
-    r"|whether|how|what)|tell me (?:which|if|whether|how|what)|say which"
-    r"|your choice|options?:)\b",
-    re.I,
-)
-#: A labelled option at the start of a line or list item: ``D1``, ``R12``, ``Option B``,
-#: ``(a)``. Two different labels make a set of options.
-_LABEL = re.compile(
-    r"(?m)^[ \t]*(?:[-*+] |\d+[.)] |\|[ \t]*)?(?:\*\*|__)?"
-    r"(\(?[A-Z]{1,2}\d{1,2}\)?|[Oo]ption [A-Z0-9]+|\(?[a-e]\))(?:\*\*|__)?[ \t]*[:.)\-—|]"
+#: What ``kyo discuss skip`` prints. One line, so a hook copy that runs it adds one line.
+SKIP_RETIRED = (
+    "discuss skip: the discussion check is retired (KYO-899), so no turn waits to be "
+    "skipped; nothing was written"
 )
 
 
-def _prose(text: str) -> str:
-    return _NOT_PROSE.sub(" ", text)
+def _check() -> Output:
+    """``kyo discuss check [--hook]``: retired. It reads nothing, not even the payload on
+    stdin, prints nothing and writes nothing, so a project's older hook copy that still
+    runs it at Stop or at UserPromptSubmit adds nothing to the session."""
+    return Output([], {"ok": True, "command": "discuss check", "fire": False, "retired": True})
 
 
-def person_cue(words: str) -> bool:
-    """Whether the person's words contain a phrase that opens a choice. A question mark
-    alone is not one (KYO-859)."""
-    prose = _prose(words)
-    return bool(_PERSON_PHRASES.search(prose))
-
-
-def reply_cue(reply: str) -> bool:
-    """Whether the agent's final message puts a choice to the person: a recommendation or a
-    request for their choice, or two or more labelled options. A closing question is not one:
-    it is as often a go-ahead question ("Shall I build one now?") as a choice (KYO-876)."""
-    prose = _prose(reply)
-    if _REPLY_PHRASES.search(prose):
-        return True
-    return len({label.strip("()").lower() for label in _LABEL.findall(prose)}) >= 2
-
-
-def detect(person: tuple[str, ...] | list[str], reply: str | None, asked: bool) -> list[str]:
-    """The cues that fire for one turn, in the order the message names them."""
-    cues: list[str] = []
-    if any(person_cue(words) for words in person):
-        cues.append(CUE_PERSON)
-    if reply and reply_cue(reply):
-        cues.append(CUE_REPLY)
-    if asked:
-        cues.append(CUE_ASKED)
-    return cues
-
-
-def _record_ids(prefix: str, text: str) -> set[str]:
-    return set(re.findall(rf"\b{re.escape(prefix)}-\d+\b", text))
-
-
-def open_discussions(store: Store, session: str) -> list[dict]:
-    """The discussions opened in ``session`` that no reference has closed and that are not
-    void, each with the record ids it is about: those its title, description and notes
-    name and those it is linked with."""
-    ladder = _load_status_ladder(store)
-    prefix = store.config.project_prefix
-    out: list[dict] = []
-    for row in store.conn.execute(
-        "SELECT r.id, r.title, r.description, r.status FROM records r"
-        " WHERE r.kind = ? AND EXISTS (SELECT 1 FROM turn_refs t WHERE t.record_id = r.id"
-        " AND t.role = ? AND t.session = ?) AND NOT EXISTS (SELECT 1 FROM turn_refs c"
-        " WHERE c.record_id = r.id AND c.role = ?) ORDER BY r.seq",
-        (DISCUSSION_KIND, ROLE_OPENED, session, ROLE_CLOSED),
-    ):
-        if ladder.is_terminal(row["status"]):
-            continue
-        about = _record_ids(prefix, f"{row['title']}\n{row['description'] or ''}")
-        for note in store.conn.execute("SELECT text FROM notes WHERE record_id = ?", (row["id"],)):
-            about |= _record_ids(prefix, note["text"] or "")
-        for link in store.conn.execute(
-            "SELECT src_id, dst_id FROM links WHERE src_id = ? OR dst_id = ?",
-            (row["id"], row["id"]),
-        ):
-            about |= {link["src_id"], link["dst_id"]}
-        about.discard(row["id"])
-        out.append({"id": row["id"], "title": row["title"], "about": about})
-    return out
-
-
-def _index_line(ctx: Context, session: str, prompt_id: str | None) -> dict | None:
-    if prompt_id is None:
-        return None
-    for line in prompt_lines(ctx.root, session):
-        if line.get("prompt_id") == prompt_id:
-            return line
-    return None
-
-
-def check_turn(ctx: Context, store: Store, payload: dict) -> dict:
-    """Decide one Stop. Returns ``{"fire": bool, "why": str, ...}`` and, when it fires,
-    ``message``. Reads only; raises what the store, the index or the transcript raise."""
-    if payload.get("hook_event_name") != "Stop":
-        return {"fire": False, "why": "not a Stop event"}
-    if payload.get("stop_hook_active"):
-        return {"fire": False, "why": "this stop already follows a Stop hook's feedback"}
-    if not transcripts_opted_in(store.config):
-        return {"fire": False, "why": "the project has not opted in to reading transcripts"}
-    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
-        return {"fire": False, "why": "a worktree's session is not the orchestrator's"}
-    session = payload.get("session_id")
-    raw_path = payload.get("transcript_path")
-    if not isinstance(session, str) or not session or not isinstance(raw_path, str):
-        return {"fire": False, "why": "no session_id or transcript_path in the hook payload"}
-    wanted = payload.get("prompt_id")
-    turn = transcript.read_turn(
-        Path(raw_path).expanduser(), wanted if isinstance(wanted, str) else None
-    )
-    if turn is None:
-        return {"fire": False, "why": "the transcript does not hold this turn"}
-    last = payload.get("last_assistant_message")
-    reply = last if isinstance(last, str) and last.strip() else turn.reply
-    cues = detect(turn.person, reply, turn.asked)
-    if not cues:
-        return {"fire": False, "why": "no cue fired", "prompt_id": turn.prompt_id}
-    result: dict = {"fire": False, "cues": cues, "prompt_id": turn.prompt_id}
-    line = _index_line(ctx, session, turn.prompt_id)
-    if line is not None and isinstance(line.get("skip"), dict):
-        return result | {"why": "the turn is skipped with a recorded reason"}
-    if turn.prompt_id is not None and _attached(store, session, turn.prompt_id):
-        return result | {"why": "a discussion names this turn"}
-    discussions = open_discussions(store, session)
-    named = set().union(
-        *(_record_ids(store.config.project_prefix, _prose(words)) for words in turn.person)
-    )
-    covered = set().union(*(d["about"] | {d["id"]} for d in discussions))
-    if discussions and (CUE_PERSON not in cues or not named or named & covered):
-        return result | {"why": f"{discussions[-1]['id']} is open in this session"}
-    if line is None:
-        return result | {"why": "the turn index holds no line for this turn"}
-    if discussions:
-        state = (
-            f"it names {', '.join(sorted(named))}, which no discussion open in this session "
-            f"is about ({', '.join(d['id'] for d in discussions)} open)"
-        )
-    else:
-        state = "no discussion is open in this session"
-    key = line.get("prompt_id") or line.get("turn")
-    recorded = mark_candidate(ctx.root, session, key, cues)
-    return result | {"fire": True, "why": state, "candidate": recorded}
-
-
-def _attached(store: Store, session: str, prompt_id: str) -> bool:
-    return (
-        store.conn.execute(
-            "SELECT 1 FROM turn_refs WHERE session = ? AND prompt_id = ?", (session, prompt_id)
-        ).fetchone()
-        is not None
-    )
-
-
-def prompt_line(line: dict) -> str:
-    """The one line of context the next prompt carries for a candidate turn."""
-    prompt_id = line["prompt_id"]
-    cues = "; ".join(line["candidate"].get("cues") or [])
-    return (
-        f"Kyosei: the turn at {line.get('at') or 'an unknown time'} (prompt {prompt_id[:8]}) may "
-        f"have put a choice to the person ({cues}). If it did, run `kyo discuss open --at-prompt "
-        f'{prompt_id} --title "<topic>"`; if not, run `kyo discuss skip --at-prompt {prompt_id} '
-        '--why "<one line>"`. Say nothing to the person about a skip. This is named once.'
-    )
-
-
-def next_prompt(ctx: Context, store: Store, payload: dict) -> dict:
-    """UserPromptSubmit: the line naming the session's newest unanswered candidate, marked
-    asked, or ``{"line": None, ...}`` with the reason there is none."""
-    if not transcripts_opted_in(store.config):
-        return {"line": None, "why": "the project has not opted in to reading transcripts"}
-    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
-        return {"line": None, "why": "a worktree's session is not the orchestrator's"}
-    session = payload.get("session_id")
-    if not isinstance(session, str) or not session:
-        return {"line": None, "why": "no session_id in the hook payload"}
-    found = next_candidate(
-        ctx.root, session, lambda prompt_id: _attached(store, session, prompt_id)
-    )
-    if found is None:
-        return {"line": None, "why": "no candidate turn is waiting"}
-    return {
-        "line": prompt_line(found),
-        "why": "a candidate turn is named",
-        "prompt_id": found["prompt_id"],
-    }
-
-
-def _check(ctx: Context, args: Namespace) -> Output:
-    if not getattr(args, "hook", False):
-        raise UsageError(
-            "check reads Claude Code's hook payload on stdin: run it as `kyo discuss check "
-            "--hook`, which is how the packaged Stop and UserPromptSubmit hooks run it"
-        )
-    lines: list[str] = []
-    try:
-        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
-        payload = json.loads(raw) if raw.strip() else {}
-        if not isinstance(payload, dict):
-            payload = {}
-        if payload.get("hook_event_name") == "UserPromptSubmit":
-            data = next_prompt(ctx, ctx.store(), payload)
-            if data["line"] is not None:
-                lines = [data["line"]]
-            data = {
-                "fire": data["line"] is not None,
-                **{k: v for k, v in data.items() if k != "line"},
-            }
-        else:
-            data = check_turn(ctx, ctx.store(), payload)
-    except Exception as exc:  # noqa: BLE001 - a hook that fails must say nothing
-        data = {"fire": False, "why": f"could not check: {exc}", "problem": str(exc)}
-    return Output(lines, {"ok": True, "command": "discuss check", **data})
-
-
-def _skip(ctx: Context, store: Store, args: Namespace) -> Output:
-    if args.id is not None:
-        raise UsageError("skip takes no id: it marks a turn, named with --at-prompt")
-    why = getattr(args, "why", None)
-    if not (why or "").strip():
-        raise UsageError('skip records why the turn is not a discussion: give --why "<one line>"')
-    why = single_line(why, what="--why")
-    session = _session_of(ctx)
-    if session is None:
-        raise UsageError(
-            f"skip marks a turn of this Claude Code session, and ${ENV_SESSION} is unset"
-        )
-    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
-        raise UsageError(
-            "skip writes the turn index, which a worktree's kyo never does; the Stop check "
-            "does not ask in a worktree, so there is nothing to skip here"
-        )
-    if not transcripts_opted_in(store.config):
-        raise UsageError(
-            "skip writes its reason on the turn's line in the turn index, and this project "
-            f"keeps none (`{READ_TRANSCRIPTS_KEY}:` in kyosei/config.yml); the Stop check "
-            "does not ask in such a project, so there is nothing to skip here"
-        )
-    _refresh_index(ctx, session)
-    lines = sorted(
-        (line for line in prompt_lines(ctx.root, session) if isinstance(line.get("at"), str)),
-        key=lambda line: line["at"],
-    )
-    at = getattr(args, "at", None)
-    prompts = [line for line in lines if isinstance(line.get("prompt_id"), str)]
-    if at is not None:
-        line = _match_at(lines, at, session)
-    elif prompts:
-        line = prompts[-1]
-    else:
-        raise UsageError(f"the turn index holds no prompt of session {session} to skip")
-    key = line.get("prompt_id") or line.get("turn")
-    written = mark_skipped(ctx.root, session, key, why)
-    if written is None:
-        raise KyoseiError(f"the turn index no longer holds {key} of session {session}")
-    return Output(
-        [f"skipped prompt {key} at {written['at']}", detail(echo_value("why", why))],
-        receipt=True,
-        data={
-            "ok": True,
-            "command": "discuss skip",
-            "session": session,
-            "prompt_id": written.get("prompt_id"),
-            "turn": written.get("turn"),
-            "skip": written["skip"],
-        },
-    )
+def _skip() -> Output:
+    """``kyo discuss skip``: retired with the check. Whatever flags it was given, it writes
+    nothing to the turn index or the store and says so in one line."""
+    return Output([SKIP_RETIRED], {"ok": True, "command": "discuss skip", "retired": True})
 
 
 def cmd_discuss(ctx: Context, args: Namespace) -> Output:
-    """``kyo discuss open | note | close | skip | check --hook``."""
+    """``kyo discuss open | note | close``, and the retired ``skip`` and ``check --hook``."""
     action = args.action
     if action == "check":
-        return _check(ctx, args)
+        return _check()
+    if action == "skip":
+        return _skip()
     if getattr(args, "hook", False):
         raise UsageError("--hook belongs to `kyo discuss check`")
     store = ctx.store()
-    if action == "skip":
-        return _skip(ctx, store, args)
     if action == "open":
         return _open(ctx, store, args)
     if action == "note":

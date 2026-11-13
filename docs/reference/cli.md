@@ -39,7 +39,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
 | [`kyo credit`](#kyo-credit) | yes | yes | credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644) |
 | [`kyo devices`](#kyo-devices) | no | no | issue, list and revoke the per-device tokens kyo serve's routes check, on this machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699) |
-| [`kyo discuss`](#kyo-discuss) | yes | yes | a discussion in which the person is asked to choose: open one when it starts, stamped at the person's turn from the turn index; note what was put to them; close one that produced nothing (KYO-658). Spawning from it closes it too |
+| [`kyo discuss`](#kyo-discuss) | yes | yes | a discussion in which the person is asked to choose, kept as a record when someone opens one on purpose: open it when it starts, stamped at the person's turn from the turn index; note what was put to them; close one that produced nothing (KYO-658). Spawning from it closes it too. No kind needs one (KYO-899) |
 | [`kyo dispatch`](#kyo-dispatch) | yes | yes | dispatch a record with a frozen brief, or `dispatch close` a dispatch (M5) |
 | [`kyo docs`](#kyo-docs) | yes | yes | Layer 3 docs-SOT skeleton validator (M8) |
 | [`kyo doctor`](#kyo-doctor) | yes | no | run the tool's own invariant checks |
@@ -517,19 +517,19 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 ## `kyo discuss`
 
-a discussion in which the person is asked to choose: open one when it starts, stamped at the person's turn from the turn index; note what was put to them; close one that produced nothing (KYO-658). Spawning from it closes it too
+a discussion in which the person is asked to choose, kept as a record when someone opens one on purpose: open it when it starts, stamped at the person's turn from the turn index; note what was put to them; close one that produced nothing (KYO-658). Spawning from it closes it too. No kind needs one (KYO-899)
 
 Needs a Kyosei project: **yes** — it searches upward for one and fails if there is none.
 
 Writes to the store: **yes** — an events row and a fresh export.
 
-Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`; `kyo discuss skip --json` carries `prompt_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
+Top-level ids in `--json`: `kyo discuss close --json` carries `record_id`; `kyo discuss note --json` carries `record_id`, `note_id`; `kyo discuss open --json` carries `record_id`. (KYO-194: an id the payload names an object for is repeated at the payload root, so a script reads it from there rather than from inside the object.)
 
 Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--title TITLE] [--at-prompt PROMPT] [--file FILE] [--dropped] [--produced [RECORD_ID ...]] [--why WHY] [--hook] {open,note,close,skip,check} [id]`
 
 ### Positional arguments
 
-- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --produced names what it led to and --dropped closes one with nothing produced; skip records, on the turn's index line, why a turn the check asked about is not a discussion; check --hook is that check, run at Stop and at the next prompt (KYO-662, KYO-876)
+- `{open,note,close,skip,check}` — **required**. open files a discussion at the person's latest confirmed turn; note keeps what was put to the person; close --produced names what it led to and --dropped closes one with nothing produced. skip and check belonged to the Stop-time discussion check, which is retired (KYO-899): both exit 0 and write nothing, so a hook copy that still runs them keeps working
 - `[ID]` — optional. note and close: the discussion, PREFIX-N
 
 ### Options
@@ -539,8 +539,8 @@ Usage: `kyo discuss [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 - `--file FILE` — optional. note: what was put to the person, the options and the recommendation, from a file or '-' for stdin (law 5)
 - `--dropped` — optional. close: the discussion produced nothing; needs --why
 - `--produced [RECORD_ID ...]` — optional. close: the records the discussion led to, each linked to it as produced by it; with --why, what is not a record, such as an idea file. Not with --dropped (KYO-878)
-- `--why WHY` — optional. close --dropped: why nothing was produced; close --produced: what the discussion produced that is not a record; skip: why the turn is not a discussion. One line
-- `--hook` — optional. check: read Claude Code's hook payload on stdin. At Stop, when the turn put a choice to the person and no discussion is open in this session, mark the turn as a candidate and print nothing. At UserPromptSubmit, print one line of context naming the newest candidate not yet asked about, once, for the agent to open a discussion or skip. Never blocks and always exits 0; how the packaged hooks invoke this (KYO-662, KYO-876)
+- `--why WHY` — optional. close --dropped: why nothing was produced; close --produced: what the discussion produced that is not a record. One line
+- `--hook` — optional. check: how the packaged hooks ran the retired discussion check. Accepted and ignored: the command prints nothing, writes nothing and exits 0 (KYO-899)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 
@@ -1090,8 +1090,8 @@ Usage: `kyo new [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [-
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
-- `--discussion ID` — optional. the discussion this record came from, which filing it closes; a kind whose policy sets requires_discussion (the default `decision`) names one (KYO-658)
-- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
+- `--discussion ID` — optional. the discussion this record came from, which filing it closes unless --keep-open is given; optional for every kind (KYO-658, KYO-899)
+- `--opened-late` — optional. open a discussion now, in the same act, marked late for good, for a matter that was talked through with none open. With a turn index, --at-prompt names the person's turn it began at
 - `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
 - `--from FILE` — optional. file the whole record from one markdown file instead of --title/--plan/--scope/--description-file/--criteria-file/--touches-file: front matter for title/scope/plan/touches, a '## Criteria' section (one criterion per list item), everything else the description; refused together with any of those flags (KYO-330)
 - `--check` — optional. with --from, validate the file (kind, scope, touches against the repo) and file nothing (KYO-330)
@@ -1628,8 +1628,8 @@ Usage: `kyo spawn [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] 
 - `--span-first UUID` — optional. the first transcript record of the discussion the credit cites
 - `--span-last UUID` — optional. the last transcript record of the discussion the credit cites
 - `--span-session ID` — optional. the session the discussion was in; defaults to the credit's session
-- `--discussion ID` — optional. the discussion this record came from, which filing it closes; a kind whose policy sets requires_discussion (the default `decision`) names one (KYO-658)
-- `--opened-late` — optional. no discussion was opened: open one now, in the same act, marked late for good. With a turn index, --at-prompt names the person's turn it began at
+- `--discussion ID` — optional. the discussion this record came from, which filing it closes unless --keep-open is given; optional for every kind (KYO-658, KYO-899)
+- `--opened-late` — optional. open a discussion now, in the same act, marked late for good, for a matter that was talked through with none open. With a turn index, --at-prompt names the person's turn it began at
 - `--at-prompt PROMPT` — optional. with --opened-late, or `kyo discuss open`: the person's turn the discussion began at, a prompt id or transcript record uuid from the turn index (a unique prefix will do); defaults, for `kyo discuss open`, to the latest
 - `--plan ID` — optional. plan record the new record belongs to, as `kyo new --plan` (KYO-749)
 - `--implements ID` — optional. the record of the decision this work carries out; writes the link `<new record> implements ID`, which `kyo dossier ID` lists under what happened next. `kyo link` adds the same link to a record already filed (KYO-786)

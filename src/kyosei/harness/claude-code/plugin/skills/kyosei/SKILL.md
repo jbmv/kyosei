@@ -119,17 +119,16 @@ the echo, and `kyo unlink <id> --why` retracts one (KYO-21). Work a decision led
 its members, and carries no criteria of its own (KYO-210). Members join one by one, with
 `--plan <plan-id>` on `kyo new` or `kyo edit <id>`; `kyo list --plan <plan-id>` walks it.
 
-**Before answering a choice put to the person, run `kyo discuss open --title "<topic>"`**
-(KYO-658), and file the decision from it, credited: `kyo spawn <discussion> --kind decision
---quote-file words.md --decision-file d.yml` (KYO-644; `--keep-open`). The Stop check is silent;
-when it marked a turn of yours, the next prompt names it once (KYO-876), and you answer inside
-that turn with `kyo discuss open --at-prompt <id> --title "<topic>"` or
-`kyo discuss skip --at-prompt <id> --why "<why>"`, a skip going unreported. A discussion that
-led to records but no decision closes with `kyo discuss close <id> --produced <record>...`
-(KYO-878; `--why` for an idea file), and `--dropped` is for one that led to nothing. With no
-discussion open, `kyo new decision --opened-late --at-prompt <prompt>`. A choice needing design
-work first is a proposal. Sending a discussion off the machine is `kyo excerpt`, refused without
-the person's go-ahead recorded as a credit (KYO-660).
+**A decision the person made is filed directly, credited**: `kyo new decision --title "..."
+--quote-file words.md --decision-file d.yml` (KYO-644). It needs no discussion (KYO-899). A
+discussion is optional: `kyo discuss open --title "<topic>"` (KYO-658) keeps a long choice as a
+record of its own, stamped at the person's turn; `kyo spawn <discussion> --kind decision` files
+from it and closes it (`--keep-open` leaves it open), `kyo discuss close <id> --produced
+<record>...` closes one that led to records but no decision (KYO-878), and `kyo discuss close
+<id> --dropped --why "..."` one that led to nothing. A choice needing design work first is a
+proposal.
+Sending a discussion off the machine is `kyo excerpt`, refused without the person's go-ahead
+recorded as a credit (KYO-660).
 
 Stories: `${CLAUDE_SKILL_DIR}/REFERENCE.md`, "2. Filing vs. promotion".
 

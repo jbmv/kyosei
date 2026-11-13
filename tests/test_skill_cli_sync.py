@@ -1183,6 +1183,19 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-899: a discussion is optional, so the workflow tier no longer walks the flags
+    # that open one late or stamp it at an earlier turn.
+    **dict.fromkeys(
+        (
+            ("discuss", "--at-prompt"),
+            ("new", "--at-prompt"),
+            ("new", "--opened-late"),
+            ("spawn", "--at-prompt"),
+            ("spawn", "--opened-late"),
+        ),
+        "a discussion is optional since KYO-899; REFERENCE.md's `A discussion is "
+        "optional` names the flag, and `kyo reference` its form",
+    ),
     # KYO-881: two flags the trimmed tier stopped spelling, neither an orchestrator's step.
     ("reference", "--output"): (
         "writes the whole command reference to a file; `kyo reference` and "

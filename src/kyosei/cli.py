@@ -420,7 +420,8 @@ MUTATING_COMMANDS = (
     # KYO-705: `kyo notes add` and `tag` write rows and an event; `list`, `show` and `tags`
     # are pure reads, on `docs`' reasoning below: the entry names the command.
     "notes",
-    # KYO-658: every `kyo discuss` action files a record or a turn reference and an event.
+    # KYO-658: `kyo discuss` open, note and close file a record or a turn reference and an
+    # event; the retired skip and check write nothing (KYO-899).
     "discuss",
     # KYO-137: `kyo docs settle` writes the verdict that clears a docs obligation, and
     # writes an events row and a fresh export like every other mutation. The command's
@@ -848,8 +849,8 @@ def build_parser() -> KyoseiParser:
     # KYO-644: a kind with policy.requires_credit (the default `decision`) names the
     # person who decided it; --quote-file alone also serves as the evidence.
     credits.add_credit_flags(p_new, decision=True, span=True)
-    # KYO-658: a kind with policy.requires_discussion (the default `decision`) names its
-    # discussion, or opens one late.
+    # KYO-658, KYO-899: any kind may name the discussion it came from, or open one late;
+    # none has to.
     cmd_discuss.add_filing_flags(p_new)
     p_new.add_argument(
         "--from",
@@ -3303,19 +3304,19 @@ def build_parser() -> KyoseiParser:
     p_discuss = sub.add_parser(
         "discuss",
         parents=[common],
-        help="a discussion in which the person is asked to choose: open one when it starts, "
-        "stamped at the person's turn from the turn index; note what was put to them; close "
-        "one that produced nothing (KYO-658). Spawning from it closes it too",
+        help="a discussion in which the person is asked to choose, kept as a record when "
+        "someone opens one on purpose: open it when it starts, stamped at the person's turn "
+        "from the turn index; note what was put to them; close one that produced nothing "
+        "(KYO-658). Spawning from it closes it too. No kind needs one (KYO-899)",
     )
     p_discuss.add_argument(
         "action",
         choices=["open", "note", "close", "skip", "check"],
         help="open files a discussion at the person's latest confirmed turn; note keeps what "
         "was put to the person; close --produced names what it led to and --dropped closes one "
-        "with nothing produced; skip records, on the turn's index line, why a turn the check "
-        "asked about is not a "
-        "discussion; check --hook is that check, run at Stop and at the next prompt "
-        "(KYO-662, KYO-876)",
+        "with nothing produced. skip and check belonged to the Stop-time discussion check, "
+        "which is retired (KYO-899): both exit 0 and write nothing, so a hook copy that "
+        "still runs them keeps working",
     )
     p_discuss.add_argument("id", nargs="?", help="note and close: the discussion, PREFIX-N")
     p_discuss.add_argument("--title", help="open: the topic, one line")
@@ -3348,18 +3349,13 @@ def build_parser() -> KyoseiParser:
     p_discuss.add_argument(
         "--why",
         help="close --dropped: why nothing was produced; close --produced: what the "
-        "discussion produced that is not a record; skip: why the turn is not a "
-        "discussion. One line",
+        "discussion produced that is not a record. One line",
     )
     p_discuss.add_argument(
         "--hook",
         action="store_true",
-        help="check: read Claude Code's hook payload on stdin. At Stop, when the turn put a "
-        "choice to the person and no discussion is open in this session, mark the turn as a "
-        "candidate and print nothing. At UserPromptSubmit, print one line of context naming "
-        "the newest candidate not yet asked about, once, for the agent to open a discussion "
-        "or skip. Never blocks and always exits 0; how the packaged hooks invoke this "
-        "(KYO-662, KYO-876)",
+        help="check: how the packaged hooks ran the retired discussion check. Accepted and "
+        "ignored: the command prints nothing, writes nothing and exits 0 (KYO-899)",
     )
 
     # KYO-184. No flags of its own, deliberately: the question has one answer and

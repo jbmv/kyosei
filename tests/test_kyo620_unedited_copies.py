@@ -234,7 +234,6 @@ def test_the_scrub_left_each_registry_s_values_unchanged(name: str) -> None:
 LATER_VALUE_CHANGES: dict[str, tuple[tuple[str, ...], ...]] = {
     "kinds.yml": (
         ("kinds", "decision", "policy", "requires_credit"),
-        ("kinds", "decision", "policy", "requires_discussion"),  # KYO-658
     ),
 }
 

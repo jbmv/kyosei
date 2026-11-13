@@ -54,7 +54,7 @@ import json
 import os
 import sys
 from argparse import Namespace
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -155,90 +155,6 @@ def confirmed_paste_flags(store_root: Path | str, session_id: str) -> dict[str, 
             if isinstance(value, str):
                 flags[value] = pasted
     return flags
-
-
-#: KYO-662: the ``role`` of a line that stands for the agent's reply, not for a prompt. Such
-#: a line repeats its prompt's id, and a skip is never written on it.
-REPLY_ROLE = "assistant"
-
-
-def prompt_lines(store_root: Path | str, session_id: str) -> list[dict]:
-    """One session's lines that each stand for a prompt or a message sent mid-turn, in file
-    order: every line of the session but those whose ``role`` is :data:`REPLY_ROLE`."""
-    return [
-        line
-        for line in read_lines(store_root)
-        if line.get("session") == session_id and line.get("role") != REPLY_ROLE
-    ]
-
-
-def mark_skipped(store_root: Path | str, session_id: str, key: str, why: str) -> dict | None:
-    """KYO-662: write ``skip`` on one index line, the reason a turn the Stop check asked
-    about is not a discussion. ``key`` is the line's prompt id or record uuid. Returns the
-    line as written, or None when the session's index holds no such line. The reason and
-    the time it was given are the only words the index holds, and they are the agent's.
-    """
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in lines:
-            if (
-                line.get("session") == session_id
-                and line.get("role") != REPLY_ROLE
-                and key in (line.get("prompt_id"), line.get("turn"))
-            ):
-                line["skip"] = {"why": why, "at": _now()}
-                _rewrite(store_root, lines)
-                return line
-    return None
-
-
-def mark_candidate(store_root: Path | str, session_id: str, key: str, cues: list[str]) -> bool:
-    """KYO-876: write ``candidate`` on one index line, the cues that fired at the Stop that
-    ended the turn, so the session's next prompt can ask about it (:func:`next_candidate`).
-    A line that already carries a candidate or a skip is left as it is. Returns whether it
-    wrote."""
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in lines:
-            if (
-                line.get("session") == session_id
-                and line.get("role") != REPLY_ROLE
-                and key in (line.get("prompt_id"), line.get("turn"))
-            ):
-                if "candidate" in line or "skip" in line:
-                    return False
-                line["candidate"] = {"cues": list(cues), "at": _now(), "asked": None}
-                _rewrite(store_root, lines)
-                return True
-    return False
-
-
-def next_candidate(
-    store_root: Path | str, session_id: str, answered: Callable[[str], bool]
-) -> dict | None:
-    """KYO-876: the newest line of the session whose candidate has not been asked about,
-    that carries no skip and whose prompt ``answered`` does not call attached to a
-    discussion; and, marked asked under the lock, so that it is named once. None when
-    there is none."""
-    with _locked(store_root):
-        lines = read_lines(store_root)
-        for line in reversed(lines):
-            candidate = line.get("candidate")
-            prompt_id = line.get("prompt_id")
-            if (
-                line.get("session") != session_id
-                or line.get("role") == REPLY_ROLE
-                or not isinstance(candidate, dict)
-                or candidate.get("asked")
-                or "skip" in line
-                or not isinstance(prompt_id, str)
-                or answered(prompt_id)
-            ):
-                continue
-            candidate["asked"] = _now()
-            _rewrite(store_root, lines)
-            return line
-    return None
 
 
 def _rewrite(store_root: Path | str, lines: list[dict]) -> None:
