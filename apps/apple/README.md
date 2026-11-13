@@ -226,13 +226,22 @@ Command-] and Command-[, indent and outdent the lines the caret or the selection
 keep the caret in the box (KYO-905). Return continues a list and ends it on an empty item.
 The page's tests read and set a box through `window.kyo.composer`.
 
+A right-click in a box's gutter opens the panel of the paragraph under the pointer, as a press
+on its mark does, in the prompt and in a scratchpad alike (KYO-911). Besides the paragraph's
+tags, attachments and anchors, the panel holds Indent and Outdent, which move the paragraph
+and the lines nested under it as Tab and Shift-Tab move a selection of those lines, each press
+one step of the box's undo, and leave the caret where it was. Outdent is disabled when none of
+those lines is indented. On a line that can fold the panel also holds Fold, or Unfold on a
+folded one, which acts as Command-Option-[ and Command-Option-] do at the caret. The panel
+stays open after each of these, so that a second press acts again.
+
 The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
 adds one. A scratchpad has a heading, which names it and is never sent, and a button that
 collapses it to that heading; a scratchpad with no heading shows the first words of its text
 there. It has no Send. Its Create prompt button moves its text, anchors, attachments and tags
 into the prompt, and is disabled while the prompt holds anything. One section is moved with
-Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in a
-scratchpad's gutter also opens: the paragraph with the lines nested under it, or a heading
+Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
+gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level, goes to the end of the prompt,
 outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad;
 a section that was folded arrives folded (KYO-913). What a section is and how its lines move are `sectionEnd` and `moveLines` in

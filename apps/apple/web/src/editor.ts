@@ -417,12 +417,13 @@ function lineChange(from: number, before: string, after: string): { from: number
  * lines alone in a selection of several lines. Each line is its own change, so each keeps its
  * marks, and the press is one undo step. The key is always taken, so the focus stays.
  */
-function shiftIndent(view: EditorView, out: boolean): boolean {
+function shiftIndent(view: EditorView, out: boolean, only?: { from: number; to: number }): boolean {
   const { state } = view;
   const { from: start, to: end, empty } = state.selection.main;
-  const first = state.doc.lineAt(start);
+  const first = only ? state.doc.line(only.from + 1) : state.doc.lineAt(start);
   // A selection that ends at the start of a line does not take that line.
-  const last = state.doc.lineAt(!empty && end > first.from && state.sliceDoc(end - 1, end) === "\n" ? end - 1 : end);
+  const last = only ? state.doc.line(only.to)
+    : state.doc.lineAt(!empty && end > first.from && state.sliceDoc(end - 1, end) === "\n" ? end - 1 : end);
   const lines: string[] = [];
   for (let number = first.number; number <= last.number; number++) lines.push(state.doc.line(number).text);
   const moved = lines.map((line) => {
@@ -436,6 +437,11 @@ function shiftIndent(view: EditorView, out: boolean): boolean {
     return change ? [change] : [];
   });
   if (!changes.length) return true;
+  if (only) {
+    // The lines were named, not selected: the selection moves with the text and is not shown.
+    view.dispatch({ changes, userEvent: out ? "delete.dedent" : "input.indent", annotations: isolateHistory.of("full") });
+    return true;
+  }
   const from = first.from;
   const length = moved.join("\n").length;
   const caret = Math.max(from, start + moved[0].length - lines[0].length);
@@ -451,6 +457,16 @@ function shiftIndent(view: EditorView, out: boolean): boolean {
 
 export const indentLines = (view: EditorView) => shiftIndent(view, false);
 export const outdentLines = (view: EditorView) => shiftIndent(view, true);
+
+/**
+ * Indent and Outdent in a paragraph's panel (KYO-911): lines `from` to `to` (counted from 0,
+ * `to` excluded) are indented or outdented as Tab and Shift-Tab would move a selection of
+ * them, in one undo step, and the caret and the selection stay where they were.
+ */
+export function shiftSection(view: EditorView, from: number, to: number, out: boolean): void {
+  if (from < 0 || to <= from || to > view.state.doc.lines) return;
+  shiftIndent(view, out, { from, to });
+}
 
 /**
  * Return: on a list item with words before the caret, a new item with the same indent and
@@ -589,6 +605,31 @@ function foldOn(state: EditorState, from: number, to: number): { from: number; t
   return found;
 }
 
+/** Whether line `line` (counted from 0) is folded now, can fold, or neither (KYO-911). */
+export function lineFold(state: EditorState, line: number): "folded" | "foldable" | null {
+  if (line < 0 || line >= state.doc.lines) return null;
+  const { from, to } = state.doc.line(line + 1);
+  return foldOn(state, from, to) ? "folded" : foldable(state, from, to) ? "foldable" : null;
+}
+
+/**
+ * Folds the section that begins on line `line` (counted from 0) or unfolds it if it is folded,
+ * as the fold keys do at the caret and the chevron does on its line. It says whether it did.
+ */
+export function toggleFold(view: EditorView, line: number): boolean {
+  if (line < 0 || line >= view.state.doc.lines) return false;
+  const { from, to } = view.state.doc.line(line + 1);
+  const folded = foldOn(view.state, from, to);
+  if (folded) {
+    view.dispatch({ effects: unfoldEffect.of(folded) });
+    return true;
+  }
+  const range = foldable(view.state, from, to);
+  if (!range) return false;
+  view.dispatch({ effects: foldEffect.of(range) });
+  return true;
+}
+
 /** What a fold's placeholder says: how many of its lines hold a mark, and what they hold. */
 interface FoldSummary { marks: number; title: string }
 
@@ -698,16 +739,7 @@ function foldsGutter<T>(options: EditorOptions<T>): Extension {
         return true;
       },
       click(view, block) {
-        const line = view.state.doc.lineAt(block.from);
-        const folded = foldOn(view.state, line.from, line.to);
-        if (folded) {
-          view.dispatch({ effects: unfoldEffect.of(folded) });
-          return true;
-        }
-        const range = foldable(view.state, line.from, line.to);
-        if (!range) return false;
-        view.dispatch({ effects: foldEffect.of(range) });
-        return true;
+        return toggleFold(view, view.state.doc.lineAt(block.from).number - 1);
       },
     },
   });

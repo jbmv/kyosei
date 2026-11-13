@@ -46,7 +46,7 @@ import {
   type FoldedLine, type LineMarks, createEditor, foldedLines, lineOfId, marksOf as lineMarks, placeItem, refreshMarks,
   removeEffect, removeItem, showLanding,
 } from "./editor";
-import { indentLines, outdentLines } from "./editor";
+import { indentLines, lineFold, outdentLines, shiftSection, toggleFold } from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -2538,7 +2538,7 @@ function showMark(editor: EditorView, id: number): void {
   anchorButton.prepend(icon("anchor"));
   const divider = document.createElement("div");
   divider.className = "mark-divider";
-  const actions: HTMLElement[] = [anchorButton];
+  const actions: HTMLElement[] = [anchorButton, ...lineActions(editor, id, line)];
   if (scratchOf.has(editor)) {
     // KYO-904: a scratchpad's paragraph, with what is nested under it, goes to the prompt.
     const move = boxButton("mark-to-prompt", "Send to prompt", () => sendToPrompt(editor, lineNow()));
@@ -2553,6 +2553,39 @@ function showMark(editor: EditorView, id: number): void {
   box.append(markPanel);
   markPanel.style.top = `${editor.documentTop + row.top - box.getBoundingClientRect().top - box.clientTop + 24}px`;
   if (refocus || !held.length) field.focus();
+}
+
+/**
+ * KYO-911: what a paragraph's panel does to its line in every box. Indent and Outdent move the
+ * line and the lines nested under it, the section Send to prompt moves (KYO-904), as Tab and
+ * Shift-Tab move a selection of those lines; Fold or Unfold is offered on a line that can fold,
+ * as the fold keys act on the caret's line (KYO-913). The panel stays open, drawn again for the
+ * line as it now is, so that a second press acts again.
+ */
+function lineActions(editor: EditorView, id: number, line: number): HTMLElement[] {
+  const act = (change: (at: number) => void) => () => {
+    const at = lineOfId(editor.state, id);
+    if (at < 0) return;
+    change(at);
+    showMark(editor, id);
+  };
+  const shift = (out: boolean) => act((at) => shiftSection(editor, at, sectionEnd(textOf(editor), at), out));
+  const section = textOf(editor).split("\n").slice(line, sectionEnd(textOf(editor), line));
+  const indent = boxButton("mark-action mark-indent", "Indent", shift(false));
+  indent.title = "Indent this paragraph and what is nested under it (Tab)";
+  const outdent = boxButton("mark-action mark-outdent", "Outdent", shift(true));
+  outdent.title = "Outdent this paragraph and what is nested under it (Shift-Tab)";
+  // Shift-Tab where nothing is indented changes nothing; the panel says so before the press.
+  outdent.disabled = !section.some((text) => /^[ \t]/.test(text));
+  const actions: HTMLElement[] = [indent, outdent];
+  const fold = lineFold(editor.state, line);
+  if (fold) {
+    const folded = fold === "folded";
+    const button = boxButton("mark-action mark-fold", folded ? "Unfold" : "Fold", act((at) => toggleFold(editor, at)));
+    button.title = folded ? "Show the lines folded under this paragraph (⌥⌘])" : "Fold the lines under this paragraph (⌥⌘[)";
+    actions.push(button);
+  }
+  return actions;
 }
 
 document.addEventListener("mousedown", (event) => {
@@ -3684,10 +3717,10 @@ function addBox(
     placeholder: scratch ? "Notes…" : "Reply…",
     drawMark,
     drawGhost,
-    // KYO-904: a right-click in a scratchpad's gutter opens the panel of the paragraph under
-    // the pointer, which holds Send to prompt.
+    // KYO-904, KYO-911: a right-click in a box's gutter opens the panel of the paragraph under
+    // the pointer, which holds Indent, Outdent and Fold, and in a scratchpad Send to prompt.
     onGutterMenu: (view, _line, lineId, event) => {
-      if (!scratchOf.has(view) || lineId === undefined) return false;
+      if (lineId === undefined) return false;
       event.preventDefault();
       showMark(view, lineId);
       return true;
