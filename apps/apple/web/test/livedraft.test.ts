@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { openPage, type Page } from "./chrome.ts";
 
-interface Box { id: string; text: string; marks?: unknown }
+interface Box { id: string; text: string; marks?: unknown; scratch?: { heading: string; collapsed?: boolean } }
 interface Device {
   page: Page;
   /** The etag the app saves under, and the etag of the draft it last handed the page. */
@@ -179,35 +179,41 @@ test("a save refused as stale is merged with the draft saved first, and saved ag
 
 test("a prompt sent from one device leaves the other, which keeps its unsaved edits", async (t) => {
   if (!laptop) return t.skip("no Chrome on this machine");
-  const [here, there] = await open([{ id: "a", text: "Sent from the laptop" }, { id: "b", text: "Second" }]);
-  await focus(there, 1);
+  const kept = { id: "a", text: "Notes", scratch: { heading: "" } };
+  const [here, there] = await open([kept, { id: "b", text: "Sent from the laptop" }]);
+  await focus(there, 0);
   await there.page.type(", still being typed");
-  await here.page.run(`document.querySelector("#boxes .box .box-send").click()`);
+  await here.page.run(`document.querySelector("#boxes .box.main .box-send").click()`);
   const sends = await here.page.run<number>(`window.posted.filter((message) => message.name === "send").length`);
   assert.equal(sends, 1);
   await here.page.run(`window.kyo.sent({ id: "held-1" })`);
   // The sender saves the draft without the sent prompt at once, with no pause.
   assert.deepEqual(await save(here), ["saved"]);
-  assert.deepEqual(server.boxes.map((box) => box.id), ["b"]);
+  assert.deepEqual(server.boxes.map((box) => box.id), ["a"]);
   await announce(there);
-  assert.deepEqual(await shown(there), ["Second, still being typed"]);
+  // The scratchpad keeps what is being typed, and the prompt that was sent is empty again.
+  assert.deepEqual(await shown(there), ["Notes, still being typed", ""]);
   await wait(there, PAUSE);
   assert.deepEqual(await save(there), ["saved"]);
-  assert.deepEqual(server.boxes, [{ id: "b", text: "Second, still being typed", marks: [] }]);
+  assert.deepEqual(server.boxes, [{ ...kept, text: "Notes, still being typed", marks: [] }]);
 });
 
 test("every box is saved with an id, which it keeps while it is edited", async (t) => {
   if (!laptop) return t.skip("no Chrome on this machine");
   const [here] = await open([{ id: "a", text: "First" }]);
+  // The + button adds a scratchpad above the prompt, with the caret in its heading.
   await here.page.run(`document.getElementById("new-prompt").click()`);
-  await here.page.type("A new prompt");
+  await here.page.type("A heading");
+  await here.page.run(`document.querySelector("#boxes .box.scratch textarea").focus()`);
+  await here.page.type("Notes");
   await wait(here, PAUSE);
   await save(here);
-  const [first, second] = server.boxes;
+  const [second, first] = server.boxes;
   assert.equal(first.id, "a");
   assert.ok(second.id && second.id !== "a");
+  assert.deepEqual([second.text, second.scratch], ["Notes", { heading: "A heading" }]);
   await here.page.type(", edited");
   await wait(here, PAUSE);
   await save(here);
-  assert.deepEqual(server.boxes.map((box) => box.id), ["a", second.id]);
+  assert.deepEqual(server.boxes.map((box) => box.id), [second.id, "a"]);
 });

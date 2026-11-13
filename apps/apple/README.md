@@ -196,6 +196,35 @@ from the session the anchor names. Its chip in the composer is drawn dimmed with
 outline and takes no press, because the chat on screen has no place for it to open. The choice
 of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
+### The prompt and the scratchpads
+
+<!-- governs:
+- apps/apple/web/src/chat.ts#ensureMain
+- apps/apple/web/src/chat.ts#createPrompt
+- apps/apple/web/src/chat.ts#scratchOf
+- apps/apple/web/src/drafts.ts#Scratch
+-->
+
+The composer has one prompt, its last box, which is the only box sent (KYO-903): Send and
+Command-Return send it from wherever the caret is, and an empty one takes its place after a
+send or a delete. It stays at the foot of the composer while the boxes above it scroll, and
+grows to half the composer's height, past which its text scrolls inside it.
+
+The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
+adds one. A scratchpad has a heading, which names it and is never sent, and a button that
+collapses it to that heading; a scratchpad with no heading shows the first words of its text
+there. It has no Send. Its Create prompt button moves its text, anchors, attachments and tags
+into the prompt, and is disabled while the prompt holds anything. A scratchpad is a box of
+the same draft with a `scratch` object holding the heading and the collapsed state, so it is
+saved, merged between devices and carried between sessions as a prompt is, and a change of
+either is merged as an edit of the text is.
+
+A draft saved before scratchpads, or a merge that kept two versions of the prompt, can hold
+several boxes that are not scratchpads. The last of them that holds anything is the prompt and
+the others are shown as scratchpads, which is saved with the next edit. A held prompt taken
+back to edit is the prompt again, and what was typed in the prompt meanwhile becomes a
+scratchpad above it.
+
 ### Anchors in an unsent prompt
 
 <!-- governs:

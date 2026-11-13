@@ -59,19 +59,27 @@ test("a plain prompt taken back is its text alone", async (t) => {
 
 const order = `[...document.querySelectorAll("#boxes textarea")].map((area) => area.value).filter(Boolean)`;
 
-test("a prompt sent from the middle and taken back returns to its place (KYO-883)", async (t) => {
+test("a prompt taken back is the prompt again, and what was typed since becomes a scratchpad (KYO-903)", async (t) => {
   if (!page) return t.skip("no Chrome here");
   await page.reload();
-  const texts = await page.run<string[]>(`(() => {
+  const seen = await page.run<{ texts: string[]; kinds: string[] }>(`(() => {
     window.kyo.project({ project: "p", scope: "server/p" });
     window.kyo.screen({ screen: { state: "working" } });
-    window.kyo.draft({ boxes: [{ id: "a", text: "first" }, { id: "b", text: "second" }, { id: "c", text: "third" }], etag: "e" });
-    document.querySelectorAll("#boxes .box .box-send")[1].click();
+    window.kyo.draft({ boxes: [{ id: "a", text: "notes", scratch: { heading: "kept" } }, { id: "b", text: "sent" }], etag: "e" });
+    document.querySelector("#boxes .box.main .box-send").click();
     window.kyo.sent({ id: "m1" });
-    window.kyo.retracted({ text: "second" });
-    return ${order};
+    const fresh = document.querySelector("#boxes .box.main textarea");
+    fresh.value = "typed since";
+    fresh.dispatchEvent(new InputEvent("input", { inputType: "insertText" }));
+    window.kyo.retracted({ text: "sent" });
+    const areas = [...document.querySelectorAll("#boxes textarea")];
+    return {
+      texts: areas.map((area) => area.value),
+      kinds: areas.map((area) => (area.closest(".box").classList.contains("main") ? "prompt" : "scratch")),
+    };
   })()`);
-  assert.deepEqual(texts, ["first", "second", "third"]);
+  assert.deepEqual(seen.texts, ["notes", "typed since", "sent"]);
+  assert.deepEqual(seen.kinds, ["scratch", "scratch", "prompt"]);
 });
 
 test("a prompt taken back whose place this window does not know goes last, as the latest sent (KYO-883)", async (t) => {

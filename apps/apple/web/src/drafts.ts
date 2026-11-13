@@ -5,7 +5,13 @@
 // Nothing here touches the page, so that node can test it.
 
 /** One prompt as it is saved: its id, its words, and whatever the composer keeps with them. */
-export interface DraftBox { id: string; text: string; marks?: unknown }
+export interface DraftBox { id: string; text: string; marks?: unknown; scratch?: Scratch | null }
+
+/**
+ * What makes a box a scratchpad and not the prompt (KYO-903): the heading the person gave it,
+ * which names it and is never sent, and whether it is collapsed to that heading.
+ */
+export interface Scratch { heading: string; collapsed?: boolean }
 
 /** A new id for a box made in this window. */
 export function boxId(): string {
@@ -32,8 +38,11 @@ function canonical(value: unknown): string {
  * an object's keys in an order of its own, and a box with no marks is saved with an empty
  * list or with none.
  */
-export function boxSignature(box: { text: string; marks?: unknown }): string {
+export function boxSignature(box: { text: string; marks?: unknown; scratch?: Scratch | null }): string {
   const marks = Array.isArray(box.marks) && box.marks.length ? box.marks : [];
+  // A scratchpad differs from a prompt of the same words, and by its heading and whether it
+  // is collapsed, so each of those is saved and merged as an edit of the text is (KYO-903).
+  if (box.scratch) return canonical([box.text, marks, [box.scratch.heading ?? "", Boolean(box.scratch.collapsed)]]);
   return canonical([box.text, marks]);
 }
 

@@ -32,7 +32,7 @@ import {
   meetDraft, sessionLinks, typedChoice,
 } from "./projects";
 import {
-  type Agreed, type DraftBox, agreedOn, boxId, boxSignature, mergeDraft, mergeNote, signatures,
+  type Agreed, type DraftBox, type Scratch, agreedOn, boxId, boxSignature, mergeDraft, mergeNote, signatures,
 } from "./drafts";
 import { SendGate } from "./sending";
 import {
@@ -1849,7 +1849,7 @@ const kyo = {
     // Only the prompt that was sent leaves; the others are still drafts.
     sendGate.end()?.remove();
     drawSending();
-    if (!textAreas().length) addBox();
+    ensureMain();
     paintAnchors();
     remember();
     // KYO-798: the sent prompt leaves the saved draft at once and not after a pause, so that
@@ -1866,13 +1866,13 @@ const kyo = {
     retracting = false;
     showHeld(null);
     const marks = restoredMarks(frame.prompt?.marks ?? []);
-    // KYO-883: the prompt goes back where it stood when it was sent, between the same
-    // neighbours, or last, as the latest sent, when that place is not known here.
-    const others = currentBoxes();
-    const restored: NamedBox = { id: sentPlace?.id ?? boxId(), text: frame.text, marks };
-    const list = [...others];
-    list.splice(placeAmong(others, sentPlace), 0, restored);
-    sentPlace = null;
+    // KYO-903: the prompt is where it was sent from, so the one taken back is the prompt
+    // again, to be edited and sent. What was typed in the prompt since becomes a scratchpad
+    // above it, and nothing typed is lost.
+    const others = currentBoxes().map((box) => (box.scratch ? box : { ...box, scratch: { heading: "" } }));
+    const restored: NamedBox = { id: sentId ?? boxId(), text: frame.text, marks };
+    sentId = null;
+    const list = [...others, restored];
     showTexts(list.map((box) => box.text), list);
   },
 
@@ -1885,7 +1885,7 @@ const kyo = {
    */
   draft(frame: { boxes: SavedBox[]; etag: string | null; turned?: boolean }): void {
     // A server from before boxes had ids sends none, and a box is then named here.
-    const saved = frame.boxes.filter((box) => box.text || box.marks?.length)
+    const saved = frame.boxes.filter((box) => box.text || box.marks?.length || box.scratch?.heading)
       .map((box) => ({ ...box, id: box.id || boxId() }));
     // Saves still unanswered were of another draft, or of this one before it was read.
     posted.clear();
@@ -1912,7 +1912,9 @@ const kyo = {
     agreed = agreedWith(saved, new Set(saved.map((box) => box.id)));
     keepCurrent();
     adoptShelf();
-    // Prompts only this device held are now part of the draft, and are saved to it.
+    // Prompts only this device held are now part of the draft, and are saved to it. A prompt
+    // of an older draft that became a scratchpad on being read (KYO-903) is not an edit: each
+    // device turns it the same way, and it is saved as one with the next edit.
     if (met.merged) remember();
   },
 
@@ -1936,7 +1938,7 @@ const kyo = {
    * acknowledged keep them, the person is told, and the merged draft is saved.
    */
   draftElsewhere(frame: { boxes: SavedBox[]; etag: string | null }): void {
-    const remote = frame.boxes.filter((box) => box.text || box.marks?.length)
+    const remote = frame.boxes.filter((box) => box.text || box.marks?.length || box.scratch?.heading)
       .map((box) => ({ ...box, id: box.id || boxId() }));
     const merged = mergeDraft(agreed, currentBoxes(), remote);
     seenEtag = frame.etag;
@@ -2228,7 +2230,7 @@ type Item = TagItem | AnchorItem | FileItem | Place;
  * One prompt as it is saved. `id` is the box's own, shared by every device and the server
  * (KYO-798); a prompt kept before boxes had one has none until it is shown.
  */
-interface SavedBox { id?: string; text: string; marks?: { line: number; items: Item[] }[] }
+interface SavedBox { id?: string; text: string; marks?: { line: number; items: Item[] }[]; scratch?: Scratch | null }
 type NamedBox = SavedBox & DraftBox;
 
 /**
@@ -2382,11 +2384,22 @@ function showCaret(area: HTMLTextAreaElement): void {
   range.setEnd(node, Math.min(from + 1, node.length));
   const line = range.getBoundingClientRect();
   if (!line.height) return;
-  const view = boxes.getBoundingClientRect();
+  const box = area.closest<HTMLElement>(".box")!;
   const lastLine = area.getBoundingClientRect().bottom - line.bottom < line.height / 2;
-  const bottom = lastLine ? area.closest(".box")!.getBoundingClientRect().bottom : line.bottom;
+  if (!scratchOf.has(area)) {
+    // KYO-903: the prompt stays at the foot of the column and scrolls inside itself once it
+    // has grown to its limit, so the caret is brought into view there.
+    const body = box.querySelector<HTMLElement>(".box-body")!;
+    const view = body.getBoundingClientRect();
+    body.scrollTop += scrollToShow(line.top - CARET_MARGIN, line.bottom + CARET_MARGIN, view.top, view.bottom);
+    return;
+  }
+  const view = boxes.getBoundingClientRect();
+  // The prompt covers the foot of the column, so a scratchpad's line is shown above it.
+  const foot = mainBox()?.getBoundingClientRect().top ?? view.bottom;
+  const bottom = lastLine ? box.getBoundingClientRect().bottom : line.bottom;
   boxes.scrollTop += scrollToShow(
-    line.top - CARET_MARGIN, bottom + CARET_MARGIN, view.top, view.bottom,
+    line.top - CARET_MARGIN, bottom + CARET_MARGIN, view.top, Math.min(view.bottom, foot),
   );
 }
 
@@ -2480,6 +2493,7 @@ function drawMarks(area: HTMLTextAreaElement): void {
   });
   marks.ghost.hidden = true;
   marks.gutter.replaceChildren(marks.ghost, ...held);
+  syncCreate();
   drawLanding();
   paintAnchors();
   if (openMark?.area === area) {
@@ -3619,13 +3633,91 @@ function reveal(item: AnchorItem): void {
 }
 
 /** A box for one prompt: the whole of one message, with its own Send and Delete. */
-function addBox(text = "", saved: SavedBox["marks"] = [], id: string = boxId()): HTMLTextAreaElement {
+/**
+ * KYO-903: the scratchpads, each by its text area, with the field holding its heading. A box
+ * that is not here is the prompt, the one box that is sent.
+ */
+const scratchOf = new WeakMap<HTMLTextAreaElement, { heading: HTMLInputElement; box: HTMLElement }>();
+
+/** The prompt's box: the one that is not a scratchpad. */
+function mainBox(): HTMLElement | null {
+  return boxes.querySelector<HTMLElement>(":scope > .box.main");
+}
+
+/** Create prompt is offered while the prompt is empty, since it would replace what is there. */
+function syncCreate(): void {
+  const main = textAreas().find((area) => !scratchOf.has(area));
+  const full = Boolean(main && isDraft(main));
+  for (const button of boxes.querySelectorAll<HTMLButtonElement>(".box-create")) {
+    button.disabled = full;
+    button.title = full
+      ? "The prompt already holds something. Send or clear it first."
+      : "Move this scratchpad into the prompt";
+  }
+}
+
+/** A scratchpad's heading field shows the first words of its text until it is given one. */
+function nameScratch(area: HTMLTextAreaElement): void {
+  const held = scratchOf.get(area);
+  if (held) held.heading.placeholder = area.value.split("\n").find((line) => line.trim())?.trim().slice(0, 80) || "Scratchpad";
+}
+
+/**
+ * Keeps the composer to one prompt, the last box, with the scratchpads above it (KYO-903).
+ * Among boxes that are not scratchpads, an empty one beside another leaves; of several that
+ * hold something, as in a draft saved before there were scratchpads or after a merge that
+ * kept two versions, the last stays the prompt and the others become scratchpads. With none,
+ * an empty prompt is added. It says whether a box became a scratchpad.
+ */
+function ensureMain(): boolean {
+  const mains = textAreas().filter((area) => !scratchOf.has(area));
+  const drafts = mains.filter(isDraft);
+  const keep = drafts.length ? drafts[drafts.length - 1] : mains[mains.length - 1];
+  let changed = false;
+  for (const area of mains) {
+    if (area === keep) continue;
+    const box = area.closest(".box")!;
+    if (openMark?.area === area) hideMark();
+    if (isDraft(area)) {
+      const held = savedBox(area);
+      const fresh = addBox(held.text, held.marks, held.id, { heading: "" });
+      box.replaceWith(fresh.closest(".box")!);
+      changed = true;
+    } else {
+      box.remove();
+    }
+  }
+  const main = (keep ?? addBox()).closest(".box")!;
+  if (main !== boxes.lastElementChild) boxes.append(main);
+  syncCreate();
+  return changed;
+}
+
+/** Moves a scratchpad's words and marks into the prompt, which is empty (KYO-903). */
+function createPrompt(area: HTMLTextAreaElement): void {
+  const main = textAreas().find((other) => !scratchOf.has(other));
+  if (main && isDraft(main)) return;
+  const held = savedBox(area);
+  if (openMark?.area === area || (main && openMark?.area === main)) hideMark();
+  main?.closest(".box")!.remove();
+  area.closest(".box")!.remove();
+  const prompt = addBox(held.text, held.marks, held.id);
+  ensureMain();
+  paintAnchors();
+  remember();
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+}
+
+function addBox(
+  text = "", saved: SavedBox["marks"] = [], id: string = boxId(), scratch: Scratch | null = null,
+): HTMLTextAreaElement {
   const box = document.createElement("div");
-  box.className = "box";
+  box.className = scratch ? `box scratch${scratch.collapsed ? " collapsed" : ""}` : "box main";
   const area = document.createElement("textarea");
   boxIds.set(area, id);
   area.rows = 1;
-  area.placeholder = "Reply…";
+  area.placeholder = scratch ? "Notes…" : "Reply…";
   area.value = text;
   const gutter = document.createElement("div");
   gutter.className = "box-gutter";
@@ -3702,6 +3794,7 @@ function addBox(text = "", saved: SavedBox["marks"] = [], id: string = boxId()):
     trackEdit(area);
     drawMarks(area);
     showCaret(area);
+    nameScratch(area);
     remember();
   });
   let armed: number | undefined;
@@ -3720,8 +3813,11 @@ function addBox(text = "", saved: SavedBox["marks"] = [], id: string = boxId()):
       return;
     }
     disarm();
+    const wasPrompt = !scratchOf.has(area);
     box.remove();
-    if (!textAreas().length) addBox().focus();
+    ensureMain();
+    // The prompt that was deleted leaves an empty one, which takes the caret.
+    if (wasPrompt) textAreas().find((other) => !scratchOf.has(other))?.focus();
     // KYO-780: what the box was anchored to is no longer anchored.
     paintAnchors();
     remember();
@@ -3738,9 +3834,48 @@ function addBox(text = "", saved: SavedBox["marks"] = [], id: string = boxId()):
   send.title = "Send (⌘↩)";
   const actions = document.createElement("div");
   actions.className = "box-actions";
-  actions.append(remove, send);
-  box.append(body, actions);
-  boxes.append(box);
+  if (scratch) {
+    // KYO-903: a scratchpad is headed by its name, which is saved and never sent, and is
+    // collapsed to it. It has no Send: Create prompt moves it into the prompt.
+    const heading = document.createElement("input");
+    heading.type = "text";
+    heading.className = "scratch-heading";
+    heading.maxLength = 120;
+    heading.value = scratch.heading ?? "";
+    heading.setAttribute("aria-label", "Scratchpad heading");
+    heading.addEventListener("input", remember);
+    heading.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.metaKey) return;
+      event.preventDefault();
+      box.classList.remove("collapsed");
+      toggle.setAttribute("aria-expanded", "true");
+      fitBox(area);
+      area.focus();
+    });
+    const toggle = boxButton("scratch-toggle", "", () => {
+      const collapsed = box.classList.toggle("collapsed");
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      if (collapsed && openMark?.area === area) hideMark();
+      // A box drawn while it was collapsed had no width to fit its text to.
+      if (!collapsed) { fitBox(area); drawMarks(area); }
+      remember();
+    });
+    toggle.title = "Collapse or open this scratchpad";
+    toggle.setAttribute("aria-expanded", String(!scratch.collapsed));
+    const head = document.createElement("div");
+    head.className = "scratch-head";
+    head.append(toggle, heading);
+    scratchOf.set(area, { heading, box });
+    const create = boxButton("box-create", "Create prompt", () => createPrompt(area));
+    actions.append(remove, create);
+    box.append(head, body, actions);
+    boxes.insertBefore(box, mainBox());
+    nameScratch(area);
+  } else {
+    actions.append(remove, send);
+    box.append(body, actions);
+    boxes.append(box);
+  }
   fitBox(area);
   drawMarks(area);
   return area;
@@ -3772,8 +3907,15 @@ function currentTexts(): string[] {
 /** One prompt as it is saved: its id, its words, and its marks by the line each is on. */
 function savedBox(area: HTMLTextAreaElement): NamedBox {
   const marks = marksOf.get(area)!;
+  const scratch = scratchOf.get(area);
   return {
     id: boxIds.get(area)!,
+    ...(scratch ? {
+      scratch: {
+        heading: scratch.heading.value,
+        ...(scratch.box.classList.contains("collapsed") ? { collapsed: true } : {}),
+      },
+    } : {}),
     text: area.value,
     marks: marks.ids.flatMap((id, line) => {
       // A file still uploading is not saved: nothing would finish it after a relaunch.
@@ -3785,7 +3927,7 @@ function savedBox(area: HTMLTextAreaElement): NamedBox {
 
 /** A box that is a draft: a prompt with an anchor and no words yet is still one. */
 function isDraft(area: HTMLTextAreaElement): boolean {
-  return Boolean(area.value || marksOf.get(area)!.items.size);
+  return Boolean(area.value || marksOf.get(area)!.items.size || scratchOf.get(area)?.heading.value);
 }
 
 /** Each prompt with its marks. */
@@ -3847,7 +3989,7 @@ function applyBoxes(wanted: NamedBox[]): void {
   for (const box of wanted) {
     const shown = have.get(box.id);
     const area = shown && boxSignature(savedBox(shown)) === boxSignature(box)
-      ? shown : addBox(box.text, box.marks, box.id);
+      ? shown : addBox(box.text, box.marks, box.id, box.scratch ?? null);
     kept.add(area);
     order.push(area.closest(".box")!);
   }
@@ -3866,7 +4008,7 @@ function applyBoxes(wanted: NamedBox[]): void {
     if (box === next) next = next.nextElementSibling;
     else boxes.insertBefore(box, next);
   }
-  if (!textAreas().length) addBox();
+  ensureMain();
   loadingDraft = wasLoading;
   paintAnchors();
   const again = caret && textAreas().find((area) => boxIds.get(area) === caret.id);
@@ -3946,9 +4088,9 @@ function showTexts(texts: string[], kept: SavedBox[] = currentBoxes()): void {
   for (const text of texts) {
     const at = left.findIndex((box) => box.text === text);
     const known = at < 0 ? undefined : left.splice(at, 1)[0];
-    addBox(text, known?.marks, known?.id || boxId());
+    addBox(text, known?.marks, known?.id || boxId(), known?.scratch ?? null);
   }
-  if (!texts.length) addBox();
+  ensureMain();
   remember();
 }
 
@@ -4008,8 +4150,11 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
 }
 
 /** A new prompt is made on purpose: an empty box is reused before another is added. */
+/** The + button: a new scratchpad above the prompt, with the caret in its heading (KYO-903). */
 function newPrompt(): void {
-  (textAreas().find((area) => !area.value) ?? addBox()).focus();
+  const area = addBox("", [], boxId(), { heading: "" });
+  syncCreate();
+  scratchOf.get(area)!.heading.focus();
 }
 
 function post(name: string, body: unknown): void {
@@ -4148,7 +4293,7 @@ function attemptSend(area: HTMLTextAreaElement): void {
   }
   coldConfirm = null;
   if (!sendGate.begin(area.closest<HTMLElement>(".box")!)) return;
-  sentPlace = placeOf(area);
+  sentId = boxIds.get(area) ?? null;
   composerNote.textContent = "Sending…";
   drawSending();
   // A prompt sent while the session works is held, and is shown in the held box instead.
@@ -4170,27 +4315,8 @@ let sentPreview: { element: HTMLElement; text: string; id?: string; drop?: numbe
  */
 const PREVIEW_GRACE_MS = 2500;
 
-/**
- * Where the prompt last sent from this window stood among the prompts (KYO-883): its id and
- * the ids of the prompts before and after it, so that Edit on it puts it back there.
- */
-let sentPlace: { id: string; after: string | null; before: string | null } | null = null;
-
-function placeOf(area: HTMLTextAreaElement): { id: string; after: string | null; before: string | null } {
-  const drafts = textAreas().filter(isDraft);
-  const at = drafts.indexOf(area);
-  const id = (other: HTMLTextAreaElement | undefined) => (other ? boxIds.get(other) ?? null : null);
-  return { id: boxIds.get(area)!, after: at > 0 ? id(drafts[at - 1]) : null, before: id(drafts[at + 1]) };
-}
-
-/** The index a returned prompt takes among `boxes`: after its old neighbour, before the other, or last. */
-function placeAmong(boxes: NamedBox[], place: typeof sentPlace): number {
-  const after = place?.after ? boxes.findIndex((box) => box.id === place.after) : -1;
-  if (after >= 0) return after + 1;
-  const before = place?.before ? boxes.findIndex((box) => box.id === place.before) : -1;
-  if (before >= 0) return before;
-  return boxes.length;
-}
+/** The id of the prompt last sent from this window, which it has again if it is taken back. */
+let sentId: string | null = null;
 
 /** A queued prompt the server says waits on something, or will not try again: a real hold. */
 function waitsOnSomething(message: Held | null | undefined): boolean {
@@ -4566,9 +4692,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.metaKey) return;
   // A key typed in the terminal is the terminal's.
   if (event.target instanceof Node && terminalPane.contains(event.target)) return;
-  const areas = textAreas();
-  const focused = areas.find((area) => area === document.activeElement);
-  const target = focused ?? (areas.length === 1 ? areas[0] : undefined);
+  // KYO-903: only the prompt is sent, wherever in the composer the key was pressed.
+  const target = textAreas().find((area) => !scratchOf.has(area));
   if (!target) return;
   event.preventDefault();
   attemptSend(target);

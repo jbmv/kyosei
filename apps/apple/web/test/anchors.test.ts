@@ -133,10 +133,13 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
   if (!page) return t.skip("no Chrome on this machine");
   const opened = await open();
   // Two boxes anchored to the same words, and the first also to a list item.
+  // The first is a scratchpad, which + adds above the prompt (KYO-903); the second is the prompt.
+  await opened.run(`document.getElementById("new-prompt").click()`);
+  await opened.run(`document.querySelector("#boxes .box.scratch textarea").focus()`);
   await opened.type("one");
   await anchor(opened, "#chat .reply p");
   await anchor(opened, "#chat .reply li strong");
-  await opened.run(`document.getElementById("new-prompt").click()`);
+  await opened.run(`document.querySelector("#boxes .box.main textarea").focus()`);
   await opened.type("two");
   await anchor(opened, "#chat .reply p");
   const first = "anchor: First paragraph of the reply here.";
@@ -183,7 +186,10 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
     remove.click();
   })()`);
   now = await shown(opened);
-  assert.deepEqual(now, { highlighted: [], bars: [], boxes: [{ text: "more", anchors: [] }] });
+  // The deleted prompt leaves an empty one in its place (KYO-903).
+  assert.deepEqual(now, {
+    highlighted: [], bars: [], boxes: [{ text: "more", anchors: [] }, { text: "", anchors: [] }],
+  });
 });
 
 test("a sent paragraph whose anchor is stale says so on its chip and names the paragraph (KYO-712)", async (t) => {
