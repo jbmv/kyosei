@@ -622,6 +622,8 @@ kyo gate <id> awaiting:human-run --do "run the migration on staging, then reload
 kyo ungate <id> [--why]          # a gate waiting on a person: their credit, or --withdrawn (KYO-644)
 kyo credit <id>... --basis <credit>   # a credit for rows that already exist (KYO-644)
 kyo credit --withdraw <credit> --why  # retract a credit that should not exist, kept readable (KYO-670)
+kyo credit --supersede <credit>   # correct a credit written since the person's previous turn,
+                                  #   with no basis; the old one stays readable (KYO-914)
 kyo discuss open --title ...      # a discussion, stamped at the person's turn from the turn index (KYO-658)
 kyo dossier <id>                  # one decision as a Markdown page for a reader outside the project,
                                   #   each part naming its source in the store (KYO-659)
