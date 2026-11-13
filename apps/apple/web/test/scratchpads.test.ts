@@ -221,3 +221,126 @@ test("Tab and Shift-Tab indent and outdent the caret's line or the selected line
     assert.deepEqual(await page.run(read), ["- a\n- b\n1. c\n- d", 4, 12, true]);
   } finally { await page.close(); }
 });
+
+/** A right-click in the gutter of box `box` (`main` or `scratch`) on its line `line`, counted from 0. */
+const gutterMenu = (box: string, line: number) => `(() => {
+  const gutter = document.querySelector("#boxes .box.${box} .cm-gutter.kyo-marks");
+  const at = document.querySelectorAll("#boxes .box.${box} .cm-line")[${line}].getBoundingClientRect();
+  return gutter.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true,
+    clientX: gutter.getBoundingClientRect().left + 5, clientY: at.top + at.height / 2 }));
+})()`;
+/** The panel's buttons, by their words, and whether each is enabled. */
+const PANEL = `[...document.querySelectorAll("#boxes .mark-panel button.mark-action, #boxes .mark-panel button.mark-to-prompt")]
+  .map((button) => [button.textContent, !button.disabled])`;
+const press = (name: string) => `document.querySelector("#boxes .mark-panel .mark-${name}").click()`;
+const PROMPT = `(() => { const box = window.kyo.composer.boxes().at(-1); return [box.text, box.from, box.to]; })()`;
+
+test("a right-click in the prompt's gutter opens the panel of the line under the pointer, whose Indent and Outdent move it with its nested lines as Tab does, one undo step each (KYO-911)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    const text = "- a\n- b\n  - nested\n\n  - two\n- c";
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [{ id: "p", text: ${JSON.stringify(text)} }], etag: "e" });
+      window.kyo.composer.select(0, ${text.length});
+    })()`);
+    // KYO-911.c1: the right-click is taken, and the panel is the second line's, in the prompt.
+    assert.equal(await page.run(gutterMenu("main", 1)), false);
+    assert.deepEqual(await page.run(PANEL), [["Indent", true], ["Outdent", true], ["Fold", true]]);
+    assert.equal(await page.run(`Boolean(document.querySelector("#boxes .box.main .mark-panel"))`), true);
+
+    // KYO-911.c2: the line and the lines nested under it move, the blank line among them is left
+    // alone, the line after the section stays, and the caret stays where it was, moved with its text.
+    await page.run(press("indent"));
+    const indented = "- a\n  - b\n    - nested\n\n    - two\n- c";
+    assert.deepEqual(await page.run(PROMPT), [indented, indented.length, indented.length]);
+    // The panel is still open, on the same line, and a second press acts again.
+    await page.run(press("indent"));
+    const twice = "- a\n    - b\n      - nested\n\n      - two\n- c";
+    assert.deepEqual(await page.run(PROMPT), [twice, twice.length, twice.length]);
+    await page.run(press("outdent"));
+    assert.deepEqual((await page.run<[string]>(PROMPT))[0], indented);
+
+    // As Tab and Shift-Tab act on a selection of those lines.
+    const tabbed = await page.run<string>(`(() => {
+      window.kyo.draft({ boxes: [{ id: "q", text: ${JSON.stringify(text)} }], etag: "f" });
+      window.kyo.composer.select(0, 4, ${text.length - 4});
+      return null;
+    })()`).then(() => page.press("Tab")).then(() => page.run<[string]>(PROMPT)).then(([typed]) => typed);
+    assert.equal(tabbed, indented);
+    await page.press("Tab", SHIFT);
+    assert.equal((await page.run<[string]>(PROMPT))[0], text);
+
+    // Each press is one step of the box's undo, and an undo puts the caret back where it was.
+    await page.run(`window.kyo.composer.select(0, 1)`);
+    await page.run(gutterMenu("main", 1));
+    await page.run(press("indent"));
+    await page.run(press("outdent"));
+    await page.run(press("outdent"));
+    assert.deepEqual((await page.run<[string]>(PROMPT))[0], "- a\n- b\n- nested\n\n- two\n- c");
+    // A press in the box closes the panel, whose tag field has the focus, and focuses the box.
+    await page.run(`(() => {
+      const content = document.querySelector("#boxes .box.main .cm-content");
+      content.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      content.focus();
+    })()`);
+    assert.equal(await page.run(`Boolean(document.querySelector("#boxes .mark-panel"))`), false);
+    await page.press("z", META, "undo");
+    assert.deepEqual(await page.run(PROMPT), [text, 1, 1]);
+    await page.press("z", META, "undo");
+    assert.deepEqual(await page.run(PROMPT), [indented, 1, 1]);
+    await page.press("z", META, "undo");
+    assert.deepEqual(await page.run(PROMPT), [text, 1, 1]);
+
+    // Outdent is disabled where none of the lines is indented, and a scratchpad's panel holds
+    // the same actions and Send to prompt.
+    await page.run(`(() => { window.kyo.draft({ boxes: [
+      { id: "s", text: "- x\\n- y", scratch: { heading: "" } }, { id: "r", text: "z" },
+    ], etag: "g" }); })()`);
+    await page.run(gutterMenu("scratch", 0));
+    assert.deepEqual(await page.run(PANEL), [["Indent", true], ["Outdent", false], ["Send to prompt", true]]);
+  } finally { await page.close(); }
+});
+
+test("the panel offers Fold or Unfold only on a line that can fold, and it acts as the fold keys do (KYO-911)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    const text = "# plan\nwords\n- a\n  - nested\n- b";
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [{ id: "p", text: ${JSON.stringify(text)} }], etag: "e" });
+    })()`);
+    const offered = async (line: number) => {
+      await page.run(gutterMenu("main", line));
+      return page.run<string[]>(`[...document.querySelectorAll("#boxes .mark-panel .mark-fold")].map((button) => button.textContent)`);
+    };
+    // A heading and an item with nested lines fold; a plain line, a nested item with nothing
+    // under it, and the last item do not.
+    assert.deepEqual(await offered(0), ["Fold"]);
+    assert.deepEqual(await offered(1), []);
+    assert.deepEqual(await offered(3), []);
+    assert.deepEqual(await offered(4), []);
+    assert.deepEqual(await offered(2), ["Fold"]);
+
+    // Fold folds the line's section, as Command-Option-[ does at the caret, and the panel
+    // then offers Unfold, which unfolds it as Command-Option-] does.
+    const folds = `window.kyo.composer.folds(0)`;
+    await page.run(press("fold"));
+    const byPanel = await page.run<number[]>(folds);
+    assert.deepEqual(byPanel, [2]);
+    assert.deepEqual(await page.run(`[...document.querySelectorAll("#boxes .mark-panel .mark-fold")].map((button) => button.textContent)`), ["Unfold"]);
+    await page.run(press("fold"));
+    assert.deepEqual(await page.run(folds), []);
+    await page.run(`window.kyo.composer.select(0, ${text.indexOf("- a")})`);
+    await page.press("[", META | 1);
+    assert.deepEqual(await page.run(folds), byPanel);
+    await page.press("]", META | 1);
+    assert.deepEqual(await page.run(folds), []);
+    // A heading folds the whole of its section, and the text is unchanged by either.
+    await page.run(gutterMenu("main", 0));
+    await page.run(press("fold"));
+    assert.deepEqual(await page.run(folds), [0]);
+    assert.deepEqual(await page.run<number>(`document.querySelectorAll("#boxes .box.main .cm-line").length`), 1);
+    assert.equal((await page.run<[string]>(PROMPT))[0], text);
+  } finally { await page.close(); }
+});
