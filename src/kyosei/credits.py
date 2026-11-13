@@ -45,9 +45,31 @@ THE PERSON (P3). ``--person`` defaults to the only person ``people:`` declares, 
 write echoes who was credited. With none or several declared and no ``--person``, the
 credit is incomplete and refused.
 
+THE WORDS, BY TURN REFERENCE (KYO-900, decision KYO-898). In a project that reads
+transcripts a credit names the turn or turns the person spoke in and kyo copies the words:
+nobody retypes them. ``--turn <id>``, once per turn, takes a prompt id or a transcript
+record uuid, whole or by a unique prefix (:func:`cite_turns`). With neither ``--turn`` nor
+``--quote-file`` the credit takes the person's latest turn of the session, after the
+session's transcript is folded into the turn index, so that the prompt being answered is
+the one taken. The turns are stored in transcript order whatever order they were named in,
+each in ``credit_turns`` with its session, record uuid, time, stored words and the index
+line's commitment where it has one. One of them is the APPROVAL, the turn that carries the
+person's judgement, and it is the credit's ``source_turn`` and ``quote_id``; the others
+are CONTEXT, earlier turns in which what was approved was specified. The approval is the
+latest turn cited, or, when ``--quote-file`` is given beside ``--turn``, the latest cited
+turn that holds those words, which are then what the credit stores for it. A turn that is
+not the person's is refused (``credit-turn-not-the-persons``), as is one whose words the
+transcript does not hold (``credit-turn-words-unread``).
+
+WHAT IS STORED OF A TURN (:func:`turn_words`). The person's typed words: pasted content is
+left out and its place marked ``[...]``, as a quote marks an omission, and a turn longer
+than :data:`TURN_WORDS_HEAD` plus :data:`TURN_WORDS_TAIL` characters keeps its head and
+tail around the same mark. The stored text therefore still checks against the transcript
+as a quote does. ``--quote-file`` narrows the approval further.
+
 WHERE THE WORDS WERE SAID. ``--session`` defaults to ``$CLAUDE_CODE_SESSION_ID``, which
-Claude Code sets in its shell; the quote is then checked against that session's
-transcript by :mod:`kyosei.harness.claude_code_transcript`, and only
+Claude Code sets in its shell. Given alone, ``--quote-file`` is checked against that
+session's transcript by :mod:`kyosei.harness.claude_code_transcript`, and only
 ``CheckResult.store_fields()`` is stored. ``--source-other`` is one line saying where
 words said outside Claude Code were said, recorded ``not-applicable``. So is every credit
 in a project that has not opted in to reading transcripts
@@ -95,7 +117,13 @@ import yaml
 
 from . import commands, export, ids, seal
 from .cmd_sessions import recorded_transcript_path
-from .cmd_turns import confirm_from_transcript, confirmed_paste_flags, session_lines
+from .cmd_turns import (
+    HUMAN,
+    confirm_from_transcript,
+    confirmed_paste_flags,
+    read_lines,
+    session_lines,
+)
 from .commands import Context, Output, _add_evidence, _touch_record
 from .config import READ_TRANSCRIPTS_KEY, declared_people, person_label, transcripts_opted_in
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
@@ -140,6 +168,31 @@ CONTRACT_CREDIT_BATCH_INVALID = "credit-batch-invalid"
 CONTRACT_CREDIT_TRANSCRIPT_STILL_ABSENT = "credit-transcript-still-absent"
 CONTRACT_CREDIT_TRANSCRIPTS_NOT_OPTED_IN = "credit-transcripts-not-opted-in"
 
+#: KYO-900: a ``--turn`` that names a turn of the index that is not the person's, and a
+#: turn of the person's whose words the transcript does not hold.
+CONTRACT_CREDIT_TURN_NOT_THE_PERSONS = "credit-turn-not-the-persons"
+CONTRACT_CREDIT_TURN_WORDS_UNREAD = "credit-turn-words-unread"
+
+#: ``credit_turns.role``: the turn that carries the person's judgement, and an earlier turn
+#: in which what was approved was specified.
+TURN_ROLE_APPROVAL = "approval"
+TURN_ROLE_CONTEXT = "context"
+
+#: The shortest ``--turn`` prefix accepted, so a one-character typo matches nothing.
+MIN_TURN_PREFIX = 4
+#: How many of the session's turns a refusal over ``--turn`` lists.
+LISTED_TURNS = 5
+#: How much of a long turn is stored: its first and last characters, around an omission
+#: mark. A credit keeps the words so that it outlives its transcript, and a turn can be
+#: many pages; what is left out is still covered by the index line's commitment.
+TURN_WORDS_HEAD = 3000
+TURN_WORDS_TAIL = 1000
+#: How an omission is marked in stored words, the mark a quote file uses.
+OMISSION = "[...]"
+#: A sole cited turn of at most this many words gets one line in the receipt saying that
+#: earlier turns can be cited as context. It refuses nothing and asks for no reply.
+SHORT_TURN_WORDS = 4
+
 #: The keys a ``--decision-file`` may carry.
 DECISION_FILE_KEYS = frozenset(
     {
@@ -182,7 +235,10 @@ def add_credit_flags(
         parser.add_argument(
             "--quote-file",
             metavar="FILE",
-            help="the person's words, verbatim, from a file or '-' for stdin",
+            help="the person's words, verbatim, from a file or '-' for stdin. Needed where "
+            "kyo cannot copy them from a turn: a project that does not read transcripts, "
+            "or words said outside Claude Code. Beside --turn it narrows what is stored to "
+            "part of a named turn",
         )
     parser.add_argument(
         "--session",
@@ -192,8 +248,15 @@ def add_credit_flags(
     )
     parser.add_argument(
         "--turn",
-        metavar="UUID",
-        help="the transcript record holding the words, when they occur in several turns",
+        action="append",
+        metavar="ID",
+        help="a turn of the person's that the credit cites, repeatable: a prompt id or a "
+        "transcript record uuid from the turn index (`kyo turns --said` lists them), whole "
+        "or by a unique prefix. kyo copies the words from the transcript, so no --quote-file is "
+        "needed, and stores the turns in transcript order: the latest is the approval and "
+        "the earlier ones the context it approved. With neither --turn nor --quote-file, "
+        "in a Claude Code session of a project that reads transcripts, the person's latest "
+        "turn is taken. With --quote-file, the words must occur in a named turn (KYO-900)",
     )
     parser.add_argument(
         "--source-other",
@@ -210,6 +273,24 @@ def add_credit_flags(
             "| unprompted), alternatives [{text, chosen, proposed_by}] where proposed_by is "
             "person, orchestrator or worker and an entry without one is read as the "
             "agent's, and refining_turn for a refined outcome",
+        )
+        parser.add_argument(
+            "--outcome",
+            choices=CREDIT_OUTCOMES,
+            help="in place of --decision-file, for a decision that lists no alternatives: "
+            "accepted, refined, overrode or unprompted (KYO-900)",
+        )
+        parser.add_argument(
+            "--recommended",
+            # One line stored beside the outcome, like --source-other: not prose with a
+            # file twin. A decision with alternatives to list takes --decision-file.
+            metavar="WHAT",
+            help="with --outcome: what was recommended, one line; none for unprompted",
+        )
+        parser.add_argument(
+            "--recommended-by",
+            metavar="WHO",
+            help="with --recommended: who recommended it; defaults to the acting author",
         )
     if span:
         parser.add_argument(
@@ -236,11 +317,503 @@ def requested(args: Namespace, *, words_flag: bool = True) -> bool:
     words from it whether or not a credit is written (`kyo confirm`)."""
     return any(
         getattr(args, name, None)
-        for name in ("person", "session", "turn", "source_other", "decision_file")
+        for name in ("person", "session", "turn", "source_other", *DECISION_FLAGS)
     ) or bool(words_flag and getattr(args, "quote_file", None))
 
 
+#: The flags that say what a decided credit decided: the YAML file, or its three scalars.
+DECISION_FLAGS = ("decision_file", "outcome", "recommended", "recommended_by")
+
+
+def _decision_text(args: Namespace) -> str | None:
+    """KYO-900: ``--outcome``, ``--recommended`` and ``--recommended-by`` as the YAML a
+    ``--decision-file`` would hold, or None when none was given."""
+    given = {
+        name: getattr(args, name, None)
+        for name in ("outcome", "recommended", "recommended_by")
+        if getattr(args, name, None)
+    }
+    if not given:
+        return None
+    if getattr(args, "decision_file", None):
+        raise UsageError(
+            "--decision-file holds the outcome and what was recommended, and so do "
+            f"{', '.join('--' + name.replace('_', '-') for name in given)}; give the file "
+            "or the flags"
+        )
+    if "outcome" not in given:
+        raise UsageError(
+            "--recommended and --recommended-by go with --outcome (accepted, refined, "
+            "overrode or unprompted)"
+        )
+    return yaml.safe_dump(given)
+
+
 # ------------------------------------------------------------------- the resolution
+
+
+# ------------------------------------------------------------- the turns (KYO-900)
+
+
+@dataclass
+class CitedTurn:
+    """One turn of the person's that a credit cites, read from the transcript and joined
+    to its line of the turn index where it has one."""
+
+    session: str
+    turn: str
+    prompt_id: str | None
+    at: str
+    form: str
+    #: The words as stored (:func:`turn_words`), and how long the turn's typed words are.
+    words: str
+    total_chars: int
+    paste_known: bool
+    #: The index line's commitment to the prompt's text (KYO-663), where it has one.
+    root: str | None = None
+    lines: int | None = None
+    role: str = TURN_ROLE_CONTEXT
+    segments: tuple[str, ...] = field(default=(), repr=False)
+
+    @property
+    def words_form(self) -> str | None:
+        return transcript.WORDS_FORMS.get(self.form)
+
+    def label(self) -> str:
+        return f"prompt {self.prompt_id}" if self.prompt_id else f"turn {self.turn}"
+
+
+@dataclass
+class Cited:
+    """The turns one credit cites, resolved: which is the approval, and the words the
+    credit stores as its quote."""
+
+    turns: list[CitedTurn]
+    approval: CitedTurn
+    quote_text: str
+    defaulted: bool = False
+
+    def check(self) -> dict:
+        return {
+            "transcript_check": transcript.MATCHED
+            if self.approval.paste_known
+            else transcript.MATCHED_PASTE_UNKNOWN,
+            "source_turn": self.approval.turn,
+            "observed_at": self.approval.at,
+            "words_form": self.approval.words_form,
+        }
+
+    def why(self) -> str:
+        approval = self.approval
+        how = (
+            f"the person's latest turn of session {approval.session} was taken, since no "
+            "--turn was given"
+            if self.defaulted
+            else f"the words were copied from the transcript at {len(self.turns)} turn(s)"
+        )
+        if not approval.paste_known:
+            how += (
+                "; no prompt-history line pairs with the approving turn, so pasted "
+                "content in it cannot be ruled out"
+            )
+        return how
+
+
+@dataclass
+class _SessionView:
+    """One session as a credit reads it: the person's turns in its transcript, and its
+    lines of the turn index that stand for a prompt or a mid-turn message."""
+
+    session: str
+    turns: list
+    lines: list[dict]
+    readable: bool
+    why: str
+
+
+def turn_refs_of(args: Namespace) -> list[str]:
+    """``--turn`` as a list. The flag is repeatable; a caller that builds its own
+    Namespace (a batch line, a composed step) may still hand one string."""
+    given = getattr(args, "turn", None)
+    if not given:
+        return []
+    return [given] if isinstance(given, str) else [ref for ref in given if ref]
+
+
+def turn_words(turn) -> tuple[str, int]:
+    """What is stored of one turn of the person's: ``(words, length of the typed words)``.
+
+    The turn's segments are the person's typing with pastes taken out, so they are joined
+    around :data:`OMISSION`; the answers to a question are joined by a newline. A text
+    longer than the head and tail kept is cut to them around the same mark."""
+    parts = [segment.strip() for segment in turn.segments if segment.strip()]
+    joiner = "\n" if turn.form == transcript.FORM_ANSWER else f"\n{OMISSION}\n"
+    text = joiner.join(parts)
+    total = len(text)
+    if total > TURN_WORDS_HEAD + TURN_WORDS_TAIL:
+        head, tail = text[:TURN_WORDS_HEAD].rstrip(), text[-TURN_WORDS_TAIL:].lstrip()
+        text = f"{head}\n{OMISSION}\n{tail}"
+    return text, total
+
+
+def _fold_index(ctx: Context, session: str) -> None:
+    """Fold the session's transcript into the turn index, as the Stop hook would. The index
+    learns a prompt's transcript record, and whether it was the person's, at the Stop that
+    ends its turn, and a credit is written before that Stop. Best effort; a worktree's kyo
+    never writes the main checkout's index."""
+    if ctx.layout is not None and ctx.layout.store_via_main_checkout is not None:
+        return
+    try:
+        paths = transcript.candidate_transcripts(
+            session,
+            config=transcript.config_dir(ctx.environ),
+            recorded=recorded_transcript_path(ctx.root, session),
+        )
+        if paths:
+            confirm_from_transcript(ctx.root, session, Path(paths[0]))
+    except (OSError, ValueError):
+        pass
+
+
+def _prompt_lines(lines: list[dict]) -> list[dict]:
+    return [line for line in lines if line.get("role") != seal.ROLE_ASSISTANT]
+
+
+def _session_view(ctx: Context, session: str) -> _SessionView:
+    _fold_index(ctx, session)
+    lines = _prompt_lines(session_lines(ctx.root, session))
+    try:
+        read = transcript.find_person_turns(
+            session,
+            recorded=recorded_transcript_path(ctx.root, session),
+            environ=ctx.environ,
+            archive=_archive(ctx),
+        )
+    except ValueError as exc:
+        raise UsageError(f"{exc}; --session takes the session's UUID") from exc
+    except OSError as exc:
+        return _SessionView(
+            session, [], lines, False, f"the transcript could not be read ({exc.strerror or exc})"
+        )
+    if not read.readable:
+        return _SessionView(session, [], lines, False, read.why)
+    turns = transcript.apply_paste_index(read.turns, confirmed_paste_flags(ctx.root, session))
+    return _SessionView(session, sorted(turns, key=lambda t: t.timestamp), lines, True, read.why)
+
+
+def _line_of(turn, lines: list[dict]) -> dict | None:
+    """The index line that stands for a transcript turn: the one naming its record, or the
+    person's line with its prompt id."""
+    for line in lines:
+        if line.get("turn") == turn.id:
+            return line
+    if turn.prompt_id is not None:
+        for line in lines:
+            if line.get("prompt_id") == turn.prompt_id and line.get("origin") == HUMAN:
+                return line
+    return None
+
+
+def _names(ref: str, ids: tuple, *, prefix: bool) -> bool:
+    values = [value for value in ids if isinstance(value, str)]
+    if prefix:
+        return len(ref) >= MIN_TURN_PREFIX and any(value.startswith(ref) for value in values)
+    return ref in values
+
+
+def _turn_listing(view: _SessionView) -> list[str]:
+    return [
+        f"  {'prompt ' + turn.prompt_id if turn.prompt_id else 'turn ' + turn.id}  "
+        f"{turn.timestamp}  ({transcript.WORDS_FORMS.get(turn.form, turn.form)})"
+        for turn in view.turns[-LISTED_TURNS:]
+    ]
+
+
+def _cited(view: _SessionView, turn) -> CitedTurn:
+    words, total = turn_words(turn)
+    if not words:
+        raise ContractViolation(
+            CONTRACT_CREDIT_TURN_WORDS_UNREAD,
+            [
+                f"turn {turn.id} of session {view.session} holds no typed words of the "
+                "person's (a paste or an image alone), so there is nothing to copy: "
+                "nothing was written",
+                "name another of their turns with --turn, or give their words in "
+                "--quote-file FILE",
+            ],
+        )
+    line = _line_of(turn, view.lines) or {}
+    root = line.get("root") if isinstance(line.get("root"), str) else None
+    return CitedTurn(
+        session=view.session,
+        turn=turn.id,
+        prompt_id=turn.prompt_id,
+        at=turn.timestamp,
+        form=turn.form,
+        words=words,
+        total_chars=total,
+        paste_known=turn.paste_known,
+        root=root,
+        lines=line.get("lines") if root and isinstance(line.get("lines"), int) else None,
+        segments=tuple(turn.segments),
+    )
+
+
+def session_turns(ctx: Context, session: str) -> list[CitedTurn]:
+    """The person's turns of one session as a credit can cite them, oldest first, for
+    `kyo turns --said`. A turn with no typed words is left out, since a credit cannot
+    cite it."""
+    view = _session_view(ctx, session)
+    out: list[CitedTurn] = []
+    for turn in view.turns:
+        try:
+            out.append(_cited(view, turn))
+        except ContractViolation:
+            continue
+    return out
+
+
+def _find_in(view: _SessionView, ref: str) -> CitedTurn | None:
+    """The turn of the person's that ``ref`` names in one session, or None when it names
+    nothing there. Refuses a reference that names several turns, a line of the index that
+    is not the person's, and a turn of the person's the transcript does not hold."""
+
+    def ids(turn) -> tuple:
+        line = _line_of(turn, view.lines) or {}
+        return (turn.id, turn.prompt_id, line.get("prompt_id"), line.get("turn"))
+
+    for prefix in (False, True):
+        found = [turn for turn in view.turns if _names(ref, ids(turn), prefix=prefix)]
+        if len(found) == 1:
+            return _cited(view, found[0])
+        if found:
+            raise UsageError(
+                "\n".join(
+                    [
+                        f"--turn {ref!r} names {len(found)} of the person's turns in session "
+                        f"{view.session}; give more of the id:",
+                        *(
+                            f"  {'prompt ' + t.prompt_id if t.prompt_id else 'turn ' + t.id}"
+                            f"  {t.timestamp}"
+                            for t in found
+                        ),
+                    ]
+                )
+            )
+    for prefix in (False, True):
+        lines = [
+            line
+            for line in view.lines
+            if _names(ref, (line.get("prompt_id"), line.get("turn")), prefix=prefix)
+        ]
+        if not lines:
+            continue
+        line = lines[0]
+        if line.get("origin") == HUMAN:
+            raise ContractViolation(
+                CONTRACT_CREDIT_TURN_WORDS_UNREAD,
+                [
+                    f"--turn {ref} is the person's turn of {line.get('at')} in session "
+                    f"{view.session}, and its words cannot be copied: {view.why}; nothing "
+                    "was written",
+                    "give their words in --quote-file FILE without --turn, which records "
+                    "what the transcript check could and could not confirm",
+                ],
+            )
+        raise ContractViolation(
+            CONTRACT_CREDIT_TURN_NOT_THE_PERSONS,
+            [
+                f"--turn {ref} is not a turn of the person's: the turn index records the "
+                f"prompt of {line.get('at')} in session {view.session} as "
+                f"{line.get('origin') or 'of unknown origin'} (a task notification and a "
+                "subagent's report arrive as prompts too), and a credit cites the "
+                "person's own words: nothing was written",
+                "name one of the person's turns with --turn; `kyo turns --said` lists "
+                "them" + (". Their latest in that session:" if view.turns else ""),
+                *_turn_listing(view),
+                "or leave --turn out, and their latest turn of the session is taken",
+            ],
+        )
+    return None
+
+
+def _resolve_turn(ctx: Context, views: dict[str, _SessionView], session: str | None, ref: str):
+    """One ``--turn`` reference as a :class:`CitedTurn`: looked for in the credit's own
+    session first, then in whichever one other session of the turn index holds it."""
+    if session is not None:
+        found = _find_in(views[session], ref)
+        if found is not None:
+            return found
+    elsewhere: set[str] = set()
+    for prefix in (False, True):
+        elsewhere = {
+            line["session"]
+            for line in _prompt_lines(read_lines(ctx.root))
+            if isinstance(line.get("session"), str)
+            and line["session"] != session
+            and _names(ref, (line.get("prompt_id"), line.get("turn")), prefix=prefix)
+        }
+        if elsewhere:
+            break
+    if len(elsewhere) == 1:
+        other = elsewhere.pop()
+        if other not in views:
+            views[other] = _session_view(ctx, other)
+        found = _find_in(views[other], ref)
+        if found is not None:
+            return found
+    where = f"session {session}" if session is not None else "the turn index"
+    listing = _turn_listing(views[session]) if session is not None else []
+    raise UsageError(
+        "\n".join(
+            [
+                f"--turn {ref!r} names "
+                + (f"turns of {len(elsewhere)} sessions" if elsewhere else "no turn")
+                + f" of the person's in {where}; give a prompt id or a transcript record "
+                "uuid from the turn index, whole or by a unique prefix of at least "
+                f"{MIN_TURN_PREFIX} characters"
+                + (". The person's latest turns there:" if listing else ""),
+                *listing,
+            ]
+        )
+    )
+
+
+def _holds(turn: CitedTurn, quote: str) -> bool:
+    """Whether ``quote`` is words of this turn: found in its typed segments as a quote is
+    checked, or the turn's stored words whole."""
+    pieces = transcript.quote_pieces(quote)
+    if not pieces:
+        return False
+    if transcript.pieces_in(pieces, turn.segments):
+        return True
+    return transcript.normalise(quote) == transcript.normalise(turn.words)
+
+
+def cite_turns(
+    ctx: Context, store, args: Namespace, quote_text: str | None
+) -> tuple[Cited | None, str]:
+    """KYO-900: the turns this invocation's credit cites, or None with why none can be read
+    and the words must come from ``--quote-file``.
+
+    Turns are cited when the project reads transcripts and either ``--turn`` names them
+    or, with no ``--quote-file`` either, a Claude Code session is known, whose latest turn
+    of the person's is taken. ``--quote-file`` given alone is the earlier path, unchanged:
+    the words are checked against the session's transcript. So is ``--quote-file`` beside
+    one ``--turn`` when no transcript can be read, or the turn is a prompt-history line,
+    since that pair has always meant "the record that holds these words".
+
+    The result is cached on ``args``: a command that stores the words itself reads them
+    first (:func:`words_from_turns`), and :func:`resolve` must see the same turns."""
+    held = getattr(args, "_kyo_cited", None)
+    if held is not None and quote_text in held[0]:
+        return held[1]
+    result = _cite_turns(ctx, store, args, quote_text)
+    keys = {quote_text}
+    if result[0] is not None and not (quote_text or "").strip():
+        # The words were copied from the turns: asked again with those words, as the
+        # command that stored them will, the answer is the same turns.
+        keys.add(result[0].quote_text)
+    args._kyo_cited = (keys, result)
+    return result
+
+
+def _cite_turns(
+    ctx: Context, store, args: Namespace, quote_text: str | None
+) -> tuple[Cited | None, str]:
+    refs = turn_refs_of(args)
+    quoted = bool((quote_text or "").strip())
+    if getattr(args, "source_other", None) is not None:
+        return None, ""
+    if not transcripts_opted_in(store.config):
+        return None, (
+            "this project does not read transcripts "
+            f"(`{READ_TRANSCRIPTS_KEY}:` in kyosei/config.yml), so kyo cannot copy them "
+            "from a turn: pass --quote-file FILE"
+        )
+    session = getattr(args, "session", None) or ctx.environ.get(ENV_SESSION) or None
+    if not refs and quoted:
+        return None, ""
+    if session is None and not refs:
+        return None, (
+            "no Claude Code session is known, so there is no turn to copy them from: pass "
+            "--quote-file FILE, with --source-other WHERE if they were said outside Claude "
+            "Code"
+        )
+    views: dict[str, _SessionView] = {}
+    if session is not None:
+        views[session] = _session_view(ctx, session)
+    if not refs:
+        assert session is not None
+        view = views[session]
+        if not view.turns:
+            return None, (
+                f"session {session} holds no turn of the person's that kyo can read "
+                f"({view.why}): pass --quote-file FILE"
+            )
+        chosen = [_cited(view, view.turns[-1])]
+    else:
+        legacy = (
+            quoted
+            and len(refs) == 1
+            and (
+                refs[0].startswith(transcript.HISTORY_ID_PREFIX)
+                or (session is not None and not views[session].readable)
+            )
+        )
+        if legacy:
+            return None, ""
+        chosen = []
+        for ref in refs:
+            turn = _resolve_turn(ctx, views, session, ref)
+            if not any((t.session, t.turn) == (turn.session, turn.turn) for t in chosen):
+                chosen.append(turn)
+    chosen.sort(key=lambda turn: turn.at)
+    if quoted:
+        assert quote_text is not None
+        holders = [turn for turn in chosen if _holds(turn, quote_text)]
+        if not holders:
+            raise ContractViolation(
+                CONTRACT_CREDIT_QUOTE_NOT_FOUND,
+                [
+                    "the words in --quote-file occur in none of the turns --turn names ("
+                    + ", ".join(turn.label() for turn in chosen)
+                    + "); pasted content in a turn is not the person's words: nothing was "
+                    "written",
+                    "correct the quote to their exact words, marking an omission with "
+                    "[...]; or drop --quote-file, and the whole of each named turn is stored",
+                ],
+            )
+        approval = holders[-1]
+        stored = quote_text
+    else:
+        approval = chosen[-1]
+        stored = approval.words
+    approval.role = TURN_ROLE_APPROVAL
+    return Cited(chosen, approval, stored, defaulted=not refs), ""
+
+
+def words_from_turns(ctx: Context, store, args: Namespace, given: str | None) -> str | None:
+    """The person's words for a command that stores them itself (a verdict's evidence, a
+    filing's evidence, a confirmation's quote): ``given`` when the command was handed
+    words, else the approving turn's words when the credit can cite turns, else None."""
+    if (given or "").strip():
+        return given
+    cited, _why = cite_turns(ctx, store, args, None)
+    return cited.quote_text if cited is not None else given
+
+
+def _legacy_turn(args: Namespace) -> str | None:
+    """``--turn`` for the path that reads no turn from the index: at most one, the
+    transcript record (or prompt-history line) holding the quoted words."""
+    refs = turn_refs_of(args)
+    if len(refs) > 1:
+        raise UsageError(
+            "several --turn cite several turns of the turn index, and here the words come "
+            "from --quote-file alone, which names at most one: the project does not read "
+            "transcripts, or the session's transcript cannot be read"
+        )
+    return refs[0] if refs else None
 
 
 @dataclass
@@ -258,6 +831,11 @@ class Credit:
     decision: dict = field(default_factory=dict)
     span: dict = field(default_factory=dict)
     span_why: str = ""
+    #: KYO-900: the turns the credit cites, in transcript order; empty for a credit whose
+    #: words were given in a file.
+    turns: list[CitedTurn] = field(default_factory=list)
+    #: Whether the turn was taken by default, as the person's latest of the session.
+    turn_defaulted: bool = False
 
     @property
     def transcript_check(self) -> str:
@@ -282,7 +860,10 @@ class Credit:
             out += ["--source-other", self.source_note or ""]
         else:
             out += ["--session", self.source_session or ""]
-            if self.check.get("source_turn"):
+            if self.turns:
+                for turn in self.turns:
+                    out += ["--turn", turn.turn]
+            elif self.check.get("source_turn"):
                 out += ["--turn", self.check["source_turn"]]
         return out
 
@@ -350,11 +931,28 @@ def resolve(
         raise UsageError(
             "--session and --source-other both say where the words were said; give one"
         )
-    if other is not None and getattr(args, "turn", None):
+    if other is not None and turn_refs_of(args):
         raise UsageError("--turn names a transcript record, and --source-other has none")
     person = _person(store, getattr(args, "person", None))
     if session is None and other is None:
         session = ctx.environ.get(ENV_SESSION) or None
+    # KYO-900: the turns the credit cites, and with them the words, where kyo can copy them.
+    cited, no_turn_why = cite_turns(ctx, store, args, quote_text)
+    if cited is not None:
+        quote_text = cited.quote_text
+        session = cited.approval.session
+    flags_text = _decision_text(args)
+    if flags_text is not None:
+        if decision_text is not None:
+            raise UsageError(
+                "--outcome states one credit's outcome, and this line already states its own"
+            )
+        if role != ROLE_DECIDED:
+            raise UsageError(
+                f"--outcome, --recommended and --recommended-by belong to a decided credit; "
+                f"this one is {role}, which records no recommendation or outcome"
+            )
+        decision_text = flags_text
     missing = []
     if person is None:
         declared = declared_people(store.config)
@@ -368,7 +966,7 @@ def resolve(
             + ")"
         )
     if not (quote_text or "").strip():
-        missing.append("the person's words")
+        missing.append("the person's words" + (f" ({no_turn_why})" if no_turn_why else ""))
     if session is None and other is None:
         missing.append(
             f"where they were said (--session ID, or ${ENV_SESSION} in a Claude Code "
@@ -376,7 +974,10 @@ def resolve(
         )
     decision_path = getattr(args, "decision_file", None)
     if role == ROLE_DECIDED and decision_path is None and decision_text is None:
-        missing.append("what was decided (--decision-file)")
+        missing.append(
+            "what was decided (--outcome, with --recommended unless it is unprompted; or "
+            "--decision-file for a decision with alternatives)"
+        )
     if missing:
         raise ContractViolation(
             contract,
@@ -415,15 +1016,28 @@ def resolve(
             check={
                 "transcript_check": CHECK_NOT_APPLICABLE,
                 # As given: nothing here read a transcript to confirm it.
-                "source_turn": getattr(args, "turn", None),
+                "source_turn": _legacy_turn(args),
                 "observed_at": None,
                 "words_form": None,
             },
             check_why=NOT_OPTED_IN_WHY,
         )
+    elif cited is not None:
+        credit = Credit(
+            person,
+            role,
+            quote_text,
+            SOURCE_CLAUDE_CODE,
+            cited.approval.session,
+            None,
+            check=cited.check(),
+            check_why=cited.why(),
+            turns=cited.turns,
+            turn_defaulted=cited.defaulted,
+        )
     else:
         assert session is not None
-        result = _check(ctx, session, quote_text, getattr(args, "turn", None), person)
+        result = _check(ctx, session, quote_text, _legacy_turn(args), person)
         credit = Credit(
             person,
             role,
@@ -716,18 +1330,7 @@ def _span_seal(ctx: Context, session: str, last: str) -> tuple[str | None, str]:
     credit is usually written before that Stop, so the session's transcript is folded
     into the index first, as the Stop hook would (best effort).
     """
-    through_main = ctx.layout.store_via_main_checkout if ctx.layout is not None else None
-    if through_main is None:
-        try:
-            paths = transcript.candidate_transcripts(
-                session,
-                config=transcript.config_dir(ctx.environ),
-                recorded=recorded_transcript_path(ctx.root, session),
-            )
-            if paths:
-                confirm_from_transcript(ctx.root, session, Path(paths[0]))
-        except (OSError, ValueError):
-            pass
+    _fold_index(ctx, session)
     return seal.span_seal(session_lines(ctx.root, session), last)
 
 
@@ -795,7 +1398,7 @@ def write(
 
     ``created_at`` is the subject's own write time when the credit is written in the
     subject's transaction (KYO-644, for KYO-647's exact "reconstructed" derivation)."""
-    return store.add_credit(
+    credit_id = store.add_credit(
         record_id,
         created_at=created_at,
         person=credit.person,
@@ -811,6 +1414,29 @@ def write(
         **credit.decision,
         **credit.span,
     )
+    # KYO-900: each cited turn, in transcript order. The approval's words are the credit's
+    # own quote; a context turn's are stored as an evidence artifact of their own, so that
+    # `kyo redact` and the sha256 cover them as they cover the quote.
+    for position, turn in enumerate(credit.turns, 1):
+        words_id = quote_id
+        if turn.role != TURN_ROLE_APPROVAL:
+            words_id, _digest = _add_evidence(
+                store, record_id, turn.words, supports_id=None, author=author
+            )
+        store.add_credit_turn(
+            credit_id,
+            position=position,
+            role=turn.role,
+            session=turn.session,
+            turn=turn.turn,
+            prompt_id=turn.prompt_id,
+            at=turn.at,
+            words_form=turn.words_form,
+            quote_id=words_id,
+            root=turn.root,
+            lines=turn.lines,
+        )
+    return credit_id
 
 
 def lines(store, credit_id: str, credit: Credit) -> list[str]:
@@ -819,6 +1445,7 @@ def lines(store, credit_id: str, credit: Credit) -> list[str]:
     out = [f"credit {credit_id}: {credit.summary(label)}"]
     if credit.check_why and credit.source_kind == SOURCE_CLAUDE_CODE:
         out.append(f"  {credit.check_why}")
+    out += turn_lines(store, credit_id, credit)
     if credit.decision:
         d = credit.decision
         out.append(
@@ -847,6 +1474,41 @@ def lines(store, credit_id: str, credit: Credit) -> list[str]:
                 "  span not sealed: the turn index holds no sealed line for the span's "
                 "last turn"
             )
+    return out
+
+
+def turn_lines(store, credit_id: str, credit: Credit | None) -> list[str]:
+    """KYO-900: what a receipt says of the turns a credit cites: each turn's role, time
+    and the first line of its words as stored, so that a wrong turn is seen at once; and,
+    for a credit resolved by this invocation (``credit``), how much of a long turn was
+    kept and, for a sole turn of a few words, that earlier turns can be cited as context."""
+    from .render import credit_turn_lines
+
+    stored = [export._credit_turn(row) for row in store.credit_turns(credit_id)]
+    if not stored:
+        return []
+    words = {
+        turn["quote_id"]: store.evidence_artifact(turn["quote_id"])["text"] for turn in stored
+    }
+    out = credit_turn_lines({"turns": stored}, words, indent="  ")
+    if credit is None or not credit.turns:
+        return out
+    for turn in credit.turns:
+        if turn.total_chars > len(turn.words) and (
+            turn.role != TURN_ROLE_APPROVAL or credit.quote_text == turn.words
+        ):
+            out.append(
+                f"    {turn.label()} is {turn.total_chars} characters of typed words; its "
+                f"first {TURN_WORDS_HEAD} and last {TURN_WORDS_TAIL} are stored around {OMISSION}"
+            )
+    approval = next(turn for turn in credit.turns if turn.role == TURN_ROLE_APPROVAL)
+    count = len(approval.words.split())
+    if len(credit.turns) == 1 and count <= SHORT_TURN_WORDS:
+        out.append(
+            f"  the cited turn is {count} word(s). Where earlier turns specified what it "
+            "approves, a credit can cite them as context: --turn <id> for each of them and "
+            "for this one"
+        )
     return out
 
 
@@ -1010,8 +1672,9 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         else CONTRACT_FILING_REQUIRES_CREDIT,
         act="a credit",
         remedies=[
-            f"give the missing parts to the same command: {rerun} with --person, "
-            "--quote-file and --session or --source-other"
+            f"give the missing parts to the same command: {rerun} with --person, and "
+            "--turn <id> for the turn the words were said in (a project that reads "
+            "transcripts) or --quote-file with --session or --source-other"
         ],
         reconstructed=args.basis is not None,
     )
@@ -1363,6 +2026,11 @@ def recheck(ctx: Context, args: Namespace) -> Output:
             **fields,
             **result.store_fields(),
         )
+        for turn in store.credit_turns(credit_id):
+            store.add_credit_turn(
+                new_id,
+                **{name: turn[name] for name in turn.keys() if name != "credit_id"},  # noqa: SIM118
+            )
         store.supersede_credit(credit_id, new_id)
         _touch_record(store, record_id)
         after, events = commands._commit_and_export(
@@ -1518,6 +2186,9 @@ def batch(ctx: Context, args: Namespace) -> Output:
             ("--turn", args.turn),
             ("--source-other", args.source_other),
             ("--decision-file", args.decision_file),
+            ("--outcome", getattr(args, "outcome", None)),
+            ("--recommended", getattr(args, "recommended", None)),
+            ("--recommended-by", getattr(args, "recommended_by", None)),
             ("--span-first", args.span_first),
             ("--span-last", args.span_last),
             ("--span-session", args.span_session),
@@ -1755,10 +2426,20 @@ def gate_clearing(
     remedies = [
         "the person's answer, with their words and where they said them: "
         f"`{command} --quote-file FILE --person KEY --source-other <where>` (or --session "
-        "ID for a Claude Code session, whose transcript is checked)",
+        "ID for a Claude Code session, whose transcript is checked; in a project that "
+        "reads transcripts --turn <id> names the turn they answered in, and no file is "
+        "needed)",
         f"or, when the wait no longer applies: `{command} --withdrawn --why <reason>`",
     ]
-    if not requested(args):
+    # KYO-900: with no credit flag at all, the person's latest turn of the session is their
+    # answer where kyo can read it; the receipt echoes the turn, so a wrong one is seen.
+    takes_latest = (
+        not requested(args)
+        and bool(human)
+        and enforced(store)
+        and cite_turns(ctx, store, args, None)[0] is not None
+    )
+    if not requested(args) and not takes_latest:
         if human and enforced(store):
             raise ContractViolation(
                 CONTRACT_PERSON_GATE_CLEAR_REQUIRES_CREDIT,
@@ -1818,7 +2499,8 @@ def refuse_settle_over_person_gate(gates: list, command: str) -> None:
             "words, or says plainly that nobody did: nothing was written",
             "the person's answer, with their words and where they said them: "
             f"`{command} --why <reason> --quote-file FILE --person KEY --source-other "
-            "<where>`",
+            "<where>` (in a project that reads transcripts, --turn <id> in place of "
+            "--quote-file names the turn they answered in)",
             f"or, when the wait no longer applies: `{command} --why <reason> --withdrawn`",
         ],
     )
@@ -1861,10 +2543,13 @@ def filing_credit(
         contract=CONTRACT_FILING_REQUIRES_CREDIT,
         act=f"kind {kind_def.name!r} sets policy.requires_credit, so `{command}`",
         remedies=[
-            "give the same command the person's words deciding it in --quote-file, what "
-            "was recommended and the alternatives in --decision-file, the person in "
-            "--person, and --session ID for a Claude Code session or --source-other "
-            "<where> for anywhere else",
+            "give the same command what was decided: --outcome (with --recommended unless "
+            "it is unprompted), or --decision-file for a decision with alternatives. In a "
+            "Claude Code session of a project that reads transcripts the person's latest "
+            "turn is taken as their words, and --turn <id> names another or adds context",
+            "elsewhere give their words in --quote-file, the person in --person, and "
+            "--session ID for a Claude Code session or --source-other <where> for "
+            "anywhere else",
         ],
     )
 
@@ -1874,7 +2559,13 @@ def filing_credit_flag_problem(args: Namespace, kind_def) -> None:
     if kind_def.requires_credit:
         return
     refuse_unused_flags(args, f"kind {kind_def.name!r} does not set policy.requires_credit")
-    for name, flag in (("quote_file", "--quote-file"), ("decision_file", "--decision-file")):
+    for name, flag in (
+        ("quote_file", "--quote-file"),
+        ("decision_file", "--decision-file"),
+        ("outcome", "--outcome"),
+        ("recommended", "--recommended"),
+        ("recommended_by", "--recommended-by"),
+    ):
         if getattr(args, name, None):
             raise UsageError(
                 f"{flag} belongs to a credit, and kind {kind_def.name!r} does not set "

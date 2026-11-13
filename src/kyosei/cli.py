@@ -2181,6 +2181,14 @@ def build_parser() -> KyoseiParser:
     )
     p_turns.add_argument("--session", help="only this session's lines")
     p_turns.add_argument(
+        "--said",
+        action="store_true",
+        help="list the person's turns of one session, oldest first, each with its time, the "
+        "id `--turn` takes on a command that writes a credit, and the first line of its "
+        "words, read from the transcript. The session is --session, or "
+        "$CLAUDE_CODE_SESSION_ID (KYO-900)",
+    )
+    p_turns.add_argument(
         "--hook",
         action="store_true",
         help="read Claude Code's UserPromptSubmit, Stop or SessionEnd payload on stdin: add "

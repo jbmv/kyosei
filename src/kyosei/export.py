@@ -410,6 +410,24 @@ def _credit(store: Store, row: sqlite3.Row) -> dict:
             {"kind": s["subject_kind"], "id": s["subject_id"]}
             for s in store.credit_subjects(row["id"])
         ],
+        # KYO-900: the turns the credit cites, in transcript order; [] for a credit whose
+        # words were given in a file.
+        "turns": [_credit_turn(t) for t in store.credit_turns(row["id"])],
+    }
+
+
+def _credit_turn(row: sqlite3.Row) -> dict:
+    """KYO-900: one turn a credit cites. Its position is its place in the list."""
+    return {
+        "role": row["role"],
+        "session": row["session"],
+        "turn": row["turn"],
+        "prompt_id": row["prompt_id"],
+        "at": row["at"],
+        "words_form": row["words_form"],
+        "quote_id": row["quote_id"],
+        "root": row["root"],
+        "lines": row["lines"],
     }
 
 

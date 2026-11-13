@@ -124,14 +124,49 @@ waiting on the operator becomes one with `kyo spawn <reminder-id> --kind decisio
 
 **The person who decided (KYO-644).** The packaged `decision` also sets `requires_credit`,
 so every filing of one, by `kyo new` or by any `kyo spawn`, carries a `decided` credit: the
-person's words alone in `--quote-file` (which also serves as the evidence when
-`--evidence-file` is not given), what was recommended, the outcome and the alternatives (each
+person's words, what was recommended, the outcome and the alternatives (each
 with `proposed_by` where the person's own words introduced the option, KYO-786) in
-`--decision-file`, the person (`--person`, defaulting to the only one declared under
+`--decision-file`, or `--outcome`, `--recommended` and `--recommended-by` for a decision
+that lists no alternatives (KYO-900), the person (`--person`, defaulting to the only one declared under
 `people:`), and where the words were said (`--session`, defaulting to
 `$CLAUDE_CODE_SESSION_ID`, whose transcript is checked where the project set
 `read_transcripts: true`, or `--source-other`). The command reference lists the decision
-file's keys. A project whose `people:` declares nobody files a decision with no credit.
+file's keys.
+
+**Where a credit's words come from (KYO-900).** In a project that reads transcripts, every
+command that writes a credit (`kyo confirm`, `kyo credit`, `kyo verify --method
+human-observed`, `kyo ungate` of a person's gate, and `kyo new` and `kyo spawn` of a kind
+that requires a credit) takes `--turn <id>`, once for each turn of the person's the credit
+cites. The id is a prompt id or a transcript record uuid from the turn index (`kyo turns
+--json`), whole or by a unique prefix of at least four characters; a message sent while the
+agent was working, and an answer to a question the agent put, have no prompt id and are
+named by their record uuid. kyo reads the words from the transcript and stores them, so no
+file is written. With neither `--turn` nor `--quote-file`, in a Claude Code session, the
+person's latest turn of that session is taken, after the session's transcript is folded
+into the turn index. A turn in another session is found through the index and stored with
+its own session.
+
+The turns are stored in transcript order whatever order they were named in. The latest is
+the `approval`, the turn that carries the person's judgement; the earlier ones are
+`context`, the turns in which what was approved was specified. `kyo show` prints each with
+its role, time and the first line of its words, and so does the receipt of the command
+that wrote the credit. A sole cited turn of four words or fewer adds one line to the
+receipt saying that earlier turns can be cited as context; it refuses nothing.
+
+What is stored of a turn is the person's typed words. Pasted content is left out and its
+place marked `[...]`; a turn longer than 4,000 characters keeps its first 3,000 and last
+1,000 around the same mark, and the receipt says so. A context turn's words are an
+evidence artifact of their own. Each turn also carries the commitment the turn index made
+to the prompt's text when it was sent, where its line has one, and `kyo turns --verify`
+checks that the line still holds it.
+
+`--quote-file` beside `--turn` narrows the credit: the words must occur in a named turn
+(`credit-quote-not-found` otherwise), the latest named turn that holds them is the
+approval, and they are what is stored for it. `--quote-file` alone is checked against the
+session's transcript as before, and is the only form in a project that does not read
+transcripts or outside a Claude Code session, where a credit with neither it nor a
+readable turn is refused naming the flag to pass. The filing's evidence, when
+`--evidence-file` is not given, is the words the credit stores. A project whose `people:` declares nobody files a decision with no credit.
 
 **Which spawn routes need evidence (KYO-522).** A reminder becomes a decision exactly when
 the operator answers in conversation, so `kyo spawn` from a source whose kind is `carried`

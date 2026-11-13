@@ -1059,10 +1059,6 @@ LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
         "reads them when the composer delivers one, and the workflow tier is at its byte "
         "ceiling, so the verbs live in the reference until that surface ships (U4)"
     ),
-    "turns": (
-        "the turn index a hook keeps (KYO-657); an orchestrator never runs it to do its "
-        "work, and `kyo sessions` is its nearest sibling"
-    ),
     "transcripts": (
         "the search of what was said in a project's sessions (KYO-812), built for the "
         "person's history search in the app; no step of the orchestrator's workflow runs it"
@@ -1183,6 +1179,27 @@ CREDIT_COMPOSED = "kyo confirm passes it to the steps it composes; not typed by 
 
 
 LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
+    # KYO-900: the workflow names `kyo turns --said`, which lists the ids `--turn` takes,
+    # and the three decision flags by `--outcome` and `--recommended`.
+    **dict.fromkeys(
+        (
+            ("turns", "--session"),
+            ("turns", "--verify"),
+            ("turns", "--seal-key"),
+            ("turns", "--key-leaves-this-machine"),
+        ),
+        "the turn index's own upkeep (a hook keeps it; KYO-657, KYO-663): the workflow "
+        "reaches `kyo turns` only for --said, in the session it is run in",
+    ),
+    **dict.fromkeys(
+        (
+            ("new", "--recommended-by"),
+            ("spawn", "--recommended-by"),
+            ("credit", "--recommended-by"),
+        ),
+        "defaults to the acting author, which is who recommended it in the orchestrator's "
+        "own session; `kyo reference` names it for the other case",
+    ),
     # KYO-899: a discussion is optional, so the workflow tier no longer walks the flags
     # that open one late or stamp it at an earlier turn.
     **dict.fromkeys(
@@ -1232,7 +1249,6 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("confirm", "--person"): CREDIT_DEFAULTED,
     ("confirm", "--session"): CREDIT_DEFAULTED,
     ("confirm", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
-    ("confirm", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("credit", "--batch"): "the backfill's one-off form; its columns are in the command reference",
     ("credit", "--person"): CREDIT_DEFAULTED,
     ("credit", "--recheck"): "named by doctor's credit_transcripts_appeared notice, with the id",
@@ -1243,7 +1259,6 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("credit", "--span-last"): CREDIT_SPAN,
     ("credit", "--span-session"): CREDIT_SPAN,
     ("credit", "--supersede"): CREDIT_NAMED_BY_REFUSAL,
-    ("credit", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     # KYO-670: a correction to the credits already written, made when a review finds one
     # that should not exist; the command reference names it.
     ("credit", "--withdraw"): "a correction to a credit already written, read from the "
@@ -1251,35 +1266,29 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("move", "--person"): CREDIT_DEFAULTED,
     ("move", "--session"): CREDIT_DEFAULTED,
     ("move", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
-    ("move", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("new", "--person"): CREDIT_DEFAULTED,
     ("new", "--session"): CREDIT_DEFAULTED,
     ("new", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
     ("new", "--span-first"): CREDIT_SPAN,
     ("new", "--span-last"): CREDIT_SPAN,
     ("new", "--span-session"): CREDIT_SPAN,
-    ("new", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("spawn", "--person"): CREDIT_DEFAULTED,
     ("spawn", "--session"): CREDIT_DEFAULTED,
     ("spawn", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
     ("spawn", "--span-first"): CREDIT_SPAN,
     ("spawn", "--span-last"): CREDIT_SPAN,
     ("spawn", "--span-session"): CREDIT_SPAN,
-    ("spawn", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("ungate", "--credit"): CREDIT_COMPOSED,
     ("ungate", "--person"): CREDIT_DEFAULTED,
     ("ungate", "--session"): CREDIT_DEFAULTED,
     ("ungate", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
-    ("ungate", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("verify", "--credit"): CREDIT_COMPOSED,
     ("verify", "--person"): CREDIT_DEFAULTED,
     ("verify", "--session"): CREDIT_DEFAULTED,
     ("verify", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
-    ("verify", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     ("wont-do", "--person"): CREDIT_DEFAULTED,
     ("wont-do", "--session"): CREDIT_DEFAULTED,
     ("wont-do", "--source-other"): CREDIT_NAMED_BY_REFUSAL,
-    ("wont-do", "--turn"): CREDIT_NAMED_BY_REFUSAL,
     # KYO-647: filters on who is credited; an orchestrator's workflow does not reach them
     # until credits are in use, and the command reference lists them.
     ("list", "--person"): "a filter on credited persons, read from the command reference",

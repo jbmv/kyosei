@@ -3977,6 +3977,13 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-900: a --turn that names a task notification, which needs a transcript and a turn
+    # index holding one.
+    "credits.py:_find_in#2": (
+        "not provoked by this walk: a re-invocation naming one of the person's turns, "
+        "which `kyo turns --said` lists; proved by tests/test_kyo900_turn_credits.py::"
+        "test_a_turn_that_is_not_the_persons_is_refused_and_the_remedy_clears_it"
+    ),
     "cmd_records.py:move_targets#0": (
         "not provoked by this walk: a re-invocation naming a record before the status; proved by "
         "test_kyo877_one_id_is_unchanged_and_a_status_alone_is_a_usage_error"
@@ -4919,6 +4926,28 @@ RECORDED: dict[str, str] = {
     # credit lacked -- the person's words in a file, a turn uuid, a declared person, a
     # supersede id -- which only the caller can supply. Each is run, from the refused
     # state, by a test in this file's KYO-644 section below.
+    # KYO-900: a credit by turn reference; each refusal's re-invocation is run by the test
+    # the reason names (tests/test_kyo900_turn_credits.py).
+    "credits.py:_decision_text#0": (
+        "a re-invocation giving --decision-file or the flags, not both; proved by "
+        "test_the_decision_flags_stand_in_for_a_decision_file"
+    ),
+    "credits.py:_cited#0": (
+        "a re-invocation naming another turn with --turn, or giving --quote-file; proved "
+        "by test_a_turn_with_no_typed_words_is_refused_naming_both_remedies"
+    ),
+    "credits.py:_find_in#0": (
+        "a re-invocation giving more of the id; proved by "
+        "test_a_prefix_that_names_several_turns_or_none_is_refused_and_a_longer_one_clears_it"
+    ),
+    "cmd_turns.py:_said#1": (
+        "the same command with --session, or run inside a session; proved by "
+        "tests/test_kyo900_turn_credits.py::test_said_lists_the_persons_turns_with_the_ids_a_credit_takes"
+    ),
+    "credits.py:_resolve_turn#0": (
+        "a re-invocation naming a listed turn; proved by "
+        "test_a_prefix_that_names_several_turns_or_none_is_refused_and_a_longer_one_clears_it"
+    ),
     "credits.py:resolve#0": (
         "a re-invocation giving --session or --source-other, not both; proved by "
         "test_kyo644_session_and_source_other_is_cleared_by_giving_one"

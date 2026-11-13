@@ -893,6 +893,27 @@ def _load(
                         " VALUES (?, ?, ?)",
                         (credit["id"], subject["kind"], subject["id"]),
                     )
+                # KYO-900: the turns the credit cites, verbatim and in their order. A
+                # document written before schema 36 has none (CREDIT_FIELD_DEFAULTS[36]).
+                for position, turn in enumerate(credit["turns"], 1):
+                    conn.execute(
+                        "INSERT INTO credit_turns (credit_id, position, role, session, turn,"
+                        " prompt_id, at, words_form, quote_id, root, lines)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            credit["id"],
+                            position,
+                            turn["role"],
+                            turn["session"],
+                            turn["turn"],
+                            turn["prompt_id"],
+                            turn["at"],
+                            turn["words_form"],
+                            turn["quote_id"],
+                            turn["root"],
+                            turn["lines"],
+                        ),
+                    )
             # KYO-658: a discussion's turn references, verbatim. A document written before
             # schema 32 has none (schema.EXPORT_FIELD_DEFAULTS[32]), and one written before
             # 35 was given each closing's outcome when it was read

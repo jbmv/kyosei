@@ -321,8 +321,8 @@ is refused (`filing-requires-evidence`), because the kind's policy sets
 `requires_evidence_links`; the refusal names the flag.
 
 The proposal route stays for a decision that needs design work first: alternatives weighed,
-evidence gathered, an argument the operator approves (`kyo confirm <proposal> --criterion <cid>
---quote-file q.txt`, then `kyo spawn <proposal-id> --kind decision`). A reminder that was waiting
+evidence gathered, an argument the operator approves (`kyo confirm <proposal> --criterion <cid>`,
+then `kyo spawn <proposal-id> --kind decision`). A reminder that was waiting
 on the operator becomes a decision with the words that answered it: `kyo spawn <reminder-id> --kind decision
 --evidence-file words.md`, then
 settle the reminder.
@@ -1043,7 +1043,9 @@ other, which is why `--do`/`--do-file` stays required.
 Closing a human gate was three commands every time: `kyo verify` the criterion `human-observed`
 with the maintainer's words as evidence, `kyo ungate`, `kyo move` -- and in measured stores the
 move almost always followed the clearing within minutes. Approving a proposal is the same act
-with no gate in it, and each one had been written differently. `kyo confirm <record> --quote-file q.txt` does all three as one act.
+with no gate in it, and each one had been written differently. `kyo confirm <record>` does all
+three as one act, with the person's words copied from their turn (KYO-900) or, where no
+transcript is read, given in `--quote-file q.txt`.
 
 It is a composition and not a second implementation, the way `kyo accept` is: each write is
 `kyo verify`, `kyo attach`, `kyo ungate` or `kyo move`, reached through the same parser and
@@ -1074,6 +1076,20 @@ no `--gate`), `confirm-ambiguous-criteria` (several unobserved criteria and noth
 while a worker is changing the thing is a look at a build about to change; rerun the same line
 once the report is ingested), `confirm-criterion-not-confirmable`, `confirm-gate-not-confirmable`
 and `confirm-gate-names-a-missing-criterion` (correct the payload with `kyo redo`).
+
+**A credit names its turns (KYO-900).** Until KYO-900 every credit took `--quote-file`: the
+agent retyped the person's words into a file and kyo checked them against the transcript. The
+retyping was a step, a one-word answer kept none of its context, and a credit could cite one
+turn. The turn index names each prompt and the transcript holds its text, so a credit is given
+the turn and kyo copies the words. `--turn <id>` is repeatable; the turns are stored in
+transcript order, the latest as the approval and the earlier ones as the context it approved,
+and `kyo show` prints each with its role. `kyo turns --said` lists a session's turns with the
+ids, the times and the first line of each. A message sent mid-turn and an answer to a question
+have no prompt id and are named by their record uuid. A turn that is not the person's (a task
+notification, a subagent's report) is refused. A long turn is stored as its head and tail, and
+a paste is left out. A second `kyo confirm` naming the same turn skips what the first applied.
+In a project that does not read transcripts, or outside a Claude Code session, the words still
+come from `--quote-file`, and a credit with neither is refused naming the flag.
 
 **The words go in evidence, verbatim, and nowhere else.** The quote is read once -- so
 `--quote-file -` works although several steps need it -- and each step gets a temporary file

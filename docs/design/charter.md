@@ -533,6 +533,20 @@ governs: src/kyosei/schema.py
   is a field set once, when the message holding it is delivered, with the time, the session and
   the held message; it replaced a `sent` tag, which a person could remove. A note sent after
   filing gets the field from a `notes sent` event, so its own ledger line is not rewritten.
+- **credit_turns** (schema_version 36, KYO-900, decision KYO-898): the turns of the person's
+  that a credit cites, one row each in transcript order. Until then every credit took its
+  words from a file the agent typed, which kyo then checked against the transcript; the
+  retyping cost the agent a step, a one-word answer kept none of its context, and one
+  credit could name one turn. The turn index already names each prompt and the transcript
+  holds its text, so a credit is given the turn (`--turn`, repeatable, a prompt id or a
+  record uuid) or none, which takes the person's latest, and kyo copies the words. One row
+  is the `approval`, the turn that carries the judgement and the credit's own
+  `source_turn`; the others are `context`, earlier turns in which what was approved was
+  specified. Each row holds the session, the record uuid, the time, the words as an
+  evidence artifact and the index line's commitment where it has one. A long turn is
+  stored as its head and tail and a paste is left out, each marked `[...]`. `--quote-file`
+  remains for a project that does not read transcripts, for words said elsewhere, and to
+  narrow what is stored of a turn.
 - **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a
   verification, a gate clearing or a decision record rests on, as a row of its own rather than
   columns on the rows it credits, so crediting a historical verdict updates nothing already

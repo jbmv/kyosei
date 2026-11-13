@@ -322,8 +322,9 @@ described where the registry is, in [registries.md](registries.md).
    the record carries an open gate, naming it. Clear it with `kyo ungate <gate-id> --why`
    once its condition is met, or pass `--force` to settle with the gate left open.
 4. **`kyo confirm` closes a person's look in one act (KYO-494).** `kyo confirm <id>
-   --quote-file q.txt` verifies the gate's criterion `human-observed` with the
-   maintainer's words as evidence, clears the answered human gate, and walks the record
+   --quote-file q.txt` (or, in a project that reads transcripts, `kyo confirm <id>` alone,
+   which copies the words from the person's turn, KYO-900) verifies the gate's criterion
+   `human-observed` with the maintainer's words as evidence, clears the answered human gate, and walks the record
    to completion; it also approves a proposal's decision criterion (`--criterion`).
 5. **Workers can check a report before handing it back (KYO-477).** Every brief now
    carries `kyo report <dispatch> --file .kyosei-report.json --check` (writes nothing)

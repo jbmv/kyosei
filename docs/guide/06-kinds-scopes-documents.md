@@ -46,8 +46,14 @@ process:
 
 `kyo spawn` follows those edges and refuses any other. A decision filed directly instead has
 your words behind it: `kyo new decision` refuses without `--evidence-file`. Where
-`people:` declares you it also carries a credit, your words and what was recommended,
-given with `--quote-file` and `--decision-file`.
+`people:` declares you it also carries a credit: your words and what was recommended.
+Where the project reads transcripts ([D14](setup-decisions.md#d14-may-kyosei-read-this-projects-transcripts))
+the orchestrator does not retype your words. It names the message or messages you said
+them in (`--turn`), or names none and your latest message is taken, and Kyosei copies the
+words from the transcript. A credit can cite the message that approved together with the
+earlier ones that specified what was approved, and `kyo show` marks which is which.
+Elsewhere your words are given in a file (`--quote-file`). What was recommended is given
+with `--outcome` and `--recommended`, or in `--decision-file` when there were alternatives.
 
 **Changing them.** Adding a kind, or changing what one accepts, is easy. Removing a kind
 that records still use is not refused, but those records stop counting and `kyo doctor`

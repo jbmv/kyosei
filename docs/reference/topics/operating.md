@@ -825,7 +825,13 @@ kyo new decision --title "Use SQLite" --evidence-file words.md \
                                            # refused where nobody is declared: the decision
                                            # carries a credit (the person's words, and in
                                            # decision.md what was recommended and the
-                                           # outcome). --discussion names the discussion
+                                           # outcome; --outcome and --recommended give
+                                           # them without a file where there are no
+                                           # alternatives). In a project that reads
+                                           # transcripts the words need no file: --turn
+                                           # <id> names the turn they were said in, or
+                                           # the person's latest turn is taken (KYO-900).
+                                           # --discussion names the discussion
                                            # it came from, which the filing closes, and
                                            # is optional, as --opened-late is,
                                            # and --source-other WHERE says where the words
@@ -851,7 +857,10 @@ kyo ungate KYO-1.g1 --quote-file q.txt     # [refused where nobody is declared]
                                            # where `people:` declares someone, a gate that
                                            # waits on a person is cleared with that person's
                                            # words, stored as a credit (with --source-other
-                                           # WHERE outside a Claude Code session);
+                                           # WHERE outside a Claude Code session; in a
+                                           # project that reads transcripts --turn <id>,
+                                           # or no flag at all for their latest turn,
+                                           # copies the words from the transcript);
                                            # --withdrawn --why clears one whose wait no
                                            # longer applies (KYO-644). Each form is refused
                                            # in the other kind of project
@@ -859,7 +868,10 @@ kyo confirm KYO-1 --quote-file q.txt     # the maintainer looked and approves: v
                                            # (human-observed, their words as evidence), clear
                                            # the answered human gate, move to done; where
                                            # `people:` declares someone the words are also
-                                           # stored as a credit
+                                           # stored as a credit. In a project that reads
+                                           # transcripts no quote is typed: the words are
+                                           # copied from the turns --turn names, or from
+                                           # the person's latest turn (KYO-900)
 kyo link KYO-1 blocks KYO-2                # cycles refused at write time
 kyo verify KYO-1.c1 --verdict met --method machine-checked \
                      --evidence-file capture.txt   # criterion state is derived from this
