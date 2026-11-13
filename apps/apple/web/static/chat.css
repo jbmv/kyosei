@@ -377,6 +377,26 @@ body.terminal-open #jump-bottom { display: none; }
 
 /* A hidden copy of the text, wrapped the same way, tells the gutter where each line sits. */
 .box-mirror { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+/* KYO-902: indent guides and heading rules, placed from the hidden copy's lines. The layer
+   lies over the text and takes no press; a guide stands in the indentation, where there are
+   no words, and a heading's tint is light enough to read through. */
+.box-outline { position: absolute; inset: 0; pointer-events: none; }
+.box-outline-probe { position: absolute; visibility: hidden; white-space: pre; font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+.outline-guide { position: absolute; width: 0; border-left: 1.5px solid var(--line); }
+.outline-heading {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 4px 4px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.outline-heading.level-1 {
+  border-top: 2px solid var(--muted);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.outline-heading.level-2 { border-top-color: var(--muted); }
 /* A text area outside the boxes that holds a copy of a box's text while its height is read
    (KYO-750): the box's own text area is taller than its text while a completion is offered. */
 .box-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }

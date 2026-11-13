@@ -223,6 +223,22 @@ The page's tests are in `web/test/` and run with `npm test` in `web/`. Those in
 `anchors.test.ts` need a web view: they build the page, open it in a headless Chrome and feed
 it the frames the app would send, and are skipped on a machine with no Chrome.
 
+### Lists and headings in an unsent prompt
+
+<!-- governs:
+- apps/apple/web/src/outline.ts
+- apps/apple/web/src/chat.ts#drawOutline
+-->
+
+A prompt is sent as typed, so a nested list and a line beginning with `#` reach the agent as
+markdown. The composer draws them (KYO-902): each indented line has one light vertical guide
+for each level of indentation, under the marker of the item it is nested in, and a heading
+line has a rule above it and a tint behind it, stronger for `#` than for `##`. Both are drawn
+on a layer over the text that takes no press, placed from the hidden copy of the text that
+also places the gutter's marks. The text area cannot indent the rows a long line wraps to, so
+a wrapped row of a nested item starts at the left edge and its guide passes through it. Which
+lines are indented and which are headings is decided in `web/src/outline.ts`.
+
 ### A session's task list
 
 <!-- governs:

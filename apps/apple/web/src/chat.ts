@@ -39,6 +39,7 @@ import {
   type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaView, listAfter,
   refusalText,
 } from "./agenda";
+import { INDENT_WIDTH, lineShapes } from "./outline";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -2399,6 +2400,62 @@ function itemIcon(item: Item): keyof typeof ICONS {
   return item.kind === "record" ? "records" : item.kind === "path" ? "page" : item.kind;
 }
 
+/** The width of one level of indentation in a box's font, measured once it can be. */
+let indentStep = 0;
+
+/**
+ * KYO-902: the indent guides and heading rules of a box, on a layer over its text that takes
+ * no press. Each is placed from the hidden copy's line of the same index, as a gutter mark
+ * is, so it spans the rows a long line wraps to. A guide stands under the marker of the item
+ * the line is nested in, and the guides of consecutive lines meet.
+ */
+function drawOutline(marks: Marks, text: string): void {
+  const words = marks.mirror.parentElement!;
+  let layer = words.querySelector<HTMLElement>(":scope > .box-outline");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = "box-outline";
+    layer.setAttribute("aria-hidden", "true");
+    words.append(layer);
+  }
+  const shapes = lineShapes(text);
+  if (!shapes.some((shape) => shape.depth || shape.heading)) {
+    layer.replaceChildren();
+    return;
+  }
+  if (!indentStep) {
+    const probe = document.createElement("span");
+    probe.className = "box-outline-probe";
+    probe.textContent = " ".repeat(INDENT_WIDTH * 10);
+    layer.append(probe);
+    indentStep = probe.getBoundingClientRect().width / 10;
+    probe.remove();
+  }
+  const drawn: HTMLElement[] = [];
+  shapes.forEach((shape, index) => {
+    const line = marks.mirror.children[index] as HTMLElement | undefined;
+    if (!line || !(shape.depth || shape.heading)) return;
+    const top = `${line.offsetTop}px`;
+    const height = `${line.offsetHeight}px`;
+    if (shape.heading) {
+      const rule = document.createElement("div");
+      rule.className = `outline-heading level-${Math.min(shape.heading, 3)}`;
+      rule.style.top = top;
+      rule.style.height = height;
+      drawn.push(rule);
+    }
+    for (let level = 1; level <= shape.depth; level++) {
+      const guide = document.createElement("div");
+      guide.className = "outline-guide";
+      guide.style.top = top;
+      guide.style.height = height;
+      guide.style.left = `${(level - 1) * indentStep + 3}px`;
+      drawn.push(guide);
+    }
+  });
+  layer.replaceChildren(...drawn);
+}
+
 function drawMarks(area: HTMLTextAreaElement): void {
   const marks = marksOf.get(area)!;
   marks.mirror.replaceChildren(...area.value.split("\n").map((text) => {
@@ -2406,6 +2463,7 @@ function drawMarks(area: HTMLTextAreaElement): void {
     line.textContent = text || "\u200b";
     return line;
   }));
+  drawOutline(marks, area.value);
   const held = marks.ids.flatMap((id, line) => {
     const items = marks.items.get(id) ?? [];
     if (!items.length) return [];
