@@ -23,3 +23,5 @@ cpSync("node_modules/highlight.js/styles/github-dark.min.css", `${out}/hljs-dark
 // The terminal emulator's own stylesheet, and its notice, which goes wherever its code does.
 cpSync("node_modules/@xterm/xterm/css/xterm.css", `${out}/xterm.css`);
 cpSync("LICENSE-xterm", `${out}/LICENSE-xterm`);
+// CodeMirror, which the composer's editor is built on (KYO-909), and its notice likewise.
+cpSync("LICENSE-codemirror", `${out}/LICENSE-codemirror`);
