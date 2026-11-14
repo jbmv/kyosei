@@ -279,7 +279,10 @@ The composer's column holds three sections, from the top: the session's task lis
 scratchpads and the prompt (KYO-925). The section in use is the one the focus last entered,
 and the prompt when the page opens; it changes when the focus enters another section, and not
 when the focus leaves the composer. It grows to two thirds of the column's height as its
-content needs, and scrolls within that. Each other section is drawn as a summary of about one
+content needs, and scrolls within that; the scratchpads in use are the exception, which have no
+share of their own and grow as their content needs until the task list's top stands a small
+padding below the bar that holds the + button, then scroll within themselves, so that the
+room they get is what the task list's lines and the prompt's summary leave (KYO-925). Each other section is drawn as a summary of about one
 line: the task list as the first three of the person's unchecked items, one line each, and an italic
 grey line below them naming the rest by whose they are, as "2 more of yours, 4 of Claude's…"
 (KYO-931); each scratchpad as its head, one under another; and the prompt
@@ -493,6 +496,13 @@ stepping to a hit inside one opens it. Every hit is counted, but only the hits o
 marked, and none inside a shut fold: the web view was measured stalling for about a
 millisecond for each marked range that lies in a shut fold. The matching is in
 `web/src/search.ts`.
+
+The search control is one bordered box of a fixed width, as a browser's find bar is, with the
+close button outside it at the right (KYO-924). The field fills the box; the count and the
+previous and next buttons stand inside it at its right and are drawn only while the field holds
+words, so the box keeps its place and width empty, with words, and whatever the count says. It
+is one element, and is the same in the chat, a record, a file and History. A press on an arrow
+leaves the focus in the field, and Return, Shift-Return and Escape act as before.
 
 ### Records
 

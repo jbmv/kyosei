@@ -94,6 +94,11 @@ function twoThirds(seen: Layout, height: number): void {
   assert.ok(Math.abs(height - seen.column * 0.66) <= 2, `${height} of ${seen.column}`);
 }
 
+/** The scratchpads in use take what the other two sections leave, which is more than two thirds (KYO-925.c9). */
+function pastTwoThirds(seen: Layout, height: number): void {
+  assert.ok(height > seen.column * 0.66 + 2, `${height} of ${seen.column}`);
+}
+
 /** All three sections on screen, in their order, none over another (KYO-925.c1). */
 function allShown(seen: Layout): void {
   assert.ok(seen.agenda.inside && seen.scratches.inside && seen.prompt.inside, JSON.stringify(seen));
@@ -157,7 +162,7 @@ test("the section holding the caret grows to two thirds and the others shrink to
     let seen = await layout(page);
     assert.equal(seen.inUse, "scratch");
     allShown(seen);
-    twoThirds(seen, seen.scratches.height);
+    pastTwoThirds(seen, seen.scratches.height);
     // The scratchpads are as their toggles say: the first open, the second collapsed.
     assert.ok(seen.pads[0].body > 100 && seen.pads[1].body === 0, JSON.stringify(seen.pads));
     // The prompt is its first line that holds words and an ellipsis, italic and grey, above its buttons.
@@ -220,7 +225,7 @@ test("when the focus leaves the composer, the section last used keeps its room (
     let seen = await layout(page);
     assert.equal(seen.focused, -1);
     assert.equal(seen.inUse, "scratch");
-    twoThirds(seen, seen.scratches.height);
+    pastTwoThirds(seen, seen.scratches.height);
     assert.equal(seen.promptSummary.shown, true);
     // The same for the list, left for the chat.
     await page.run(`document.getElementById("agenda-summary").click()`);
@@ -251,5 +256,58 @@ test("a press on a scratchpad's head while they are heads goes into it, opening 
     seen = await layout(page);
     assert.equal(seen.inUse, "agenda");
     assert.equal(seen.focused, -1);
+  } finally { await page.close(); }
+});
+
+// KYO-925.c9, 2026-11-14: the scratchpads in use are not held to two thirds. They grow as their
+// content needs, pushing the list's summary up, until the list's top stands a small padding
+// below the bar that holds the + button, and scroll within themselves beyond that.
+test("the scratchpads in use fill what the list's summary and the prompt's leave, whatever the list holds (KYO-925.c9)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    const measure = async (items: AgendaItem[]) => {
+      await page.reload();
+      await page.run(`(() => { ${START}
+        window.kyo.draft({ boxes: [
+          { id: "a", text: ${JSON.stringify(`first pad\n${LONG}`)}, scratch: {} },
+          { id: "c", text: ${JSON.stringify(`third pad\n${LONG}`)}, scratch: {} },
+          { id: "m", text: ${JSON.stringify(`the prompt's first line\n${LONG}`)} },
+        ], etag: "e" });
+        window.kyo.agenda({ state: "shown", session_id: "S1", etag: '"e"', items: ${JSON.stringify(items)} });
+        window.kyo.composer.select(0, 3);
+      })()`);
+      const seen = await layout(page);
+      const edges = await page.run<{ bar: number; padding: number; scrollable: boolean; summary: number; promptTop: number }>(`(() => {
+        const column = document.getElementById("boxes");
+        const scratches = document.getElementById("scratches");
+        return { bar: Math.round(document.getElementById("composer-top").getBoundingClientRect().bottom),
+          padding: parseFloat(getComputedStyle(column).borderTopWidth),
+          scrollable: scratches.scrollHeight > scratches.clientHeight + 1,
+          summary: Math.round(document.getElementById("agenda-summary").getBoundingClientRect().height),
+          promptTop: Math.round(document.querySelector("#boxes > .box.main").getBoundingClientRect().top) };
+      })()`);
+      return { seen, ...edges };
+    };
+    const one = await measure(ITEMS.slice(0, 1));
+    const three = await measure(ITEMS.slice(0, 3));
+    for (const each of [one, three]) {
+      assert.equal(each.seen.inUse, "scratch");
+      allShown(each.seen);
+      // More than two thirds, which is what the fixed share allowed.
+      assert.ok(each.seen.scratches.height > each.seen.column * 0.7, JSON.stringify(each.seen));
+      // The list stands a small fixed padding below the bar, drawn whole.
+      assert.equal(each.seen.agenda.top - each.bar, each.padding);
+      assert.ok(each.padding > 0 && each.padding <= 16, String(each.padding));
+      assert.ok(each.seen.agenda.height > 0 && each.seen.peek.every((line) => line.shown), JSON.stringify(each));
+      // The scratchpads scroll within themselves, and the prompt's summary is whole.
+      assert.equal(each.scrollable, true);
+      assert.equal(each.seen.promptSummary.shown, true);
+      assert.ok(each.seen.prompt.inside);
+    }
+    // With more reminders drawn the list is taller and the scratchpads give up what it takes.
+    assert.ok(three.seen.agenda.height > one.seen.agenda.height, `${three.seen.agenda.height} vs ${one.seen.agenda.height}`);
+    assert.ok(three.seen.scratches.height < one.seen.scratches.height);
+    assert.equal(three.seen.agenda.top, one.seen.agenda.top);
+    assert.equal(three.promptTop, one.promptTop);
   } finally { await page.close(); }
 });

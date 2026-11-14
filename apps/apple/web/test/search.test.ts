@@ -370,3 +370,99 @@ test("in the chat, the field does not move as the count changes", async (t) => {
   assert.equal(none.count, "No results");
   assert.equal(await left(), empty);
 });
+
+// KYO-924.c6, 2026-11-14: the control is one bordered box of a fixed width, as a browser's find
+// bar is. The count and the two arrows stand inside it at its right, only while the field holds
+// words, and the close button stands outside, at the right. The box is one element, so it is
+// the same in each view that shows it.
+const BOX = `(() => {
+  const rect = (element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  const box = document.getElementById("find-box");
+  const tools = document.getElementById("find-tools");
+  return {
+    box: rect(box), close: rect(document.getElementById("find-close")), count: rect(document.getElementById("find-count")),
+    prev: rect(document.getElementById("find-prev")), next: rect(document.getElementById("find-next")),
+    toolsShown: getComputedStyle(tools).display !== "none" && tools.getBoundingClientRect().width > 0,
+    border: getComputedStyle(box).borderTopWidth,
+    active: document.activeElement.id,
+  };
+})()`;
+interface Box { box: R; close: R; count: R; prev: R; next: R; toolsShown: boolean; border: string; active: string }
+interface R { left: number; right: number; top: number; bottom: number }
+
+test("the search box has one place and width, empty, with words, and whatever the count says (KYO-924.c6)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = page;
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "t", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
+    ] } });
+    window.kyo.apply({ reset: true,
+      turns: [{ id: "u1", at: "2026-01-01T00:00:00Z", text: "Open a record, with care." }],
+      replies: [{ message_id: "m1", uuid: "x1", at: "2026-01-01T00:00:01Z", text: "a record, a record, a record" }] });
+    window.kyo.find();
+  })()`);
+  const read = () => opened.run<Box>(BOX);
+  const empty = await read();
+  assert.equal(empty.toolsShown, false);
+  assert.equal(empty.border, "1px");
+  const same = (seen: Box) => {
+    assert.deepEqual(seen.box, empty.box);
+    assert.deepEqual(seen.close, empty.close);
+  };
+  await search(opened, "record");
+  const counted = await read();
+  same(counted);
+  assert.equal(counted.toolsShown, true);
+  // The count and the arrows are inside the box, in that order, and the close button is outside it, to its right.
+  for (const part of [counted.count, counted.prev, counted.next]) {
+    assert.ok(part.left >= counted.box.left && part.right <= counted.box.right && part.top >= counted.box.top && part.bottom <= counted.box.bottom, JSON.stringify(counted));
+  }
+  assert.ok(counted.count.right <= counted.prev.left && counted.prev.right <= counted.next.left);
+  assert.ok(counted.close.left >= counted.box.right);
+  const none = await search(opened, "zzzz");
+  assert.equal(none.count, "No results");
+  same(await read());
+  // A press on an arrow steps and leaves the focus in the field.
+  await search(opened, "record");
+  await opened.run(`document.getElementById("find-field").focus()`);
+  await opened.run(`(() => { const button = document.getElementById("find-next");
+    button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); button.click(); })()`);
+  assert.equal((await read()).active, "find-field");
+  assert.equal(await opened.run(`document.getElementById("find-count").textContent`), "2 of 4");
+  // Cleared, the words are gone and so are the tools, the box where it was.
+  await opened.run(`(() => { const field = document.getElementById("find-field"); field.value = "";
+    field.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  const cleared = await read();
+  assert.equal(cleared.toolsShown, false);
+  same(cleared);
+});
+
+test("the search box is the same box in the Files view (KYO-924.c6)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = page;
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.files({ project: "p", same_machine: true });
+    [...document.querySelectorAll(".view-item")].find((item) => item.textContent.includes("Files")).click();
+    window.kyo.filesRoots({ document: { ok: true, roots: [{ name: "code", served: true }] } });
+    window.kyo.filesTree({ root: "code", path: "", status: 200, document: { entries: [
+      { name: "a.ts", path: "a.ts", type: "file", media_type: "text/plain", text: true, size: 60 },
+    ] } });
+    document.querySelector('.files-tree .tree-row[data-file="a.ts"]').click();
+    window.kyo.filesBlob({ root: "code", path: "a.ts", status: 200, etag: "e1", media_type: "text/plain", size: 60,
+      text: "a record\\nanother record\\n" });
+    window.kyo.find();
+  })()`);
+  const empty = await opened.run<Box>(BOX);
+  assert.equal(empty.toolsShown, false);
+  assert.equal(empty.box.right - empty.box.left, 300);
+  await search(opened, "record");
+  const counted = await opened.run<Box>(BOX);
+  assert.equal(counted.toolsShown, true);
+  assert.deepEqual(counted.box, empty.box);
+  assert.deepEqual(counted.close, empty.close);
+});
