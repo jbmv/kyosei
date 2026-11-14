@@ -86,13 +86,14 @@ struct KyoseiMacApp: App {
 }
 
 /// The Edit menu's Spelling and Grammar (KYO-918). The right-click menu on a composer box no
-/// longer holds WebKit's submenu of that name, so the two settings it kept are here: whether
-/// misspelled words are underlined and whether they are corrected as they are typed. Each item
-/// sends the web view the action WebKit's own item sent, which stores the choice under the
-/// key `ChatPage` registers a default for (KYO-796), and shows that key's value as its tick.
+/// longer holds WebKit's submenu of that name, so the setting it kept is here: whether
+/// misspelled words are underlined. The item sends the web view the action WebKit's own item
+/// sent, which stores the choice under the key `ChatPage` registers a default for (KYO-796),
+/// and shows that key's value as its tick. There is no Correct Spelling Automatically item:
+/// the page corrects nothing that is typed, by design (KYO-796), and the item changed nothing
+/// when chosen, so the menu no longer offers what the app does not do.
 struct SpellingCommands: Commands {
     @AppStorage("WebContinuousSpellCheckingEnabled") private var underlines = true
-    @AppStorage("WebAutomaticSpellingCorrectionEnabled") private var corrects = false
 
     private func send(_ action: String) {
         NSApp.sendAction(Selector((action)), to: nil, from: nil)
@@ -107,9 +108,6 @@ struct SpellingCommands: Commands {
                 Toggle(
                     "Check Spelling While Typing",
                     isOn: Binding(get: { underlines }, set: { _ in send("toggleContinuousSpellChecking:") }))
-                Toggle(
-                    "Correct Spelling Automatically",
-                    isOn: Binding(get: { corrects }, set: { _ in send("toggleAutomaticSpellingCorrection:") }))
             }
         }
     }
