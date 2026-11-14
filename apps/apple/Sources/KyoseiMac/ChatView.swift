@@ -246,6 +246,38 @@ struct LimitLabel: View {
 /// from the system's own capitalisation setting, `NSAutomaticCapitalizationEnabled`, which the
 /// checker reads from the app's domain before the global one, so that key is registered off too.
 /// That this is the source is a hypothesis the maintainer's next look decides.
+/// Removes the items the system adds to a menu after `willOpenMenu` has run: AutoFill and
+/// Services (KYO-918.n1). An item is matched by identifier or action first and by its English
+/// title second, and a separator left at either end or doubled by a removal is dropped.
+final class SystemItemTrimmer: NSObject, NSMenuDelegate {
+    static func isSystemItem(_ item: NSMenuItem) -> Bool {
+        let id = (item.identifier?.rawValue ?? "").lowercased()
+        let action = item.action.map { NSStringFromSelector($0).lowercased() } ?? ""
+        for key in ["autofill", "services"] where id.contains(key) || action.contains(key) {
+            return true
+        }
+        return ["AutoFill", "Services"].contains(item.title)
+    }
+
+    static func trim(_ menu: NSMenu) {
+        menu.allowsContextMenuPlugIns = false
+        for item in menu.items where isSystemItem(item) { menu.removeItem(item) }
+        while let first = menu.items.first, first.isSeparatorItem { menu.removeItem(first) }
+        while let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
+        var i = 1
+        while i < menu.items.count {
+            if menu.items[i].isSeparatorItem, menu.items[i - 1].isSeparatorItem {
+                menu.removeItem(at: i)
+            } else {
+                i += 1
+            }
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) { Self.trim(menu) }
+    func menuWillOpen(_ menu: NSMenu) { Self.trim(menu) }
+}
+
 final class ChatPage: WKWebView {
     static let spellingDefaults: [String: Any] = [
         "WebContinuousSpellCheckingEnabled": true,
@@ -281,6 +313,10 @@ final class ChatPage: WKWebView {
     /// Whether the last right-click was on a composer box's words, which the page posts as
     /// `composerMenu` from its `contextmenu` listener before WebKit's menu opens.
     var composerMenu = false
+
+    /// Holds the delegate that removes the system's own items from a box's menu; an `NSMenu`
+    /// keeps its delegate unretained (KYO-918.n1).
+    private var menuTrimmer: SystemItemTrimmer?
 
     // MARK: Quick Look on an image (KYO-883)
 
@@ -359,6 +395,16 @@ final class ChatPage: WKWebView {
                 menu.addItem(outdent)
                 menu.addItem(.separator())
                 clipboard.forEach { menu.addItem($0) }
+            }
+            // KYO-918.n1: the system appends Services and AutoFill after this hook returns.
+            // Services is switched off on the menu; AutoFill is removed by a delegate once the
+            // system has added it, with a second pass on the next run-loop turn.
+            menu.allowsContextMenuPlugIns = false
+            let trimmer = SystemItemTrimmer()
+            menuTrimmer = trimmer
+            menu.delegate = trimmer
+            DispatchQueue.main.async { [weak menu] in
+                if let menu { SystemItemTrimmer.trim(menu) }
             }
         }
         let imageItems = ["WKMenuItemIdentifierCopyImage", "WKMenuItemIdentifierDownloadImage"]
