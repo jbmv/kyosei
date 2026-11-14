@@ -272,7 +272,7 @@ scratchpad above it.
 - apps/apple/web/src/chat.ts#drawPromptSummary
 - apps/apple/web/src/chat.ts#dragScratch
 - apps/apple/web/src/chat.ts#placeBoxes
-- apps/apple/web/src/agenda.ts#agendaSummary
+- apps/apple/web/src/agenda.ts#agendaPeek
 -->
 
 The composer's column holds three sections, from the top: the session's task list, the
@@ -280,10 +280,11 @@ scratchpads and the prompt (KYO-925). The section in use is the one the focus la
 and the prompt when the page opens; it changes when the focus enters another section, and not
 when the focus leaves the composer. It grows to two thirds of the column's height as its
 content needs, and scrolls within that. Each other section is drawn as a summary of about one
-line: the task list as an italic grey line counting its unchecked items by whose they are, as
-"4 of yours, 2 of Claude's…"; each scratchpad as its head, one under another; and the prompt
+line: the task list as the first three of the person's unchecked items, one line each, and an italic
+grey line below them naming the rest by whose they are, as "2 more of yours, 4 of Claude's…"
+(KYO-931); each scratchpad as its head, one under another; and the prompt
 as its first line that holds words followed by an ellipsis, italic and grey, above its Delete
-and Send. A press on a summary, or on a scratchpad's head while the scratchpads are drawn as heads,
+and Send. A press on the list's items or line, on another summary, or on a scratchpad's head while the scratchpads are drawn as heads,
 goes into that section with the caret where it was, and a collapsed scratchpad pressed this
 way is opened. The text of a
 section drawn as its summary stays in the page out of sight, so that anything that puts the
@@ -386,7 +387,8 @@ chevron and a line's first character stand at least four pixels apart, and the t
 
 A live session's task list (KYO-770, KYO-771) is drawn above the composer's prompts, in a
 slightly dimmed bubble that is the first of the composer's sections; while another section is
-in use it is a single line counting its unchecked items (KYO-925). The person
+in use it is drawn as its first three unchecked items of the person's and a line counting the
+rest (KYO-925, KYO-931); the drawn items take no check or edit until the list is open. The person
 adds items and edits, checks and removes their own; the orchestrator's items show their state
 and take no press, since the server refuses a device's change to one. The app reads the list
 when it turns to a live session and again when the session's stream says its etag changed,
@@ -568,7 +570,7 @@ Files shows the project's files as `kyo serve` serves them: the code repository 
 repository, each as git shows it, and the followed session's scratchpad directory when the
 server has one for it. The side bar holds a chip for each of these roots, the chosen root's
 tree, a toggle for dotfiles, which are hidden at first, and the files the session's replies and
-prompts have named, newest first; the chat's side bar lists those files too. A markdown file is
+prompts have named, newest first. A markdown file is
 drawn as a reply is, and its relative links and images are read against its own folder. A source
 or text file is read-only, with line numbers and with colouring for the types the renderer
 knows. An image is shown, and any other file is described by its name, type and size. A text
