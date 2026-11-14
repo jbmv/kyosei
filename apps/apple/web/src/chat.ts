@@ -15,6 +15,7 @@ import {
 } from "./files";
 import { highlight, render } from "./pipeline";
 import { chipPieces } from "./chipwords";
+import { TAG_RULE, tagCharRefused, tagName, tagProblem } from "./tags";
 import {
   type Item, type Line, type LinkTarget, type Narrowing, type RecordLocation, type RecordRow, type RecordSort,
   type RecordSortBy, awaitingIds, kindControlText, kindsOf, kindsPresent, pressed,
@@ -2615,6 +2616,13 @@ function showMark(editor: EditorView, id: number): void {
     chip.className = "mark-item";
     if (item.kind === "tag") {
       chip.textContent = `#${item.name}`;
+      // KYO-941: a tag kept in a draft from before the field checked it is shown as the server
+      // will refuse it, before the send.
+      const problem = tagProblem(item.name);
+      if (problem) {
+        chip.classList.add("invalid");
+        chip.title = `Not a valid tag: ${problem}. The send will be refused until it is removed.`;
+      }
     } else if (item.kind === "file") {
       if (item.thumb) {
         const thumb = document.createElement("img");
@@ -2656,9 +2664,21 @@ function showMark(editor: EditorView, id: number): void {
   // the wrong place in the app's web view.
   const suggestions = document.createElement("div");
   suggestions.className = "tag-suggestions";
-  const addTag = (name: string) => {
+  // KYO-941: says why the field took nothing, in the server's terms.
+  const note = document.createElement("div");
+  note.className = "tag-note";
+  const say = (text: string) => { note.textContent = text; };
+  const addTag = (raw: string): boolean => {
+    const problem = tagProblem(raw);
+    if (problem) {
+      say(`"${raw.trim()}" is not added: ${problem}.`);
+      return false;
+    }
+    const name = tagName(raw);
+    say("");
     store(TAGS_KEY, [name, ...stored<string[]>(TAGS_KEY, []).filter((used) => used !== name)].slice(0, 200));
     if (!held.some((item) => item.kind === "tag" && item.name === name)) placeItem<Item>(editor, lineNow(), { kind: "tag", name });
+    return true;
   };
   const suggest = () => {
     const typed = field.value.trim().replace(/^#/, "").toLowerCase();
@@ -2672,16 +2692,27 @@ function showMark(editor: EditorView, id: number): void {
     suggestions.replaceChildren(...names.map((name) => boxButton("tag-suggestion", `#${name}`, () => addTag(name))));
   };
   field.addEventListener("input", suggest);
+  // A space or a comma enters nothing, and the field says so while it is typed. A paste or an
+  // insertion that carries one is refused whole, which `beforeinput` sees and `keydown` does not.
+  field.addEventListener("beforeinput", (event) => {
+    const given = event.data ?? "";
+    const refused = [...given].find(tagCharRefused);
+    if (event.inputType.startsWith("insert") && refused !== undefined) {
+      event.preventDefault();
+      say(`${refused === "," ? "A comma" : "A space"} is not allowed in a tag: ${TAG_RULE}.`);
+    } else {
+      say("");
+    }
+  });
   field.addEventListener("keydown", (event) => {
     event.stopPropagation();
     if (event.key === "Escape") {
       hideMark();
       editor.focus();
     }
-    const name = field.value.trim().replace(/^#/, "");
-    if (event.key !== "Enter" || !name) return;
+    if (event.key !== "Enter" || !tagName(field.value)) return;
     event.preventDefault();
-    addTag(name);
+    addTag(field.value);
   });
   // KYO-823: the reverse of a right-click, a place in the chat chosen for this paragraph.
   const anchorButton = boxButton("mark-anchor-mode", "Anchor", () => startAnchorMode(editor, id));
@@ -2695,7 +2726,7 @@ function showMark(editor: EditorView, id: number): void {
     move.title = "Move this paragraph, with what is nested under it, to the end of the prompt";
     actions.push(move);
   }
-  markPanel.replaceChildren(...chips, ...actions, divider, field, suggestions);
+  markPanel.replaceChildren(...chips, ...actions, divider, field, note, suggestions);
   suggest();
   // Below its paragraph's first row, in the box, which the panel is placed in.
   const box = boxOf(editor);
@@ -3245,7 +3276,7 @@ function paintStaleAnchors(): void {
   }
   for (const chip of Array.from(chat.querySelectorAll<HTMLElement>(".turn-anchor[data-anchor]"))) {
     const marks = stale.get(chip.dataset.anchor ?? "");
-    const line = (chip.title ?? "").replace(/\n\(stale:.*$/s, "");
+    const line = (chip.title ?? "").replace(/\n\(stale reference:.*$/s, "");
     chip.classList.toggle("stale", Boolean(marks));
     if (!marks) {
       chip.title = line;
@@ -3255,7 +3286,7 @@ function paintStaleAnchors(): void {
     const under = paragraphUnder(chip);
     const mark = marks.find((held) => under && held.text?.split("\n")[0].trim() === under) ?? marks[0];
     const paragraph = firstWords(under || mark.text || "", STALE_WORDS);
-    chip.title = `${line}\n(stale: the place${paragraph ? ` "${paragraph}" was anchored to` : " anchored"} is no longer in the transcript as it was)`;
+    chip.title = `${line}\n(stale reference: the document was edited or moved since${paragraph ? ` "${paragraph}" was anchored to it` : " this was anchored to it"})`;
   }
 }
 
