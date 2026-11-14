@@ -28,7 +28,9 @@ adds the following.
 - **The session's task list.** A session has one list that the person and the
   orchestrator both write, and between sessions the app shows the last session's. The person keeps reminders on it in the app, above the composer,
   and the orchestrator keeps its plan there with `kyo agenda`. The hooks print the unchecked
-  items into the session on each prompt and name the person's at each stop.
+  items into the session on each prompt and name the person's at each stop. A record id of
+  the project in an item, with or without a criterion or gate suffix, is drawn as a link that
+  opens Records at that record; the collapsed list's lines stay text.
 - **Drafts kept on the server.** The server saves the unsent prompts of each session and of
   the project. A prompt written on one device appears on another while both are open, a
   prompt sent from one leaves the other, and one written while no session runs is carried

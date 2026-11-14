@@ -1226,7 +1226,7 @@ body.view-files #menu-panel { display: flex; flex-direction: column; overflow: h
 .tree-row:hover { background: var(--panel); }
 .tree-row.current { background: var(--line); }
 .tree-row .chevron { flex: none; display: inline-block; width: 10px; color: var(--muted); text-align: center; }
-.tree-row.open > .chevron { transform: rotate(90deg); }
+.tree-row.open .chevron { transform: rotate(90deg); }
 .tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tree-row.dot .tree-name { color: var(--muted); }
 .tree-waiting { color: var(--muted); font-size: 12px; }
