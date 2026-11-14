@@ -13,6 +13,8 @@
 # object files with the app's build. It is signed ad hoc, or with KYOSEI_SIGN_IDENTITY, and
 # is never notarized or given the provisioning profile: the command stops if a variable
 # that asks for either is set.
+# Its Info.plist sets LSUIElement, so that it starts as an accessory app, with no Dock icon,
+# and does not come in front of the app a person is using (KYO-945).
 set -eu
 cd "$(dirname "$0")"
 
@@ -44,7 +46,8 @@ if [ "${1:-}" = check ]; then
   /usr/libexec/PlistBuddy \
     -c 'Set :CFBundleIdentifier dev.kyosei.apple.check' \
     -c 'Set :CFBundleExecutable KyoseiCheck' \
-    -c 'Set :CFBundleName KyoseiCheck' "$APP/Contents/Info.plist"
+    -c 'Set :CFBundleName KyoseiCheck' \
+    -c 'Add :LSUIElement bool true' "$APP/Contents/Info.plist"
   if [ -n "${KYOSEI_SIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime --sign "$KYOSEI_SIGN_IDENTITY" "$APP"
   else

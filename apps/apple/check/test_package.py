@@ -82,6 +82,9 @@ def test_check_mode_writes_the_check_build_and_leaves_the_apps_package() -> None
         ).stdout.strip()
 
     assert read("CFBundleIdentifier") == "dev.kyosei.apple.check"
+    # KYO-945: an accessory app from its first moment, so that starting it brings nothing
+    # in front of the app a person is using.
+    assert read("LSUIElement") == "true"
     assert read("CFBundleExecutable") == "KyoseiCheck"
     executable = app / "Contents" / "MacOS" / "KyoseiCheck"
     assert harness.MARKER in executable.read_bytes()

@@ -10,14 +10,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setvbuf(stdout, nil, _IOLBF, 0)
-        // Run as a plain executable, the process is otherwise not a foreground app.
-        NSApp.setActivationPolicy(.regular)
         #if KYOSEI_CHECK
-        // A check build (KYO-944) is started by a runner on a machine a person may be using,
-        // so it does not ask to come to the front unless the run says so, and it takes its
-        // window's place from the run. Its channel starts only when the run names a socket.
+        // A check build (KYO-944) is started by a runner on a machine a person may be using.
+        // It runs as an accessory app (KYO-945): it has no Dock icon and no menu bar of its
+        // own, and nothing brings it in front of the app the person is using; its bundle
+        // says the same with LSUIElement, so that it is one from its first moment. A run
+        // that asks for the front with KYOSEI_CHECK_ACTIVATE gets a regular app, activated.
+        // The window's place is taken from the run, and the channel starts only when the
+        // run names a socket.
         let environment = ProcessInfo.processInfo.environment
-        if environment[CheckBuild.activateVariable] == "1" { NSApp.activate() }
+        let asked = environment[CheckBuild.activateVariable] == "1"
+        NSApp.setActivationPolicy(asked ? .regular : .accessory)
+        if asked { NSApp.activate() }
         checkChannel = CheckChannel.startFromEnvironment(feed: feed)
         if let frame = CheckBuild.frame(in: environment) {
             Task {
@@ -31,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         #else
+        // Run as a plain executable, the process is otherwise not a foreground app.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         #endif
     }
