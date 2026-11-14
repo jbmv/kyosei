@@ -85,6 +85,25 @@ a { color: var(--link); }
   overflow-wrap: anywhere;
 }
 
+/* KYO-930: a message kyo serve sent (the idle timer's), drawn on the other side from the person's
+   prompts, without their fill, and labelled by its data-source. */
+.turn.turn-automatic {
+  margin-left: 0;
+  margin-right: auto;
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+.turn.turn-automatic::before {
+  content: attr(data-source);
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .reply { overflow-wrap: break-word; }
 .reply > :first-child { margin-top: 0; }
 .reply h1, .reply h2, .reply h3 { line-height: 1.3; margin: 1.3em 0 0.5em; }

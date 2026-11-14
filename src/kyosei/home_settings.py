@@ -11,6 +11,11 @@ prefix wherever it appears in an argument. A missing file, or a file without the
 ``serve_send: true`` lets ``kyo serve`` accept the send routes (KYO-699); anything else,
 including an absent key, leaves them refusing. It is read on every request.
 
+``serve_idle_message: true`` lets ``kyo serve`` send one automated message to a session that
+has sat idle while its prompt cache nears expiry (KYO-929, :mod:`kyosei.serve_idle`). It is
+off unless set, takes effect only where ``serve_send`` is also true, and is read when the
+server starts and again at each look, so that clearing it stops the messages without a restart.
+
 KYO-519 (from KYO-513): before the controller -> orchestrator rename the key was spelled
 ``controller_command``, and that spelling is read permanently. Both present with different
 values is refused by name. Nothing writes the file: the operator renames the key by hand,
@@ -60,8 +65,16 @@ PREFIX_PLACEHOLDER = "{prefix}"
 #: KYO-699: whether ``kyo serve`` may send input to a session on this machine.
 SERVE_SEND_KEY = "serve_send"
 
+#: KYO-929: whether ``kyo serve`` sends an idle session its one automated message.
+SERVE_IDLE_MESSAGE_KEY = "serve_idle_message"
+
 #: Every key this build knows. Anything else is refused by name.
-KNOWN_KEYS: tuple[str, ...] = (ORCHESTRATOR_COMMAND_KEY, CONTROLLER_COMMAND_KEY, SERVE_SEND_KEY)
+KNOWN_KEYS: tuple[str, ...] = (
+    ORCHESTRATOR_COMMAND_KEY,
+    CONTROLLER_COMMAND_KEY,
+    SERVE_SEND_KEY,
+    SERVE_IDLE_MESSAGE_KEY,
+)
 
 #: The value a refusal offers as working: the default, spelled as the file would hold it.
 _EXAMPLE = f'{ORCHESTRATOR_COMMAND_KEY}: ["claude", "--remote-control", "{PREFIX_PLACEHOLDER}"]'
@@ -77,6 +90,8 @@ class HomeSettings:
     source: str
     #: KYO-699: only an explicit ``serve_send: true`` is True.
     serve_send: bool = False
+    #: KYO-929: only an explicit ``serve_idle_message: true`` is True.
+    serve_idle_message: bool = False
 
     def controller_argv(self, prefix: str) -> list[str]:
         """The command for one project: ``{prefix}`` replaced in every argument."""
@@ -94,6 +109,19 @@ def _refuse(path: Path, problem: str) -> KyoseiError:
         f"or remove the file to run the default, `{DEFAULT_CONTROLLER_COMMAND[0]}` with "
         "no arguments"
     )
+
+
+def _idle_message_flag(path: Path, raw: dict) -> bool:
+    """``serve_idle_message``, which must be true or false when present (KYO-929)."""
+    value = raw.get(SERVE_IDLE_MESSAGE_KEY, False)
+    if not isinstance(value, bool):
+        raise KyoseiError(
+            f"{path} gives {SERVE_IDLE_MESSAGE_KEY} as {value!r}; write "
+            f"`{SERVE_IDLE_MESSAGE_KEY}: true` to let kyo serve send an idle session one "
+            f"automated message (it also needs `{SERVE_SEND_KEY}: true`), or "
+            f"`{SERVE_IDLE_MESSAGE_KEY}: false` or nothing to send none"
+        )
+    return value
 
 
 def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
@@ -129,9 +157,12 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
             f"to let kyo serve send input to sessions, or `{SERVE_SEND_KEY}: false` or nothing "
             "to refuse it"
         )
+    serve_idle_message = _idle_message_flag(path, raw)
     present = [key for key in (ORCHESTRATOR_COMMAND_KEY, CONTROLLER_COMMAND_KEY) if key in raw]
     if not present:
-        return HomeSettings(path, DEFAULT_CONTROLLER_COMMAND, "default", serve_send)
+        return HomeSettings(
+            path, DEFAULT_CONTROLLER_COMMAND, "default", serve_send, serve_idle_message
+        )
     if len(present) == 2 and raw[ORCHESTRATOR_COMMAND_KEY] != raw[CONTROLLER_COMMAND_KEY]:
         raise KyoseiError(
             f"{path} gives both {ORCHESTRATOR_COMMAND_KEY} and {CONTROLLER_COMMAND_KEY}, "
@@ -151,4 +182,4 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
             f"gives {key} as {value!r}, which is not a non-empty list "
             "of non-empty strings",
         )
-    return HomeSettings(path, tuple(value), "file", serve_send)
+    return HomeSettings(path, tuple(value), "file", serve_send, serve_idle_message)

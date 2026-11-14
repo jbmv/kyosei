@@ -58,7 +58,12 @@ import {
   TERMINAL_FONT, type TerminalSize, bytesOf, fontToFit, lineBreakKeys, viewSize,
 } from "./terminal";
 
-interface Turn { id: string; at: string; text: string; images?: { index: number }[] }
+/**
+ * `automatic` is set by `kyo serve` on a turn it sent itself, the idle timer's message (KYO-929):
+ * Claude Code records such a turn as the person's, and the server's send log is what says it was
+ * not. A server that predates the field sends none, and the turn is the person's.
+ */
+interface Turn { id: string; at: string; text: string; images?: { index: number }[]; automatic?: boolean }
 interface Reply { message_id: string; uuid?: string; at: string; text: string; thinking?: string | null }
 interface Delivery {
   uuid: string; at: string; kind: string; text: string | null; sender: string | null;
@@ -506,6 +511,13 @@ function drawChipWords(words: string): Node[] {
 function drawTurn(turn: Turn, session?: string): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
+  // KYO-930: a message `kyo serve` sent is drawn as the server's: its own look, and a label in
+  // the stylesheet (`content: attr(data-source)`), so the label is not text an anchor measures.
+  if (turn.automatic) {
+    element.classList.add("turn-automatic");
+    element.dataset.source = "Automated message from kyo serve";
+    element.title = "Sent by kyo serve, not typed by the person";
+  }
   for (const { index } of turn.images ?? []) element.append(drawImage(turn, index, session));
   // The line the server puts above an anchored paragraph is drawn as a chip. The text
   // around it stays as it was sent, which is what an anchor on this prompt measures against.

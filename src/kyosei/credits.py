@@ -453,6 +453,10 @@ class _SessionView:
     lines: list[dict]
     readable: bool
     why: str
+    #: KYO-929: transcript turns the send log records as automatic sends (the idle timer's
+    #: message): in the transcript as the person's, but not their words, so left out of
+    #: ``turns``, and kept here to refuse a reference that names one.
+    automatic: list = field(default_factory=list)
 
 
 def turn_refs_of(args: Namespace) -> list[str]:
@@ -531,7 +535,26 @@ def _session_view(ctx: Context, session: str) -> _SessionView:
     if not read.readable:
         return _SessionView(session, [], lines, False, read.why)
     turns = transcript.apply_paste_index(read.turns, confirmed_paste_flags(ctx.root, session))
-    return _SessionView(session, sorted(turns, key=lambda t: t.timestamp), lines, True, read.why)
+    turns = sorted(turns, key=lambda t: t.timestamp)
+    persons, automatic = _without_automatic(ctx, session, turns)
+    return _SessionView(session, persons, lines, True, read.why, automatic)
+
+
+def _without_automatic(ctx: Context, session: str, turns: list) -> tuple[list, list]:
+    """Split a session's turns into the person's and those the send log records as automatic
+    sends to it (KYO-929): the text typed into the pane reaches the transcript as the
+    person's, and only the log says it was not."""
+    from . import serve_send  # imports the server, which this module otherwise does not need
+
+    sends = serve_send.automatic_sends(dict(ctx.environ), session)
+    if not sends:
+        return turns, []
+    persons: list = []
+    automatic: list = []
+    for turn in turns:
+        marked = serve_send.is_automatic_turn(sends, turn.timestamp, turn.full_text)
+        (automatic if marked else persons).append(turn)
+    return persons, automatic
 
 
 def _line_of(turn, lines: list[dict]) -> dict | None:
@@ -606,6 +629,30 @@ def session_turns(ctx: Context, session: str) -> list[CitedTurn]:
     return out
 
 
+def _refuse_automatic(view: _SessionView, ref: str, flag: str, ids) -> None:
+    """Refuse a reference naming a turn the send log records as an automatic send (KYO-929).
+
+    Claude Code records the idle timer's message as the person's turn, so the turn index
+    holds it as theirs; only the log says it is not, and a credit cites their own words."""
+    for prefix in (False, True):
+        marked = [turn for turn in view.automatic if _names(ref, ids(turn), prefix=prefix)]
+        if marked:
+            raise ContractViolation(
+                CONTRACT_CREDIT_TURN_NOT_THE_PERSONS,
+                [
+                    f"{flag} {ref} is not a turn of the person's: the send log records the "
+                    f"message of {marked[0].timestamp} in session {view.session} as an "
+                    "automatic send from kyo serve (the idle timer's message arrives in the "
+                    "transcript as the person's turn), and a credit cites the person's own "
+                    "words: nothing was written",
+                    "name one of the person's turns with --turn; `kyo turns --said` lists "
+                    "them" + (". Their latest in that session:" if view.turns else ""),
+                    *_turn_listing(view),
+                    "or leave --turn out, and their latest turn of the session is taken",
+                ],
+            )
+
+
 def _find_in(view: _SessionView, ref: str, flag: str = "--turn") -> CitedTurn | None:
     """The turn of the person's that ``ref`` names in one session, or None when it names
     nothing there. Refuses a reference that names several turns, a line of the index that
@@ -633,6 +680,7 @@ def _find_in(view: _SessionView, ref: str, flag: str = "--turn") -> CitedTurn | 
                     ]
                 )
             )
+    _refuse_automatic(view, ref, flag, ids)
     for prefix in (False, True):
         lines = [
             line

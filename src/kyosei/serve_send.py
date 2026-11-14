@@ -49,6 +49,13 @@ setting or the device may have changed. Its log rows have the actions ``hold``, 
 and ``held-delivery``. A line the server writes above a held message at delivery (KYO-730,
 :func:`kyosei.serve_notes.held_line`) is logged as a first segment of its own, of the kind
 ``held-line``, so that the row does not count it among what the person typed.
+
+THE IDLE TIMER (KYO-929, :mod:`kyosei.serve_idle`) sends through :func:`deliver_idle`, which
+makes the same checks of the machine's setting and of the screen as a held message's delivery
+and writes a row with the action ``idle-message``, no device, ``automatic`` true and the reason
+``idle-timer``. :func:`automatic_sends` and :func:`is_automatic_turn` read such rows back, so
+that a credit never takes a transcript turn that this log records as an automatic send for
+the person's own words.
 """
 
 from __future__ import annotations
@@ -63,6 +70,7 @@ import threading
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +91,9 @@ INTERRUPT = "interrupt"
 HOLD = "hold"
 RETRACT = "retract"
 HELD_DELIVERY = "held-delivery"
+#: The log action of the idle timer's message, and the reason of its row (KYO-929).
+IDLE_MESSAGE = "idle-message"
+IDLE_TIMER = "idle-timer"
 
 #: What follows ``sessions/{id}/``. Each answers POST only.
 ROUTES = (MESSAGE, SLASH, INTERRUPT)
@@ -448,7 +459,7 @@ def _parsed(action: str, document: dict) -> tuple[list[_Segment], bool]:
 
 def _keys(live: session_layer.LiveSession, action: str, segments: list[_Segment]) -> None:
     """Hand the keys to the session layer. The caller holds :data:`_SEND_LOCK`."""
-    if action in (MESSAGE, HELD_DELIVERY):
+    if action in (MESSAGE, HELD_DELIVERY, IDLE_MESSAGE):
         live.send_message(
             [
                 session_layer.Pasted(s.text) if s.kind == PASTED else session_layer.Typed(s.text)
@@ -610,6 +621,8 @@ def _waiting(reason: str | None = None, detail: str | None = None, *, idle: bool
 #: route publishes them. The session layer names no constant for them.
 _IDLE = "idle"
 _WORKING = "working"
+#: The idle state, for the idle timer, which reads the screen to choose its text.
+IDLE_SCREEN = _IDLE
 
 
 #: The reason on the log row of a held message sent to a working screen (KYO-722).
@@ -784,3 +797,166 @@ def log_held(
             _append(descriptor, attempt)
     finally:
         os.close(descriptor)
+
+
+# ----------------------------------------------------------------------- the idle timer
+
+
+def deliver_idle(
+    environ: dict[str, str],
+    project_name: str,
+    session_id: str,
+    root_of: Callable[[], str],
+    text: str,
+    *,
+    at: str,
+) -> HeldOutcome:
+    """Send the idle timer's one message as typed keys, if the screen is idle with an empty box.
+
+    The machine's ``serve_send`` setting is checked as for any send; the screen is read, and
+    read again under the send lock before the keys, and a screen showing a prompt, a dialog,
+    a working turn or text in the box is left alone (``waiting``). It sends no slash command
+    and no interrupt. The row has no device: the server is the sender. ``at`` is the time the
+    row carries.
+    """
+    try:
+        _require_enabled(environ)
+        project = ProjectSessions(root_of(), environ)
+        project.require(session_id)
+        live = project.open_live(session_id)
+        if live.pane is None:
+            return _waiting("no-pane", f"session {session_id} has no pane ({live.pane_lookup.why})")
+        blocked = _not_idle(live.screen())
+    except Refusal as refusal:
+        return _waiting(refusal.extra.get("reason", "session-route"), str(refusal))
+    except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+        return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
+    if blocked is not None:
+        return blocked
+    segment = _Segment(TYPED, text)
+    attempt = _Attempt(
+        IDLE_MESSAGE,
+        project_name,
+        session_id,
+        at=at,
+        segments=[segment.logged()],
+        automatic=True,
+    )
+    try:
+        descriptor = _open_log(environ)
+    except Refusal as refusal:
+        return _waiting("send-log-unusable", str(refusal))
+    result: HeldOutcome
+    try:
+        with _SEND_LOCK:
+            try:
+                blocked = _not_idle(live.screen())
+            except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+                return _waiting("pane-unreadable", f"the pane could not be read: {exc}")
+            if blocked is not None:
+                return blocked
+            try:
+                _keys(live, IDLE_MESSAGE, [segment])
+            except session_layer.PaneNotReady as exc:
+                attempt.outcome, attempt.status, attempt.reason = "refused", 409, "screen-not-ready"
+                result = _waiting("screen-not-ready", str(exc))
+            except session_layer.NotSubmitted as exc:
+                attempt.outcome, attempt.status, attempt.reason = "failed", 502, NOT_SUBMITTED
+                attempt.diagnosis = _diagnosis(exc)
+                result = HeldOutcome("failed", NOT_SUBMITTED, str(exc))
+            except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+                attempt.outcome, attempt.status, attempt.reason = "failed", 502, "send-failed"
+                result = HeldOutcome("failed", "send-failed", str(exc))
+            else:
+                attempt.outcome, attempt.status, attempt.reason = "sent", 200, IDLE_TIMER
+                result = HeldOutcome("delivered")
+        try:
+            _append(descriptor, attempt)
+        except OSError as exc:
+            if result.outcome == "delivered":
+                result = HeldOutcome("delivered", log_problem=str(exc))
+    finally:
+        os.close(descriptor)
+    return result
+
+
+@dataclass(frozen=True)
+class AutomaticSend:
+    """One logged send marked automatic: when, why, and the digests of its segments."""
+
+    at: datetime
+    reason: str | None
+    digests: frozenset[str]
+
+
+#: How far apart a send's row and the transcript turn it made may lie: the row is stamped
+#: before the keys, and the turn is stamped by Claude Code when it takes the message.
+_TURN_AFTER_SEND = timedelta(minutes=10)
+_TURN_BEFORE_SEND = timedelta(seconds=10)
+
+
+def _logged_moment(stamp: object) -> datetime | None:
+    if not isinstance(stamp, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def automatic_sends(environ: dict[str, str], session_id: str) -> list[AutomaticSend]:
+    """The log's rows for ``session_id`` that sent a message marked automatic, oldest first.
+
+    A missing or unreadable log, and a line that is not a row, give nothing: the log is
+    read to refuse crediting a message, and a log that cannot be read cannot say.
+    """
+    try:
+        text = log_path(environ).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    found: list[AutomaticSend] = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            not isinstance(row, dict)
+            or row.get("session_id") != session_id
+            or row.get("automatic") is not True
+            or row.get("outcome") != "sent"
+            or (at := _logged_moment(row.get("at"))) is None
+        ):
+            continue
+        digests = frozenset(
+            seg["digest"]
+            for seg in row.get("segments") or []
+            if isinstance(seg, dict)
+            and seg.get("kind") in (TYPED, PASTED)
+            and isinstance(seg.get("digest"), str)
+        )
+        found.append(AutomaticSend(at, row.get("reason"), digests))
+    return sorted(found, key=lambda send: send.at)
+
+
+def digest_of(text: str) -> str:
+    """The digest a log row holds for a segment of this text."""
+    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
+
+
+def is_automatic_turn(sends: list[AutomaticSend], at: str, text: str) -> bool:
+    """Whether a transcript turn is one the log records as an automatic send.
+
+    The turn must carry the text of a logged automatic send to its session (compared by
+    digest, whole or with surrounding white space removed) and be stamped within minutes
+    after that row.
+    """
+    moment = _logged_moment(at)
+    if moment is None:
+        return False
+    wanted = {digest_of(text), digest_of(text.strip())}
+    return any(
+        send.digests & wanted and -_TURN_BEFORE_SEND <= moment - send.at <= _TURN_AFTER_SEND
+        for send in sends
+    )
