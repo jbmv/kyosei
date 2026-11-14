@@ -878,7 +878,7 @@ body.terminal-open #terminal { display: flex; }
 .turn-place.stale { text-decoration: line-through; opacity: 0.7; }
 /* KYO-712: a sent paragraph whose anchor to a reply or a prompt is stale says so beside the chip's words. */
 .turn-anchor.stale { background: color-mix(in srgb, var(--kind-decision) 20%, transparent); }
-.turn-anchor.stale::after { content: "place lost"; margin-left: 8px; color: var(--kind-decision); font-style: italic; }
+.turn-anchor.stale::after { content: "stale reference"; margin-left: 8px; color: var(--kind-decision); font-style: italic; }
 /* The server's line above a prompt it held across replies: grey, since no one anchored it. */
 .turn-held { background: color-mix(in srgb, var(--muted) 16%, transparent); }
 
@@ -887,6 +887,9 @@ body.terminal-open #terminal { display: flex; }
 .mark-anchor .icon, .turn-anchor .icon { margin-right: 4px; }
 /* KYO-763: an anchor made in a session that is no longer the one shown cannot be opened. */
 .mark-anchor.gone { color: var(--muted); cursor: default; }
+.mark-item.invalid { border: 1px solid var(--kind-decision); }
+.tag-note { flex-basis: 100%; font-size: 12px; color: var(--kind-decision); }
+.tag-note:empty { display: none; }
 .mark-item.gone { border: 1px dashed var(--muted); background: none; }
 
 /* What a sent prompt was anchored to: quieter than an unsent one, and it stays. */

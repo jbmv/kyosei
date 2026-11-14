@@ -207,9 +207,9 @@ test("a sent paragraph whose anchor is stale says so on its chip and names the p
   const opened = await open([{ ...mark, anchors: [{ role: "agent", uuid: UUID, stale: true }] }]);
   const stale = await opened.run<Chip>(read);
   assert.equal(stale.stale, true);
-  assert.equal(stale.said, '"place lost"');
-  assert.match(stale.title, /\(stale: the place "The paragraph that was anchored\." was anchored to is no longer in the transcript as it was\)$/);
-  assert.equal(stale.text.includes("place lost"), false, "the warning is no part of the prompt's text");
+  assert.equal(stale.said, '"stale reference"');
+  assert.match(stale.title, /\(stale reference: the document was edited or moved since "The paragraph that was anchored\." was anchored to it\)$/);
+  assert.equal(stale.text.includes("stale reference"), false, "the warning is no part of the prompt's text");
 
   // An anchor the server can still place is drawn as before, and a warning goes when the frame says so.
   await opened.run(`window.kyo.marks({ marks: ${JSON.stringify([{ ...mark, anchors: [{ role: "agent", message: "m1", start: 0, end: 5 }] }])} })`);

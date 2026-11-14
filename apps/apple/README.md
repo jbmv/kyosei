@@ -22,7 +22,9 @@ adds the following.
 - **Tags.** A paragraph can also carry tags. At delivery the server files each anchored or
   tagged paragraph in the store as a note, with its text, anchors and tags, and
   `kyo notes list --tag` later finds what the person wrote on a subject. A tag is not typed
-  to the agent.
+  to the agent. The tag field applies the server's rule (1 to 64 characters, no space or
+  comma) as it is typed and says why when it takes nothing; a tag kept in an older draft that
+  the server would refuse is marked invalid on its chip.
 - **Attachments.** A file or a pasted image can be attached to a paragraph. The server saves
   it on the machine the session runs on and types its path above the paragraph.
 - **The session's task list.** A session has one list that the person and the
@@ -89,6 +91,7 @@ The files that the later sections do not name, with what each holds:
 | `web/static/chat.css` | the page's styles |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
+| `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
 | `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
 | `web/src/agents.ts` | how a subagent is named under the composer and in the side panel |
@@ -381,8 +384,8 @@ a test process has no key window, and does not see the app's own Edit menu.
 What an unsent prompt is anchored to is highlighted
 in the chat, and the highlight goes when the anchor does, unless another prompt holds an anchor
 on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
-cannot be highlighted, so the chip above that paragraph in the sent prompt reads "place lost"
-and its title names the paragraph.
+cannot be highlighted, so the chip above that paragraph in the sent prompt reads "stale reference"
+and its title says that the document was edited or moved since, and names the paragraph.
 
 The page's tests are in `web/test/` and run with `npm test` in `web/`. Those in
 `anchors.test.ts` need a web view: they build the page, open it in a headless Chrome and feed
