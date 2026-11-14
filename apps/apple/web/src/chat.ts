@@ -37,7 +37,7 @@ import {
 } from "./drafts";
 import { SendGate } from "./sending";
 import {
-  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaSummary, agendaView, listAfter,
+  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaPeek, agendaView, listAfter,
   refusalText,
 } from "./agenda";
 import { moveLines, sectionEnd } from "./outline";
@@ -1183,18 +1183,12 @@ function arrange(): void {
 // ------------------------------------------------------------- the menu and the side panel
 
 const subagents = new Map<string, Subagent>();
-const openAgents = new Set<string>();
 const agentCalls = new Map<string, ToolCall[]>();
 const agentDispatches = new Map<string, { added: number; removed: number }>();
 const requestedAgents = new Set<string>();
-let showFinishedAgents = false;
-let showFinishedTasks = false;
 const deliveries: Delivery[] = [];
 let facts: Facts | null = null;
 let menu: Menu | null = null;
-
-const SESSIONS_SHOWN = 4;
-let allSessions = false;
 
 function select(session: string): void {
   // The prompts being typed are the session's that is left, and are saved to it first.
@@ -1211,47 +1205,10 @@ function sessionLabel(row: SessionRow): string {
 function drawMenu(): void {
   if (!menu) return;
   drawHistorySessions();
-  const { current, sessions: { sessions } } = menu;
-  const shown = allSessions ? sessions : sessions.slice(0, SESSIONS_SHOWN);
-  const more = document.getElementById("sessions-more")!;
-  more.hidden = sessions.length <= SESSIONS_SHOWN;
-  more.textContent = allSessions ? "Show fewer" : "See all";
-  document.getElementById("sessions")!.replaceChildren(
-    ...shown.map((row) => {
-      const item = document.createElement("div");
-      item.className = row.session_id === current ? "session current" : "session";
-      if (row.live) {
-        const dot = document.createElement("span");
-        dot.className = "live-dot";
-        item.append(dot);
-      }
-      const label = document.createElement("span");
-      label.className = "session-label";
-      label.textContent = sessionLabel(row);
-      item.append(label);
-      item.addEventListener("click", () => select(row.session_id));
-      return item;
-    }),
-  );
 }
 
 function setText(id: string, text: string): void {
   document.getElementById(id)!.textContent = text;
-}
-
-/**
- * A list's "N finished" line with its disclosure mark (KYO-751). The mark is one drawing, a
- * chevron centred in a square box, that is turned about the box's centre when the list is open;
- * swapping one text glyph for another put the open mark off the closed one's centre.
- */
-function drawFinished(id: string, count: number, open: boolean): void {
-  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  mark.setAttribute("viewBox", "0 0 10 10");
-  mark.setAttribute("class", open ? "disclosure open" : "disclosure");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M3.5 2 L6.5 5 L3.5 8");
-  mark.append(path);
-  document.getElementById(id)!.replaceChildren(`${count} finished `, mark);
 }
 
 function drawSide(): void {
@@ -1259,80 +1216,6 @@ function drawSide(): void {
   setText("top-title", session?.title ?? menu?.project ?? windowProject);
   drawActivity();
   drawAgents();
-
-  const own = [...calls.values()].filter(isOwnBackgroundTask);
-  const runningOwn = own.filter((call) => !callFinished(call));
-  const ownLabel = (call: ToolCall) => String(call.input?.description ?? summary(call) ?? call.name);
-  sideList("side-tasks", runningOwn.map((call) => ({ label: ownLabel(call), since: call.at })));
-  const finishedOwn = own.filter(callFinished).reverse();
-  sideList(
-    "side-tasks-done",
-    showFinishedTasks
-      ? finishedOwn.map((call) => ({ label: ownLabel(call), took: tookWords(call) }))
-      : [],
-  );
-  drawFinished("side-finished", finishedOwn.length, showFinishedTasks);
-}
-
-function tookWords(call: ToolCall): string | undefined {
-  const done = deliveries.find((delivery) => delivery.call_id === call.call_id);
-  return done ? duration(Date.parse(done.at) - Date.parse(call.at)) : undefined;
-}
-
-function drawAgentRow(agent: Subagent, running: boolean): HTMLElement[] {
-  const row = document.createElement("div");
-  row.className = running ? "side-task clickable running" : "side-task clickable";
-  const name = document.createElement("span");
-  name.className = "side-task-name";
-  name.textContent = agent.description || agent.agent_type;
-  name.title = name.textContent;
-  row.append(name);
-  const since = [...calls.values()].find((call) => call.uuid === agent.tool_call_uuid)?.at;
-  if (running && since) {
-    const time = document.createElement("span");
-    time.className = "side-task-time";
-    time.dataset.since = since;
-    time.textContent = elapsed(since);
-    row.append(time);
-  }
-  row.addEventListener("click", () => {
-    if (openAgents.has(agent.agent_id)) openAgents.delete(agent.agent_id);
-    else {
-      openAgents.add(agent.agent_id);
-      requestAgent(agent.agent_id);
-    }
-    drawAgents();
-  });
-  const rows: HTMLElement[] = [row];
-  if (!running && !agentCalls.has(agent.agent_id) && !requestedAgents.has(agent.agent_id)) {
-    requestedAgents.add(agent.agent_id);
-    requestAgent(agent.agent_id);
-  }
-  // The second line: what it runs on, then its tokens, how long it took and its lines. It
-  // does not wrap, so a long one is cut at the panel's edge.
-  const words = agentMeta(agent, running);
-  const meta = document.createElement("div");
-  meta.className = running ? "agent-meta running" : "agent-meta";
-  meta.append(words.parts.join("  ·  "));
-  if (words.lines) {
-    if (words.parts.length) meta.append("  ·  ");
-    meta.append(...words.lines);
-  }
-  rows.push(meta);
-  if (!openAgents.has(agent.agent_id)) return rows;
-  const list = document.createElement("div");
-  list.className = "agent-calls";
-  const toolCalls = agentCalls.get(agent.agent_id);
-  if (!toolCalls) list.textContent = "Loading";
-  else if (!toolCalls.length) list.textContent = "No tool calls";
-  for (const call of toolCalls ?? []) {
-    const line = document.createElement("div");
-    line.textContent = `${call.name}  ${summary(call)}`;
-    line.title = line.textContent;
-    if (call.result?.is_error) line.className = "failed";
-    list.append(line);
-  }
-  return [...rows, list];
 }
 
 function tokenWords(total: number): string {
@@ -1380,13 +1263,6 @@ function drawAgents(): void {
   const agents = [...subagents.values()];
   const running = agents.filter((agent) => !agentFinished(agent));
   const finished = agents.filter(agentFinished).reverse();
-  document.getElementById("side-agents")!.replaceChildren(
-    ...running.flatMap((agent) => drawAgentRow(agent, true)),
-  );
-  document.getElementById("side-agents-done")!.replaceChildren(
-    ...(showFinishedAgents ? finished.flatMap((agent) => drawAgentRow(agent, false)) : []),
-  );
-  drawFinished("side-agents-finished", finished.length, showFinishedAgents);
   drawRunningAgents(running, finished);
   // The app is told the count as well, for anything outside the page that states it.
   (window as any).webkit?.messageHandlers?.strip?.postMessage({
@@ -1478,45 +1354,9 @@ function requestAgent(agent: string): void {
   (window as any).webkit?.messageHandlers?.agent?.postMessage({ agent });
 }
 
-function sideList(id: string, rows: { label: string; since?: string; took?: string }[]): void {
-  document.getElementById(id)!.replaceChildren(
-    ...rows.map(({ label, since, took }) => {
-      const item = document.createElement("div");
-      item.className = "side-task";
-      const name = document.createElement("span");
-      name.className = "side-task-name";
-      name.textContent = label;
-      name.title = label;
-      item.append(name);
-      if (since) {
-        const time = document.createElement("span");
-        time.className = "side-task-time";
-        time.dataset.since = since;
-        time.textContent = elapsed(since);
-        item.append(time);
-      } else if (took) {
-        const time = document.createElement("span");
-        time.className = "side-task-time";
-        time.textContent = took;
-        item.append(time);
-      }
-      return item;
-    }),
-  );
-}
-
 function agentFinished(agent: Subagent): boolean {
   return deliveries.some((delivery) =>
     delivery.task_id === agent.agent_id || (delivery.handback && delivery.sender_id === agent.agent_id));
-}
-
-function callFinished(call: ToolCall): boolean {
-  return deliveries.some((delivery) => delivery.call_id === call.call_id);
-}
-
-/** This session's own background work. A subagent's is the subagent's, and is not listed. */
-function isOwnBackgroundTask(call: ToolCall): boolean {
-  return call.name === "Monitor" || (call.name === "Bash" && call.input?.run_in_background === true);
 }
 
 // The terminal drawer (KYO-721) is an emulator on the session's pane. The app carries the
@@ -1708,16 +1548,6 @@ terminalPane.addEventListener("wheel", (event) => {
   event.stopPropagation();
 }, { passive: false });
 
-document.getElementById("side-finished")!.addEventListener("click", () => {
-  showFinishedTasks = !showFinishedTasks;
-  drawSide();
-});
-
-document.getElementById("side-agents-finished")!.addEventListener("click", () => {
-  showFinishedAgents = !showFinishedAgents;
-  drawAgents();
-});
-
 /** KYO-922: Chat with its terminal shown, as the terminal's button opens it, and never closed. */
 function openTerminal(): void {
   if (currentView !== "chat") showView("chat");
@@ -1740,11 +1570,6 @@ document.getElementById("terminal-toggle")!.addEventListener("click", () => {
   // The app opens the stream, and opens it again when the window turns to another session.
   stateTerminalSize("open");
   terminal.focus();
-});
-
-document.getElementById("sessions-more")!.addEventListener("click", () => {
-  allSessions = !allSessions;
-  drawMenu();
 });
 
 // The terminal goes on showing a reply after it has landed, and alternates between showing
@@ -1803,7 +1628,6 @@ const kyo = {
     calls.clear();
     diffs.clear();
     subagents.clear();
-    openAgents.clear();
     agentCalls.clear();
     agentDispatches.clear();
     requestedAgents.clear();
@@ -1866,11 +1690,6 @@ const kyo = {
     drawEnded();
     drawStart();
     drawSide();
-    // A subagent still running has more tool calls each time.
-    for (const id of openAgents) {
-      const agent = subagents.get(id);
-      if (agent && !agentFinished(agent)) requestAgent(id);
-    }
   },
 
   agent(data: {
@@ -2367,9 +2186,6 @@ const kyo = {
     kyo.clear();
     menu = null;
     startFrame = null;
-    allSessions = false;
-    document.getElementById("sessions")!.replaceChildren();
-    document.getElementById("sessions-more")!.hidden = true;
     chatPlace = null;
     sentMarks_ = [];
     storeTags = [];
@@ -4712,10 +4528,32 @@ function agendaRow(row: Row): HTMLElement {
   return item;
 }
 
+/**
+ * The collapsed list (KYO-931): the person's first three items, each a button that opens the
+ * list as a press on the summary line does, then the line. The items are text only; they take
+ * no check or edit until the list is open.
+ */
+function drawAgendaPeek(): void {
+  const peek = agendaPeek(agendaFrame);
+  const drawn = peek.items.map((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.tabIndex = -1;
+    button.className = "composer-summary agenda-peek-item";
+    button.textContent = item.text;
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", openAgendaFromSummary);
+    return button;
+  });
+  agendaPeekItems.replaceChildren(...drawn);
+  agendaSummaryButton.textContent = peek.line;
+  agendaSummaryButton.hidden = peek.line === "";
+}
+
 function drawAgenda(): void {
   const view = agendaView(agendaFrame, agendaShowCompleted);
   agendaPane.hidden = !view.shown;
-  agendaSummaryButton.textContent = agendaSummary(agendaFrame);
+  drawAgendaPeek();
   drawSections();
   agendaWhy.hidden = view.why === null;
   agendaWhy.textContent = view.why ?? "";
@@ -4811,6 +4649,7 @@ document.getElementById("interrupt")!.addEventListener("click", () => post("inte
 type Section = "agenda" | "scratch" | "prompt";
 let sectionInUse: Section = "prompt";
 const agendaSummaryButton = document.getElementById("agenda-summary")!;
+const agendaPeekItems = document.getElementById("agenda-peek")!;
 
 /** The section an element stands in, or null when it is in none of them. */
 function sectionAt(node: EventTarget | null): Section | null {
@@ -4882,10 +4721,11 @@ function enterScratch(editor: EditorView): void {
 
 // A press on the list's summary opens the list, with the caret in its add field when it has one.
 agendaSummaryButton.addEventListener("mousedown", (event) => event.preventDefault());
-agendaSummaryButton.addEventListener("click", () => {
+function openAgendaFromSummary(): void {
   useSection("agenda");
   if (!agendaAdd.hidden && !agendaAddRow.hidden) agendaAdd.focus();
-});
+}
+agendaSummaryButton.addEventListener("click", openAgendaFromSummary);
 
 /**
  * The prompt's summary: its first line that holds words, then an ellipsis. A prompt with marks
@@ -6299,8 +6139,6 @@ const relinkWaiting = new Set<HTMLElement>();
 let relinkTimer: number | undefined;
 let mentions: Mention[] = [];
 let chatLinks: ChatLink[] = [];
-let allLinks = false;
-const LINKS_SHOWN = 6;
 const PATH_SKIPPED = "a, button, pre, summary, textarea, .katex, .thinking";
 
 function knownPath(given: string): Answer | null {
@@ -6751,38 +6589,9 @@ function readChatLinks(): ChatLink[] {
   return list;
 }
 
-function linkRow(item: ChatLink): HTMLElement {
-  const row = document.createElement("a");
-  row.className = item.given ? "mention-row side-link path-link" : "mention-row side-link";
-  row.setAttribute("href", item.href);
-  if (item.given) row.dataset.given = item.given;
-  row.dataset.kind = item.kind;
-  row.title = item.kind === "url" ? item.href : item.place;
-  // A record is named by its title, read from the record list, which is asked for once a
-  // link needs it; until it answers the row says Record.
-  let place = item.place;
-  if (item.kind === "record") {
-    const id = parseLink(item.href)?.record;
-    const title = id ? recordRows.find((row) => row.id === id)?.title : undefined;
-    if (title) place = row.title = title;
-    else if (!listsAsked) {
-      listsAsked = true;
-      post("records", { want: "lists" });
-    }
-  }
-  row.append(span("mention-name", item.name), span("mention-place", place));
-  return row;
-}
-
-/** The chat's links, newest first, in the chat's side bar. */
+/** The chat's links, newest first, read for the Records home (KYO-862). */
 function drawChatLinks(): void {
   chatLinks = readChatLinks();
-  const short = allLinks ? chatLinks : chatLinks.slice(0, LINKS_SHOWN);
-  document.getElementById("side-linked")!.replaceChildren(
-    ...(short.length ? short.map(linkRow) : [emptyRow("None yet.")]));
-  const more = document.getElementById("side-linked-more")!;
-  more.hidden = chatLinks.length <= LINKS_SHOWN;
-  more.textContent = allLinks ? "Show fewer" : `See all ${chatLinks.length}`;
   // The Records home lists the records the chat names (KYO-862).
   if (listsRead) drawRecordsHome("");
 }
@@ -7838,11 +7647,6 @@ fileArticle.addEventListener("contextmenu", (event) => {
     kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}),
   });
 });
-document.getElementById("side-linked-more")!.addEventListener("click", () => {
-  allLinks = !allLinks;
-  drawChatLinks();
-});
-
 drawViews();
 drawProjects();
 drawRecordLists();

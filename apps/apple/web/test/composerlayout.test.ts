@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openPage, type Page } from "./chrome.ts";
-import { agendaSummary, type AgendaItem } from "../src/agenda.ts";
+import { agendaPeek, type AgendaItem } from "../src/agenda.ts";
 
 const START = `window.kyo.project({ project: "p", scope: "server/p" });`;
 const LONG = Array.from({ length: 60 }, (_, line) => `line ${line}`).join("\n");
@@ -17,17 +17,15 @@ const ITEMS = [
   item("o1", "orchestrator"), item("o2", "orchestrator"), item("o3", "orchestrator", true),
 ];
 
-test("the list's summary counts the unchecked items by whose they are (KYO-925.c4)", () => {
-  const shown = (items: AgendaItem[]) => agendaSummary({ state: "shown", session_id: "s", etag: null, items });
-  assert.equal(shown(ITEMS), "4 of yours, 2 of Claude's…");
-  // A group with nothing left is not named.
-  assert.equal(shown(ITEMS.filter((each) => each.author === "orchestrator")), "2 of Claude's…");
-  assert.equal(shown(ITEMS.filter((each) => each.author === "person")), "4 of yours…");
-  assert.equal(shown(ITEMS.filter((each) => each.checked)), "Every reminder is done…");
-  assert.equal(shown([]), "No reminders…");
-  assert.equal(agendaSummary({ state: "unavailable", why: "The list could not be read." }), "The list could not be read.");
-  assert.equal(agendaSummary({ state: "absent" }), "");
-  assert.equal(agendaSummary(null), "");
+test("the collapsed list's line counts what is not drawn, by whose it is (KYO-925.c4, KYO-931)", () => {
+  const line = (items: AgendaItem[]) => agendaPeek({ state: "shown", session_id: "s", etag: null, items }).line;
+  assert.equal(line(ITEMS), "1 more of yours, 2 of Claude's…");
+  assert.equal(line(ITEMS.filter((each) => each.author === "orchestrator")), "2 of Claude's…");
+  assert.equal(line(ITEMS.filter((each) => each.checked)), "Every reminder is done…");
+  assert.equal(line([]), "No reminders…");
+  assert.equal(agendaPeek({ state: "unavailable", why: "The list could not be read." }).line, "The list could not be read.");
+  assert.equal(agendaPeek({ state: "absent" }).line, "");
+  assert.equal(agendaPeek(null).line, "");
 });
 
 /** Each section's place and size, and what its summary shows and how. */
@@ -59,6 +57,8 @@ const LAYOUT = `(() => {
     muted,
     agenda: rect(document.getElementById("agenda")),
     agendaSummary: look(document.getElementById("agenda-summary")),
+    peek: [...document.querySelectorAll("#agenda-peek > button")].map((button) => ({
+      text: button.textContent, shown: button.getBoundingClientRect().height > 0, italic: getComputedStyle(button).fontStyle === "italic" })),
     agendaItems: document.getElementById("agenda-items").getBoundingClientRect().height,
     scratches: rect(document.getElementById("scratches")),
     pads: [...document.querySelectorAll("#scratches > .box")].map((box) => ({
@@ -76,7 +76,7 @@ interface Rect { top: number; bottom: number; height: number; inside: boolean }
 interface Look { text: string; italic: boolean; color: string; shown: boolean }
 interface Layout {
   inUse: string; column: number; muted: string;
-  agenda: Rect; agendaSummary: Look; agendaItems: number;
+  agenda: Rect; agendaSummary: Look; peek: { text: string; shown: boolean; italic: boolean }[]; agendaItems: number;
   scratches: Rect; pads: (Rect & { head: string; body: number })[];
   prompt: Rect; promptBody: number; promptSummary: Look;
   focused: number; active: string | null;
@@ -123,14 +123,29 @@ test("the prompt is in use at first; the list and each scratchpad show their sum
     twoThirds(seen, seen.prompt.height);
     assert.equal(seen.promptSummary.shown, false);
     // The list is its one line: italic, grey, the unchecked items counted by whose they are.
-    assert.deepEqual(seen.agendaSummary, { text: "4 of yours, 2 of Claude's…", italic: true, color: seen.muted, shown: true });
+    assert.deepEqual(seen.agendaSummary, { text: "1 more of yours, 2 of Claude's…", italic: true, color: seen.muted, shown: true });
+    // KYO-931: above that line, the first three of the person's unchecked items, one line each.
+    assert.deepEqual(seen.peek.map((each) => [each.text, each.shown]), [["item p1", true], ["item p2", true], ["item p3", true]]);
     assert.equal(seen.agendaItems, 0);
-    assert.ok(seen.agenda.height < 45, JSON.stringify(seen.agenda));
+    assert.ok(seen.agenda.height < 100, JSON.stringify(seen.agenda));
     // Each scratchpad is its head, its first line that holds words, one under another, the
     // collapsed one among them.
     assert.deepEqual(seen.pads.map((pad) => [pad.head, pad.body]), [["first pad", 0], ["second pad", 0], ["third pad", 0]]);
     for (const pad of seen.pads) assert.ok(pad.height < 40, JSON.stringify(pad));
     assert.ok(seen.pads[0].bottom <= seen.pads[1].top && seen.pads[1].bottom <= seen.pads[2].top);
+  } finally { await page.close(); }
+});
+
+test("a press on a drawn item of the collapsed list opens the list with the caret in its add field (KYO-931.c2)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await full(page);
+    await page.run(`document.querySelector("#agenda-peek > button").click()`);
+    const seen = await layout(page);
+    assert.equal(seen.inUse, "agenda");
+    assert.equal(seen.active, "agenda-add");
+    assert.deepEqual(seen.peek.map((each) => each.shown), [false, false, false]);
+    assert.ok(seen.agendaItems > 0);
   } finally { await page.close(); }
 });
 
