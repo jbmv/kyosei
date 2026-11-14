@@ -17,6 +17,10 @@ own ``kyo serve``, their sessions in tmux and the installed app.
 - The app is the check build, which has its own bundle identifier and so its own settings,
   reads its server and its token from the environment alone, and refuses to start without a
   server. ``CFFIXED_USER_HOME`` moves the page's storage into the run's directory.
+- The session behind the server is a script (``scripted_session.py``, KYO-946), started by
+  the server's own Start route in a pane of the private tmux server. No ``claude`` is started.
+- The app is started as an accessory app and is never asked to come to the front, and the app
+  in front is sampled through the run (``frontmost.py``, KYO-945).
 - The run stops only the processes it started, by the process objects it holds.
 
 The harness is outside ``tests/``, the only path ``pyproject.toml`` collects, so ``make test``
@@ -28,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import html
+import http.client
 import json
 import os
 import shutil
@@ -36,12 +41,18 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import frontmost
 
 HERE = Path(__file__).resolve().parent
 APPLE = HERE.parent
@@ -51,6 +62,9 @@ CHECK_EXECUTABLE = CHECK_APP / "Contents" / "MacOS" / "KyoseiCheck"
 CHECK_IDENTIFIER = "dev.kyosei.apple.check"
 SHIPPED_IDENTIFIER = "dev.kyosei.apple"
 MARKER = b"KYOSEI_CHECK_SOCKET"
+
+#: The program that stands in for a Claude Code session (KYO-946).
+SCRIPTED_SESSION = HERE / "scripted_session.py"
 
 #: The tmux servers ``kyo serve`` asks for panes (``claude_code_pane.PANE_SOCKETS``), which the
 #: wrapper maps to the run's private socket.
@@ -191,6 +205,8 @@ class Run:
             self.claude / "projects",
         ):
             made.mkdir(parents=True, exist_ok=True)
+        self.script = self.directory / "script.json"
+        self.session_log = self.directory / "session.jsonl"
         self.real_tmux = shutil.which("tmux")
         self.wrapper = write_tmux_wrapper(
             self.bin, real_tmux=self.real_tmux, socket_path=self.tmux_socket, log=self.tmux_log
@@ -241,6 +257,52 @@ class Run:
         )
         return done.stdout
 
+    def tmux(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        """Run tmux against the run's private server, named by its socket and nothing else."""
+        if not self.real_tmux:
+            raise CheckError("no tmux is installed, so the run has no private server")
+        return subprocess.run(  # noqa: S603
+            [self.real_tmux, "-S", str(self.tmux_socket), "-f", os.devnull, *arguments],
+            env=_scrubbed(dict(os.environ)),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+    def use_script(self, script: dict[str, Any] | None = None) -> None:
+        """Make the scripted session what the server's Start route starts, playing ``script``.
+
+        Written to the run's own ``settings.yml``: ``serve_send``, so that the server types a
+        prompt into the session, and ``orchestrator_command``, the program a start runs. The
+        command names this checkout's interpreter and the run's directories outright, since
+        the pane's login shell builds an environment of its own.
+        """
+        import scripted_session
+
+        scripted_session.check_script(script or {})
+        self.script.write_text(json.dumps(script or {}), encoding="utf-8")
+        command = [
+            sys.executable,
+            str(SCRIPTED_SESSION),
+            "--script",
+            str(self.script),
+            "--config",
+            str(self.claude),
+            "--kyosei-home",
+            str(self.kyosei_home),
+            "--log",
+            str(self.session_log),
+        ]
+        (self.kyosei_home / "settings.yml").write_text(
+            f"serve_send: true\norchestrator_command: {json.dumps(command)}\n", encoding="utf-8"
+        )
+
+    def session_events(self, event: str | None = None) -> list[dict[str, Any]]:
+        """What the scripted session logged, in order; one kind of event if named."""
+        rows = [json.loads(line) for line in each_line(self.session_log) if line.strip()]
+        return [row for row in rows if event is None or row["event"] == event]
+
     def stop(self) -> None:
         """Stop what the run started and nothing else, then remove the run's directory."""
         for process in reversed(self.started):
@@ -286,6 +348,102 @@ class Server:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=10)
+
+    def ask(
+        self, method: str, path: str, body: Any = None, *, timeout: float = 30
+    ) -> tuple[int, Any]:
+        """One request to a route of the project, with the run's device token."""
+        request = urllib.request.Request(  # noqa: S310 - the test server's own address
+            f"{self.url}/v1/projects/{self.name}/{path}",
+            method=method,
+            data=None if body is None else json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as answer:  # noqa: S310
+                return answer.status, json.loads(answer.read() or b"null")
+        except urllib.error.HTTPError as refusal:
+            raw = refusal.read()
+            try:
+                return refusal.code, json.loads(raw)
+            except ValueError:
+                return refusal.code, raw.decode("utf-8", "replace")
+
+    def get(self, path: str) -> Any:
+        status, document = self.ask("GET", path)
+        if status != 200:
+            raise CheckError(f"GET {path} answered {status}: {document}")
+        return document
+
+    def live_session(self) -> dict[str, Any] | None:
+        """The project's live session with a pane, as the server lists it, or None."""
+        for row in self.get("sessions")["sessions"]:
+            if row.get("live") and row.get("has_pane"):
+                return row
+        return None
+
+    def start_session(self, *, deadline: float = 30.0) -> dict[str, Any]:
+        """Start the project's session through the server's Start route, and wait until the
+        server lists it as live with a pane. Returns the route's answer and the listed row."""
+        status, started = self.ask("POST", "orchestrator/start", {})
+        if status != 200:
+            raise CheckError(f"the Start route answered {status}: {started}")
+        row = poll("the server to list the started session as live", self.live_session,
+                   deadline=deadline)  # fmt: skip
+        return {"started": started, "row": row}
+
+    def events(self, session_id: str) -> Events:
+        """Subscribe to the session's event stream; the frames are collected as they arrive."""
+        return Events(self, session_id)
+
+
+class Events:
+    """A subscriber to ``sessions/{id}/events``, reading frames on a thread of its own."""
+
+    def __init__(self, server: Server, session_id: str) -> None:
+        address = urllib.parse.urlsplit(server.url)
+        self.connection = http.client.HTTPConnection(
+            address.hostname or "", address.port, timeout=60
+        )
+        self.connection.request(
+            "GET",
+            f"/v1/projects/{server.name}/sessions/{session_id}/events",
+            headers={"Authorization": f"Bearer {server.token}"},
+        )
+        # Kept so that closing can end a read that is waiting for the next frame.
+        self.socket = self.connection.sock
+        self.stream = self.connection.getresponse()
+        if self.stream.status != 200:
+            raise CheckError(f"the event stream answered {self.stream.status}")
+        #: Each frame as ``(wall clock, event, data)``, in the order it arrived.
+        self.frames: list[tuple[float, str, Any]] = []
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _read(self) -> None:
+        event, data = "", ""
+        try:
+            for raw in self.stream:
+                line = raw.decode("utf-8").rstrip("\n")
+                if line.startswith("event: "):
+                    event = line[7:]
+                elif line.startswith("data: "):
+                    data = line[6:]
+                elif not line and event:
+                    self.frames.append((time.time(), event, json.loads(data) if data else None))
+                    event, data = "", ""
+        except (OSError, ValueError, http.client.HTTPException):
+            return
+
+    def close(self) -> None:
+        with contextlib.suppress(OSError):
+            self.socket.shutdown(socket.SHUT_RDWR)
+        self.thread.join(timeout=5)
+        with contextlib.suppress(OSError):
+            self.connection.close()
 
 
 def make_project(run: Run, name: str = "checked") -> Path:
@@ -449,6 +607,11 @@ def forget_settings() -> None:
     )
 
 
+#: For each check build a run has ended: how often it became the active app and how many
+#: menus it tracked on the screen, as its channel counted them.
+FRONT_TAKEN: list[dict[str, Any]] = []
+
+
 @dataclass
 class App:
     process: subprocess.Popen
@@ -456,9 +619,22 @@ class App:
     log: Path
     #: Seconds from starting the executable to the channel answering with a window.
     launch_seconds: float
+    #: Whether the run asked this app to come to the front.
+    asked_to_activate: bool = False
 
     def quit(self, *, deadline: float = 15.0) -> int:
-        """End the app as its Quit item does, and return its exit status."""
+        """End the app as its Quit item does, and return its exit status. What the app says
+        it did to the front is read first and kept in :data:`FRONT_TAKEN` (KYO-945)."""
+        with contextlib.suppress(CheckError, OSError):
+            state = self.channel.request("state")
+            FRONT_TAKEN.append(
+                {
+                    "pid": self.process.pid,
+                    "asked_to_activate": self.asked_to_activate,
+                    "became_active": state.get("became_active"),
+                    "menus_on_screen": state.get("menus_on_screen"),
+                }
+            )
         with contextlib.suppress(CheckError, OSError):
             self.channel.request("quit")
         self.channel.close()
@@ -526,7 +702,7 @@ def start_app(
         if state.get("bundle") != CHECK_IDENTIFIER:
             process.terminate()
             raise CheckError(f"the app started is {state.get('bundle')}, not {CHECK_IDENTIFIER}")
-        return App(process, channel, log, time.monotonic() - began)
+        return App(process, channel, log, time.monotonic() - began, activate)
     process.terminate()
     raise CheckError(f"the check build gave no window within {deadline} s:\n{log.read_text()}")
 
@@ -704,13 +880,42 @@ def identity(server_version: str) -> dict[str, Any]:
     }
 
 
+def front_of_the_run(log: Path | None) -> dict[str, Any]:
+    """What the run did to the app in front, and whether the screen was locked (KYO-945).
+
+    ``screen_locked`` is ``throughout``, ``never``, ``part of the run`` or ``not known``. A
+    run under a locked screen cannot show what it would do to an unlocked one, which
+    ``frontmost.py`` states with the measurement.
+    """
+    judged = frontmost.judge(log, build_directories=(str(APPLE / ".build"),)) if log else None
+    locked = (
+        judged["screen_locked"] if judged and judged["lines"] else [frontmost.screen_is_locked()]
+    )
+    return {
+        "screen_locked": "throughout" if locked == [True]
+        else "never" if locked == [False]
+        else "not known" if locked == [None]
+        else "part of the run",
+        "sampled": bool(judged and judged["lines"]),
+        "judgement": judged,
+        "said": frontmost.sentence(judged) if judged else "the front was not sampled",
+        "check_builds": FRONT_TAKEN,
+    }  # fmt: skip
+
+
 def write_result(
-    out: Path, scenarios: list[Scenario], *, server_version: str, measurements: dict[str, Any]
+    out: Path,
+    scenarios: list[Scenario],
+    *,
+    server_version: str,
+    measurements: dict[str, Any],
+    front_log: Path | None = None,
 ) -> Path:
     """Write ``result.json`` and the review sheet ``review.html`` into ``out``."""
     out.mkdir(parents=True, exist_ok=True)
     document = {
         "identity": identity(server_version),
+        "front": front_of_the_run(front_log),
         "passed": bool(scenarios) and all(scenario.document()["passed"] for scenario in scenarios),
         "measurements": measurements,
         "scenarios": [scenario.document() for scenario in scenarios],
@@ -741,6 +946,8 @@ def review_sheet(document: dict[str, Any]) -> str:
         f"<code>{html.escape(str(made['executable_sha256']))}</code>; server "
         f"<code>{html.escape(str(made['kyo_serve']))}</code>; written "
         f"{html.escape(str(made['written_at']))}.</p>",
+        f"<p>The screen was locked: {html.escape(document['front']['screen_locked'])}. "
+        f"The app in front: {html.escape(document['front']['said'])}.</p>",
     ]
     for scenario in document["scenarios"]:
         verdict = "pass" if scenario["passed"] else "fail"

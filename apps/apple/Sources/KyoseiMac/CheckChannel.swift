@@ -86,6 +86,12 @@ final class CheckChannel {
     private var listener: Int32 = -1
     private var accepting: DispatchSourceRead?
     private var connections: [Int32: Connection] = [:]
+    /// How many times the app became the active app, and how many menus it tracked on the
+    /// screen, since the channel started (KYO-945). A run that did not ask for the front
+    /// expects both to stay at zero, and reads them from `state`.
+    private var becameActive = 0
+    private var menusOnScreen = 0
+    private var watching: [NSObjectProtocol] = []
 
     @MainActor private final class Connection {
         var buffer = Data()
@@ -167,10 +173,21 @@ final class CheckChannel {
         }
         source.resume()
         accepting = source
+        let center = NotificationCenter.default
+        watching = [
+            center.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.becameActive += 1 } },
+            center.addObserver(
+                forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.menusOnScreen += 1 } },
+        ]
     }
 
     /// Closes the socket and removes its file.
     func stop() {
+        watching.forEach(NotificationCenter.default.removeObserver)
+        watching = []
         accepting?.cancel()
         accepting = nil
         for (descriptor, connection) in connections {
@@ -269,9 +286,12 @@ final class CheckChannel {
     /// - `key`: `key` is one character or a named key, with `modifiers`; or `text` is typed
     ///   one key at a time. The events go to `NSApp.sendEvent`.
     /// - `mouse`: a press, a release or both at `x`, `y` in the page's own coordinates.
+    ///   With `menu` or `choose` the menu a right press opens is read, and an item of it
+    ///   chosen, without the menu being put on the screen, unless `on_screen` asks for it.
     /// - `snapshot`: writes a PNG of the window to `path`.
     /// - `state`: the window's title, whether it is key, its first responder, whether the
-    ///   app is active and which app is in front.
+    ///   app is active and which app is in front, whether the app is an accessory app, and
+    ///   how often it became active and tracked a menu on the screen since the channel began.
     /// - `window`: places the window, or makes it key.
     /// - `quit`: ends the app as its Quit item does, after the answer has been written.
     ///
@@ -602,6 +622,39 @@ final class CheckChannel {
         }
     }
 
+    /// Opens a context menu without putting it on the screen (KYO-945). A menu on the screen
+    /// is tracked by the window server, which takes the keyboard and the pointer from the
+    /// app the person is using for as long as it is open. While a `mouse` request reads a
+    /// menu, the call that would show one, `NSMenu.popUpContextMenu(_:with:for:)`, which is
+    /// what WebKit shows a page's menu with, is answered here instead: the view is told the
+    /// menu is about to open, as AppKit tells it and as `ChatPage` trims it, the menu is
+    /// validated and handed to the request, and the view is told it closed. At any other
+    /// time the call is AppKit's own.
+    private enum MenuCapture {
+        @MainActor static var taking: ((NSMenu, NSEvent, NSView) -> Void)?
+
+        @MainActor static let installed: Bool = {
+            let selector = #selector(NSMenu.popUpContextMenu(_:with:for:))
+            guard let method = class_getClassMethod(NSMenu.self, selector) else { return false }
+            typealias Shown = @convention(c) (AnyClass, Selector, NSMenu, NSEvent, NSView) -> Void
+            let shown = unsafeBitCast(method_getImplementation(method), to: Shown.self)
+            let answer: @convention(block) (AnyClass, NSMenu, NSEvent, NSView) -> Void = {
+                menus, menu, event, view in
+                // AppKit shows a menu from the main thread, which is the main actor's.
+                nonisolated(unsafe) let menu = menu
+                nonisolated(unsafe) let event = event
+                let taken = MainActor.assumeIsolated { () -> Bool in
+                    guard let taking = MenuCapture.taking else { return false }
+                    taking(menu, event, view)
+                    return true
+                }
+                if !taken { shown(menus, selector, menu, event, view) }
+            }
+            method_setImplementation(method, imp_implementationWithBlock(answer))
+            return true
+        }()
+    }
+
     /// Hands a mouse event to the view under it. A window that is not the key window keeps
     /// a left press for itself, to become key, unless the view takes a first press, and a
     /// check build's window is not always key; so a left press goes to the view the window
@@ -654,6 +707,27 @@ final class CheckChannel {
                 name: NSMenu.didBeginTrackingNotification, object: nil)
         }
         defer { NotificationCenter.default.removeObserver(watch) }
+        // The menu is read off the screen unless the request asks to see it tracked.
+        var offScreen = false
+        if wantsMenu, request["on_screen"] as? Bool != true, MenuCapture.installed {
+            MenuCapture.taking = { menu, event, view in
+                offScreen = true
+                view.willOpenMenu(menu, with: event)
+                menu.delegate?.menuNeedsUpdate?(menu)
+                menu.update()
+                watch.menu = menu
+                watch.titles = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map(\.title)
+                let item = watch.choose.flatMap { title in
+                    menu.items.first { $0.title == title && $0.isEnabled }
+                }
+                if let item {
+                    watch.chosen = true
+                    menu.performActionForItem(at: menu.index(of: item))
+                }
+                view.didCloseMenu(menu, with: event)
+            }
+        }
+        defer { MenuCapture.taking = nil }
         for type in types {
             guard
                 let event = NSEvent.mouseEvent(
@@ -687,6 +761,7 @@ final class CheckChannel {
             if watch.titles != nil { pump(until: Date().addingTimeInterval(0.3)) { true } }
             answer["menu"] = watch.titles.map { $0 as Any } ?? NSNull()
             answer["chosen"] = watch.chosen
+            answer["on_screen"] = watch.titles != nil && !offScreen
         }
         return answer
     }
@@ -780,6 +855,9 @@ final class CheckChannel {
             "first_responder": responder,
             "active": NSApp.isActive,
             "frontmost": frontmost,
+            "accessory": NSApp.activationPolicy() == .accessory,
+            "became_active": becameActive,
+            "menus_on_screen": menusOnScreen,
             "bundle": bundle,
             "frame": [frame.minX, frame.minY, frame.width, frame.height],
         ]

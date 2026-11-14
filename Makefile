@@ -62,14 +62,28 @@ logged:
 # screen of the login session it runs in, so it runs on a Mac on request: it is outside
 # `tests/`, the only path pyproject.toml collects, and is named by neither `make test` nor CI
 # (tests/test_kyo944_app_check.py fails if either changes). KYOSEI_CHECK_OUT moves the result.
+# KYO-945: the app in front is sampled from before the build until after the last test
+# (apps/apple/check/frontmost.py), each step is named among the samples, and the target fails
+# if a process of the run was in front at any of them. The tmux variables are dropped so that
+# nothing the target starts is pointed at the tmux server it was run from.
 app-check: $(STAMP)
 	@out="$${KYOSEI_CHECK_OUT:-$$(pwd)/apps/apple/.build/check-run}"; \
+	front="$$out/frontmost.jsonl"; mkdir -p "$$out"; : > "$$front"; \
+	unset TMUX TMUX_PANE TMUX_TMPDIR; \
+	$(BIN)/python apps/apple/check/frontmost.py watch "$$front" & watcher=$$!; \
+	trap 'kill $$watcher 2>/dev/null' EXIT; \
+	step() { $(BIN)/python apps/apple/check/frontmost.py mark "$$front" "$$@"; }; \
+	step "package.sh check"; \
 	sh apps/apple/package.sh check || exit $$?; \
+	step "swift test"; \
 	(cd apps/apple && swift test --scratch-path .build/check -Xswiftc -DKYOSEI_CHECK \
 		--filter 'CheckChannelTests|CheckBuildTests') || exit $$?; \
-	KYOSEI_CHECK_OUT="$$out" $(BIN)/python -m pytest apps/apple/check -p no:cacheprovider; s=$$?; \
+	KYOSEI_CHECK_OUT="$$out" KYOSEI_CHECK_FRONT_LOG="$$front" \
+		$(BIN)/python -m pytest apps/apple/check -p no:cacheprovider; s=$$?; \
+	kill $$watcher 2>/dev/null; wait $$watcher 2>/dev/null; \
+	$(BIN)/python apps/apple/check/frontmost.py judge "$$front"; f=$$?; \
 	echo "make app-check: result file $$out/result.json (review sheet: $$out/review.html)"; \
-	exit $$s
+	[ $$s -eq 0 ] || exit $$s; exit $$f
 
 fmt: $(STAMP)
 	$(BIN)/ruff check --fix src tests tools

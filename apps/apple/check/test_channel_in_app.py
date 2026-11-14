@@ -42,6 +42,9 @@ def test_the_app_started_is_the_check_build_and_shows_the_test_servers_project(
     assert state["bundle"] == harness.CHECK_IDENTIFIER
     assert state["title"] == "checked"
     assert state["visible"] is True
+    # KYO-945: started as an accessory app, which nothing brings in front of another app.
+    assert state["accessory"] is True
+    assert state["active"] is False and state["became_active"] == 0
     project = app.channel.wait(
         "the project's name in the top bar",
         "return document.querySelector('.view-item[aria-current=\"page\"]')?.dataset.viewItem",
@@ -90,6 +93,10 @@ def test_a_right_press_reads_the_native_menu_and_closes_it(app: harness.App) -> 
     answer = app.channel.request("mouse", x=box["x"], y=box["y"], button="right", menu=True)
     assert answer["menu"], "no native menu opened on the right press"
     assert "Reload" in answer["menu"]
+    # KYO-945: the menu was read without being put on the screen, where the window server
+    # would have tracked it and taken the keyboard and pointer from the app in front.
+    assert answer["on_screen"] is False
+    assert app.channel.request("state")["menus_on_screen"] == 0
     # The app answers again, so it is not waiting in the menu.
     assert app.channel.eval("return 1 + 1;") == 2
 
