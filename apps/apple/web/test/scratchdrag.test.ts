@@ -1,6 +1,6 @@
 // Run with `npm test`. A scratchpad is moved among the others by dragging its head, its fold
-// toggle included, and a press on the head that does not move still folds and opens it
-// (KYO-926). The new order is saved with the draft, and a window that reads the draft shows
+// toggle included, and a press on the head that does not move still collapses and opens it
+// (KYO-926), one being open at a time (KYO-936). The new order is saved with the draft, and a window that reads the draft shows
 // it. The pointer is driven by mouse events dispatched in the page. A machine with no Chrome
 // skips these.
 import assert from "node:assert/strict";
@@ -53,7 +53,8 @@ test("a scratchpad dragged by its head moves among the others, and the order is 
     // Below the middle of the last: it goes last, and the click that ends the drag folds nothing.
     await page.run(drag(0, "title", 2, 4));
     assert.deepEqual(await page.run(ORDER), ["beta", "gamma", "alpha"]);
-    assert.deepEqual(await page.run(COLLAPSED), [false, false, false]);
+    // KYO-936: the one with the caret is the one open, before the drag and after it.
+    assert.deepEqual(await page.run(COLLAPSED), [true, true, false]);
     // The box being typed in keeps the caret where it was.
     assert.deepEqual(await page.run(`(() => { const box = window.kyo.composer.boxes().find((each) => each.focused);
       return box && [box.text, box.from]; })()`), ["alpha\nnotes", 2]);
@@ -62,7 +63,7 @@ test("a scratchpad dragged by its head moves among the others, and the order is 
     // By its toggle, above the middle of the first: it goes first.
     await page.run(drag(1, "toggle", 0, -4));
     assert.deepEqual(await page.run(ORDER), ["gamma", "beta", "alpha"]);
-    assert.deepEqual(await page.run(COLLAPSED), [false, false, false]);
+    assert.deepEqual(await page.run(COLLAPSED), [true, true, false]);
     await page.run(pause);
     const order = await page.run<{ id: string }[]>(saved);
     assert.deepEqual(order.map((box) => box.id), ["c", "b", "a", "m"]);
@@ -85,20 +86,24 @@ test("another window showing the draft takes the new order when the moved draft 
   } finally { await page.close(); }
 });
 
-test("a press on the head that does not move folds and opens the scratchpad as before, and a drag back to its place moves nothing (KYO-926.c1)", async (t) => {
+test("a press on the head that does not move opens the scratchpad or collapses it, and a drag back to its place moves nothing (KYO-926.c1, KYO-936.c1)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await open(page);
+    // The first holds the caret and is the one open. A press on a collapsed head opens that
+    // one, which takes the caret, and collapses the other; a press on the open head collapses it.
+    assert.deepEqual(await page.run(COLLAPSED), [false, true, true]);
     await page.run(drag(1, "toggle", null, 2));
-    assert.deepEqual(await page.run(COLLAPSED), [false, true, false]);
+    assert.deepEqual(await page.run(COLLAPSED), [true, false, true]);
+    assert.deepEqual(await page.run(`window.kyo.composer.boxes().map((box) => box.focused)`), [false, true, false, false]);
     await page.run(drag(1, "title", null, 0));
-    assert.deepEqual(await page.run(COLLAPSED), [false, false, false]);
-    // The fold and the opening are saved; what follows is not.
+    assert.deepEqual(await page.run(COLLAPSED), [true, true, true]);
+    // Which is open is this window's and is not saved, and neither is what follows.
     await page.run(pause);
-    await page.run(`window.posted = []`);
+    assert.equal(await page.run(`${saved} ?? null`), null);
     await page.run(drag(1, "title", null, 12));
     assert.deepEqual(await page.run(ORDER), ["alpha", "beta", "gamma"]);
-    assert.deepEqual(await page.run(COLLAPSED), [false, false, false]);
+    assert.deepEqual(await page.run(COLLAPSED), [true, true, true]);
     await page.run(pause);
     assert.equal(await page.run(`${saved} ?? null`), null);
     // Nothing of the drag is left drawn.

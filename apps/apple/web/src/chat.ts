@@ -1776,7 +1776,7 @@ const kyo = {
     },
     select(index: number, from: number, to = from): void {
       const editor = editors()[index];
-      editor.focus();
+      focusBox(editor);
       editor.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
     },
     /** The lines (counted from 0) of box `index` whose sections are folded (KYO-913). */
@@ -2021,7 +2021,11 @@ const kyo = {
       .map((box) => ({ ...box, id: box.id || boxId() }));
     const merged = mergeDraft(agreed, currentBoxes(), remote);
     seenEtag = frame.etag;
+    const shown = () => JSON.stringify(currentBoxes().map((box) => [box.id, boxSignature(box)]));
+    const was = shown();
     applyBoxes(merged.boxes);
+    // KYO-936: a draft that changed the boxes ends the chance to undo the move before it.
+    if (shown() !== was) lastMove = null;
     agreed = agreedWith(remote, new Set(merged.boxes.filter((box) => remote.includes(box)).map((box) => box.id)));
     keepCurrent();
     const note = mergeNote(merged);
@@ -2107,24 +2111,29 @@ const kyo = {
     if (!upload) return;
     uploads.delete(frame.ref);
     const { editor, item } = upload;
-    if (frame.error || !frame.id) {
-      // The file leaves its paragraph, and that is no step of the box's history to undo.
-      const marks = marksOf(editor);
-      const line = marks.ids.findIndex((id) => marks.items.get(id)?.includes(item));
-      if (line >= 0) {
-        editor.dispatch({
-          effects: removeEffect.of({ pos: editor.state.doc.line(line + 1).from, item }),
-          annotations: Transaction.addToHistory.of(false),
-        });
+    // KYO-936: the answer is no edit of the person's, so a move made while the file was
+    // uploading can still be undone; the move holds the same item, which is finished here.
+    keepMove(() => {
+      if (frame.error || !frame.id) {
+        // The file leaves its paragraph, and that is no step of the box's history to undo.
+        const marks = marksOf(editor);
+        const line = marks.ids.findIndex((id) => marks.items.get(id)?.includes(item));
+        if (line >= 0) {
+          editor.dispatch({
+            effects: removeEffect.of({ pos: editor.state.doc.line(line + 1).from, item }),
+            annotations: Transaction.addToHistory.of(false),
+          });
+        }
+        dropHeldItem(item);
+        composerNote.textContent = frame.error ?? "The file could not be attached.";
+      } else {
+        item.id = frame.id;
+        item.path = frame.path;
+        delete item.pending;
       }
-      composerNote.textContent = frame.error ?? "The file could not be attached.";
-    } else {
-      item.id = frame.id;
-      item.path = frame.path;
-      delete item.pending;
-    }
-    remember();
-    refreshMarks(editor);
+      remember();
+      refreshMarks(editor);
+    });
   },
 
   /** The session's sent prompts' anchors, from the store, which the chat keeps showing. */
@@ -2362,7 +2371,7 @@ function caretLine(editor: EditorView): number {
 
 /** Puts the caret at `at` in a box, focused, and shows it. */
 function caretTo(editor: EditorView, at: number): void {
-  editor.focus();
+  focusBox(editor);
   editor.dispatch({ selection: { anchor: Math.min(at, editor.state.doc.length) }, scrollIntoView: true });
 }
 
@@ -3584,6 +3593,51 @@ function reveal(item: AnchorItem): void {
  */
 const scratchOf = new WeakMap<EditorView, { title: HTMLElement; box: HTMLElement }>();
 
+/**
+ * KYO-936: the scratchpad that is open, by its box's id; every other one is collapsed to its
+ * head. It is the one the caret was last put in, so it is this window's, as a box's folds are,
+ * and no part of the draft: two devices each show the scratchpad their own caret is in.
+ */
+let openScratch: string | null = null;
+
+/**
+ * Opens this scratchpad and collapses every other, or collapses them all when given none
+ * (KYO-936). A scratchpad that collapses with the caret in it gives the caret up, since its
+ * text is no longer shown.
+ */
+function openOnly(editor: EditorView | null): void {
+  openScratch = editor ? boxIds.get(editor) ?? null : null;
+  for (const each of editors()) {
+    const held = scratchOf.get(each);
+    if (!held) continue;
+    const open = each === editor;
+    if (held.box.classList.contains("collapsed") !== open) continue;
+    held.box.classList.toggle("collapsed", !open);
+    held.box.querySelector(".scratch-toggle")?.setAttribute("aria-expanded", String(open));
+    if (open) {
+      // A box drawn while it was collapsed had no size to lay its lines out in.
+      each.requestMeasure();
+    } else {
+      if (openMark?.editor === each) hideMark();
+      if (each.root.activeElement === each.contentDOM) each.contentDOM.blur();
+    }
+  }
+}
+
+/** Puts the focus in a box's text, opening the box first if it is a collapsed scratchpad. */
+function focusBox(editor: EditorView): void {
+  if (scratchOf.has(editor)) openOnly(editor);
+  editor.focus();
+}
+
+// The caret put in a scratchpad, by a press, a key or the page, opens it and collapses the
+// others (KYO-936).
+document.addEventListener("focusin", (event) => {
+  const element = event.target instanceof Element ? event.target.closest<HTMLElement>("#scratches .cm-editor") : null;
+  const editor = element && EditorView.findFromDOM(element);
+  if (editor && scratchOf.has(editor)) openOnly(editor);
+});
+
 /** The prompt's box: the one that is not a scratchpad. */
 function mainBox(): HTMLElement | null {
   return boxes.querySelector<HTMLElement>(":scope > .box.main");
@@ -3594,14 +3648,18 @@ function mainEditor(): EditorView | undefined {
   return editors().find((editor) => !scratchOf.has(editor));
 }
 
-/** Create prompt is offered while the prompt is empty, since it would replace what is there. */
+/**
+ * A scratchpad's button reads Create prompt while the prompt is empty and Send to prompt while
+ * it holds words or marks, which the scratchpad is then added after (KYO-936).
+ */
 function syncCreate(): void {
   const main = mainEditor();
   const full = Boolean(main && isDraft(main));
   for (const button of boxes.querySelectorAll<HTMLButtonElement>(".box-create")) {
-    button.disabled = full;
+    const label = full ? "Send to prompt" : "Create prompt";
+    if (button.textContent !== label) button.textContent = label;
     button.title = full
-      ? "The prompt already holds something. Send or clear it first."
+      ? "Move this scratchpad to the end of the prompt"
       : "Move this scratchpad into the prompt";
   }
 }
@@ -3672,57 +3730,250 @@ function placeBoxes(order: HTMLElement[]): void {
   if (last && last !== boxes.lastElementChild) boxes.append(last);
 }
 
+// ---- moves between a scratchpad and the prompt, and their undo (KYO-904, KYO-936)
+
+/**
+ * One box as a move holds it: what is saved of it, a file still uploading included, with what
+ * this window keeps beside that, which is its folds, its selection and what was pasted into it.
+ */
+interface HeldBox extends NamedBox { folds: FoldedLine[]; anchor: number; head: number; pasted: string[] }
+/**
+ * The composer as a move holds it: its boxes in their order, the empty prompt included, the
+ * scratchpad that is open and the box that has the caret.
+ */
+interface ComposerState { boxes: HeldBox[]; open: string | null; caret: string | null }
+
+/**
+ * The last move between a scratchpad and the prompt, until something else changes the
+ * composer (KYO-936): the composer before it and after it, and whether it stands undone.
+ * A move draws its boxes again, so their editors' own histories begin after it and cannot
+ * reach it; Command-Z in a box reaches it here. One move is held, and no edit made after it is
+ * ever taken back with it: the first change that is not the move's own forgets it.
+ */
+let lastMove: { before: ComposerState; after: ComposerState; undone: boolean } | null = null;
+/** True while the composer is changed by a move, its undo, or a file of its finishing. */
+let keepingMove = false;
+
+/** Runs a change of the composer that is the held move's own, which does not forget it. */
+function keepMove(change: () => void): void {
+  const was = keepingMove;
+  keepingMove = true;
+  try {
+    change();
+  } finally {
+    keepingMove = was;
+  }
+}
+
+/** The composer as it stands. */
+function holdComposer(): ComposerState {
+  const focused = focusedEditor();
+  return {
+    boxes: editors().map((editor) => {
+      const box = savedBox(editor, true);
+      return {
+        ...box,
+        folds: foldsById.get(box.id) ?? [],
+        anchor: editor.state.selection.main.anchor,
+        head: editor.state.selection.main.head,
+        pasted: [...(pasted.get(editor) ?? [])],
+      };
+    }),
+    open: openScratch,
+    caret: focused ? boxIds.get(focused)! : null,
+  };
+}
+
+/** What two copies of a box are compared by: what is saved of it, and its folds. */
+function heldSignature(box: NamedBox & { folds: FoldedLine[] }): string {
+  return `${boxSignature(box)}${JSON.stringify(box.folds.map((fold) => fold.line))}`;
+}
+
+/**
+ * Shows the composer as it was held. A box that already holds what is wanted is left alone,
+ * with its caret and its own history; any other is drawn again with its marks, its folds and
+ * its selection. Each file still uploading is then looked for in the boxes, so that the
+ * server's answer goes to the box whose line holds it (KYO-920), and the caret goes to the box
+ * that had it. The result is saved as any change is.
+ */
+function showComposer(held: ComposerState): void {
+  hideMark();
+  keepMove(() => {
+    const have = new Map(editors().map((editor) => [boxIds.get(editor)!, editor]));
+    const kept = new Map<string, EditorView>();
+    for (const box of held.boxes) {
+      const shown = have.get(box.id);
+      if (shown && heldSignature({ ...savedBox(shown, true), folds: foldsById.get(box.id) ?? [] }) === heldSignature(box)) {
+        kept.set(box.id, shown);
+      }
+    }
+    for (const [id, editor] of have) {
+      if (kept.get(id) === editor) continue;
+      boxOf(editor).remove();
+      foldsById.delete(id);
+    }
+    openScratch = held.open;
+    const order = held.boxes.map((box) => {
+      let editor = kept.get(box.id);
+      if (!editor) {
+        if (box.folds.length) foldsById.set(box.id, box.folds);
+        editor = addBox(box.text, box.marks, box.id, box.scratch ?? null);
+        if (box.pasted.length) pasted.set(editor, [...box.pasted]);
+        const length = editor.state.doc.length;
+        editor.dispatch({ selection: { anchor: Math.min(box.anchor, length), head: Math.min(box.head, length) } });
+      }
+      return boxOf(editor);
+    });
+    placeBoxes(order);
+    ensureMain();
+    const open = editors().find((editor) => boxIds.get(editor) === held.open && scratchOf.has(editor));
+    openOnly(open ?? null);
+    const all = editors();
+    for (const upload of uploads.values()) {
+      const holder = all.find((editor) => Array.from(marksOf(editor).items.values()).some((items) => items.includes(upload.item)));
+      if (holder) upload.editor = holder;
+    }
+    paintAnchors();
+    remember();
+    const caret = all.find((editor) => boxIds.get(editor) === held.caret);
+    if (caret) {
+      focusBox(caret);
+      caret.dispatch({ effects: EditorView.scrollIntoView(caret.state.selection.main.head, { y: "nearest" }) });
+    }
+  });
+}
+
+/** Makes a move: the composer is shown as `after`, and `before` is kept for Command-Z. */
+function moveTo(before: ComposerState, after: ComposerState): void {
+  showComposer(after);
+  lastMove = { before, after, undone: false };
+}
+
+/**
+ * Takes the held move back, or makes it again: both boxes are as they were, with their marks,
+ * their attachments, their folds, the scratchpad's place among the others and the caret. It
+ * says whether there was a move to act on.
+ */
+function undoMove(redo: boolean): boolean {
+  if (!lastMove || lastMove.undone !== redo) return false;
+  const move = lastMove;
+  showComposer(redo ? move.after : move.before);
+  lastMove = { ...move, undone: !redo };
+  return true;
+}
+
+/** A file that could not be attached leaves the held move too, which would put it back. */
+function dropHeldItem(item: Item): void {
+  if (!lastMove) return;
+  for (const held of [lastMove.before, lastMove.after]) {
+    for (const box of held.boxes) {
+      box.marks = box.marks?.flatMap((mark) => {
+        const items = mark.items.filter((other) => other !== item);
+        return items.length ? [{ ...mark, items }] : [];
+      });
+    }
+  }
+}
+
+/** Whether a key or an editing command was aimed at the text of one of the composer's boxes. */
+function inBoxText(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("#boxes .cm-editor"));
+}
+
+// Command-Z in a box directly after a move takes the move back, and Command-Shift-Z after
+// that makes it again (KYO-936). The move is the last change of the composer for as long as it
+// is held, so it comes before the steps of the box's own history, which the key reaches
+// otherwise.
+document.addEventListener("keydown", (event) => {
+  if (!lastMove || !event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "z") return;
+  if (!inBoxText(event.target) || !undoMove(event.shiftKey)) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+// Edit > Undo and Redo reach a box as these editing commands, when WebKit raises them.
+document.addEventListener("beforeinput", (event) => {
+  if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo") return;
+  if (!inBoxText(event.target) || !undoMove(event.inputType === "historyRedo")) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+
+/** A fold of a box's line `line`, on the line `to` of the text `lines` it moved to. */
+function movedFold(lines: string[], to: number): FoldedLine {
+  return { line: to, text: lines[to] };
+}
+
 /**
  * KYO-904: moves the section that begins at `line` of a scratchpad to the end of the prompt,
- * with what each of its lines holds. Both boxes are drawn again from what they then hold; a
- * scratchpad left with nothing leaves.
+ * with what each of its lines holds, a file still uploading included (KYO-936). Both boxes are
+ * drawn again from what they then hold; a scratchpad left with nothing leaves.
  */
 function sendToPrompt(editor: EditorView, line: number): void {
   const main = mainEditor();
   if (!main || line < 0) return;
-  hideMark();
-  const from = savedBox(editor);
-  const to = savedBox(main);
-  const end = sectionEnd(textOf(editor), line);
+  const before = holdComposer();
+  const from = before.boxes.find((box) => box.id === boxIds.get(editor))!;
+  const to = before.boxes.find((box) => box.id === boxIds.get(main))!;
+  const end = sectionEnd(from.text, line);
   const moved = moveLines(from, to, line, end);
   // KYO-913: the section's folds go with it, and the folds below it move up.
-  const folds = foldsById.get(from.id) ?? [];
   const lines = moved.target.text.split("\n");
   const start = lines.length - (end - line);
-  foldsById.set(from.id, folds.filter((fold) => fold.line < line || fold.line >= end)
-    .map((fold) => (fold.line >= end ? { ...fold, line: fold.line - (end - line) } : fold)));
-  foldsById.set(to.id, [...(foldsById.get(to.id) ?? []), ...folds.filter((fold) => fold.line >= line && fold.line < end)
-    .map((fold) => ({ line: start + fold.line - line, text: lines[start + fold.line - line] }))]);
-  const scratch = from.scratch ?? {};
-  const emptied = !moved.source.text.trim() && !moved.source.marks?.length;
-  const old = boxOf(editor);
-  if (emptied) old.remove();
-  else old.replaceWith(boxOf(addBox(moved.source.text, moved.source.marks, from.id, scratch)));
-  boxOf(main).remove();
-  const prompt = addBox(moved.target.text, moved.target.marks, to.id);
-  ensureMain();
-  paintAnchors();
-  remember();
-  caretTo(prompt, prompt.state.doc.length);
+  const source: HeldBox = {
+    ...from, text: moved.source.text, marks: moved.source.marks,
+    folds: from.folds.filter((fold) => fold.line < line || fold.line >= end)
+      .map((fold) => (fold.line >= end ? { ...fold, line: fold.line - (end - line) } : fold)),
+    anchor: 0, head: 0,
+  };
+  const target: HeldBox = {
+    ...to, text: moved.target.text, marks: moved.target.marks,
+    folds: [...to.folds, ...from.folds.filter((fold) => fold.line >= line && fold.line < end)
+      .map((fold) => movedFold(lines, start + fold.line - line))],
+    anchor: moved.target.text.length, head: moved.target.text.length,
+    pasted: [...to.pasted, ...from.pasted],
+  };
+  const emptied = !source.text.trim() && !source.marks?.length;
+  moveTo({ ...before, caret: before.caret ?? from.id }, {
+    boxes: before.boxes.flatMap((box) => (box === from ? (emptied ? [] : [source]) : box === to ? [target] : [box])),
+    open: before.open,
+    caret: to.id,
+  });
 }
 
-/** Moves a scratchpad's words and marks into the prompt, which is empty (KYO-903). */
+/**
+ * A scratchpad's button (KYO-903, KYO-936): the whole of its text moves to the prompt with its
+ * marks and its folds, its first line included, since the head shows that line and holds
+ * nothing of its own (KYO-917), and the scratchpad leaves. An empty prompt becomes the
+ * scratchpad's box, under its id; a prompt that holds words or marks keeps its own and takes
+ * the text after its last line, as it was typed. KYO-920: a file still uploading moves too,
+ * and the server's answer for it is taken by the prompt, whose line holds the same item.
+ */
 function createPrompt(editor: EditorView): void {
   const main = mainEditor();
-  if (main && isDraft(main)) return;
-  // KYO-917: the whole text moves, its first line included, since the head shows that line
-  // and holds nothing of its own. KYO-920: a file still uploading moves too, and the server's
-  // answer for it is taken by the prompt, whose line holds the same item.
-  const held = savedBox(editor, true);
-  if (openMark?.editor === editor || (main && openMark?.editor === main)) hideMark();
-  if (main) boxOf(main).remove();
-  boxOf(editor).remove();
-  const prompt = addBox(held.text, held.marks, held.id);
-  for (const upload of uploads.values()) if (upload.editor === editor) upload.editor = prompt;
-  ensureMain();
-  paintAnchors();
-  remember();
-  caretTo(prompt, prompt.state.doc.length);
+  const before = holdComposer();
+  const from = before.boxes.find((box) => box.id === boxIds.get(editor))!;
+  const to = before.boxes.find((box) => main && box.id === boxIds.get(main));
+  const { scratch: _scratch, ...words } = from;
+  let prompt: HeldBox;
+  if (!to || !(to.text || to.marks?.length)) {
+    prompt = { ...words, anchor: from.text.length, head: from.text.length };
+  } else {
+    const held = to.text.split("\n");
+    const lines = [...held, ...from.text.split("\n")];
+    const text = lines.join("\n");
+    prompt = {
+      ...to, text,
+      marks: [...(to.marks ?? []), ...(from.marks ?? []).map((mark) => ({ ...mark, line: mark.line + held.length }))],
+      folds: [...to.folds, ...from.folds.map((fold) => movedFold(lines, fold.line + held.length))],
+      anchor: text.length, head: text.length,
+      pasted: [...to.pasted, ...from.pasted],
+    };
+  }
+  moveTo({ ...before, caret: before.caret ?? from.id }, {
+    boxes: [...before.boxes.filter((box) => box !== from && box !== to), prompt],
+    open: before.open === from.id ? null : before.open,
+    caret: prompt.id,
+  });
 }
 
 /**
@@ -3745,7 +3996,9 @@ function addBox(
   // KYO-917: a scratchpad an earlier build saved with a heading opens with it as its first line.
   if (scratch?.heading !== undefined) ({ text, marks: saved, scratch } = headingAsLine(text, saved ?? [], scratch));
   const box = document.createElement("div");
-  box.className = scratch ? `box scratch${scratch.collapsed ? " collapsed" : ""}` : "box main";
+  // KYO-936: a scratchpad is drawn collapsed unless it is the one that is open in this window.
+  const collapsed = id !== openScratch;
+  box.className = scratch ? `box scratch${collapsed ? " collapsed" : ""}` : "box main";
   const body = document.createElement("div");
   body.className = "box-body";
   box.append(body);
@@ -3807,6 +4060,7 @@ function addBox(
     disarm();
     const wasPrompt = !scratchOf.has(editor);
     foldsById.delete(id);
+    if (openScratch === id) openScratch = null;
     box.remove();
     ensureMain();
     // The prompt that was deleted leaves an empty one, which takes the caret.
@@ -3829,25 +4083,19 @@ function addBox(
   actions.className = "box-actions";
   if (scratch) {
     // KYO-903, KYO-917: a scratchpad is headed by the first line of its text that holds words,
-    // shown and not edited there, and is collapsed to that line. It has no Send: Create prompt
-    // moves it into the prompt.
+    // shown and not edited there, and is collapsed to that line. It has no Send: its button
+    // moves it into the prompt (KYO-936).
     const title = document.createElement("span");
     title.className = "scratch-title";
     const toggle = boxButton("scratch-toggle", "", () => {
       // KYO-925: while the scratchpads are drawn as their heads, a press on one goes into it.
-      if (sectionInUse !== "scratch") {
-        enterScratch(editor);
-        return;
-      }
-      const collapsed = box.classList.toggle("collapsed");
-      toggle.setAttribute("aria-expanded", String(!collapsed));
-      if (collapsed && openMark?.editor === editor) hideMark();
-      // A box drawn while it was collapsed had no size to lay its lines out in.
-      if (!collapsed) editor.requestMeasure();
-      remember();
+      // KYO-936: so does a press on a collapsed one, which opens it and collapses the others;
+      // a press on the open one collapses it, and none is then open.
+      if (sectionInUse !== "scratch" || box.classList.contains("collapsed")) enterScratch(editor);
+      else openOnly(null);
     });
     toggle.title = "Collapse or open this scratchpad";
-    toggle.setAttribute("aria-expanded", String(!scratch.collapsed));
+    toggle.setAttribute("aria-expanded", String(!collapsed));
     // A press on the words opens or collapses the scratchpad, as one on the button does.
     title.addEventListener("mousedown", (event) => event.preventDefault());
     title.addEventListener("click", () => toggle.click());
@@ -3910,7 +4158,8 @@ function savedBox(editor: EditorView, uploading = false): NamedBox {
   const scratch = scratchOf.get(editor);
   return {
     id: boxIds.get(editor)!,
-    ...(scratch ? { scratch: scratch.box.classList.contains("collapsed") ? { collapsed: true } : {} } : {}),
+    // KYO-936: which scratchpad is open is this window's and is not saved.
+    ...(scratch ? { scratch: {} } : {}),
     text: textOf(editor),
     marks: marks.ids.flatMap((id, line) => {
       // A file still uploading is not saved: nothing would finish it after a relaunch.
@@ -4057,6 +4306,9 @@ function adoptShelf(): void {
 
 /** Keeps the boxes in this window's storage at once, and on the server after a pause. */
 function remember(): void {
+  // KYO-936: whatever changes the composer, other than a move itself, ends the chance to undo
+  // the move before it: putting the boxes back would take the later change with it.
+  if (!keepingMove) lastMove = null;
   if (loadingDraft) return;
   keepCurrent();
   if (draftSave !== undefined) clearTimeout(draftSave);
@@ -4148,9 +4400,11 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
 
 /** The + button: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
 function newPrompt(): void {
+  // The move before it can no longer be undone: putting the boxes back would drop this one.
+  lastMove = null;
   const editor = addBox("", [], boxId(), {});
   syncCreate();
-  editor.focus();
+  focusBox(editor);
 }
 
 function post(name: string, body: unknown): void {
@@ -4210,7 +4464,9 @@ async function attachFile(editor: EditorView, file: File, line = caretLine(edito
   placeItem<Item>(editor, line, item);
   uploads.set(ref, { editor, item });
   item.thumb = await thumbnail(file);
-  refreshMarks(editor);
+  // The box may have been drawn again by a move meanwhile; the upload names the one it is in.
+  const holder = uploads.get(ref)?.editor;
+  if (holder) keepMove(() => refreshMarks(holder));
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let at = 0; at < bytes.length; at += 0x8000) {
@@ -4702,7 +4958,7 @@ document.addEventListener("focusin", (event) => {
 
 /** Focuses a box's text where its caret was, and shows the caret's line. */
 function enterBox(editor: EditorView): void {
-  editor.focus();
+  focusBox(editor);
   editor.dispatch({ effects: EditorView.scrollIntoView(editor.state.selection.main.head, { y: "nearest" }) });
 }
 
@@ -4713,17 +4969,13 @@ function enterPrompt(): void {
 }
 
 /**
- * A press on a scratchpad's head while the scratchpads are drawn as their heads: they are in
- * use, and the caret is in this one, which is opened if it was collapsed.
+ * A press on a scratchpad's head while the scratchpads are drawn as their heads, or on the
+ * head of a collapsed one: they are in use, and the caret is in this one, which is opened
+ * while the others collapse (KYO-936).
  */
 function enterScratch(editor: EditorView): void {
   const box = boxOf(editor);
   useSection("scratch");
-  if (box.classList.contains("collapsed")) {
-    box.classList.remove("collapsed");
-    box.querySelector(".scratch-toggle")?.setAttribute("aria-expanded", "true");
-    remember();
-  }
   enterBox(editor);
   box.scrollIntoView({ block: "nearest" });
 }
