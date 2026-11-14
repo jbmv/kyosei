@@ -843,7 +843,10 @@ The channel does not exercise what happens before the app: the window server's d
 input, the menu bar's tracking, and activation. Measured on macOS 27 from a process started
 in tmux: `makeKey` does not make the window key while the app is not active, and the page
 then reports no focus. Keys, presses and menu items still reach the page and the menu bar.
-Whether the app can be activated from there was not measured.
+Whether the app can be activated from there was not measured. While another app covers the
+window the page draws no frames, so its transitions do not advance; a scenario therefore
+finishes the page's running transitions before it reads a place, and `snapshot` waits for a
+frame for no longer than half a second. Snapshots taken of a covered window were correct.
 
 **The harness.** `check/harness.py` holds a run's parts and says what a run is kept from. The
 server's `KYOSEI_HOME`, `CLAUDE_CONFIG_DIR` and `HOME` are directories of the run. The first

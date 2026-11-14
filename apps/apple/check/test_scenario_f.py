@@ -19,6 +19,10 @@ import conftest
 REDS = {"rgb(255, 59, 48)", "rgb(255, 69, 58)"}
 
 
+#: Ends the page's running transitions at their last frame, as time would.
+FINISH = "for (const moving of document.getAnimations()) { try { moving.finish(); } catch {} }"
+
+
 def _seed(run: harness.Run) -> tuple[Path, dict[str, str]]:
     """A project with two open plans, members in three statuses, a shift note and files."""
     project = harness.make_project(run)
@@ -71,7 +75,8 @@ def test_scenario_f_records_and_files(run: harness.Run, check_build: Path, resul
     page = app.channel
     try:
         # The page takes the keys the scenario sends once it is the window's first responder.
-        page.request("window", focus=True)
+        state = page.request("window", focus=True)
+        results.measurements["scenario_F_window_on_screen"] = state["on_screen"]
         _records(scenario, page, ids)
         _files(scenario, page)
     except Exception as failure:
@@ -218,13 +223,17 @@ def _dock(scenario: harness.Scenario, page: harness.Channel, view: str) -> None:
         " paneLeft: Math.round("
         "   document.getElementById('view-' + view).getBoundingClientRect().left) };"
     )
-    before = page.eval(read, view=view)
+    before = page.eval(f"{FINISH} {read}", view=view)
     page.eval("document.getElementById('menu-icon').click();")
     page.wait("the drawer to dock", "return document.body.classList.contains('dock-left');")
-    # The drawer slides and the pane moves over a transition; the wait is for their places.
+    # The drawer slides and the pane moves over a transition, and the wait is for their
+    # places. A page whose window is covered draws no frames, so its transitions do not
+    # advance: measured, a run made while another app covered the window waited fifteen
+    # seconds with the drawer still off the edge. The transitions are therefore finished
+    # by the page's own animation interface before the places are read.
     docked = page.wait(
         "the docked drawer to be in place",
-        f"const now = (() => {{ {read} }})();"
+        f"{FINISH} const now = (() => {{ {read} }})();"
         " return now.panelLeft === 0 && now.paneLeft === now.panelWidth ? now : null;",
         view=view,
     )
