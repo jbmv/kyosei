@@ -487,6 +487,22 @@ orchestrator's ad-hoc script.
 itself a declared orchestrator-only command: the contradiction above, caught where it can be
 fixed.
 
+### `PreToolUse` (matcher `AskUserQuestion`) → `kyo sessions --hook`
+
+**KYO-940.** Saves the question a session is about to ask, so that `kyo serve` can send it to
+a client while the question is open. Claude Code writes the record of an `AskUserQuestion`
+call to the transcript when the call resolves, together with its result, so a client that
+draws the question from the transcript has nothing to draw while the person is being asked.
+This event's payload carries the call's id and its whole input before the dialog opens.
+`kyo sessions --hook` tells the event apart by the payload's `hook_event_name`, as it does
+the three session events, and writes `$KYOSEI_HOME/pending-questions/<session id>.json`,
+outside every repository and readable by its owner only. The session's next start, stop or
+end removes the file, and `kyo serve` ignores it once the transcript holds the call it names.
+
+It guards nothing: it prints nothing and exits 0 whatever happens, and it saves nothing in a
+project that has not opted in to reading transcripts (setup decision D14). Measured on Claude
+Code 2.1.325, the hook added 0.13 seconds before the dialog opened.
+
 ### `UserPromptSubmit`, `Stop` and `SessionEnd` → `kyo turns --hook`
 
 In a project that opted in to reading transcripts (setup decision D14, KYO-656), the prompt
@@ -550,7 +566,7 @@ All in `src/kyosei/defaults/hooks/`:
 - `stop.json` — `Stop` → `kyo sweep --hook`, then `kyo doctor --hook`; `kyo turns --hook` in its own group, under `Stop` and `SessionEnd`
 - `subagent-stop.json` — `SubagentStop` → `kyo check-clean --subagent-stop`, then `kyo check-branch --subagent-stop --against main`
 - `sessions.json` — `SessionStart`, `Stop` and `SessionEnd` → `kyo sessions --hook`
-- `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`
+- `pre-tool-use.json` — `PreToolUse` (matcher `Bash`) → `kyo check-push --pre-tool-use`; `PreToolUse` again, in a second group of the same file → `kyo check-command --pre-tool-use`; and in a third, matched on `AskUserQuestion` → `kyo sessions --hook`
 - `prompt-submit.json` — `UserPromptSubmit` → `kyo check-build --hook`, `kyo turns --hook`
 
 Each file is a standalone JSON fragment shaped like one event's value under `.claude/
