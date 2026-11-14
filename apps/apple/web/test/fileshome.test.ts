@@ -158,3 +158,22 @@ test("the Files home's dropdown chooses the root and holds Show dotfiles; the dr
   assert.equal((await state()).dots, "true");
   assert.equal(await opened.run<string>(`document.querySelector("#files-side .files-home-side .files-dots").textContent`), "Hide dotfiles");
 });
+
+test("an open folder's chevron in the home's list points down at every depth, a closed one's points right (KYO-937)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await openFiles();
+  await opened.run(`(() => {
+    document.querySelector('.files-columns .tree-row[data-dir="docs"]').click();
+    window.kyo.filesTree({ root: "code", path: "docs", session: null, status: 200, document: { ok: true, entries: [
+      { name: "deep", path: "docs/deep", type: "dir", mtime_ns: 2e18 },
+      { name: "shut", path: "docs/shut", type: "dir", mtime_ns: 2e18 } ] } });
+    document.querySelector('.files-columns .tree-row[data-dir="docs/deep"]').click();
+    window.kyo.filesTree({ root: "code", path: "docs/deep", session: null, status: 200, document: { ok: true, entries: [
+      { name: "x.md", path: "docs/deep/x.md", type: "file", size: 1, mtime_ns: 2e18 } ] } });
+  })()`);
+  const turned = await opened.run<Record<string, string>>(`Object.fromEntries(
+    [...document.querySelectorAll(".files-columns .tree-row[data-dir]")].map((row) =>
+      [row.dataset.dir, row.classList.contains("open") + ":" + getComputedStyle(row.querySelector(".chevron")).transform]))`);
+  const down = "matrix(0, 1, -1, 0, 0, 0)";
+  assert.deepEqual(turned, { docs: `true:${down}`, "docs/deep": `true:${down}`, "docs/shut": "false:none" });
+});

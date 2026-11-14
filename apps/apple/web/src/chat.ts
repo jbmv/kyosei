@@ -4497,7 +4497,9 @@ function agendaRow(row: Row): HTMLElement {
   } else {
     const text = document.createElement("span");
     text.className = "agenda-text";
-    text.textContent = row.text;
+    // A record id of this project in a reminder is a link to the record, at the criterion or
+    // gate the id names (KYO-937); the page's click handler follows it.
+    text.append(linked(row.text));
     // A path in a reminder is a link to Files, as one in a reply is (2026-11-11). The path
     // links are declared further down the module, so they are made once it has run.
     queueMicrotask(() => linkQuietly(text));
@@ -4554,6 +4556,12 @@ function drawAgendaPeek(): void {
 function drawAgenda(): void {
   const view = agendaView(agendaFrame, agendaShowCompleted);
   agendaPane.hidden = !view.shown;
+  // The project's prefix is read from its record list, so the list is asked for once a
+  // reminder is to be drawn; the lists' answer draws the reminders again with the ids linked.
+  if (view.rows.length && !listsAsked && windowProject) {
+    listsAsked = true;
+    post("records", { want: "lists" });
+  }
   drawAgendaPeek();
   drawSections();
   agendaWhy.hidden = view.why === null;
@@ -6070,6 +6078,7 @@ const recordFrames = {
     if (frame.next) readyRecords = dispatchableIds(frame.next);
     if (frame.gates) awaitingRecords = awaitingIds(frame.gates);
     drawRecordLists();
+    drawAgenda();
     // A link or a member on the open page is named by the list's titles.
     if (openRecordDoc) drawRecord();
     // So is a record linked in the chat, in the chat's side bar.
