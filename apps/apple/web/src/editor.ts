@@ -50,6 +50,12 @@ export const placeEffect = StateEffect.define<ItemChange>({ map: mapItem });
 /** Removes an item from a line, by identity; also an undo step. */
 export const removeEffect = StateEffect.define<ItemChange>({ map: mapItem });
 const refreshEffect = StateEffect.define<null>();
+/**
+ * Puts items on the lines from the one `pos` is in, one list for each line (KYO-938). An item a
+ * line holds already is not put on it twice, since the marks a cut line left in `lost` may have
+ * come back on the paste by the line's text.
+ */
+const carryEffect = StateEffect.define<{ pos: number; lines: unknown[][] }>();
 
 let nextId = 1;
 const freshId = () => nextId++;
@@ -128,6 +134,19 @@ function changeItems<T>(marks: LineMarks<T>, doc: Text, change: ItemChange, plac
   return { ...marks, items };
 }
 
+function carryItems<T>(marks: LineMarks<T>, doc: Text, carried: { pos: number; lines: unknown[][] }): LineMarks<T> {
+  const first = doc.lineAt(Math.max(0, Math.min(carried.pos, doc.length))).number - 1;
+  const items = new Map(marks.items);
+  carried.lines.forEach((each, offset) => {
+    const id = marks.ids[first + offset];
+    if (id === undefined) return;
+    const held = items.get(id) ?? [];
+    const now = [...held, ...(each as T[]).filter((item) => !held.includes(item))];
+    if (now.length) items.set(id, now);
+  });
+  return { ...marks, items };
+}
+
 function initialMarks<T>(doc: Text, saved: { line: number; items: T[] }[]): LineMarks<T> {
   const ids = Array.from({ length: doc.lines }, freshId);
   return {
@@ -146,6 +165,7 @@ const marksField = StateField.define<LineMarks<unknown>>({
     for (const effect of tr.effects) {
       if (effect.is(placeEffect)) marks = changeItems(marks, tr.state.doc, effect.value, true);
       else if (effect.is(removeEffect)) marks = changeItems(marks, tr.state.doc, effect.value, false);
+      else if (effect.is(carryEffect)) marks = carryItems(marks, tr.state.doc, effect.value);
       else if (effect.is(refreshEffect)) marks = { ...marks, version: marks.version + 1 };
     }
     return marks;
@@ -880,6 +900,8 @@ export interface EditorOptions<T> {
   onFiles?: (view: EditorView, files: File[], how: "paste" | "drop", pos: number) => void;
   /** Text pasted into the box, with where it was put, after it is in the document. */
   onPaste?: (view: EditorView, text: string, from: number) => void;
+  /** Items that came with a cut line's paste, once they are on this box's lines (KYO-938). */
+  onCarried?: (view: EditorView, items: T[]) => void;
   /** Every update of the view: edits, the selection, the marks, the focus. */
   onUpdate?: (update: ViewUpdate) => void;
   /** Further extensions. */
@@ -961,11 +983,80 @@ const followPointer = ViewPlugin.fromClass(class {
   }
 });
 
+// --------------------------------------------- a cut line's marks follow it (KYO-938)
+
+/**
+ * The last cut of whole lines in this window: its text, and what each line held. The system
+ * clipboard carries the text alone; a paste of exactly this text takes the marks with it, once.
+ */
+let lastCut: { text: string; lines: unknown[][] } | null = null;
+
+/** Forgets the last cut; for a window that is drawn from nothing, and for tests. */
+export function forgetCut(): void {
+  lastCut = null;
+}
+
+/** What a cut would take, when it begins at a line's start and ends at a line's end or the next's start. */
+function cutLines(state: EditorState): { text: string; lines: unknown[][] } | null {
+  if (state.selection.ranges.length !== 1) return null;
+  const { from, to, empty } = state.selection.main;
+  const marks = marksOf(state);
+  let start = from;
+  let end = to;
+  let text: string;
+  if (empty) {
+    // CodeMirror cuts the caret's line, its line break included.
+    const line = state.doc.lineAt(from);
+    start = line.from;
+    end = Math.min(line.to + 1, state.doc.length);
+    text = line.text + "\n";
+  } else {
+    text = state.doc.sliceString(from, to);
+  }
+  const first = state.doc.lineAt(start);
+  if (start !== first.from) return null;
+  const last = state.doc.lineAt(end);
+  const whole = end === last.to || end === last.from;
+  if (!whole) return null;
+  // A cut that ends at the start of a line takes up to the end of the line before it.
+  const lastLine = end === last.from && end > start ? last.number - 1 : last.number;
+  const lines: unknown[][] = [];
+  for (let number = first.number; number <= lastLine; number += 1) {
+    lines.push([...(marks.items.get(marks.ids[number - 1]) ?? [])]);
+  }
+  if (!lines.some((held) => held.length)) return null;
+  return { text, lines };
+}
+
 /** Paste and drop (proposal 5.8): files go to the caller, and text pasted is reported. */
 function transfers<T>(options: EditorOptions<T>): Extension {
   return [
     EditorView.domEventHandlers({
+      cut(_event, view) {
+        lastCut = cutLines(view.state);
+        return false;
+      },
       paste(event, view) {
+        const carried = lastCut;
+        const words = event.clipboardData?.getData("text/plain");
+        if (carried && words === carried.text && view.state.selection.ranges.length === 1
+          && !event.clipboardData?.files.length) {
+          lastCut = null;
+          event.preventDefault();
+          const { from, to } = view.state.selection.main;
+          const at = view.state.doc.lineAt(from).number;
+          const start = view.state.doc.line(at).from;
+          view.dispatch({
+            changes: { from, to, insert: words },
+            selection: { anchor: from + words.length },
+            effects: carryEffect.of({ pos: Math.min(start, from), lines: carried.lines }),
+            annotations: isolateHistory.of("full"),
+            userEvent: "input.paste",
+            scrollIntoView: true,
+          });
+          options.onCarried?.(view, carried.lines.flat() as T[]);
+          return true;
+        }
         const files = Array.from(event.clipboardData?.files ?? []);
         if (!files.length) return false;
         event.preventDefault();

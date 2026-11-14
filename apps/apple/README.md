@@ -95,7 +95,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides, heading rules and horizontal rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides, heading rules and horizontal rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, paste and drop, and the marks of a cut line that follow it on paste; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
@@ -271,6 +271,17 @@ in another way: a letter typed, a mark placed or removed, a box added, deleted o
 a send, or a draft from another device that changes a box. After that the key acts on the
 box's own history, because putting the boxes back would discard the later change. Edit >
 Undo and Edit > Redo act on the move as the keys do (KYO-915, below).
+
+A line's marks follow it when it is cut and pasted (KYO-938). The system clipboard carries
+text alone, so the editor keeps beside it the last cut of whole lines made in this window: a
+selection that begins at a line's start and ends at a line's end or at the start of the next
+line, with what each of those lines held. A paste of exactly that text, into the same box or
+another one of the window, puts the anchors, attachments and tags on the pasted lines, in
+their order, in the transaction that inserts the text, so that one Command-Z removes both; the
+cut is then forgotten. A copy, a cut that begins or ends inside a line, and a paste of other
+text carry nothing. A file still uploading is held as the same item, and its upload is
+repointed to the box that holds the line now. The behaviour is in `web/src/editor.ts` and is
+tested in `web/test/cutmarks.test.ts`.
 
 A scratchpad is a box of
 the same draft with a `scratch` object, so it is saved,
