@@ -85,6 +85,9 @@ reports the finding, exits 0 and records the unblocked stop where `kyo show <dis
 `PreToolUse` runs `kyo check-push --pre-tool-use`, which stops a `git push` that would publish an
 in-repo store before it happens (KYO-60), and `kyo check-command --pre-tool-use`, which refuses a
 declared whole-suite command inside a running dispatch's worktree (KYO-298; section 3 below).
+Matched on `AskUserQuestion` it runs `kyo sessions --hook`, which stops nothing: it saves the
+question under `$KYOSEI_HOME` so that `kyo serve` can show it to the person while it is open,
+in a project that set `read_transcripts` (KYO-940).
 
 ### The blocked push (KYO-60)
 

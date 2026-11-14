@@ -988,6 +988,11 @@ and integrates via:
     orchestrator-only when it would run inside a running dispatch's worktree (KYO-298). The
     `git commit`-on-`kyo doctor` gate this line described until 2026-09-18 never shipped: the
     packaged PreToolUse fragment was first added by KYO-60 and has never carried one.
+  - `PreToolUse` on AskUserQuestion → `kyo sessions --hook`, which saves the question the
+    session is about to ask under `$KYOSEI_HOME` (KYO-940). Claude Code writes the record of
+    that call to the transcript when the call resolves, so `kyo serve` sends the saved
+    question to a client while it is open. It stops nothing and prints nothing, and saves
+    nothing in a project that has not set `read_transcripts`.
   - `SubagentStop` → `kyo check-clean --subagent-stop` and `kyo check-branch --subagent-stop`,
     which block a worker's stop while its worktree holds uncommitted work or its branch carries
     a write to the store (and note: a stop hook is NOT the durability mechanism — law 8 — it is

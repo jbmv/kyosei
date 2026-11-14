@@ -2048,7 +2048,9 @@ def build_parser() -> KyoseiParser:
         "invokes this. Silent on success, and always exit 0 — a session that could not "
         "be recorded must still start, turn and end. At Stop it also announces the "
         "session's task list as a hook systemMessage, when there is something to say "
-        "(KYO-770)",
+        "(KYO-770). Given a PreToolUse payload for AskUserQuestion, it saves the question "
+        "under $KYOSEI_HOME/pending-questions for `kyo serve` to send to a client while "
+        "the question is open, in a project that set read_transcripts (KYO-940)",
     )
     p_sessions.add_argument(
         "words",

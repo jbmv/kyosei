@@ -62,6 +62,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -71,7 +72,7 @@ from pathlib import Path
 
 from .clock import now
 from .commands import Context, Output
-from .config import KYOSEI_DIR, SESSIONS_NAME
+from .config import KYOSEI_DIR, SESSIONS_NAME, store_home
 
 #: The file's basename, beside ``kyosei.db`` under ``<store_root>/kyosei/``.
 #: Re-exported from :mod:`kyosei.config`, which is where :mod:`kyosei.scaffold`
@@ -790,6 +791,118 @@ def record_event(
     }
 
 
+# ------------------------------------------------------- the question a session waits on
+#
+# KYO-940. Claude Code writes the assistant record that holds an ``AskUserQuestion`` call to
+# the transcript when the call resolves, and not while its dialog is open (measured on
+# 2.1.325 with no hook matching the tool: no assistant record reached the file in the twelve
+# seconds the dialog stood open, and the call and its result arrived together when it was
+# dismissed). A client that draws the question from the transcript therefore has nothing to
+# draw while the person is being asked. A ``PreToolUse`` hook matched on the tool receives
+# the call's whole input and its id before the dialog opens, so the hook saves them here and
+# ``kyo serve`` sends them to the session's subscribers as a call still pending
+# (:mod:`kyosei.serve_sessions`).
+#
+# The same measurement found that a matching hook also makes Claude Code write the records
+# it holds before the hook runs, so with this hook installed the transcript usually holds
+# the call at once as well. Nothing here relies on that: it is not documented, and the two
+# sources name the call by one id, by which a reader keeps a single object.
+#
+# One file per session under ``$KYOSEI_HOME``, beside the session's other per-machine state
+# and outside every repository, since a question's words are the session's. It holds the
+# latest question only. It is removed when the session next stops, starts or ends; until
+# then a reader ignores it once the transcript holds the call it names.
+
+#: The event the question hook runs under. The tool it is matched on is the transcript
+#: adapter's ``QUESTION_TOOL``.
+EVENT_PRE_TOOL = "PreToolUse"
+
+#: What follows ``$KYOSEI_HOME``: one file per session, named by its id.
+QUESTIONS_DIRNAME = "pending-questions"
+
+#: The shape of a question file. A reader that meets another number reads no question.
+QUESTION_SCHEMA = 1
+
+_SESSION_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def question_path(environ: dict[str, str] | None, session_id: object) -> Path | None:
+    """The file holding ``session_id``'s open question; None for an id that names no file."""
+    if not isinstance(session_id, str) or not _SESSION_FILE.match(session_id):
+        return None
+    return store_home(environ) / QUESTIONS_DIRNAME / f"{session_id}.json"
+
+
+def record_question(environ: dict[str, str] | None, payload: dict) -> str | None:
+    """Save the question ``payload`` announces. Returns a problem, never raises.
+
+    The payload is read by the transcript adapter, which knows Claude Code's shapes; this
+    keeps the call it finds. The file is written whole and renamed into place, so a reader
+    sees the earlier question or this one, and is readable by its owner only.
+    """
+    from .harness.claude_code_transcript import announced_question
+
+    session_id = payload.get("session_id")
+    call = announced_question(payload, now())
+    path = None if call is None else question_path(environ, session_id)
+    if call is None or path is None:
+        return "the hook payload names no AskUserQuestion call of a session"
+    document = {
+        "schema": QUESTION_SCHEMA,
+        "session_id": session_id,
+        "call_id": call.call_id,
+        "name": call.name,
+        "asked_at": call.at,
+        "input": dict(call.input),
+    }
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(document, ensure_ascii=False) + "\n")
+        os.replace(temporary, path)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+        return f"{path} could not be written ({exc})"
+    return None
+
+
+def clear_question(environ: dict[str, str] | None, session_id: str) -> None:
+    """Remove ``session_id``'s question file, if it has one. Never raises."""
+    path = question_path(environ, session_id)
+    if path is not None:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
+def read_question(environ: dict[str, str] | None, session_id: str) -> dict | None:
+    """The question last saved for ``session_id``: ``call_id``, ``name``, ``asked_at``, ``input``.
+
+    None when there is none, or when the file is not one this build wrote. Whether the
+    question is still open is the reader's to decide, against the session's transcript.
+    """
+    path = question_path(environ, session_id)
+    if path is None:
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(document, dict)
+        or document.get("schema") != QUESTION_SCHEMA
+        or document.get("session_id") != session_id
+        or not isinstance(document.get("call_id"), str)
+        or not isinstance(document.get("name"), str)
+        or not isinstance(document.get("asked_at"), str)
+        or not isinstance(document.get("input"), dict)
+    ):
+        return None
+    return {key: document[key] for key in ("call_id", "name", "asked_at", "input")}
+
+
 # --------------------------------------------------------------- resolution
 
 
@@ -849,6 +962,24 @@ def _payload_of(raw: str) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _question_event(ctx: Context, payload: dict) -> Output:
+    """``kyo sessions --hook`` under ``PreToolUse``: save the question the session asks.
+
+    Silent and exit 0 whatever happens, since the hook runs before the dialog opens and a
+    refusal here would stand between the person and their question. Nothing is saved in a
+    project that has not opted in to its transcripts being read (``read_transcripts``):
+    `kyo serve` shows no session of such a project, so the file would have no reader.
+    """
+    from .cmd_turns import _config_of
+    from .config import transcripts_opted_in
+
+    config = _config_of(ctx)
+    if config is None or not transcripts_opted_in(config):
+        return Output(lines=[], data={"ok": True, "opted_in": False})
+    problem = record_question(ctx.environ, payload)
+    return Output(lines=[], data={"ok": problem is None, "problem": problem})
+
+
 def cmd_sessions(ctx: Context, args: Namespace) -> Output:
     """``kyo sessions`` — list the file, or (``--hook``) write this session into it.
 
@@ -863,6 +994,11 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
     exit code — the same stance ``kyo check-clean`` takes for an unresolvable stop,
     for the same reason: the only party a refusal would reach is powerless to clear
     it.
+
+    UNDER ``PreToolUse`` (KYO-940), matched on ``AskUserQuestion``, the hook saves the
+    question the session is about to ask, for `kyo serve` to send to a client before the
+    transcript holds it (:func:`_question_event`). Each of the three events above removes
+    that file, and none of this touches ``sessions.json``.
 
     SILENT ON A SUCCESSFUL HOOK WRITE. ``SessionStart``'s stdout is injected into
     the session's context, where the compact brief is the only thing that belongs,
@@ -951,6 +1087,15 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
     # folding this session into it would record one working tree's session as the
     # other's. Saying so is the whole remedy: the session that belongs in that ledger
     # is the one running in that checkout.
+    payload = _payload_of(sys.stdin.read() if not sys.stdin.isatty() else "")
+    session_id = payload.get("session_id")
+    event = payload.get("hook_event_name")
+    # KYO-940: the question a session waits on is per-machine state named by the session's
+    # id, and no ledger's, so it is kept and removed ahead of the sentence below.
+    if event == EVENT_PRE_TOOL:
+        return _question_event(ctx, payload)
+    if isinstance(session_id, str) and event in SESSION_EVENTS:
+        clear_question(ctx.environ, session_id)
     reached_through = None if ctx.layout is None else ctx.layout.store_via_main_checkout
     if reached_through is not None:
         return Output(
@@ -966,9 +1111,6 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
             },
         )
 
-    payload = _payload_of(sys.stdin.read() if not sys.stdin.isatty() else "")
-    session_id = payload.get("session_id")
-    event = payload.get("hook_event_name")
     if not isinstance(session_id, str) or not session_id:
         return Output(
             lines=[f"{SESSIONS_FILE}: the hook payload carried no session_id; nothing recorded"],

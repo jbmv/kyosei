@@ -144,6 +144,7 @@ decides, and how a setup agent can find the answer before asking.
   | Every prompt | `kyo turns --hook` | Silent; indexes the prompt where D14 is yes. |
   | Before a `git push` | `kyo check-push` | Refuses a push that would publish an in-repo store until acknowledged. |
   | Before a whole-suite command in a worker's worktree | `kyo check-command` | Keeps full suites with the orchestrator (see D5). |
+  | Before a multiple-choice question to the person | `kyo sessions --hook` | Silent; where D14 is yes, saves the question for `kyo serve` to show while it is open. |
   | A worker stops | `kyo check-clean`, `kyo check-branch` | Refuses a dirty worktree, or a worker that wrote to the store. |
   | The session stops | `kyo sweep --hook`, then `kyo doctor --hook` | Raises staleness flags, then checks invariants. |
   | The session stops | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index, commits the agent's final reply to it and copies the transcript to the local archive. |

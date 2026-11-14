@@ -106,12 +106,13 @@ def test_install_hooks_distributes_the_pre_tool_use_hook(kyo, project: Path) -> 
     assert kyo("install-hooks", "--copies").code == 0
     settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
     groups = settings["hooks"]["PreToolUse"]
-    # Every group under this event matches Bash, and this one is here. KYO-298 added a
+    # Every guard under this event matches Bash, and this one is here. KYO-298 added a
     # SECOND group to the same packaged fragment (`kyo check-command --pre-tool-use`),
     # so what this asserts is that check-push is wired, not that it is alone — see
     # tests/test_kyo298_command_guard.py for why the second one is its own group rather
     # than a second entry in this one.
-    assert {group["matcher"] for group in groups} == {"Bash"}
+    # KYO-940 added a third, matched on AskUserQuestion, which guards nothing.
+    assert {group["matcher"] for group in groups} == {"Bash", "AskUserQuestion"}
     assert "kyo check-push --pre-tool-use" in json.dumps(groups)
 
 

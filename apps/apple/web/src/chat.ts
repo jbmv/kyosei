@@ -65,7 +65,16 @@ import {
  * Claude Code records such a turn as the person's, and the server's send log is what says it was
  * not. A server that predates the field sends none, and the turn is the person's.
  */
-interface Turn { id: string; at: string; text: string; images?: { index: number }[]; automatic?: boolean }
+interface Turn {
+  id: string; at: string; text: string; images?: { index: number }[]; automatic?: boolean;
+  answers?: TurnAnswer[];
+}
+/**
+ * An answer to a question asked with `AskUserQuestion`, as `kyo serve` divides it (KYO-940):
+ * the question, and the answer as the options picked and the text typed. The parts' texts
+ * joined by ", " are the answer, and a turn's answers joined by a line break are its text.
+ */
+interface TurnAnswer { question: string; parts: { text: string; picked: boolean }[] }
 interface Reply { message_id: string; uuid?: string; at: string; text: string; thinking?: string | null }
 interface Delivery {
   uuid: string; at: string; kind: string; text: string | null; sender: string | null;
@@ -79,12 +88,17 @@ interface Subagent {
   model?: string | null; effort?: string | null;
 }
 interface ToolCall {
-  call_id: string; uuid: string; at: string; name: string; input: Record<string, unknown> | null;
+  call_id: string; uuid: string | null; at: string; name: string; input: Record<string, unknown> | null;
   result: { text: string | null; is_error: boolean } | null;
 }
 interface CommandOutput { uuid: string; at: string; command: string; args: string; text: string }
 interface Batch {
   reset?: boolean; turns?: Turn[]; replies?: Reply[]; tool_calls?: ToolCall[];
+  /**
+   * KYO-940: every call that is open and not yet in the transcript, which holds an
+   * `AskUserQuestion` call only once it is answered. Absent when the frame says nothing of them.
+   */
+  pending_tool_calls?: ToolCall[];
   command_outputs?: CommandOutput[]; subagents?: Subagent[]; deliveries?: Delivery[];
   facts?: Facts | null;
 }
@@ -289,6 +303,13 @@ const MESSAGE_KEY = /^[trdo]:/;
 
 /** Whether objects placed now are new output, counted on the arrow, and not a session's first load. */
 let countingNew = false;
+
+/** Takes a placed object out of the conversation. */
+function unplace(key: string): void {
+  elements.get(key)?.remove();
+  elements.delete(key);
+  rendered.delete(key);
+}
 
 function place(key: string, at: string, version: string, build: () => HTMLElement): void {
   if (rendered.get(key) === version) return;
@@ -510,9 +531,61 @@ function drawChipWords(words: string): Node[] {
   });
 }
 
+/** Text that belongs to a turn's words and is not shown, so the turn still reads as it was sent. */
+function unseenText(text: string): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "turn-sep";
+  span.textContent = text;
+  return span;
+}
+
+/**
+ * The answers of a turn that answers a question (KYO-940): each under its question, an option
+ * the person picked as a chip with a tick and text they typed marked as typed, so that a
+ * choice from a list does not read as a prompt in their own words. The question and the mark
+ * are drawn by the stylesheet, so the turn's text is still the answers alone, which an anchor
+ * measures against. Null for any other turn, and for answers that are not the turn's text.
+ */
+function drawAnswers(turn: Turn): HTMLElement[] | null {
+  const answers = turn.answers ?? [];
+  if (!answers.length) return null;
+  const said = answers.map((answer) => answer.parts.map((part) => part.text).join(", ")).join("\n");
+  if (said !== turn.text) return null;
+  const drawn: HTMLElement[] = [];
+  for (const [index, answer] of answers.entries()) {
+    if (index) drawn.push(unseenText("\n"));
+    const item = document.createElement("div");
+    item.className = "turn-answer-item";
+    item.dataset.question = answer.question;
+    for (const [at, part] of answer.parts.entries()) {
+      if (at) item.append(unseenText(", "));
+      const words = document.createElement("span");
+      if (part.picked) {
+        words.className = "turn-choice";
+        words.title = "Picked from the question's options";
+        words.append(icon("check"), part.text);
+      } else {
+        words.className = "turn-typed";
+        words.title = "Typed, not one of the question's options";
+        words.dataset.mark = "typed";
+        words.textContent = part.text;
+      }
+      item.append(words);
+    }
+    drawn.push(item);
+  }
+  return drawn;
+}
+
 function drawTurn(turn: Turn, session?: string): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
+  const answers = drawAnswers(turn);
+  if (answers) {
+    element.classList.add("turn-answer");
+    element.append(...answers);
+    return element;
+  }
   // KYO-930: a message `kyo serve` sent is drawn as the server's: its own look, and a label in
   // the stylesheet (`content: attr(data-source)`), so the label is not text an anchor measures.
   if (turn.automatic) {
@@ -770,6 +843,33 @@ function drawQuestionState(element: HTMLElement, call: ToolCall): void {
   state.hidden = !state.textContent;
 }
 
+function drawCall(call: ToolCall): HTMLElement {
+  return call.name === "AskUserQuestion" ? drawQuestion(call) : drawToolCall(call);
+}
+
+/**
+ * Takes the calls that are open and not yet in the transcript (KYO-940), which is how a
+ * question is drawn while it is being asked. Each is placed under the key the transcript's
+ * record of it will have, so that record, with the answer, is drawn in the same card and not
+ * as a second one. A call the transcript has given already is left as the transcript has it,
+ * and one that is no longer listed and never reached the transcript is taken away.
+ */
+function takePendingCalls(list: ToolCall[]): void {
+  const listed = new Set(list.map((call) => call.call_id));
+  for (const id of [...pendingCalls]) {
+    if (listed.has(id)) continue;
+    pendingCalls.delete(id);
+    calls.delete(id);
+    unplace(`c:${id}`);
+  }
+  for (const call of list) {
+    if (calls.has(call.call_id) && !pendingCalls.has(call.call_id)) continue;
+    pendingCalls.add(call.call_id);
+    calls.set(call.call_id, call);
+    place(`c:${call.call_id}`, call.at, "", () => drawCall(call));
+  }
+}
+
 /** Brings each question's card up to date with the screen. */
 function drawQuestionStates(): void {
   for (const element of chat.querySelectorAll<HTMLElement>(".question")) {
@@ -786,6 +886,8 @@ interface ScreenFrame { screen?: { state: string; background?: Background | null
 const working = document.getElementById("working")!;
 const workingText = document.getElementById("working-text")!;
 const calls = new Map<string, ToolCall>();
+/** The ids of the calls drawn from `pending_tool_calls`, which the transcript does not hold yet. */
+const pendingCalls = new Set<string>();
 let screenState: string | null = null;
 let background: Background | null = null;
 let workingLine: string | null = null;
@@ -1628,6 +1730,7 @@ const kyo = {
     drawChatLinksSoon();
     rendered.clear();
     calls.clear();
+    pendingCalls.clear();
     diffs.clear();
     subagents.clear();
     agentCalls.clear();
@@ -1847,10 +1950,12 @@ const kyo = {
       }
       for (const call of batch.tool_calls ?? []) {
         const version = `${call.result?.text ?? ""}${call.result?.is_error ?? ""}`;
+        // KYO-940: the transcript's record of a call drawn while it was pending takes its card.
+        pendingCalls.delete(call.call_id);
         calls.set(call.call_id, call);
-        place(`c:${call.call_id}`, call.at, version,
-          () => call.name === "AskUserQuestion" ? drawQuestion(call) : drawToolCall(call));
+        place(`c:${call.call_id}`, call.at, version, () => drawCall(call));
       }
+      if (batch.pending_tool_calls) takePendingCalls(batch.pending_tool_calls);
       for (const output of batch.command_outputs ?? []) {
         place(`o:${output.uuid}`, output.at, output.text, () => drawCommandOutput(output));
         linkPlaced(`o:${output.uuid}`);
@@ -1871,7 +1976,7 @@ const kyo = {
     // The final text has arrived, so the in-progress copy goes at once.
     if (liveText !== null && alreadyLanded(liveText)) clearLive();
     drawSide();
-    for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.command_outputs]) {
+    for (const list of [batch.turns, batch.replies, batch.tool_calls, batch.pending_tool_calls, batch.command_outputs]) {
       for (const item of list ?? []) if (item.at > latestAt) latestAt = item.at;
     }
     turnsLoaded = true;
@@ -1902,6 +2007,16 @@ const kyo = {
     kyo.facts(frame as { facts?: Facts | null });
     kyo.terminal(frame as { terminal?: { text: string; working_line: string | null } | null });
     kyo.screen(frame);
+    // KYO-940: a question that was open when the stream began; a server that predates the
+    // field sends none. After the screen, which is what says the card's question is waited on.
+    const pending = (frame as { pending_tool_calls?: ToolCall[] }).pending_tool_calls;
+    if (pending) {
+      keepingPlace(() => {
+        takePendingCalls(pending);
+        arrange();
+      });
+      drawWorking();
+    }
   },
 
   /**

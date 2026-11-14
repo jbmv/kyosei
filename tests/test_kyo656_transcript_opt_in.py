@@ -144,6 +144,7 @@ def test_every_module_that_imports_the_reader_asks_the_one_question() -> None:
         "cmd_discuss.py",  # KYO-658: the stamp folds the transcript into the index
         "cmd_excerpt.py",  # KYO-660: the text of the lines a pack shares
         "cmd_notes.py",
+        "cmd_sessions.py",  # KYO-940: the question a hook's payload announces, kept for serve
         "cmd_turns.py",
         "credits.py",
         "doctor_install.py",
