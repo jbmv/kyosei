@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-14** — `KYO-934` (task) — A credit from a turn that answers several gates stores only its gate's part
 - **2026-11-14** — `KYO-933` (task) — Mac app: the Records search reaches gate text, criteria and the description
 - **2026-11-14** — `KYO-932` (task) — Mac app: Chat's hidden side bar removed from the page, styles and code
 - **2026-11-14** — `KYO-931` (task) — Mac app: the reminder list's summary shows three of the person's items
