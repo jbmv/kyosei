@@ -584,7 +584,10 @@ and defaults to `$CLAUDE_CODE_SESSION_ID`; in a project that has opted in to rea
 transcripts `--turn ID`, repeatable, names the turns the credit cites, by prompt id or
 transcript record uuid, and the words are copied from them. `--context-turn ID` cites a
 turn as context and leaves the person's latest turn as the approval, and with `--turn` the
-receipt says when the latest turn is not cited (KYO-914). A quote given beside `--turn` must
+receipt says when the latest turn is not cited (KYO-914). Of a turn that answers several
+gates, each under its `on record` line, the part headed for this record, or for the gate or
+criterion named, is what is stored, and the receipt names it; a turn with no such part is
+stored whole (KYO-934, [registries.md](registries.md)). A quote given beside `--turn` must
 occur in a named turn, and a quote given alone is checked against the session's
 transcript. A second `kyo confirm` naming the same turn skips what the first applied, as
 it does for the same quote. `--source-other

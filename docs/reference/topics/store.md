@@ -740,7 +740,8 @@ recommended and by whom, the outcome (`accepted`, `refined`, `overrode` or `unpr
 and the alternatives. Where a decided credit cites a discussion, its depth is the
 person's turn count and active time beside the session, never the wall-clock span; words
 the person sent from Claude Code's suggestions are labelled as their choice and not their
-writing. `kyo show --json` carries the same in `credits[]` (person, role, outcome,
+writing, and words stored as one part of a turn that answered several gates are marked
+`part of a longer turn` (KYO-934). `kyo show --json` carries the same in `credits[]` (person, role, outcome,
 `transcript_check`, the span fields), a `credit` id on each verification and gate, and the
 derived `reconstructed`, `person_name` and `overrides`; the export holds `credits[]` and
 none of the derived fields. `kyo list --json` rows carry `people`, and `kyo changelog`

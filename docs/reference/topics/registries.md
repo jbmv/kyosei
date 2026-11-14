@@ -177,6 +177,26 @@ evidence artifact of their own. Each turn also carries the commitment the turn i
 to the prompt's text when it was sent, where its line has one, and `kyo turns --verify`
 checks that the line still holds it.
 
+A prompt sent from a client may answer several gates at once, each answer under the line
+`kyo serve` writes to say what it answers, such as `on record KYO-12.g1 "<words>..."`
+([serve-and-desktop.md](serve-and-desktop.md)). Of such a turn a credit stores the part
+headed for what the command credits (KYO-934): the person's lines under a line naming that
+gate, criterion or record, up to the next such line, the next `Note` heading of a notes
+message, or the end of the turn. An `attached` line does not end a part. A command naming
+a record takes every part naming the record or one of its elements, and where no line
+names what is credited, the parts naming anything else of the same record are taken. Only
+the id a line is for counts, and an id among its quoted words does not. `kyo confirm`,
+`kyo verify --method human-observed`, `kyo ungate`, `kyo credit` and a settle that clears
+a person's gate choose the part this way, `kyo spawn` of a decision takes the part headed
+for its source, and `kyo new` names nothing a part could be headed for. The part is stored
+with `[...]` on a line of its own wherever the rest of the turn was left out, the
+server's own lines included, and it is checked against the turn's typed words as a quote
+is. The credit cites the same turn with the same commitment, so the stored shape is that
+of any other credit. A turn with no such part is stored whole. The receipt says which was
+done, naming the line the part stands under and its first line, and `kyo show` marks
+words that begin or end with `[...]` as `part of a longer turn`. `--quote-file` beside
+`--turn` still stores other words of the turn.
+
 `--quote-file` beside `--turn` narrows the credit: the words must occur in a named turn
 (`credit-quote-not-found` otherwise), the latest named turn that holds them is the
 approval, and they are what is stored for it. `--quote-file` alone is checked against the

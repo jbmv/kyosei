@@ -53,8 +53,7 @@ _TURN_LINE = re.compile(rf"^on (?:{'|'.join(_TURN_WHO.values())}) {_UUID}(?: |$)
 _NOTE_LINE = re.compile(rf"^{re.escape(_ON_NOTE)}\S+$")
 #: A served file's line, and the older line of an anchor filed with a commit.
 _FILE_LINE = re.compile(
-    r"^on (?:file \S.*? lines? \d+(?:-\d+)?"
-    r"|(?:file|document) \S+ at [0-9a-f]{7,40} (?:lines|chars) \d+-\d+)(?: |$)"
+    r"^on (?:file|document) \S.*? (?:lines? \d+(?:-\d+)?|chars \d+-\d+)(?: |$)"
 )
 #: An attachment is stored under its digest, which is what tells the server's line from a
 #: sentence of the person's that begins with the same word.

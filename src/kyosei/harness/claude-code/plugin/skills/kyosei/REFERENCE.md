@@ -1087,7 +1087,13 @@ and `kyo show` prints each with its role. `kyo turns --said` lists a session's t
 ids, the times and the first line of each. A message sent mid-turn and an answer to a question
 have no prompt id and are named by their record uuid. A turn that is not the person's (a task
 notification, a subagent's report) is refused. A long turn is stored as its head and tail, and
-a paste is left out. A second `kyo confirm` naming the same turn skips what the first applied.
+a paste is left out. A turn sent from the app that answers several gates holds each answer under
+an `on record <id> "..."` line, and a credit stores the part headed for what its command
+credits (KYO-934): the gate, criterion or record named, or failing that anything of the same
+record, up to the next such line. The receipt names the line and prints the part's first line,
+or says the turn was stored whole because no part was headed for it; `kyo show` marks the words
+`part of a longer turn`. Credit each record with its own command and the same turn, and pass
+`--quote-file` beside `--turn` when the part is not the words meant. A second `kyo confirm` naming the same turn skips what the first applied.
 In a project that does not read transcripts, or outside a Claude Code session, the words still
 come from `--quote-file`, and a credit with neither is refused naming the flag.
 `--context-turn <id>` (KYO-914) cites a turn as context and leaves the person's latest turn as
