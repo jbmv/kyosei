@@ -81,10 +81,16 @@
       <!-- Search (KYO-741, KYO-754): in the chat, the open record or the open file, whichever view shows;
            opened by Command-F, closed by Escape. -->
       <span id="find" hidden>
-        <input id="find-field" class="records-search" type="search" placeholder="Search this chat" aria-label="Search this chat" />
-        <button id="find-prev" class="nav-icon" data-nav-icon="up" title="Previous (Shift-Return)" aria-label="Previous hit"></button>
-        <button id="find-next" class="nav-icon" data-nav-icon="down" title="Next (Return)" aria-label="Next hit"></button>
-        <span id="find-count"></span>
+        <!-- KYO-924: one box of a fixed width, as a browser's find bar is; the count and the
+             arrows are drawn inside it at its right, only while the field holds words. -->
+        <span id="find-box">
+          <input id="find-field" type="search" placeholder="Search this chat" aria-label="Search this chat" />
+          <span id="find-tools">
+            <span id="find-count"></span>
+            <button id="find-prev" class="nav-icon" data-nav-icon="up" title="Previous (Shift-Return)" aria-label="Previous hit"></button>
+            <button id="find-next" class="nav-icon" data-nav-icon="down" title="Next (Return)" aria-label="Next hit"></button>
+          </span>
+        </span>
         <button id="find-close" class="nav-icon" data-nav-icon="close" title="Close (Escape)" aria-label="Close search"></button>
       </span>
     </header>
