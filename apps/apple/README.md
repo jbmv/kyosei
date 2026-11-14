@@ -419,9 +419,10 @@ when `WebContinuousSpellCheckingEnabled` is true, and it applies the system chec
 corrections, which include the capital at the start of a sentence, when words are being
 underlined and `WebAutomaticSpellingCorrectionEnabled` is true or absent with the correction
 on system-wide. `ChatPage` in `ChatView.swift` registers the first as true and the second as
-false before the web view is built. The Spelling and Grammar menu stores a choice under the
-same keys, and a stored value is read before a registered one, so a choice made there is
-kept. Smart quotes, smart dashes and text replacement have their own keys and still follow
+false before the web view is built. The Edit menu's Check Spelling While Typing stores a
+choice of the underline under the first key, and a stored value is read before a registered
+one, so a choice made there is kept. The menu has no Correct Spelling Automatically item,
+since the correction is off by design. Smart quotes, smart dashes and text replacement have their own keys and still follow
 the system-wide settings. A box of the composer is an editor whose text is in a
 `contenteditable` element marked `spellcheck="true"` (KYO-910), so WebKit checks it as it
 checked the text area, and the page does not cancel a right-click on its words, so the menu
@@ -439,15 +440,28 @@ suggestions with Ignore and Learn, then Indent and Outdent, then Cut, Copy and P
 other items, which suit a web page more than a prompt, are left out there. The suggestions
 are taken by their place, as the groups before the first one that holds Look Up, Cut or a
 submenu, because WebKit's names for its items are not documented; if Cut, Copy and Paste are
-not found, nothing is left out and the two items follow the suggestions. The two spelling
-settings that WebKit's submenu held are in the Edit menu's Spelling and Grammar
-(`SpellingCommands` in `App.swift`): each item sends the web view WebKit's own action and
-shows the stored setting as its tick. On every right-click the page posts a
+not found, nothing is left out and the two items follow the suggestions. Of the two spelling
+settings that WebKit's submenu held, Check Spelling While Typing is in the Edit menu's
+Spelling and Grammar (`SpellingCommands` in `App.swift`): the item sends the web view WebKit's
+own action and shows the stored setting as its tick. Correct Spelling Automatically is not
+offered, since the page corrects nothing. On every right-click the page posts a
 `composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
 `ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
 `window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
-nothing when no box has the focus. `web/test/composermenu.test.ts` checks the page's part in
-headless Chrome; the menu itself is seen only in the app.
+nothing when no box has the focus.
+
+Below a menu's last item macOS draws rows of its own: AutoFill, the Continuity items and
+Services, as observed on macOS 27. They are items of menus the system keeps and are not
+among the menu's `items`, so they cannot be removed from it, and they are attached before
+`willOpenMenu` runs. `ChatPage.systemItems` finds them as the items the menu's
+`accessibilityChildren` lists and its `items` does not, and on a box's words they are hidden.
+The system attaches them again, shown, to the next menu, so other menus keep them.
+
+`web/test/composermenu.test.ts` checks the page's part in headless Chrome.
+`Tests/KyoseiMacTests/MenuTrimTests.swift` opens the menu itself: it puts the web view in a
+window, sends a right mouse press to a misspelled word in an editable element, reads the
+titles drawn in the menu's window and cancels the menu. It runs only in a login session that
+has the screen, where it shows a menu for about a quarter of a second, twice.
 
 ## Views
 
