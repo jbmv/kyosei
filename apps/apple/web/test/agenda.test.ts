@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type AgendaItem, MAX_TEXT, agendaView, itemText, listAfter, refusalText,
+  type AgendaItem, MAX_TEXT, agendaPeek, agendaView, itemText, listAfter, refusalText,
 } from "../src/agenda.ts";
 
 const items: AgendaItem[] = [
@@ -140,4 +140,31 @@ test("the divider stands before the orchestrator's rows, and only when there are
   const onlyDone = mixed.map((item) => ({ ...item, checked: item.author === "person" }));
   assert.equal(agendaView(frameOf(onlyDone)).dividerAt, 0);
   assert.equal(agendaView(frameOf(onlyDone), true).dividerAt, 3);
+});
+
+const make = (author: AgendaItem["author"], count: number, from = 1): AgendaItem[] =>
+  Array.from({ length: count }, (_, at) => ({ id: `${author[0]}${from + at}`, text: `${author} ${from + at}`, author, checked: false }));
+const peek = (list: AgendaItem[]) => {
+  const { items: drawn, line } = agendaPeek({ state: "shown", session_id: "s", etag: null, items: list });
+  return { drawn: drawn.map((item) => item.id), line };
+};
+
+test("the collapsed list draws the first three of the person's items and names the rest (KYO-931.c1)", () => {
+  assert.deepEqual(peek([...make("person", 5), ...make("orchestrator", 2)]), {
+    drawn: ["p1", "p2", "p3"], line: "2 more of yours, 2 of Claude's…",
+  });
+  assert.deepEqual(peek([...make("person", 2), ...make("orchestrator", 1)]), { drawn: ["p1", "p2"], line: "1 of Claude's…" });
+  assert.deepEqual(peek(make("person", 3)), { drawn: ["p1", "p2", "p3"], line: "" });
+  assert.deepEqual(peek(make("orchestrator", 2)), { drawn: [], line: "2 of Claude's…" });
+  assert.deepEqual(peek([]), { drawn: [], line: "No reminders…" });
+});
+
+test("the collapsed list skips checked items and keeps the list's order (KYO-931.c1)", () => {
+  const list: AgendaItem[] = [
+    { id: "a", text: "a", author: "person", checked: true },
+    ...make("person", 4, 1),
+    { id: "o", text: "o", author: "orchestrator", checked: true },
+  ];
+  assert.deepEqual(peek(list), { drawn: ["p1", "p2", "p3"], line: "1 more of yours…" });
+  assert.deepEqual(peek([list[0], list[5]]), { drawn: [], line: "Every reminder is done…" });
 });

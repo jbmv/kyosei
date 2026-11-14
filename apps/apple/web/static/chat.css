@@ -326,11 +326,15 @@ body.terminal-open #jump-bottom { display: none; }
   cursor: pointer;
 }
 .composer-summary:hover { color: var(--text); }
-#boxes[data-in-use="agenda"] #agenda-summary { display: none; }
+#boxes[data-in-use="agenda"] #agenda-summary, #boxes[data-in-use="agenda"] #agenda-peek { display: none; }
+#agenda-summary[hidden] { display: none; }
 /* The list is out of sight but not out of the page, so that a focus put in it opens it. */
 #boxes:not([data-in-use="agenda"]) > #agenda { gap: 0; }
-#boxes:not([data-in-use="agenda"]) #agenda > :not(#agenda-summary) { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; }
-#agenda-summary { margin-left: 21px; }
+#boxes:not([data-in-use="agenda"]) #agenda > :not(#agenda-summary):not(#agenda-peek) { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; }
+#agenda-summary, #agenda-peek { margin-left: 21px; }
+#agenda-peek { display: flex; flex-direction: column; }
+#agenda-peek:empty { display: none; }
+.agenda-peek-item { font-style: normal; }
 
 /* The scratchpads stand together and scroll together. A drag of one by its head (KYO-926)
    draws it over the others, and a line where it will land. */

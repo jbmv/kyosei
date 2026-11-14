@@ -107,21 +107,33 @@ export function agendaView(frame: AgendaFrame | null, showCompleted = false): Ag
   };
 }
 
+/** How many of the person's items the collapsed list draws. */
+export const PEEK_ITEMS = 3;
+
 /**
- * The list drawn as one line while another section of the composer is in use (KYO-925): how
- * many items are left unchecked, by whose they are, as "4 of yours, 2 of Claude's…". A group
- * with none left is not named. The line of a list that cannot be read is why; with no list,
- * it is empty.
+ * The list as it is drawn while another section of the composer is in use (KYO-925, KYO-931):
+ * the first three of the person's unchecked items in the list's order, then one line naming
+ * what is not shown, as "2 more of yours, 4 of Claude's…". A group with nothing left unshown
+ * is not named, and the line is empty when nothing is left to name after the items. With none
+ * of the person's items left, the line is the whole of it: "2 of Claude's…", "Every reminder
+ * is done…" or "No reminders…". The line of a list that cannot be read is why; with no list,
+ * both are empty.
  */
-export function agendaSummary(frame: AgendaFrame | null): string {
-  if (!frame || frame.state === "absent") return "";
-  if (frame.state === "unavailable") return frame.why;
-  const left = (author: AgendaItem["author"]) => frame.items.filter((item) => item.author === author && !item.checked).length;
+export function agendaPeek(frame: AgendaFrame | null): { items: AgendaItem[]; line: string } {
+  if (!frame || frame.state === "absent") return { items: [], line: "" };
+  if (frame.state === "unavailable") return { items: [], line: frame.why };
+  const left = (author: AgendaItem["author"]) => frame.items.filter((item) => item.author === author && !item.checked);
   const mine = left("person");
-  const theirs = left("orchestrator");
-  const parts = [...(mine ? [`${mine} of yours`] : []), ...(theirs ? [`${theirs} of Claude's`] : [])];
-  if (parts.length) return `${parts.join(", ")}…`;
-  return frame.items.length ? "Every reminder is done…" : "No reminders…";
+  const theirs = left("orchestrator").length;
+  const items = mine.slice(0, PEEK_ITEMS);
+  const more = mine.length - items.length;
+  const parts = [
+    ...(more ? [`${more} more of yours`] : []),
+    ...(theirs ? [`${theirs} of Claude's`] : []),
+  ];
+  if (parts.length) return { items, line: `${parts.join(", ")}…` };
+  if (items.length) return { items, line: "" };
+  return { items, line: frame.items.length ? "Every reminder is done…" : "No reminders…" };
 }
 
 /** One line of typed text as an item holds it, or null when it holds nothing. */

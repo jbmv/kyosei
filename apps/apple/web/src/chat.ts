@@ -37,7 +37,7 @@ import {
 } from "./drafts";
 import { SendGate } from "./sending";
 import {
-  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaSummary, agendaView, listAfter,
+  type AgendaFrame, type AgendaItem, type Change, type Refusal, type Row, agendaPeek, agendaView, listAfter,
   refusalText,
 } from "./agenda";
 import { moveLines, sectionEnd } from "./outline";
@@ -4712,10 +4712,32 @@ function agendaRow(row: Row): HTMLElement {
   return item;
 }
 
+/**
+ * The collapsed list (KYO-931): the person's first three items, each a button that opens the
+ * list as a press on the summary line does, then the line. The items are text only; they take
+ * no check or edit until the list is open.
+ */
+function drawAgendaPeek(): void {
+  const peek = agendaPeek(agendaFrame);
+  const drawn = peek.items.map((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.tabIndex = -1;
+    button.className = "composer-summary agenda-peek-item";
+    button.textContent = item.text;
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", openAgendaFromSummary);
+    return button;
+  });
+  agendaPeekItems.replaceChildren(...drawn);
+  agendaSummaryButton.textContent = peek.line;
+  agendaSummaryButton.hidden = peek.line === "";
+}
+
 function drawAgenda(): void {
   const view = agendaView(agendaFrame, agendaShowCompleted);
   agendaPane.hidden = !view.shown;
-  agendaSummaryButton.textContent = agendaSummary(agendaFrame);
+  drawAgendaPeek();
   drawSections();
   agendaWhy.hidden = view.why === null;
   agendaWhy.textContent = view.why ?? "";
@@ -4811,6 +4833,7 @@ document.getElementById("interrupt")!.addEventListener("click", () => post("inte
 type Section = "agenda" | "scratch" | "prompt";
 let sectionInUse: Section = "prompt";
 const agendaSummaryButton = document.getElementById("agenda-summary")!;
+const agendaPeekItems = document.getElementById("agenda-peek")!;
 
 /** The section an element stands in, or null when it is in none of them. */
 function sectionAt(node: EventTarget | null): Section | null {
@@ -4882,10 +4905,11 @@ function enterScratch(editor: EditorView): void {
 
 // A press on the list's summary opens the list, with the caret in its add field when it has one.
 agendaSummaryButton.addEventListener("mousedown", (event) => event.preventDefault());
-agendaSummaryButton.addEventListener("click", () => {
+function openAgendaFromSummary(): void {
   useSection("agenda");
   if (!agendaAdd.hidden && !agendaAddRow.hidden) agendaAdd.focus();
-});
+}
+agendaSummaryButton.addEventListener("click", openAgendaFromSummary);
 
 /**
  * The prompt's summary: its first line that holds words, then an ellipsis. A prompt with marks

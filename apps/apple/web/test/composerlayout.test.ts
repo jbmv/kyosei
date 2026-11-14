@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openPage, type Page } from "./chrome.ts";
-import { agendaSummary, type AgendaItem } from "../src/agenda.ts";
+import { agendaPeek, type AgendaItem } from "../src/agenda.ts";
 
 const START = `window.kyo.project({ project: "p", scope: "server/p" });`;
 const LONG = Array.from({ length: 60 }, (_, line) => `line ${line}`).join("\n");
@@ -17,17 +17,15 @@ const ITEMS = [
   item("o1", "orchestrator"), item("o2", "orchestrator"), item("o3", "orchestrator", true),
 ];
 
-test("the list's summary counts the unchecked items by whose they are (KYO-925.c4)", () => {
-  const shown = (items: AgendaItem[]) => agendaSummary({ state: "shown", session_id: "s", etag: null, items });
-  assert.equal(shown(ITEMS), "4 of yours, 2 of Claude's…");
-  // A group with nothing left is not named.
-  assert.equal(shown(ITEMS.filter((each) => each.author === "orchestrator")), "2 of Claude's…");
-  assert.equal(shown(ITEMS.filter((each) => each.author === "person")), "4 of yours…");
-  assert.equal(shown(ITEMS.filter((each) => each.checked)), "Every reminder is done…");
-  assert.equal(shown([]), "No reminders…");
-  assert.equal(agendaSummary({ state: "unavailable", why: "The list could not be read." }), "The list could not be read.");
-  assert.equal(agendaSummary({ state: "absent" }), "");
-  assert.equal(agendaSummary(null), "");
+test("the collapsed list's line counts what is not drawn, by whose it is (KYO-925.c4, KYO-931)", () => {
+  const line = (items: AgendaItem[]) => agendaPeek({ state: "shown", session_id: "s", etag: null, items }).line;
+  assert.equal(line(ITEMS), "1 more of yours, 2 of Claude's…");
+  assert.equal(line(ITEMS.filter((each) => each.author === "orchestrator")), "2 of Claude's…");
+  assert.equal(line(ITEMS.filter((each) => each.checked)), "Every reminder is done…");
+  assert.equal(line([]), "No reminders…");
+  assert.equal(agendaPeek({ state: "unavailable", why: "The list could not be read." }).line, "The list could not be read.");
+  assert.equal(agendaPeek({ state: "absent" }).line, "");
+  assert.equal(agendaPeek(null).line, "");
 });
 
 /** Each section's place and size, and what its summary shows and how. */
