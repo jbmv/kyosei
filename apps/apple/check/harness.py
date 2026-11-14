@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import html
+import http.client
 import json
 import os
 import shutil
@@ -43,6 +44,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from collections.abc import Callable, Iterator
@@ -402,11 +404,20 @@ class Events:
     """A subscriber to ``sessions/{id}/events``, reading frames on a thread of its own."""
 
     def __init__(self, server: Server, session_id: str) -> None:
-        request = urllib.request.Request(  # noqa: S310
-            f"{server.url}/v1/projects/{server.name}/sessions/{session_id}/events",
+        address = urllib.parse.urlsplit(server.url)
+        self.connection = http.client.HTTPConnection(
+            address.hostname or "", address.port, timeout=60
+        )
+        self.connection.request(
+            "GET",
+            f"/v1/projects/{server.name}/sessions/{session_id}/events",
             headers={"Authorization": f"Bearer {server.token}"},
         )
-        self.stream = urllib.request.urlopen(request, timeout=60)  # noqa: S310
+        # Kept so that closing can end a read that is waiting for the next frame.
+        self.socket = self.connection.sock
+        self.stream = self.connection.getresponse()
+        if self.stream.status != 200:
+            raise CheckError(f"the event stream answered {self.stream.status}")
         #: Each frame as ``(wall clock, event, data)``, in the order it arrived.
         self.frames: list[tuple[float, str, Any]] = []
         self.thread = threading.Thread(target=self._read, daemon=True)
@@ -424,12 +435,15 @@ class Events:
                 elif not line and event:
                     self.frames.append((time.time(), event, json.loads(data) if data else None))
                     event, data = "", ""
-        except (OSError, ValueError):
+        except (OSError, ValueError, http.client.HTTPException):
             return
 
     def close(self) -> None:
         with contextlib.suppress(OSError):
-            self.stream.close()
+            self.socket.shutdown(socket.SHUT_RDWR)
+        self.thread.join(timeout=5)
+        with contextlib.suppress(OSError):
+            self.connection.close()
 
 
 def make_project(run: Run, name: str = "checked") -> Path:

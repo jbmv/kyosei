@@ -27,7 +27,7 @@ Used three ways::
 
     python frontmost.py watch <log>          # sample until ended with SIGTERM
     python frontmost.py mark <log> <step>    # say which step of the run begins now
-    python frontmost.py judge <log>          # print the judgement; status 1 if the run took the front
+    python frontmost.py judge <log>          # print the judgement; status 1 if the front was taken
 """
 
 from __future__ import annotations
