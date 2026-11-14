@@ -86,7 +86,7 @@ The files that the later sections do not name, with what each holds:
 | `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
 | `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
 | `Sources/KyoseiClient/SealKeyItem.swift` | the seal key as a synchronizable keychain item, and the `seal-key` mode's contract with `kyo` |
-| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server, and the delegate starts the check channel |
+| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server, and the delegate starts the app as an accessory app and starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
@@ -821,8 +821,11 @@ the app as follows:
 - It reads its device token from `KYOSEI_CHECK_TOKEN` and never runs `security`; saving a
   token from Settings is refused, and it has no `seal-key` command.
 - Its settings are its own identifier's, and it refuses to start under the app's identifier.
-- It does not ask to come to the front when it starts, unless `KYOSEI_CHECK_ACTIVATE` is `1`,
-  and it takes its window's frame from `KYOSEI_CHECK_FRAME`, as `x,y,width,height`.
+- It starts as an accessory app (KYO-945): its bundle sets `LSUIElement` and its delegate the
+  accessory activation policy, so it has no Dock icon and starting it brings nothing in front
+  of the app a person is using. With `KYOSEI_CHECK_ACTIVATE` set to `1` it is a regular app
+  and asks to come to the front. It takes its window's frame from `KYOSEI_CHECK_FRAME`, as
+  `x,y,width,height`.
 
 **The channel.** While `KYOSEI_CHECK_SOCKET` names a path, the check build listens there on a
 Unix socket with mode 0600 and answers one line of JSON for each line it is sent. A request is
@@ -836,17 +839,23 @@ the system.
 | `menus` | answers the main menu as a tree: titles, key equivalents, and each item's enabled state after validation |
 | `menu` | validates and performs the item at `path`, such as `["Edit", "Undo"]`, as choosing it does |
 | `key` | sends one key (`key`, with `modifiers`) or types `text`, through `NSApp.sendEvent` |
-| `mouse` | sends a press, a release or both at `x`, `y` in the page's coordinates; with `menu` it answers the items of a native menu the press opened and closes the menu, and with `choose` it chooses one |
+| `mouse` | sends a press, a release or both at `x`, `y` in the page's coordinates; with `menu` it answers the items of the native menu the press opens, and with `choose` it chooses one. The menu is not put on the screen unless `on_screen` asks for it |
 | `snapshot` | writes a PNG of the window to `path`: the title bar and status bar from `cacheDisplay`, the page from `WKWebView.takeSnapshot` |
-| `state` | answers the window's title, frame and first responder, whether it is key, whether the app is active, and which app is in front |
+| `state` | answers the window's title, frame and first responder, whether it is key, whether the app is active and an accessory app, which app is in front, and how often the app became active and tracked a menu on the screen since the channel started |
 | `window` | sets the window's `frame`, makes it key (`key`), makes the page its first responder (`focus`), or activates the app (`activate`) |
 | `quit` | answers, then ends the app with `NSApp.terminate`, which runs the app's own quit path |
 
 The channel does not exercise what happens before the app: the window server's delivery of
 input, the menu bar's tracking, and activation. Measured on macOS 27 from a process started
 in tmux: `makeKey` does not make the window key while the app is not active, and the page
-then reports no focus. Keys, presses and menu items still reach the page and the menu bar.
-Whether the app can be activated from there was not measured. While another app covers the
+then reports no focus. Keys, presses and menu items still reach the page and the menu bar,
+and text typed with `key` reaches a composer box; the page takes the keys one after another,
+so a scenario waits for the box to hold the text before it presses Send. Whether the app can
+be activated from there was not measured. A context menu is read without being shown
+(KYO-945): a menu on the screen is tracked by the window server, which takes the keyboard and
+the pointer from the app in front, so while a `mouse` request reads a menu the channel answers
+`NSMenu.popUpContextMenu(_:with:for:)` itself, tells the view the menu is opening as AppKit
+does, and hands the menu to the request. While another app covers the
 window the page draws no frames, so its transitions do not advance; a scenario therefore
 finishes the page's running transitions before it reads a place, and `snapshot` waits for a
 frame for no longer than half a second. Snapshots taken of a covered window were correct.
@@ -860,16 +869,51 @@ has looked for a session's pane. The page's storage is moved into the run's dire
 `CFFIXED_USER_HOME`, and the check build's settings are deleted before and after a scenario.
 A run stops only the processes it started.
 
-`check/test_scenario_f.py` is the one scenario built so far, Records and Files: a chosen
+**The app in front.** A run must not take the place of the app a person is using (KYO-945).
+`check/frontmost.py` samples the app in front with `lsappinfo`, which needs no permission,
+and judges the samples: the run fails if the check build or a test runner of `swift test` was
+in front at any of them. `make app-check` starts the sampling before it builds, names each
+step and each test among the samples, and fails on that judgement; the harness's last test,
+`check/test_zz_frontmost.py`, fails on it too, and on a check build that says it became
+active or tracked a menu on the screen. Measured with the screen locked: an app that asks to
+be activated is not, and the order of apps does not move, so a run under a locked screen
+passes whatever it would do to an unlocked one. The result file therefore records whether the
+screen was locked, and the judgement says when its pass is not evidence. Which step of a run
+took the front from an app in use, as was seen once by a person, has not been measured,
+because every run since was made under a locked screen.
+
+**The scripted session.** A scenario that uses the chat needs a live session, and a run
+starts no `claude`. `check/scripted_session.py` stands in for one (KYO-946). The harness
+writes it into the run's own `settings.yml` as `orchestrator_command`, with `serve_send`, so
+the test server's Start route starts it in a pane of the private tmux server. It writes the
+process record and the transcript a session has, runs `kyo sessions --hook` and `kyo turns
+--hook` with the payloads the plugin's hooks receive, draws the screen the server's reader
+classifies, reads the keys the server sends, and answers each submitted prompt with a turn of
+its script. A script names events (a reply, a tool call, a question, a working row,
+background work, a wait) and never transcript rows, so a scenario cannot write an order Claude
+Code does not produce. The file's header states the order and timing rules, with what
+measured each, and what the program does not reproduce; `check/test_scripted_session.py`
+tests each rule against the server's routes, the transcript and the session's own log. The
+session imitates Claude Code 2.1.319 as the recorded screens under
+`tests/fixtures/session_layer/` show it, and can drift from later releases as those do.
+
+Two scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
 plan's outstanding members are red, plans are named by id and then title, the side bar has no
 Latest shift note, one drawer is present in Records and in Files and docks, and an open file's
-root and path are separate elements whose right-click menu offers Copy path. The scenarios
-that need a session are planned and not built.
+root and path are separate elements whose right-click menu offers Copy path.
+`check/test_scenario_e.py` is Chat while a session works: the app's Start button starts the
+scripted session, a prompt typed into the composer appears dimmed at the press and loses the
+dimming when the server has typed it into the session's pane, the working line is one row
+with its whole text in its tooltip, and with the chat scrolled up new replies leave the place
+unchanged and are counted on the arrow. It ends with a short check that a question the
+session asks reaches the chat from the session's hook while its dialog is open. The other
+scenarios of the proposal are planned and not built.
 
 A run writes `result.json` and `review.html` under `.build/check-run`, or under
 `KYOSEI_CHECK_OUT`, and `make app-check` prints the path. The result names what was tested (the
-commit, the digest of the check build's executable and the server's version) and holds each
-assertion with its outcome. The review sheet shows each screenshot beside the text of what it
+commit, the digest of the check build's executable and the server's version), whether the
+screen was locked and what the run did to the app in front, and holds each assertion with its
+outcome. The review sheet shows each screenshot beside the text of what it
 is a look at. The screenshots are of the check build and are taken by the app of its own
 window.
 

@@ -272,7 +272,8 @@ def _working_line(scenario: harness.Scenario, page: harness.Channel) -> None:
         "const words = document.getElementById('working-text');"
         "const style = getComputedStyle(words);"
         "const one = document.createElement('span'); one.textContent = 'X';"
-        "words.parentElement.append(one); const row = one.getBoundingClientRect().height; one.remove();"
+        "words.parentElement.append(one);"
+        "const row = one.getBoundingClientRect().height; one.remove();"
         f"return {{text: words.textContent, title: words.title, hidden: words.parentElement.hidden,"
         " height: words.getBoundingClientRect().height, one_row: row,"
         " clipped: words.scrollWidth > words.clientWidth, white_space: style.whiteSpace,"
@@ -321,7 +322,8 @@ def _arrow(scenario: harness.Scenario, page: harness.Channel) -> None:
     )
     page.wait("the third reply", f"return {CHAT}.includes('Three.');", deadline=20)
     after = page.eval(
-        "const page = document.getElementById('page'); const arrow = document.getElementById('jump-bottom');"
+        "const page = document.getElementById('page');"
+        "const arrow = document.getElementById('jump-bottom');"
         "return {place: page.scrollTop, count: document.getElementById('jump-count').textContent,"
         " classes: arrow.className, display: getComputedStyle(arrow).display,"
         " from_the_end: page.scrollHeight - page.scrollTop - page.clientHeight};"
