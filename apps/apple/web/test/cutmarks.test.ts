@@ -87,6 +87,30 @@ test("lines cut from the prompt are pasted into a scratchpad with their anchor, 
   }
 });
 
+// The maintainer, 2026-11-14: a line cut by its text alone left its anchor on the empty line
+// it left behind, so the anchor was sent twice once the line came back.
+test("a cut of a line's text, without its line break, leaves no marks on the empty line, and undoing the cut puts them back (KYO-938)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await open(page);
+    // "two": the second line's text, up to its end.
+    await page.run(cut(1, 4, 7));
+    assert.deepEqual(await page.run(BOXES), [["scratch", "notes\nlast"], ["prompt", "one\n\nthree\nfour"]]);
+    assert.deepEqual(await saved(page), [["pad", []], ["m", [[2, ["file"]]]]]);
+    await page.run(paste(0, 6));
+    assert.deepEqual(await page.run(BOXES), [["scratch", "notes\ntwolast"], ["prompt", "one\n\nthree\nfour"]]);
+    assert.deepEqual(await saved(page), [["pad", [[1, ["anchor", "tag"]]]], ["m", [[2, ["file"]]]]]);
+    // Undoing the cut in the box it was made in brings the line back with what it held.
+    await open(page);
+    await page.run(cut(1, 4, 7));
+    await page.press("z", META);
+    assert.deepEqual(await page.run(BOXES), [["scratch", "notes\nlast"], ["prompt", "one\ntwo\nthree\nfour"]]);
+    assert.deepEqual(await saved(page), [["pad", []], ["m", [[1, ["anchor", "tag"]], [2, ["file"]]]]]);
+  } finally {
+    await page.close();
+  }
+});
+
 test("a copy, a cut inside a line and a paste of other words carry nothing (KYO-938.c3)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {

@@ -56,6 +56,13 @@ const refreshEffect = StateEffect.define<null>();
  * come back on the paste by the line's text.
  */
 const carryEffect = StateEffect.define<{ pos: number; lines: unknown[][] }>();
+/**
+ * Takes what a cut of whole lines took off the lines that remain (KYO-938). A cut that ends at
+ * a line's end leaves that line, empty, and it would keep what it held while the paste put the
+ * same items on another line. They are kept by the line's text, as a removed line's are, so
+ * that undoing the cut puts them back.
+ */
+const strandEffect = StateEffect.define<{ text: string; lines: unknown[][] }>();
 
 let nextId = 1;
 const freshId = () => nextId++;
@@ -147,6 +154,26 @@ function carryItems<T>(marks: LineMarks<T>, doc: Text, carried: { pos: number; l
   return { ...marks, items };
 }
 
+function strandItems<T>(marks: LineMarks<T>, cut: { text: string; lines: unknown[][] }): LineMarks<T> {
+  const taken = new Set(cut.lines.flat());
+  const items = new Map(marks.items);
+  let changed = false;
+  for (const [id, held] of marks.items) {
+    const kept = held.filter((item) => !taken.has(item));
+    if (kept.length === held.length) continue;
+    changed = true;
+    if (kept.length) items.set(id, kept);
+    else items.delete(id);
+  }
+  if (!changed) return marks;
+  const lost = new Map(marks.lost);
+  const texts = linesOf(cut.text);
+  cut.lines.forEach((held, line) => {
+    if (held.length && texts[line]) lost.set(texts[line], held as T[]);
+  });
+  return { ...marks, items, lost, version: marks.version + 1 };
+}
+
 function initialMarks<T>(doc: Text, saved: { line: number; items: T[] }[]): LineMarks<T> {
   const ids = Array.from({ length: doc.lines }, freshId);
   return {
@@ -166,6 +193,7 @@ const marksField = StateField.define<LineMarks<unknown>>({
       if (effect.is(placeEffect)) marks = changeItems(marks, tr.state.doc, effect.value, true);
       else if (effect.is(removeEffect)) marks = changeItems(marks, tr.state.doc, effect.value, false);
       else if (effect.is(carryEffect)) marks = carryItems(marks, tr.state.doc, effect.value);
+      else if (effect.is(strandEffect)) marks = strandItems(marks, effect.value);
       else if (effect.is(refreshEffect)) marks = { ...marks, version: marks.version + 1 };
     }
     return marks;
@@ -1028,12 +1056,26 @@ function cutLines(state: EditorState): { text: string; lines: unknown[][] } | nu
   return { text, lines };
 }
 
+/** The whole-line cut whose text the editor is about to remove, between the event and its transaction. */
+let cutting: { text: string; lines: unknown[][] } | null = null;
+const strandOnCut = EditorState.transactionExtender.of((tr) => {
+  if (!cutting || !tr.isUserEvent("delete.cut")) return null;
+  const cut = cutting;
+  cutting = null;
+  return { effects: strandEffect.of(cut) };
+});
+
 /** Paste and drop (proposal 5.8): files go to the caller, and text pasted is reported. */
 function transfers<T>(options: EditorOptions<T>): Extension {
   return [
+    strandOnCut,
     EditorView.domEventHandlers({
       cut(_event, view) {
         lastCut = cutLines(view.state);
+        // The editor removes the text after this handler; the cut's own transaction then takes
+        // the marks off a line the cut left empty (`strandOnCut`).
+        cutting = lastCut;
+        setTimeout(() => { cutting = null; }, 0);
         return false;
       },
       paste(event, view) {
