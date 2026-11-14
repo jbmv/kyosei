@@ -431,6 +431,37 @@ test("an edit after a move ends the chance to undo it: Command-Z then acts on th
   } finally { await page.close(); }
 });
 
+test("Edit > Undo directly after a move takes it back as Command-Z does, Edit > Redo repeats it, and the app is told there is a step (KYO-915.c4)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    // What the page last told the app its Undo and Redo items would act on.
+    const told = `new Promise((done) => setTimeout(() => done(window.posted.filter((m) => m.name === "undo").at(-1)?.body), 30))`;
+    for (const button of ["Create prompt", "Send to prompt"]) {
+      await openPads(page, button === "Send to prompt" ? [{ id: "m", text: "already here" }] : []);
+      const before = await page.run(HELD);
+      // The boxes are newly drawn from the draft, so no box's own history holds a step.
+      assert.deepEqual(await page.run(told), { box: true, undo: false, redo: false }, button);
+      assert.equal(await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].textContent`), button);
+      await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].click()`);
+      const after = await page.run(HELD);
+      assert.notDeepEqual(after, before, button);
+      assert.deepEqual(await page.run(told), { box: true, undo: true, redo: false }, button);
+      // The calls the app makes when Edit > Undo and Edit > Redo are chosen.
+      assert.equal(await page.run(`window.kyo.undo()`), true, button);
+      assert.deepEqual(await page.run(HELD), before, button);
+      assert.deepEqual(await page.run(told), { box: true, undo: false, redo: true }, button);
+      assert.equal(await page.run(`window.kyo.redo()`), true, button);
+      assert.deepEqual(await page.run(HELD), after, button);
+      assert.deepEqual(await page.run(told), { box: true, undo: true, redo: false }, button);
+      // A letter typed ends the chance: Undo then takes back the letter and leaves the move.
+      await page.type("!");
+      assert.equal(await page.run(`window.kyo.undo()`), true, button);
+      assert.deepEqual(await page.run(HELD), after, button);
+      assert.deepEqual(await page.run(told), { box: true, undo: false, redo: true }, button);
+    }
+  } finally { await page.close(); }
+});
+
 test("Command-Return in a scratchpad sends nothing; in the prompt it sends, and an empty prompt follows (KYO-904)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {

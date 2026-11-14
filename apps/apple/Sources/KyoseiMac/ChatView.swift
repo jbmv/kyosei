@@ -257,7 +257,10 @@ final class ChatPage: WKWebView {
 
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         UserDefaults.standard.register(defaults: Self.spellingDefaults)
+        let listener = UndoListener()
+        configuration.userContentController.add(listener, name: "undo")
         super.init(frame: frame, configuration: configuration)
+        listener.page = self
     }
 
     required init?(coder: NSCoder) {
@@ -276,6 +279,80 @@ final class ChatPage: WKWebView {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    // MARK: Edit > Undo and Redo in a composer box (KYO-915)
+
+    /// What the page last said its Undo and Redo would act on: whether a composer box's words
+    /// hold the focus, and whether there is then something to undo and to redo, which is a
+    /// move between boxes that the page holds (KYO-936) or a step of that box's own history.
+    struct UndoState: Equatable {
+        var box = false
+        var undo = false
+        var redo = false
+
+        init() {}
+
+        /// The body of the page's `undo` message; anything else reads as no box.
+        init(message body: Any) {
+            let body = body as? [String: Any]
+            box = body?["box"] as? Bool ?? false
+            undo = box && body?["undo"] as? Bool ?? false
+            redo = box && body?["redo"] as? Bool ?? false
+        }
+    }
+
+    /// A composer box is an editor that keeps its own history, in which placing an anchor, an
+    /// attachment or a tag is a step, and WebKit performs Edit > Undo from its undo manager,
+    /// which holds typing in a text field and none of an editor's steps. So while a box has
+    /// the focus this view is the target of `undo:` and `redo:`: it validates the two items
+    /// from this state and sends them to the page, as `window.kyo.undo()` and
+    /// `window.kyo.redo()`. The page posts the state as an `undo` message whenever it changes,
+    /// because an item is validated without waiting for the page. While no box has the focus
+    /// the view does not respond to either action, so both pass along the responder chain to
+    /// what handled them before, which acts on the page's other text fields.
+    var undoState = UndoState()
+
+    /// Takes the page's `undo` messages. The page's content controller keeps its handlers, so
+    /// the handler is an object of its own that does not keep the view.
+    private final class UndoListener: NSObject, WKScriptMessageHandler {
+        weak var page: ChatPage?
+
+        func userContentController(
+            _ controller: WKUserContentController, didReceive message: WKScriptMessage
+        ) {
+            page?.undoState = UndoState(message: message.body)
+        }
+    }
+
+    @objc func undo(_ sender: Any?) {
+        evaluateJavaScript("window.kyo.undo()", completionHandler: nil)
+    }
+
+    @objc func redo(_ sender: Any?) {
+        evaluateJavaScript("window.kyo.redo()", completionHandler: nil)
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        if selector == #selector(undo(_:)) || selector == #selector(redo(_:)) {
+            // The responder chain asks on the main thread; the state is the main actor's.
+            return Thread.isMainThread && MainActor.assumeIsolated { undoState.box }
+        }
+        return super.responds(to: selector)
+    }
+
+    /// The window names its Undo item after the step its undo manager holds, "Undo Typing"
+    /// for one, and a box's step has no such name, so the two items read Undo and Redo.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(undo(_:)) {
+            (item as? NSMenuItem)?.title = "Undo"
+            return undoState.undo
+        }
+        if item.action == #selector(redo(_:)) {
+            (item as? NSMenuItem)?.title = "Redo"
+            return undoState.redo
+        }
+        return super.validateUserInterfaceItem(item)
     }
 
     // MARK: Indent and Outdent on a box's words (KYO-912)
