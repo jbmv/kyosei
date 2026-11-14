@@ -276,7 +276,7 @@ final class CheckChannel {
             case "menus": value = try menus()
             case "menu": value = try choose(request)
             case "key": value = try key(request)
-            case "mouse": value = try await mouse(request)
+            case "mouse": value = try mouse(request)
             case "snapshot": value = try await snapshot(request)
             case "state": value = try state()
             case "window": value = try place(request)
@@ -412,26 +412,25 @@ final class CheckChannel {
         "down": (125, "\u{F701}", true), "up": (126, "\u{F700}", true),
     ]
 
-    /// The key codes of a US keyboard, by the character a key types alone and with Shift.
-    private static let codes: [Character: UInt16] = {
-        let rows: [(String, String, UInt16)] = [
-            ("a", "A", 0), ("s", "S", 1), ("d", "D", 2), ("f", "F", 3), ("h", "H", 4), ("g", "G", 5),
-            ("z", "Z", 6), ("x", "X", 7), ("c", "C", 8), ("v", "V", 9), ("b", "B", 11), ("q", "Q", 12),
-            ("w", "W", 13), ("e", "E", 14), ("r", "R", 15), ("y", "Y", 16), ("t", "T", 17),
-            ("1", "!", 18), ("2", "@", 19), ("3", "#", 20), ("4", "$", 21), ("6", "^", 22),
-            ("5", "%", 23), ("=", "+", 24), ("9", "(", 25), ("7", "&", 26), ("-", "_", 27),
-            ("8", "*", 28), ("0", ")", 29), ("]", "}", 30), ("o", "O", 31), ("u", "U", 32),
-            ("[", "{", 33), ("i", "I", 34), ("p", "P", 35), ("l", "L", 37), ("j", "J", 38),
-            ("'", "\"", 39), ("k", "K", 40), (";", ":", 41), ("\\", "|", 42), (",", "<", 43),
-            ("/", "?", 44), ("n", "N", 45), ("m", "M", 46), (".", ">", 47), ("`", "~", 50),
-        ]
-        var codes: [Character: UInt16] = [:]
-        for (plain, shifted, code) in rows {
-            codes[Character(plain)] = code
-            codes[Character(shifted)] = code
-        }
-        return codes
-    }()
+    /// The keys of a US keyboard: the character each types alone, the one it types with
+    /// Shift, and its key code.
+    private static let keys: [(plain: Character, shifted: Character, code: UInt16)] = [
+        ("a", "A", 0), ("s", "S", 1), ("d", "D", 2), ("f", "F", 3), ("h", "H", 4), ("g", "G", 5),
+        ("z", "Z", 6), ("x", "X", 7), ("c", "C", 8), ("v", "V", 9), ("b", "B", 11), ("q", "Q", 12),
+        ("w", "W", 13), ("e", "E", 14), ("r", "R", 15), ("y", "Y", 16), ("t", "T", 17),
+        ("1", "!", 18), ("2", "@", 19), ("3", "#", 20), ("4", "$", 21), ("6", "^", 22),
+        ("5", "%", 23), ("=", "+", 24), ("9", "(", 25), ("7", "&", 26), ("-", "_", 27),
+        ("8", "*", 28), ("0", ")", 29), ("]", "}", 30), ("o", "O", 31), ("u", "U", 32),
+        ("[", "{", 33), ("i", "I", 34), ("p", "P", 35), ("l", "L", 37), ("j", "J", 38),
+        ("'", "\"", 39), ("k", "K", 40), (";", ":", 41), ("\\", "|", 42), (",", "<", 43),
+        ("/", "?", 44), ("n", "N", 45), ("m", "M", 46), (".", ">", 47), ("`", "~", 50),
+    ]
+    private static let codes: [Character: UInt16] = Dictionary(
+        keys.flatMap { [($0.plain, $0.code), ($0.shifted, $0.code)] }, uniquingKeysWith: { first, _ in first })
+    private static let plain: [UInt16: Character] = Dictionary(
+        keys.map { ($0.code, $0.plain) }, uniquingKeysWith: { first, _ in first })
+    private static let shifted: [UInt16: Character] = Dictionary(
+        keys.map { ($0.code, $0.shifted) }, uniquingKeysWith: { first, _ in first })
 
     private static func flags(_ names: [String]) throws -> NSEvent.ModifierFlags {
         var flags: NSEvent.ModifierFlags = []
@@ -447,20 +446,57 @@ final class CheckChannel {
         return flags
     }
 
+    /// The field of a Quartz event that holds the number of the window it is for. It has
+    /// no public name; an `NSEvent` made from a Quartz event was measured to take its
+    /// `windowNumber` from it on macOS 27, and `press` checks that it did.
+    private static let windowField = CGEventField(rawValue: 51)
+
     /// One key: a press and a release, handed to the app as the window server hands a key.
     /// The app then offers it to the window's key equivalents and the menu bar's, and gives
     /// it to the first responder if neither takes it.
+    ///
+    /// The event is made from a Quartz keyboard event, as a hardware key's is, because the
+    /// menu bar matches a key equivalent differently against an event made by
+    /// `NSEvent.keyEvent`. Measured: an item with the equivalent `k` and the modifiers Command
+    /// and Shift took such an event only when its unmodified character was `k`, an item with
+    /// the equivalent `K` and Command only when it was `K`, and a hardware key reaches both.
+    /// An event made from a Quartz event reached both. Its characters are those the key
+    /// types on the keyboard layout in use, unless `typed` states them, which typing text
+    /// does so that the text does not depend on the layout. Where the Quartz event cannot
+    /// be made for the window, the event is made by `NSEvent.keyEvent` with `plain` as its
+    /// unmodified character.
     private func press(
-        _ characters: String, code: UInt16, flags: NSEvent.ModifierFlags, in window: NSWindow
+        _ characters: String, plain: String? = nil, typed: Bool = false, code: UInt16,
+        flags: NSEvent.ModifierFlags, in window: NSWindow
     ) throws {
-        for type in [NSEvent.EventType.keyDown, .keyUp] {
-            guard
-                let event = NSEvent.keyEvent(
+        for (type, down) in [(NSEvent.EventType.keyDown, true), (.keyUp, false)] {
+            var event: NSEvent?
+            if let field = Self.windowField,
+                let quartz = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+            {
+                var quartzFlags: CGEventFlags = []
+                if flags.contains(.command) { quartzFlags.insert(.maskCommand) }
+                if flags.contains(.shift) { quartzFlags.insert(.maskShift) }
+                if flags.contains(.option) { quartzFlags.insert(.maskAlternate) }
+                if flags.contains(.control) { quartzFlags.insert(.maskControl) }
+                if flags.contains(.function) { quartzFlags.insert(.maskSecondaryFn) }
+                quartz.flags = quartzFlags
+                quartz.setIntegerValueField(field, value: Int64(window.windowNumber))
+                if typed {
+                    let units = Array(characters.utf16)
+                    quartz.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+                }
+                if let made = NSEvent(cgEvent: quartz), made.windowNumber == window.windowNumber {
+                    event = made
+                }
+            }
+            event = event
+                ?? NSEvent.keyEvent(
                     with: type, location: .zero, modifierFlags: flags,
                     timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: window.windowNumber, context: nil, characters: characters,
-                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)
-            else { throw CheckFailure("no key event could be made for \(characters)") }
+                    charactersIgnoringModifiers: plain ?? characters, isARepeat: false, keyCode: code)
+            guard let event else { throw CheckFailure("no key event could be made for \(characters)") }
             NSApp.sendEvent(event)
         }
     }
@@ -471,15 +507,17 @@ final class CheckChannel {
         if let text = request["text"] as? String {
             for character in text {
                 if character == "\n" {
-                    try press("\r", code: 36, flags: [], in: window)
+                    try press("\r", typed: true, code: 36, flags: [], in: window)
                     continue
                 }
                 guard let code = Self.codes[character] ?? (character == " " ? 49 : nil) else {
                     throw CheckFailure("no key of a US keyboard types \(character)")
                 }
-                let shifted = character != " " && String(character) != String(character).lowercased()
-                    || "!@#$%^&*()_+{}|:\"<>?~".contains(character)
-                try press(String(character), code: code, flags: shifted ? [.shift] : [], in: window)
+                let shifted = Self.shifted[code] == character
+                let plain = Self.plain[code].map(String.init)
+                try press(
+                    String(character), plain: plain, typed: true, code: code,
+                    flags: shifted ? [.shift] : [], in: window)
             }
             return ["keys": text.count]
         }
@@ -495,8 +533,9 @@ final class CheckChannel {
             throw CheckFailure("there is no key named \(name)")
         }
         // With Shift held a key's character is its shifted one, as the keyboard reports it.
-        let characters = flags.contains(.shift) ? name.uppercased() : name
-        try press(characters, code: code, flags: flags, in: window)
+        let plain = Self.plain[code].map(String.init) ?? name
+        let characters = flags.contains(.shift) ? (Self.shifted[code].map(String.init) ?? name) : plain
+        try press(characters, plain: plain, code: code, flags: flags, in: window)
         return ["keys": 1]
     }
 
@@ -533,7 +572,27 @@ final class CheckChannel {
         }
     }
 
-    private func mouse(_ request: [String: Any]) async throws -> Any {
+    /// Hands a mouse event to the view under it. A window that is not the key window keeps
+    /// a left press for itself, to become key, unless the view takes a first press, and a
+    /// check build's window is not always key; so a left press goes to the view the window
+    /// would have chosen. A right press goes through the window, which opens the view's menu.
+    private func deliver(_ event: NSEvent, in window: NSWindow) {
+        let frame = window.contentView?.superview ?? window.contentView
+        guard event.type != .rightMouseDown, event.type != .rightMouseUp,
+            let view = frame?.hitTest(event.locationInWindow)
+        else {
+            window.sendEvent(event)
+            return
+        }
+        switch event.type {
+        case .leftMouseDown: view.mouseDown(with: event)
+        case .leftMouseUp: view.mouseUp(with: event)
+        case .mouseMoved: view.mouseMoved(with: event)
+        default: window.sendEvent(event)
+        }
+    }
+
+    private func mouse(_ request: [String: Any]) throws -> Any {
         guard let x = (request["x"] as? NSNumber)?.doubleValue,
             let y = (request["y"] as? NSNumber)?.doubleValue
         else { throw CheckFailure("mouse takes x and y, in the page's coordinates") }
@@ -573,17 +632,29 @@ final class CheckChannel {
                     windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                     clickCount: (request["count"] as? NSNumber)?.intValue ?? 1, pressure: 1)
             else { throw CheckFailure("no mouse event could be made") }
-            window.sendEvent(event)
+            deliver(event, in: window)
         }
         var answer: [String: Any] = ["events": types.count]
         if wantsMenu {
             // WebKit opens its menu after the page has answered, which is after the press
-            // returns. The wait ends when a menu has been read, or at the limit.
+            // returns. The wait ends when a menu has been read, or at the limit, and then
+            // goes on for a moment. It takes the app's events as the app's own loop does:
+            // the window server sends the process events as a menu closes, each arrival
+            // stops the run loop that is waiting so that the event is fetched, and where
+            // nothing fetches events, as under `swift test`, that stop ends the loop the
+            // process waits in and with it the process. This was read from the stop's caller,
+            // `PushToCGEventQueue`, in a debugger.
             let limit = (request["wait"] as? NSNumber)?.doubleValue ?? 3
-            let end = Date().addingTimeInterval(limit)
-            while watch.titles == nil, Date() < end {
-                try? await Task.sleep(for: .milliseconds(50))
+            func pump(until end: Date, while going: () -> Bool) {
+                while going(), Date() < end {
+                    let next = NSApp.nextEvent(
+                        matching: .any, until: Date().addingTimeInterval(0.05), inMode: .default,
+                        dequeue: true)
+                    if let next { NSApp.sendEvent(next) }
+                }
             }
+            pump(until: Date().addingTimeInterval(limit)) { watch.titles == nil }
+            if watch.titles != nil { pump(until: Date().addingTimeInterval(0.3)) { true } }
             answer["menu"] = watch.titles.map { $0 as Any } ?? NSNull()
             answer["chosen"] = watch.chosen
         }
