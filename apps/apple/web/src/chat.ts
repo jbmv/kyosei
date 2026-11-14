@@ -42,6 +42,7 @@ import {
   refusalText,
 } from "./agenda";
 import { moveLines, sectionEnd } from "./outline";
+import { redo as redoStep, redoDepth, undo as undoStep, undoDepth } from "@codemirror/commands";
 import { Transaction } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import {
@@ -1760,6 +1761,22 @@ const kyo = {
   },
 
   /**
+   * Edit > Undo and Edit > Redo while a box's words hold the focus (KYO-915). The app sends its
+   * two menu items here, because WebKit performs them from its own undo stack, which holds no
+   * step of an editor's history. Each does what Command-Z and Command-Shift-Z do in the box: a
+   * held move first (KYO-936), and otherwise a step of the box's own history, where placing an
+   * anchor, an attachment or a tag is a step. Each says whether it did anything, and does
+   * nothing when no box has the focus.
+   */
+  undo(): boolean {
+    return menuUndo(false);
+  },
+
+  redo(): boolean {
+    return menuUndo(true);
+  },
+
+  /**
    * The composer's boxes as the page's tests read them (KYO-910): each box's kind, id, text and
    * selection, and whether it has the focus. `select` focuses a box and sets its selection.
    */
@@ -2026,6 +2043,7 @@ const kyo = {
     applyBoxes(merged.boxes);
     // KYO-936: a draft that changed the boxes ends the chance to undo the move before it.
     if (shown() !== was) lastMove = null;
+    tellUndoSoon();
     agreed = agreedWith(remote, new Set(merged.boxes.filter((box) => remote.includes(box)).map((box) => box.id)));
     keepCurrent();
     const note = mergeNote(merged);
@@ -2437,6 +2455,7 @@ function boxUpdated(update: ViewUpdate): void {
     if (openMark?.editor === editor) showMark(editor, openMark.id);
   }
   if (update.docChanged || before.items !== after.items) remember();
+  tellUndoSoon();
 }
 
 /**
@@ -3847,6 +3866,7 @@ function showComposer(held: ComposerState): void {
 function moveTo(before: ComposerState, after: ComposerState): void {
   showComposer(after);
   lastMove = { before, after, undone: false };
+  tellUndoSoon();
 }
 
 /**
@@ -3859,6 +3879,7 @@ function undoMove(redo: boolean): boolean {
   const move = lastMove;
   showComposer(redo ? move.after : move.before);
   lastMove = { ...move, undone: !redo };
+  tellUndoSoon();
   return true;
 }
 
@@ -3897,6 +3918,52 @@ document.addEventListener("beforeinput", (event) => {
   event.preventDefault();
   event.stopPropagation();
 }, true);
+
+/**
+ * What Edit > Undo and Edit > Redo would act on (KYO-915): whether a box's words hold the
+ * focus, and whether there is then something to undo and to redo, which is a held move or a
+ * step of that box's own history.
+ */
+function undoState(): { box: boolean; undo: boolean; redo: boolean } {
+  const editor = focusedEditor();
+  if (!editor) return { box: false, undo: false, redo: false };
+  return {
+    box: true,
+    undo: (lastMove !== null && !lastMove.undone) || undoDepth(editor.state) > 0,
+    redo: (lastMove !== null && lastMove.undone) || redoDepth(editor.state) > 0,
+  };
+}
+
+let toldUndo = "";
+let tellingUndo = false;
+
+/**
+ * Tells the app what its Undo and Redo items would act on, as an `undo` message, when that has
+ * changed. A menu item is validated without waiting for the page, so the app keeps the last
+ * answer. It is read after the change at hand is over, and after the focus has moved.
+ */
+function tellUndoSoon(): void {
+  if (tellingUndo) return;
+  tellingUndo = true;
+  window.setTimeout(() => {
+    tellingUndo = false;
+    const state = undoState();
+    const told = JSON.stringify(state);
+    if (told === toldUndo) return;
+    toldUndo = told;
+    post("undo", state);
+  }, 0);
+}
+document.addEventListener("focusin", tellUndoSoon);
+document.addEventListener("focusout", tellUndoSoon);
+
+/** Edit > Undo or Redo, sent by the app while a box's words hold the focus (KYO-915). */
+function menuUndo(redo: boolean): boolean {
+  const editor = focusedEditor();
+  if (!editor) return false;
+  if (undoMove(redo)) return true;
+  return redo ? redoStep(editor) : undoStep(editor);
+}
 
 /** A fold of a box's line `line`, on the line `to` of the text `lines` it moved to. */
 function movedFold(lines: string[], to: number): FoldedLine {
@@ -4309,6 +4376,7 @@ function remember(): void {
   // KYO-936: whatever changes the composer, other than a move itself, ends the chance to undo
   // the move before it: putting the boxes back would take the later change with it.
   if (!keepingMove) lastMove = null;
+  tellUndoSoon();
   if (loadingDraft) return;
   keepCurrent();
   if (draftSave !== undefined) clearTimeout(draftSave);

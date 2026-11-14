@@ -270,8 +270,7 @@ with the draft as any change is. One move is held, and only until the composer n
 in another way: a letter typed, a mark placed or removed, a box added, deleted or dragged,
 a send, or a draft from another device that changes a box. After that the key acts on the
 box's own history, because putting the boxes back would discard the later change. Edit >
-Undo acts on the move only when WebKit raises its undo command in the box, which it does
-from its own undo stack and not from the page's (KYO-915).
+Undo and Edit > Redo act on the move as the keys do (KYO-915, below).
 
 A scratchpad is a box of
 the same draft with a `scratch` object, so it is saved,
@@ -343,7 +342,26 @@ it takes the anchor back and leaves the text as it was, and Shift-Command-Z puts
 marks are kept in the editor's state, and placing or removing one, an attachment or a tag
 included, is a step of the same history as the edits of the text (KYO-910), so the keys and
 Edit > Undo step through both in the order they were made. Typing is one step until a pause
-of half a second. What an unsent prompt is anchored to is highlighted
+of half a second.
+
+Edit > Undo and Edit > Redo are sent to the page while a box's words hold the focus
+(KYO-915). WebKit performs the two items from its own undo manager, which holds what was
+typed in a text field and no step of an editor's history: an anchor placed in a box, or a
+move between boxes, is not in it, though Command-Z, which the page reads as a key, takes
+either back. The page therefore tells the app, in an `undo` message sent
+whenever the answer changes, whether a box's words hold the focus and whether there is then
+something to undo and to redo: a held move (KYO-936), or a step of that box's history.
+While a box has the focus `ChatPage` responds to `undo:` and `redo:`, enables each item from
+that message, and calls `window.kyo.undo()` or `window.kyo.redo()`, which take a held move
+first and otherwise a step of the box's history, as the keys do. An enabled item takes its
+key equivalent, so Command-Z then reaches the page by the same call. While no box has the
+focus `ChatPage` does not respond to either action, and both go on to the window, which
+performs them from WebKit's undo manager for the page's other text fields.
+`Tests/KyoseiMacTests/UndoRoutingTests.swift` checks both cases against the built renderer;
+it finds the responder that takes each action by walking the window's responder chain, since
+a test process has no key window, and does not see the app's own Edit menu.
+
+What an unsent prompt is anchored to is highlighted
 in the chat, and the highlight goes when the anchor does, unless another prompt holds an anchor
 on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
 cannot be highlighted, so the chip above that paragraph in the sent prompt reads "place lost"
