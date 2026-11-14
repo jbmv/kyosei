@@ -546,8 +546,15 @@ session as waiting when it is live, its pane has been read, and either nothing r
 terminal shows a question or a permission prompt. The same wait makes the line under the
 composer red and has the app keep its Dock icon bouncing while another app is in front, until
 the app comes to the front or the session works again (`DockAttention` in `ChatView.swift`).
-A question asked with `AskUserQuestion` is drawn in the chat from the call's input in the
-transcript, with a button that opens the terminal, where it is answered.
+A question asked with `AskUserQuestion` is drawn in the chat from the call's input, with a
+button that opens the terminal, where it is answered. Claude Code writes the call to the
+transcript only when it resolves, so while the question is open the page draws it from the
+`pending_tool_calls` of the session's stream, which `kyo serve` fills from the session's
+`PreToolUse` hook (KYO-940). The transcript's record of the call has the same id and is drawn
+in the same card, which then says whether the question was answered. The answer is a turn of
+the person's: an option picked from the question is drawn as a chip with a tick under the
+question's words, and text typed in place of an option is marked `typed`, so that neither
+reads as a prompt the person wrote.
 
 ### Search in a view
 

@@ -322,8 +322,10 @@ object, at its latest version:
 
 ```
 turn:      id, at, form ("typed" | "mid-turn" | "answer" | "accepted-suggestion"), text,
-           typed, paste_known, prompt_id, images, automatic
+           typed, paste_known, prompt_id, images, automatic, answers
            images: index, media_type, size
+           answers: question, header, multi_select, parts
+                    parts: text, picked
 reply:     message_id, uuid, at, text, thinking, thinking_omitted, model, usage, record_uuids
            usage: input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 tool call: call_id, uuid, at, name, input, result
@@ -338,7 +340,15 @@ delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, 
 `typed` is the person's own words (the text between any pastes), and `text` is the whole
 message. `automatic` is true for a turn that `kyo serve` sent itself, the idle timer's message
 (see "The idle timer"): Claude Code records such a turn as the person's, and the send log is what
-says it was not. A client draws it as the server's. The field is false for every other turn. `paste_known` is false when pasted text cannot be ruled out. A reply is keyed by
+says it was not. A client draws it as the server's. The field is false for every other turn. `paste_known` is false when pasted text cannot be ruled out. `answers` is empty except on
+a turn of form `answer`, the person's answer to a question the session asked with
+`AskUserQuestion`. There it holds each answer beside its question, divided into `parts`: an
+option the person picked has `picked: true`, and text they typed has `picked: false`. The
+answer to a multi-select question is read as the picked labels joined by `", "`, followed by
+any typed text. The parts of an answer joined by `", "` are that answer, and the answers
+joined by a line break are the turn's `text`. A client can therefore draw a choice from a list
+apart from a prompt the person wrote. `answers` is empty on an answer whose record does not
+hold its questions. A reply is keyed by
 `message_id` and a tool call by `call_id`: the same object is sent again when a later record
 changes it, as when a tool result lands, and a client replaces what it holds. A reply's
 `uuid` can change while its message is still being written, so it is not the key.
@@ -526,8 +536,8 @@ the route that holds the message, so neither shows that the session is still bei
 
 | Frame | `data` |
 |---|---|
-| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `facts`, `held`, `agenda`, `draft`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` and `draft` are each `{"etag": ...}` |
-| `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only |
+| `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `pending_tool_calls`, `facts`, `held`, `agenda`, `draft`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` and `draft` are each `{"etag": ...}` |
+| `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only; and `pending_tool_calls`, in a frame where that list has changed |
 | `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, or new usage limits saved by any session change them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
@@ -545,6 +555,23 @@ A `transcript` frame carries the id of its `cursor`, so a client that reconnects
 replace themselves, and the frame that catches a client up also carries `reset`. The reply
 in progress is what the terminal has drawn so far, and is
 replaced by the transcript's reply when its record lands.
+
+**A question that is being asked (KYO-940).** Claude Code writes the record of an
+`AskUserQuestion` call to the transcript when the call resolves, together with its result, so
+the transcript does not hold a question while the person is being asked it. The session's
+`PreToolUse` hook, `kyo sessions --hook` matched on that tool, receives the call's id and its
+input before the dialog opens and saves them in
+`$KYOSEI_HOME/pending-questions/<session id>.json`. `pending_tool_calls` is every such call
+that the transcript does not hold yet: at most one, shaped as a tool call with `uuid: null`,
+`result: null`, `pending: true` and the hook's time as `at`. A list that is present states all
+of them, so an empty one withdraws a call sent before. The call has the `call_id` the
+transcript's record will have, so a client that keys tool calls by `call_id` replaces the
+pending call with the recorded one and draws the question once. A pending call is not an
+object of the transcript: the cursor does not count it, a frame that carries only a change
+to it has the cursor of the frame before, and `/turns` does not list it. The hook saves
+nothing in a project that has not set `read_transcripts`, and a question asked in a session
+whose hooks do not include it is first seen when it is answered. The file is removed when the
+session next starts, stops or ends.
 
 The stream stands beside `/events` and does not extend it. `/events` is one project's `stat`
 fingerprint; this one samples a pane, which costs a subprocess, so one sampler serves
