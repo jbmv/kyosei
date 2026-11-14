@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-14** — `KYO-933` (task) — Mac app: the Records search reaches gate text, criteria and the description
 - **2026-11-14** — `KYO-932` (task) — Mac app: Chat's hidden side bar removed from the page, styles and code
 - **2026-11-14** — `KYO-931` (task) — Mac app: the reminder list's summary shows three of the person's items
 - **2026-11-14** — `KYO-930` (task) — Mac app: Chat draws kyo serve's automated message as the server's, not the person's
