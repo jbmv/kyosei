@@ -57,6 +57,8 @@ const LAYOUT = `(() => {
     muted,
     agenda: rect(document.getElementById("agenda")),
     agendaSummary: look(document.getElementById("agenda-summary")),
+    peek: [...document.querySelectorAll("#agenda-peek > button")].map((button) => ({
+      text: button.textContent, shown: button.getBoundingClientRect().height > 0, italic: getComputedStyle(button).fontStyle === "italic" })),
     agendaItems: document.getElementById("agenda-items").getBoundingClientRect().height,
     scratches: rect(document.getElementById("scratches")),
     pads: [...document.querySelectorAll("#scratches > .box")].map((box) => ({
@@ -74,7 +76,7 @@ interface Rect { top: number; bottom: number; height: number; inside: boolean }
 interface Look { text: string; italic: boolean; color: string; shown: boolean }
 interface Layout {
   inUse: string; column: number; muted: string;
-  agenda: Rect; agendaSummary: Look; agendaItems: number;
+  agenda: Rect; agendaSummary: Look; peek: { text: string; shown: boolean; italic: boolean }[]; agendaItems: number;
   scratches: Rect; pads: (Rect & { head: string; body: number })[];
   prompt: Rect; promptBody: number; promptSummary: Look;
   focused: number; active: string | null;
@@ -121,14 +123,29 @@ test("the prompt is in use at first; the list and each scratchpad show their sum
     twoThirds(seen, seen.prompt.height);
     assert.equal(seen.promptSummary.shown, false);
     // The list is its one line: italic, grey, the unchecked items counted by whose they are.
-    assert.deepEqual(seen.agendaSummary, { text: "4 of yours, 2 of Claude's…", italic: true, color: seen.muted, shown: true });
+    assert.deepEqual(seen.agendaSummary, { text: "1 more of yours, 2 of Claude's…", italic: true, color: seen.muted, shown: true });
+    // KYO-931: above that line, the first three of the person's unchecked items, one line each.
+    assert.deepEqual(seen.peek.map((each) => [each.text, each.shown]), [["item p1", true], ["item p2", true], ["item p3", true]]);
     assert.equal(seen.agendaItems, 0);
-    assert.ok(seen.agenda.height < 45, JSON.stringify(seen.agenda));
+    assert.ok(seen.agenda.height < 100, JSON.stringify(seen.agenda));
     // Each scratchpad is its head, its first line that holds words, one under another, the
     // collapsed one among them.
     assert.deepEqual(seen.pads.map((pad) => [pad.head, pad.body]), [["first pad", 0], ["second pad", 0], ["third pad", 0]]);
     for (const pad of seen.pads) assert.ok(pad.height < 40, JSON.stringify(pad));
     assert.ok(seen.pads[0].bottom <= seen.pads[1].top && seen.pads[1].bottom <= seen.pads[2].top);
+  } finally { await page.close(); }
+});
+
+test("a press on a drawn item of the collapsed list opens the list with the caret in its add field (KYO-931.c2)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await full(page);
+    await page.run(`document.querySelector("#agenda-peek > button").click()`);
+    const seen = await layout(page);
+    assert.equal(seen.inUse, "agenda");
+    assert.equal(seen.active, "agenda-add");
+    assert.deepEqual(seen.peek.map((each) => each.shown), [false, false, false]);
+    assert.ok(seen.agendaItems > 0);
   } finally { await page.close(); }
 });
 
