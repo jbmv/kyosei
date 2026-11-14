@@ -297,23 +297,22 @@ body.terminal-open #jump-bottom { display: none; }
 #interrupt:hover { color: var(--apple-red); text-decoration: underline; }
 /* KYO-925: the column holds three sections, the session's list, the scratchpads and the
    prompt, which sit at its foot. The one in use (`data-in-use`, set by web/src/chat.ts) takes
-   up to two thirds of the column as its content needs and scrolls within that; each other one
-   is drawn as its summary, so that all three stay on screen. The column itself does not
-   scroll, and in a column too short for all of it the sections shrink and scroll within. */
+   as much of the column as its content needs, which is all that the other two summaries leave
+   (KYO-925.c9, KYO-935), and scrolls within itself beyond that; each other one is drawn as its
+   summary, so that all three stay on screen. The column itself does not scroll, and in a
+   column too short for all of it the sections shrink and scroll within. */
 #boxes { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: size; }
 #boxes::before { content: ""; flex: 1 1 0; }
 #boxes > * { flex: 0 1 auto; min-height: 0; }
 .box { flex: none; }
-#boxes[data-in-use="agenda"] > #agenda,
-#boxes[data-in-use="prompt"] > .box.main { max-height: 66cqh; }
-/* KYO-925.c9: the scratchpads in use have no share of their own. They grow as their content
-   needs, pushing the list's summary up, and scroll within themselves once the column's top,
-   a small padding below the bar that holds the + button, is reached; the list's summary and
-   the prompt's keep their places and are never squeezed (they are `flex: none` below). */
+/* KYO-925.c9, KYO-935: no section in use has a share of its own. It grows as its content
+   needs, pushing the sections above it up, and scrolls within itself once the column's top, a
+   small padding below the bar that holds the + button, is reached; the summaries of the
+   others keep their places and are never squeezed (they are `flex: none` below). */
 #boxes { border-top: 8px solid transparent; }
 #boxes:not([data-in-use="agenda"]) > #agenda,
-#boxes:not([data-in-use="prompt"]) > .box.main { flex: none; }
-#boxes[data-in-use="scratch"] > #scratches { flex: 0 1 auto; }
+#boxes:not([data-in-use="prompt"]) > .box.main,
+#boxes:not([data-in-use="scratch"]) > #scratches { flex: none; }
 
 /* A section's summary: one line, italic and grey, that a press opens the section from. */
 .composer-summary {
@@ -440,8 +439,8 @@ body.sorting-scratch, body.sorting-scratch * { cursor: grabbing !important; user
 .send-keys { margin-left: 8px; font-weight: 400; letter-spacing: 1px; }
 
 /* KYO-903: the prompt is the last box and the only one sent, at the foot of the column. In
-   use it grows to two thirds of the column's height (KYO-925), past which its text scrolls
-   inside it and its buttons stay in view. Otherwise it is its first line, above its buttons. */
+   use it grows as its content needs, to what the other summaries leave of the column
+   (KYO-925, KYO-935), past which its text scrolls inside it and its buttons stay in view. Otherwise it is its first line, above its buttons. */
 .box.main { margin-bottom: 0; box-sizing: border-box; }
 .box.main .box-body { min-height: 0; overflow-y: auto; }
 .box.main .box-actions { flex: none; }

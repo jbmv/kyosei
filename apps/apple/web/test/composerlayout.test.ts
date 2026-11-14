@@ -1,6 +1,6 @@
 // Run with `npm test`. The composer's three sections, the session's reminder list, the
 // scratchpads and the prompt (KYO-925): the one in use, which holds the caret or held it last,
-// takes up to two thirds of the column and scrolls within that, and each other one is drawn as
+// takes what the other two summaries leave of the column and scrolls within itself beyond that, and each other one is drawn as
 // its summary, so that all three are on screen at once. A machine with no Chrome skips the
 // tests that need a page.
 import assert from "node:assert/strict";
@@ -54,6 +54,8 @@ const LAYOUT = `(() => {
   return {
     inUse: column.dataset.inUse,
     column: column.clientHeight,
+    columnTop: Math.round(outer.top),
+    padding: parseFloat(getComputedStyle(column).borderTopWidth),
     muted,
     agenda: rect(document.getElementById("agenda")),
     agendaSummary: look(document.getElementById("agenda-summary")),
@@ -75,7 +77,7 @@ const LAYOUT = `(() => {
 interface Rect { top: number; bottom: number; height: number; inside: boolean }
 interface Look { text: string; italic: boolean; color: string; shown: boolean }
 interface Layout {
-  inUse: string; column: number; muted: string;
+  inUse: string; column: number; columnTop: number; padding: number; muted: string;
   agenda: Rect; agendaSummary: Look; peek: { text: string; shown: boolean; italic: boolean }[]; agendaItems: number;
   scratches: Rect; pads: (Rect & { head: string; body: number })[];
   prompt: Rect; promptBody: number; promptSummary: Look;
@@ -89,14 +91,14 @@ async function layout(page: Page): Promise<Layout> {
   return page.run<Layout>(LAYOUT);
 }
 
-/** Two thirds of the column, as the section in use takes it when its content needs it. */
-function twoThirds(seen: Layout, height: number): void {
-  assert.ok(Math.abs(height - seen.column * 0.66) <= 2, `${height} of ${seen.column}`);
-}
-
-/** The scratchpads in use take what the other two sections leave, which is more than two thirds (KYO-925.c9). */
+/** The section in use takes what the other two sections leave, which is more than two thirds (KYO-925.c9, KYO-935). */
 function pastTwoThirds(seen: Layout, height: number): void {
   assert.ok(height > seen.column * 0.66 + 2, `${height} of ${seen.column}`);
+}
+
+/** The section in use has taken all that the other two leave: the list's top stands the column's padding below its top. */
+function fills(seen: Layout): void {
+  assert.equal(seen.agenda.top, seen.columnTop + seen.padding, JSON.stringify(seen));
 }
 
 /** All three sections on screen, in their order, none over another (KYO-925.c1). */
@@ -125,7 +127,7 @@ test("the prompt is in use at first; the list and each scratchpad show their sum
     const seen = await layout(page);
     assert.equal(seen.inUse, "prompt");
     allShown(seen);
-    twoThirds(seen, seen.prompt.height);
+    fills(seen);
     assert.equal(seen.promptSummary.shown, false);
     // The list is its one line: italic, grey, the unchecked items counted by whose they are.
     assert.deepEqual(seen.agendaSummary, { text: "1 more of yours, 2 of Claude's…", italic: true, color: seen.muted, shown: true });
@@ -154,7 +156,7 @@ test("a press on a drawn item of the collapsed list opens the list with the care
   } finally { await page.close(); }
 });
 
-test("the section holding the caret grows to two thirds and the others shrink to their summaries, back when the caret leaves (KYO-925.c2, c5)", async (t) => {
+test("the section holding the caret grows to fill the column and the others shrink to their summaries, back when the caret leaves (KYO-925.c2, c5)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await full(page);
@@ -176,7 +178,7 @@ test("the section holding the caret grows to two thirds and the others shrink to
     seen = await layout(page);
     assert.equal(seen.inUse, "prompt");
     allShown(seen);
-    twoThirds(seen, seen.prompt.height);
+    fills(seen);
     assert.deepEqual(seen.pads.map((pad) => pad.body), [0, 0, 0]);
 
     // A press on the list's summary opens it with the caret in its add field, and the prompt
@@ -259,7 +261,7 @@ test("a press on a scratchpad's head while they are heads goes into it, opening 
   } finally { await page.close(); }
 });
 
-// KYO-925.c9, 2026-11-14: the scratchpads in use are not held to two thirds. They grow as their
+// KYO-925.c9, KYO-935, 2026-11-14: no section in use is held to two thirds. They grow as their
 // content needs, pushing the list's summary up, until the list's top stands a small padding
 // below the bar that holds the + button, and scroll within themselves beyond that.
 test("the scratchpads in use fill what the list's summary and the prompt's leave, whatever the list holds (KYO-925.c9)", async (t) => {
@@ -309,5 +311,52 @@ test("the scratchpads in use fill what the list's summary and the prompt's leave
     assert.ok(three.seen.scratches.height < one.seen.scratches.height);
     assert.equal(three.seen.agenda.top, one.seen.agenda.top);
     assert.equal(three.promptTop, one.promptTop);
+  } finally { await page.close(); }
+});
+
+// KYO-935.c1, c2: the prompt and the list in use, with content longer than the composer, stop at
+// the same place the scratchpads do, with the other two sections' summaries whole and on screen.
+test("the prompt and the list in use fill what the other two summaries leave (KYO-935.c1, c2, c3)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    const many = Array.from({ length: 80 }, (_, n) => item(`p${n}`, "person"));
+    await page.reload();
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [
+        { id: "a", text: ${JSON.stringify(`first pad\n${LONG}`)}, scratch: {} },
+        { id: "m", text: ${JSON.stringify(`the prompt's first line\n${LONG}`)} },
+      ], etag: "e" });
+      window.kyo.agenda({ state: "shown", session_id: "S1", etag: '"e"', items: ${JSON.stringify(many)} });
+    })()`);
+    const edges = `(() => {
+      const scrolls = (id) => { const e = document.querySelector(id); return e.scrollHeight > e.clientHeight + 1; };
+      return { bar: Math.round(document.getElementById("composer-top").getBoundingClientRect().bottom),
+        padding: parseFloat(getComputedStyle(document.getElementById("boxes")).borderTopWidth),
+        promptScrolls: (() => { const b = document.querySelector("#boxes > .box.main .box-body"); return b.scrollHeight > b.clientHeight + 1; })(),
+        agendaScrolls: scrolls("#agenda") };
+    })()`;
+    // The prompt in use: its top is the list's summary, which stands the padding below the bar.
+    await page.run(`window.kyo.composer.select(1, 0)`);
+    let seen = await layout(page);
+    let edge = await page.run<{ bar: number; padding: number; promptScrolls: boolean; agendaScrolls: boolean }>(edges);
+    assert.equal(seen.inUse, "prompt");
+    allShown(seen);
+    pastTwoThirds(seen, seen.prompt.height);
+    assert.equal(seen.agenda.top - edge.bar, edge.padding);
+    assert.equal(edge.promptScrolls, true);
+    assert.ok(seen.agendaSummary.shown && seen.peek.every((line) => line.shown));
+    assert.equal(seen.pads[0].body, 0);
+    // The list in use.
+    await page.run(`document.getElementById("agenda-summary").click()`);
+    seen = await layout(page);
+    edge = await page.run(edges);
+    assert.equal(seen.inUse, "agenda");
+    allShown(seen);
+    pastTwoThirds(seen, seen.agenda.height);
+    assert.equal(seen.agenda.top - edge.bar, edge.padding);
+    assert.equal(edge.agendaScrolls, true);
+    assert.equal(seen.promptSummary.shown, true);
+    assert.equal(seen.pads[0].body, 0);
+    assert.ok(seen.pads[0].inside);
   } finally { await page.close(); }
 });

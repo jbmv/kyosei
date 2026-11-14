@@ -278,11 +278,11 @@ scratchpad above it.
 The composer's column holds three sections, from the top: the session's task list, the
 scratchpads and the prompt (KYO-925). The section in use is the one the focus last entered,
 and the prompt when the page opens; it changes when the focus enters another section, and not
-when the focus leaves the composer. It grows to two thirds of the column's height as its
-content needs, and scrolls within that; the scratchpads in use are the exception, which have no
-share of their own and grow as their content needs until the task list's top stands a small
-padding below the bar that holds the + button, then scroll within themselves, so that the
-room they get is what the task list's lines and the prompt's summary leave (KYO-925). Each other section is drawn as a summary of about one
+when the focus leaves the composer. It grows as its content needs, to all that the other two sections' summaries leave of the
+column, and scrolls within itself beyond that (KYO-925, KYO-935). The scratchpads in use stop
+when the task list's top stands a small padding below the bar that holds the + button; the
+task list and the prompt in use stop at the same place, so that the other two sections' lines
+remain whole and on screen. Each other section is drawn as a summary of about one
 line: the task list as the first three of the person's unchecked items, one line each, and an italic
 grey line below them naming the rest by whose they are, as "2 more of yours, 4 of Claude's…"
 (KYO-931); each scratchpad as its head, one under another; and the prompt
