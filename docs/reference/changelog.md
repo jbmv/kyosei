@@ -656,6 +656,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-931` (task) — Mac app: the reminder list's summary shows three of the person's items
 - **2026-11-14** — `KYO-930` (task) — Mac app: Chat draws kyo serve's automated message as the server's, not the person's
 - **2026-11-14** — `KYO-929` (task) — kyo serve: one automated message to a session idle for 55 minutes, never credited to the person
+- **2026-11-14** — `KYO-926` (task) — Mac app: scratchpads are reordered by dragging their heads
 - **2026-11-13** — `KYO-919` (bug) — kyo confirm prints the cited turns and the latest-turn-not-cited line twice
 - **2026-11-13** — `KYO-914` (bug) — A decision's refining_turn refuses the prompt id that --turn accepts
 - **2026-11-13** — `KYO-913` (task) — Mac app: a heading's section and a list item's nested lines fold in the composer
