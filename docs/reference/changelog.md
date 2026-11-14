@@ -659,6 +659,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-926` (task) — Mac app: scratchpads are reordered by dragging their heads
 - **2026-11-14** — `KYO-923` (task) — Mac app: two blank lines or a --- line end a heading's section in a box
 - **2026-11-14** — `KYO-917` (task) — Mac app: a scratchpad's head is its first line, the gutters swap, and a heading's section has a line down its side
+- **2026-11-14** — `KYO-903` (task) — Mac app: one sendable prompt, and the other boxes are scratchpads
 - **2026-11-14** — `KYO-902` (task) — Mac app: the composer draws indent guides and heading dividers
 - **2026-11-13** — `KYO-919` (bug) — kyo confirm prints the cited turns and the latest-turn-not-cited line twice
 - **2026-11-13** — `KYO-914` (bug) — A decision's refining_turn refuses the prompt id that --turn accepts
