@@ -10,9 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 import harness
+import pytest
 
 PACKAGE = harness.APPLE / ".build" / "package"
 SCRIPT = harness.APPLE / "package.sh"
@@ -77,7 +76,9 @@ def test_check_mode_writes_the_check_build_and_leaves_the_apps_package() -> None
     def read(key: str) -> str:
         return subprocess.run(
             ["/usr/libexec/PlistBuddy", "-c", f"Print :{key}", str(plist)],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
 
     assert read("CFBundleIdentifier") == "dev.kyosei.apple.check"

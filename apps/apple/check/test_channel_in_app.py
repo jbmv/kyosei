@@ -11,9 +11,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-import pytest
-
 import harness
+import pytest
 
 
 @pytest.fixture
@@ -72,7 +71,6 @@ def test_the_apps_own_menu_is_read_and_an_item_of_it_is_performed(app: harness.A
     assert edit["Redo"]["modifiers"] == ["command", "shift"]
 
     # File > Projects… shows the list of projects in place of the chat (KYO-766).
-    shown = "return document.body.classList.contains('project-list') || !!document.querySelector('#project-list:not([hidden])');"
     before = app.channel.eval("return document.body.className;")
     done = app.channel.request("menu", path=["File", "Projects…"])
     assert done == {"performed": True, "enabled": True, "title": "Projects…"}
@@ -81,7 +79,7 @@ def test_the_apps_own_menu_is_read_and_an_item_of_it_is_performed(app: harness.A
         "return document.body.className !== before ? document.body.className : '';",
         before=before,
     )
-    assert after != before, shown
+    assert after != before
 
 
 def test_a_right_press_reads_the_native_menu_and_closes_it(app: harness.App) -> None:

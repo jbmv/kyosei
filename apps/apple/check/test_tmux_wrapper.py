@@ -91,7 +91,12 @@ def test_no_tmux_call_of_the_test_server_reaches_a_real_socket(run: harness.Run)
     # hook record one: the process record, with the server's own pid, which is running, and
     # the session's start told to `kyo sessions --hook`. Looking for its pane calls tmux.
     session = "0f0f0f0f-1111-4222-8333-444444444444"
-    record = {"pid": server.process.pid, "sessionId": session, "status": "busy", "cwd": str(project)}
+    record = {
+        "pid": server.process.pid,
+        "sessionId": session,
+        "status": "busy",
+        "cwd": str(project),
+    }
     (run.claude / "sessions" / f"{server.process.pid}.json").write_text(
         json.dumps(record), encoding="utf-8"
     )
@@ -122,7 +127,9 @@ def test_no_tmux_call_of_the_test_server_reaches_a_real_socket(run: harness.Run)
     assert get(f"/v1/projects/{server.name}/sessions") == 200
     calls = harness.poll("the server to call tmux", lambda: harness.read_tmux_log(run.tmux_log))
 
-    asked = {call.arguments.split(" list-panes")[0] for call in calls if "list-panes" in call.arguments}
+    asked = {
+        call.arguments.split(" list-panes")[0] for call in calls if "list-panes" in call.arguments
+    }
     assert asked == {"-L default", "-L kyosei"}, calls
     assert harness.calls_reaching_another_socket(run.tmux_log, run.tmux_socket) == []
     assert all(call.socket in ("-", str(run.tmux_socket)) for call in calls)

@@ -712,6 +712,17 @@ final class CheckChannel {
         var place = page.convert(page.bounds, to: frame)
         if frame.isFlipped { place.origin.y = frame.bounds.height - place.maxY }
         if parts.contains("web") {
+            // The page is given two frames to draw what its last change asked for. Measured
+            // without this: a snapshot asked for straight after a list was replaced showed
+            // the list's place empty. A page that is drawing no frames, as one whose window
+            // is covered may not, is waited for no longer than half a second.
+            _ = try? await page.callAsyncJavaScript(
+                """
+                await new Promise((done) => {
+                  setTimeout(done, 500);
+                  requestAnimationFrame(() => requestAnimationFrame(() => done()));
+                });
+                """, arguments: [:], in: nil, contentWorld: .page)
             let web: NSImage
             do {
                 web = try await page.takeSnapshot(configuration: nil)

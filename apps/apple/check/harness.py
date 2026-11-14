@@ -76,7 +76,9 @@ class CheckError(AssertionError):
 # ------------------------------------------------------------------------- the tmux wrapper
 
 
-def write_tmux_wrapper(directory: Path, *, real_tmux: str | None, socket_path: Path, log: Path) -> Path:
+def write_tmux_wrapper(
+    directory: Path, *, real_tmux: str | None, socket_path: Path, log: Path
+) -> Path:
     """Write the ``tmux`` the test server finds first on its ``PATH``, and return its path.
 
     A call that begins ``-L default`` or ``-L kyosei`` is run by the real tmux against the
@@ -110,7 +112,7 @@ def write_tmux_wrapper(directory: Path, *, real_tmux: str | None, socket_path: P
         "esac\n"
         f'printf \'refused\\t-\\t%s\\n\' "$*" >> "{log}"\n'
         'echo "tmux (check harness wrapper): refused; only -L default and -L kyosei are '
-        'mapped, to the run\'s private socket" >&2\n'
+        "mapped, to the run's private socket\" >&2\n"
         "exit 1\n",
         encoding="utf-8",
     )
@@ -182,7 +184,12 @@ class Run:
         self.bin = self.directory / "bin"
         self.tmux_socket = self.directory / "tmux.sock"
         self.tmux_log = self.directory / "tmux.log"
-        for made in (self.home, self.kyosei_home, self.claude / "sessions", self.claude / "projects"):
+        for made in (
+            self.home,
+            self.kyosei_home,
+            self.claude / "sessions",
+            self.claude / "projects",
+        ):
             made.mkdir(parents=True, exist_ok=True)
         self.real_tmux = shutil.which("tmux")
         self.wrapper = write_tmux_wrapper(
@@ -301,7 +308,10 @@ def start_server(
     """Start ``kyo serve`` on a free port over ``project`` and issue a device token for it."""
     log = run.directory / "serve.log"
     token = run.kyo(
-        "devices", "issue", "check-harness", "--token-only",
+        "devices",
+        "issue",
+        "check-harness",
+        "--token-only",
         *[part for permission in permissions for part in ("--permission", permission)],
         cwd=project,
     ).strip()
@@ -329,7 +339,9 @@ def start_server(
             raise CheckError(f"kyo serve exited {process.returncode} before serving:\n{text}")
         time.sleep(0.05)
     process.terminate()
-    raise CheckError(f"kyo serve did not say it was serving within {deadline} s:\n{log.read_text()}")
+    raise CheckError(
+        f"kyo serve did not say it was serving within {deadline} s:\n{log.read_text()}"
+    )
 
 
 # ------------------------------------------------------------------------------ the channel
@@ -366,7 +378,9 @@ class Channel:
         line, _, self.buffer = self.buffer.partition(b"\n")
         answer = json.loads(line)
         if answer.get("id") != self.count:
-            raise CheckError(f"the answer to request {self.count} carried the id {answer.get('id')}")
+            raise CheckError(
+                f"the answer to request {self.count} carried the id {answer.get('id')}"
+            )
         if not answer.get("ok"):
             raise ChannelError(f"{op}: {answer.get('error')}")
         return answer.get("value")
@@ -406,8 +420,15 @@ def require_check_build(app: Path = CHECK_APP) -> Path:
     if not executable.exists():
         raise CheckError(f"no check build at {app}; build it with `sh apps/apple/package.sh check`")
     identifier = subprocess.run(  # noqa: S603
-        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", str(app / "Contents" / "Info.plist")],
-        capture_output=True, text=True, check=True,
+        [
+            "/usr/libexec/PlistBuddy",
+            "-c",
+            "Print :CFBundleIdentifier",
+            str(app / "Contents" / "Info.plist"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     if identifier != CHECK_IDENTIFIER:
         raise CheckError(f"{app} has the identifier {identifier}, not {CHECK_IDENTIFIER}")
@@ -593,8 +614,11 @@ def read_png(path: Path) -> Picture:
                 above = before[i]
                 corner = before[i - channels] if i >= channels else 0
                 guess = left + above - corner
-                nearest = min((abs(guess - left), 0, left), (abs(guess - above), 1, above),
-                              (abs(guess - corner), 2, corner))[2]
+                nearest = min(
+                    (abs(guess - left), 0, left),
+                    (abs(guess - above), 1, above),
+                    (abs(guess - corner), 2, corner),
+                )[2]
                 line[i] = (line[i] + nearest) & 255
         rows.append(bytes(line))
         before = line
