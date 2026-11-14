@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-14** — `KYO-942` (proposal) — Mac app: an end-to-end check harness that drives the packaged app against a real kyo serve
 - **2026-11-14** — `KYO-938` (task) — Mac app: a cut line's marks follow it when it is pasted in a composer box
 - **2026-11-14** — `KYO-937` (task) — Mac app: an open folder's chevron points down in Files, and record ids in reminders are links
 - **2026-11-14** — `KYO-936` (task) — Mac app: one scratchpad open at a time, Send to prompt into a prompt that holds words, and Command-Z undoes a move
