@@ -67,6 +67,20 @@ than :data:`TURN_WORDS_HEAD` plus :data:`TURN_WORDS_TAIL` characters keeps its h
 tail around the same mark. The stored text therefore still checks against the transcript
 as a quote does. ``--quote-file`` narrows the approval further.
 
+A TURN THAT ANSWERS SEVERAL THINGS (KYO-934, :func:`_part_of`). A prompt sent from a client
+may answer many gates at once, each answer under the line the server wrote to say what it
+answers (``on record KYO-12.g1 "..."``, :mod:`kyosei.message_lines`). Stored whole, such a
+turn would put every answer under every record. The command says what it credits
+(:func:`credit_for`), and where the approving turn holds a part headed for that gate or
+record, or failing that for anything else of the same record, that part is what the credit
+stores, with the omission mark before and after it where the rest of the turn was. Nothing
+else changes: the credit cites the same turn, with the same commitment, and the part is
+checked against the turn's typed words as a ``--quote-file`` would be, so it can be
+checked against the transcript again by the same reading. A turn with no such part, a
+turn of answers to a question, and a part that fails that check are stored whole, and the
+receipt says which was done.
+``--quote-file`` still decides what is stored when it is given.
+
 WHERE THE WORDS WERE SAID. ``--session`` defaults to ``$CLAUDE_CODE_SESSION_ID``, which
 Claude Code sets in its shell. Given alone, ``--quote-file`` is checked against that
 session's transcript by :mod:`kyosei.harness.claude_code_transcript`, and only
@@ -115,7 +129,7 @@ from pathlib import Path
 
 import yaml
 
-from . import commands, export, ids, seal
+from . import commands, export, ids, message_lines, seal
 from .cmd_sessions import recorded_transcript_path
 from .cmd_turns import (
     HUMAN,
@@ -129,6 +143,7 @@ from .config import READ_TRANSCRIPTS_KEY, declared_people, person_label, transcr
 from .contracts import CREDIT_OUTCOME_REFINED, CREDIT_OUTCOMES, CREDIT_ROLES
 from .errors import ContractViolation, NotFound, UsageError
 from .harness import claude_code_transcript as transcript
+from .message_lines import OMISSION
 from .prose import read_prose, single_line
 
 #: The gates that wait on a person to look. Clearing one needs a credit or ``--withdrawn``.
@@ -187,8 +202,8 @@ LISTED_TURNS = 5
 #: many pages; what is left out is still covered by the index line's commitment.
 TURN_WORDS_HEAD = 3000
 TURN_WORDS_TAIL = 1000
-#: How an omission is marked in stored words, the mark a quote file uses.
-OMISSION = "[...]"
+#: ``OMISSION``, how an omission is marked in stored words, is the mark a quote file uses;
+#: it is defined beside the form of a message's lines (:mod:`kyosei.message_lines`).
 #: A sole cited turn of at most this many words gets one line in the receipt saying that
 #: earlier turns can be cited as context. It refuses nothing and asks for no reply.
 SHORT_TURN_WORDS = 4
@@ -411,6 +426,10 @@ class Cited:
     #: KYO-914: with ``--turn`` given, the person's latest turn of the session when none of
     #: the cited turns is it, as ``(label, time)``; the receipt says so.
     latest_uncited: tuple[str, str] | None = None
+    #: KYO-934: the part of the approving turn that is stored in place of the whole, and,
+    #: when the whole was kept although the command named what it credits, why.
+    part: message_lines.Cut | None = None
+    whole_why: str = ""
 
     def check(self) -> dict:
         return {
@@ -491,6 +510,52 @@ def turn_words(turn) -> tuple[str, int]:
         head, tail = text[:TURN_WORDS_HEAD].rstrip(), text[-TURN_WORDS_TAIL:].lstrip()
         text = f"{head}\n{OMISSION}\n{tail}"
     return text, total
+
+
+def credit_for(args: Namespace, subject_ids) -> None:
+    """KYO-934: say what this invocation's credit is for, as the ids of the gates,
+    criteria and records it names, so that a turn answering several things is cut to the
+    part headed for these (:func:`_part_of`). A command calls it before the turns are first
+    read; one that does not gets the whole turn, as every command did before."""
+    args._kyo_credit_for = tuple(dict.fromkeys(i for i in subject_ids if isinstance(i, str) and i))
+
+
+def _credited(args: Namespace) -> tuple[str, ...]:
+    return getattr(args, "_kyo_credit_for", ())
+
+
+def _part_text(text: str) -> str:
+    """A part as stored: whole, or, past the length kept of any turn, its head and tail
+    around the omission mark. Each is cut at white space, since a quote is not found where
+    it would begin or end inside a word."""
+    if len(text) <= TURN_WORDS_HEAD + TURN_WORDS_TAIL:
+        return text
+    head = text[:TURN_WORDS_HEAD]
+    tail = text[-TURN_WORDS_TAIL:]
+    head = head[: max((head.rfind(c) for c in " \n"), default=-1) + 1 or len(head)].rstrip()
+    starts = [at for at in (tail.find(c) for c in " \n") if at >= 0]
+    tail = tail[min(starts, default=0) :].lstrip()
+    return f"{head}\n{OMISSION}\n{tail}"
+
+
+def _part_of(turn: CitedTurn, targets: tuple[str, ...]) -> tuple[message_lines.Cut | None, str]:
+    """KYO-934: ``(the part of ``turn`` headed for ``targets``, "")``, or ``(None, why the
+    whole turn is kept)``. The why is empty when the command named nothing to head a part
+    for, which is the whole turn as it always was."""
+    if not targets:
+        return None, ""
+    named = ", ".join(targets)
+    if turn.form == transcript.FORM_ANSWER:
+        return None, f"it is answers to a question, which hold no part headed for {named}"
+    cut = message_lines.cut_for(turn.segments, targets)
+    if cut is None:
+        return None, f"no part of it is headed for {named}"
+    cut = message_lines.Cut(_part_text(cut.text), cut.headers)
+    if not _holds(turn, cut.text):
+        return None, (
+            f"its part headed for {named} did not check against the turn's typed words"
+        )
+    return cut, ""
 
 
 def _fold_index(ctx: Context, session: str) -> None:
@@ -876,9 +941,15 @@ def _cite_turns(
             )
         approval = holders[-1]
         stored = quote_text
+        part, whole_why = None, ""
     else:
         approval = chosen[-1]
         stored = approval.words
+        # KYO-934: a turn that answers several things is cut to the part headed for what
+        # this command credits.
+        part, whole_why = _part_of(approval, _credited(args))
+        if part is not None:
+            stored = part.text
     approval.role = TURN_ROLE_APPROVAL
     chosen += _context_turns(ctx, views, session, contexts, approval, chosen)
     chosen.sort(key=lambda turn: turn.at)
@@ -890,7 +961,15 @@ def _cite_turns(
         if not any((t.session, t.turn) == (session, latest.id) for t in chosen):
             label = f"prompt {latest.prompt_id}" if latest.prompt_id else f"turn {latest.id}"
             latest_uncited = (label, latest.timestamp)
-    cited = Cited(chosen, approval, stored, defaulted=not refs, latest_uncited=latest_uncited)
+    cited = Cited(
+        chosen,
+        approval,
+        stored,
+        defaulted=not refs,
+        latest_uncited=latest_uncited,
+        part=part,
+        whole_why=whole_why,
+    )
     return cited, ""
 
 
@@ -989,6 +1068,10 @@ class Credit:
     turn_defaulted: bool = False
     #: KYO-914: the person's latest turn, ``(label, time)``, when --turn left it uncited.
     latest_uncited: tuple[str, str] | None = None
+    #: KYO-934: the part of the approving turn stored in place of the whole, or why the
+    #: whole was kept although the command named what it credits.
+    part: message_lines.Cut | None = None
+    whole_why: str = ""
 
     @property
     def transcript_check(self) -> str:
@@ -1190,6 +1273,8 @@ def resolve(
             turns=cited.turns,
             turn_defaulted=cited.defaulted,
             latest_uncited=cited.latest_uncited,
+            part=cited.part,
+            whole_why=cited.whole_why,
         )
     else:
         assert session is not None
@@ -1662,6 +1747,18 @@ def turn_lines(store, credit_id: str, credit: Credit | None) -> list[str]:
                 f"first {TURN_WORDS_HEAD} and last {TURN_WORDS_TAIL} are stored around {OMISSION}"
             )
     approval = next(turn for turn in credit.turns if turn.role == TURN_ROLE_APPROVAL)
+    if credit.part is not None:
+        # KYO-934: which part of the turn was stored, by the line that heads it, and how
+        # it begins, so that a wrong cut is seen as a wrong turn is.
+        out.append(
+            f"  stored of {approval.label()}: its part under "
+            + "; ".join(credit.part.headers)
+            + f" ({len(credit.part.text)} of the turn's {approval.total_chars} characters "
+            f'of typed words), which begins "{credit.part.first_line}". The rest of the '
+            f"turn is left out at {OMISSION}; --quote-file stores other words of it"
+        )
+    elif credit.whole_why:
+        out.append(f"  {approval.label()} is stored whole: {credit.whole_why}")
     if credit.latest_uncited is not None:
         label, at = credit.latest_uncited
         out.append(
@@ -1670,7 +1767,7 @@ def turn_lines(store, credit_id: str, credit: Credit | None) -> list[str]:
             "the earlier turns with --context-turn <id> instead of --turn"
         )
     count = len(approval.words.split())
-    if len(credit.turns) == 1 and count <= SHORT_TURN_WORDS:
+    if credit.part is None and len(credit.turns) == 1 and count <= SHORT_TURN_WORDS:
         out.append(
             f"  the cited turn is {count} word(s). Where earlier turns specified what it "
             "approves, a credit can cite them as context: --context-turn <id> for each of "
@@ -1839,6 +1936,21 @@ def cmd_credit(ctx: Context, args: Namespace) -> Output:
         raise UsageError(f"--role {role!r}; known: {', '.join(CREDIT_ROLES)}")
     _check_role_subjects(role, kinds)
     quote_text = read_prose(args.quote_file, what="--quote-file") if args.quote_file else None
+    # KYO-934: a verdict is answered under its criterion's line, not its own id.
+    credit_for(
+        args,
+        [
+            *subject_ids,
+            *(
+                row["criterion_id"]
+                for row in store.conn.execute(
+                    "SELECT criterion_id FROM verifications WHERE id IN "
+                    f"({', '.join('?' * len(subject_ids))})",
+                    subject_ids,
+                )
+            ),
+        ],
+    )
     rerun = "kyo " + shlex.join(["credit", *subject_ids])
     credit = resolve(
         ctx,
@@ -2692,6 +2804,8 @@ def gate_clearing(
         "needed)",
         f"or, when the wait no longer applies: `{command} --withdrawn --why <reason>`",
     ]
+    if gates:
+        credit_for(args, [g["id"] for g in gates])  # KYO-934: an answer headed for a gate
     # KYO-900: with no credit flag at all, the person's latest turn of the session is their
     # answer where kyo can read it; the receipt echoes the turn, so a wrong one is seen.
     takes_latest = (
@@ -2774,6 +2888,7 @@ def settle_clearing(ctx: Context, store, args: Namespace, reason: str | None) ->
     allowed."""
     if not (requested(args) or getattr(args, "withdrawn", False)):
         return GateClearing()
+    credit_for(args, [getattr(args, "id", None)])  # KYO-934: the record being settled
     return gate_clearing(ctx, store, args, [], reason, command="kyo move")
 
 

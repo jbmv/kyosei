@@ -57,6 +57,7 @@ import re
 import shlex
 import tempfile
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 from . import cmd_close_wave, cmd_evidence, cmd_links, credits, receipt
@@ -543,6 +544,11 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         raise UsageError("pass --criterion or --all-unobserved, not both")
     store = ctx.store()
     typed = getattr(args, "quote", None) is not None or getattr(args, "quote_file", None)
+    # KYO-934: a turn that answers several gates is cut to the part headed for this record,
+    # or for the gate or criteria named here.
+    credits.credit_for(
+        args, [args.record_id, getattr(args, "gate", None), *(args.criterion or [])]
+    )
     # KYO-900: with no words given, they are the person's own, copied from the turn.
     quote = _Quote(args, None if typed else credits.words_from_turns(ctx, store, args, None))
     record_id = args.record_id
@@ -730,6 +736,13 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
     # KYO-900: each cited turn's time and first line, so a wrong turn is seen at once.
     shown_turns = credits.turn_lines(store, credit_id, credit) if credit_id else []
     lines += shown_turns
+    # KYO-934: a composed step is handed the words, so it says nothing of how a turn was
+    # cut to them; what it echoes is these lines without that one.
+    echoed_turns = (
+        credits.turn_lines(store, credit_id, replace(credit, part=None, whole_why=""))
+        if credit_id and credit is not None
+        else shown_turns
+    )
     if not complete:
         lines.append(
             _incomplete_line(
@@ -783,7 +796,7 @@ def cmd_confirm(ctx: Context, args: Namespace) -> Output:
         suffix = "  — REFUSED" if step.refused else ""
         lines.append(_step_head(f"[{n}/{len(steps)}] {step.command}" + suffix, step))
         # The step that wrote the credit echoes the same turns; they are shown once, above.
-        lines += receipt.indented("  ", _without_block(step.lines, shown_turns))
+        lines += receipt.indented("  ", _without_block(step.lines, echoed_turns))
     for item in gates_left:
         lines.append(f"left open: {item['gate_id']} ({item['gate_type']}) — {item['why']}")
     if close:

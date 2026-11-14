@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import docs_obligations
+from . import docs_obligations, message_lines
 from . import sweep as sweep_module
 from .brief import WORKER_RULE_FULL_TEXT_COMMAND
 from .buildinfo import SOURCE_GIT
@@ -634,12 +634,29 @@ def span_text(credit: dict) -> str | None:
     )
 
 
+#: KYO-934: what follows words stored as a part of the turn they were said in.
+PART_OF_A_LONGER_TURN = "part of a longer turn"
+
+
+def _stored_words(words: str, quote_id: str) -> str:
+    """Stored words on one line: their first line, how much more there is and where, and,
+    for words that begin or end with the omission mark, that they are part of a longer turn
+    (KYO-934). The mark itself is not the line shown."""
+    partial = message_lines.is_partial(words)
+    if partial:
+        lines = words.strip().split("\n")
+        while lines and lines[0].strip() in ("", message_lines.OMISSION):
+            lines.pop(0)
+        words = "\n".join(lines)
+    first, more = elided_first_line(words, more_at=f"in {quote_id}")
+    return f'"{first}"{more}' + (f"   ({PART_OF_A_LONGER_TURN})" if partial else "")
+
+
 def _quote_clause(credit: dict, evidence: dict[str, str]) -> str:
     quote = evidence.get(credit["quote_id"])
     if quote is None:
         return ""
-    first, more = elided_first_line(quote, more_at=f"in {credit['quote_id']}")
-    shown = f'"{first}"{more}'
+    shown = _stored_words(quote, credit["quote_id"])
     form = credit.get("words_form")
     if form == "accepted-suggestion":
         # KYO-640.n1: sent from Claude Code's suggestions, so the person's choice and
@@ -677,11 +694,7 @@ def credit_turn_lines(credit: dict, evidence: dict[str, str], *, indent: str) ->
     out = [f"{indent}turns cited ({len(turns)}), in transcript order:"]
     for turn in turns:
         words = evidence.get(turn["quote_id"])
-        if words is None:
-            shown = "(words removed)"
-        else:
-            first, more = elided_first_line(words, more_at=f"in {turn['quote_id']}")
-            shown = f'"{first}"{more}'
+        shown = "(words removed)" if words is None else _stored_words(words, turn["quote_id"])
         form = turn.get("words_form")
         marks = [turn_label(turn)]
         if len(sessions) > 1:

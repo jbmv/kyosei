@@ -780,7 +780,9 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
         and not credits.exempt(store, args)
     ):
         # KYO-900: no words were given, so they are copied from the person's turn, and
-        # stored as the verdict's evidence as a file's would be.
+        # stored as the verdict's evidence as a file's would be. KYO-934: of a turn that
+        # answers several things, the part headed for this criterion or its record.
+        credits.credit_for(args, [args.criterion_id])
         text = credits.words_from_turns(ctx, store, args, None)
     credit, joined = _credit_for_verdict(ctx, store, args, text)
 
