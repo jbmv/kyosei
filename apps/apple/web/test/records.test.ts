@@ -6,6 +6,7 @@ import {
   kindControlText, kindsOf, kindsPresent, textOf, withKinds, latestVerdict, matchesSearch, narrow, newestFirst, parseLink, prefixOf, recordOf, recordPage,
   refParts, visit,
   pressed, reportItem, taskOf,
+  findsFrom, foundLabel, markedParts, searchKey, standsInFor,
 } from "../src/records.ts";
 
 const rows = [
@@ -531,4 +532,65 @@ test("the Records home puts each record in one group: awaiting, dispatchable, ot
   assert.deepEqual(groups.map((group) => [group.name, group.rows.map((row) => row.id)]), [
     ["Awaiting you", ["K-1"]], ["Dispatchable", ["K-2"]], ["Other open", ["K-3", "K-6"]], ["Closed", ["K-4", "K-5"]],
   ]);
+});
+
+// ----------------------------------------------------- the search of a record's text (KYO-933)
+
+test("a record the server found in its text passes the search, under any filter, and one it did not is still matched by id and title", () => {
+  const finds = findsFrom({ records: [
+    { id: "KYO-30", found: { in: "gate", id: "KYO-30.g2", excerpt: "… until the Dock icon bounces …" } },
+    { id: "KYO-12", found: null },
+  ] });
+  const found = (narrowing: object, awaiting = new Set<string>()) =>
+    ids(narrow(rows, { ...all, search: "dock", ...narrowing }, new Set(), awaiting, finds));
+  // No title holds the word: without the answer nothing is found, with it the two records are.
+  assert.deepEqual(narrow(rows, { ...all, search: "dock" }, new Set()), []);
+  assert.deepEqual(found({}), ["KYO-12", "KYO-30"]);
+  assert.deepEqual(found({ awaiting: true }, new Set(["KYO-30", "KYO-7"])), ["KYO-30"]);
+  assert.deepEqual(found({ search: "kind:bug dock" }), ["KYO-12"]);
+  // A title's own match stands beside the answer, which may be an earlier text's standing in.
+  assert.deepEqual(ids(narrow(rows, { ...all, search: "serve" }, new Set(), new Set(), finds)),
+    ["KYO-12", "KYO-30", "KYO-21", "KYO-25"]);
+  assert.equal(matchesSearch(rows[0], "dock", finds), false);
+});
+
+test("the server's answer is read as finds, and anything else as none", () => {
+  const finds = findsFrom({ records: [
+    { id: "KYO-1", found: { in: "criterion", id: "KYO-1.c3", excerpt: "a word" } },
+    { id: "KYO-2", found: null }, { id: "KYO-3" }, { id: "KYO-4", found: { in: "gate" } }, { found: null }, null,
+  ] });
+  assert.deepEqual([...finds], [
+    ["KYO-1", { in: "criterion", id: "KYO-1.c3", excerpt: "a word" }],
+    ["KYO-2", null], ["KYO-3", null], ["KYO-4", null],
+  ]);
+  for (const answer of [null, undefined, {}, { records: "no" }, "text"]) assert.equal(findsFrom(answer).size, 0);
+});
+
+test("the server is asked for the words in lower case, without kind tokens, and not for single letters", () => {
+  assert.equal(searchKey("  Dock   BOUNCE dock "), "dock bounce");
+  assert.equal(searchKey("kind:bug,task Dock"), "dock");
+  for (const nothing of ["", "   ", "kind:plan ", "a", "a b"]) assert.equal(searchKey(nothing), "");
+  assert.equal(searchKey("a dock"), "a dock");
+});
+
+test("an earlier answer stands in only for a search typed on from it", () => {
+  assert.equal(standsInFor("dock", "dock"), true);
+  assert.equal(standsInFor("doc", "dock bounce"), true);
+  assert.equal(standsInFor("dock bo", "dock bounce"), true);
+  assert.equal(standsInFor("dock bounce", "dock"), false);
+  assert.equal(standsInFor("gate", "dock"), false);
+  assert.equal(standsInFor("", "dock"), false);
+});
+
+test("a find is named by where it was found, and its excerpt is split at the words searched for", () => {
+  assert.equal(foundLabel({ in: "gate", id: "KYO-883.g2", excerpt: "x" }), "Gate g2");
+  assert.equal(foundLabel({ in: "criterion", id: "KYO-933.c3", excerpt: "x" }), "Criterion c3");
+  assert.equal(foundLabel({ in: "description", id: "KYO-933", excerpt: "x" }), "Description");
+  assert.deepEqual(markedParts("… the Dock icon bounces, docked …", "kind:task dock BOUNCE"), [
+    { text: "… the ", hit: false }, { text: "Dock", hit: true }, { text: " icon ", hit: false },
+    { text: "bounce", hit: true }, { text: "s, ", hit: false }, { text: "dock", hit: true },
+    { text: "ed …", hit: false },
+  ]);
+  assert.deepEqual(markedParts("no such word", "dock"), [{ text: "no such word", hit: false }]);
+  assert.deepEqual(markedParts("", "dock"), []);
 });

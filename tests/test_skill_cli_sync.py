@@ -1298,6 +1298,8 @@ LEAVE_TO_REFERENCE_FLAGS: dict[tuple[str, str], str] = {
     ("list", "--person"): "a filter on credited persons, read from the command reference",
     ("list", "--decided-by"): "a filter on credited persons, read from the command reference",
     ("list", "--overrode"): "a filter on credited persons, read from the command reference",
+    # KYO-933: the Mac app's Records search asks it; the skill is at its size ceiling.
+    ("list", "--search"): "a search of the records' text, read from the command reference",
     # KYO-595: the copies mode is chosen once, at setup, and a project already on the
     # copies runs both commands without the flag; the skill names them for that case.
     ("install-hooks", "--copies"): (

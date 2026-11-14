@@ -185,6 +185,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # decoded to the three ids it was made from and refused otherwise, and is stored
         # nowhere.
         "--cursor",
+        # KYO-933: the words `kyo list --search` looks for in the records' text, on a read
+        # that writes nothing; they are matched and stored nowhere.
+        "--search",
         # KYO-826: the characters an excerpt keeps around a match, an integer that argparse
         # parses and the search refuses outside 0 to 400; stored nowhere.
         "--context",

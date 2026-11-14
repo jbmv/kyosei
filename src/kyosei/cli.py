@@ -1676,6 +1676,14 @@ def build_parser() -> KyoseiParser:
         "one on the same criterion (KYO-647)",
     )
     p_list.add_argument(
+        query.SEARCH_FLAG,
+        metavar="WORDS",
+        help="only records in which every word of WORDS is found, without regard to case: "
+        "in the id, the title, the text of an open gate, the text of a criterion or the "
+        "description. A record found by a word its id and title lack is listed with "
+        "where that word was found and an excerpt (`found` in --json) (KYO-933)",
+    )
+    p_list.add_argument(
         "--limit",
         metavar="N",
         type=_positive_int,

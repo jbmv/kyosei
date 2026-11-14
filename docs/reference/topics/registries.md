@@ -239,7 +239,7 @@ when structure is worth authoring (law 13).
 edges from `accepts_from`. `kyo list [--kind K] [--status S] [--json]` lists records
 and summarises the queue split by `policy.counted`. With no filter it lists every record,
 done and void included — that default is deliberate; an agent that
-wants the short listing asks for it with `kyo list --unsettled` (`--limit N` to cap it). `kyo doctor` validates the
+wants the short listing asks for it with `kyo list --unsettled` (`--limit N` to cap it). `kyo list --search TEXT` keeps the records in which every word of the text is found, in the id, the title, an open gate's text, a criterion's text or the description, and says for each where a word outside its id and title was found (KYO-933). `kyo doctor` validates the
 registry and that every record's kind is still defined in it.
 
 **Removing a kind that records still use (KYO-509).** Deleting a kind from `kinds.yml`
@@ -532,7 +532,7 @@ record has an id and a file has a path.
 
 | source | what a row is | its fields | its filters |
 |---|---|---|---|
-| `records` | one record | `id`, `seq`, `kind`, `scope`, `plan` (the id of the plan the record belongs to, or null), `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at`, `people` (the persons with a current credit on the record) | `kind`, `scope`, `status`, `plan`, `gate-tag`, `person`, `decided-by` — exactly `kyo list`'s filters; its flags `--unsettled`, `--overrode` and `--limit` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
+| `records` | one record | `id`, `seq`, `kind`, `scope`, `plan` (the id of the plan the record belongs to, or null), `status`, `standing`, `gates_open`, `gate_tags`, `gate_types`, `title`, `counted`, `created_at`, `updated_at`, `people` (the persons with a current credit on the record) | `kind`, `scope`, `status`, `plan`, `gate-tag`, `person`, `decided-by` — exactly `kyo list`'s filters; its flags `--unsettled`, `--overrode`, `--limit` and `--search` are not Base filters, and `status:` takes one value where `kyo list --status` may repeat (KYO-420) |
 | `ideas` | one file under `ideas/` | `id` (its path), `title`, `stamped`, `promoted`, `promoted_at`, `section_count`, `promoted_section_count`, `properties` | `path`, `contains`, any field, `properties.<key>` |
 | `docs` | one file under `docs/` | `id` (its path), `title`, `section_count`, `governs`, `governs_broken`, `amended`, `staleness`, `staleness_says`, `properties` | the same four |
 

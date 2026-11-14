@@ -146,8 +146,100 @@ export function kindControlText(search: string, present: string[]): { text: stri
   return { text: `Kind: ${named}${unknown.length ? " (no such kind)" : ""}`, active: true, unknown };
 }
 
-/** Whether every word typed is found in the record's id or its title. */
-export function matchesSearch(row: RecordRow, search: string): boolean {
+/**
+ * Where the server found a word that a record's id and title lack, as a row of
+ * `kyo list --search` states it (KYO-933): `in` is `gate`, `criterion` or `description`,
+ * `id` is the gate's or the criterion's id, and `excerpt` is a line of the text around the word.
+ */
+export interface Found {
+  in: string;
+  id: string;
+  excerpt: string;
+}
+
+/**
+ * The records the server found for one search text, by id. The value is null for a record
+ * whose id and title hold every word, which has nothing further to show.
+ */
+export type Finds = ReadonlyMap<string, Found | null>;
+
+/**
+ * What the server is asked for a search text: its words in lower case, without the `kind:`
+ * tokens. Empty when there is nothing worth asking: no word, or no word of two letters, which
+ * nearly every record's text holds.
+ */
+export function searchKey(search: string): string {
+  const words = [...new Set(searchWords(search))];
+  return words.some((word) => word.length > 1) ? words.join(" ") : "";
+}
+
+/** The finds in the answer to `kyo list --search`; empty for anything else. */
+export function findsFrom(list: unknown): Map<string, Found | null> {
+  const rows = (list as { records?: unknown } | null)?.records;
+  const finds = new Map<string, Found | null>();
+  if (!Array.isArray(rows)) return finds;
+  for (const row of rows) {
+    const { id, found } = (row ?? {}) as { id?: unknown; found?: Partial<Found> | null };
+    if (typeof id !== "string") continue;
+    finds.set(id, found && typeof found.excerpt === "string" && found.excerpt
+      ? { in: String(found.in ?? ""), id: String(found.id ?? ""), excerpt: found.excerpt }
+      : null);
+  }
+  return finds;
+}
+
+/**
+ * Whether the answer to `earlier` holds every record the answer to `later` will: each word
+ * of the earlier text is part of a word of the later one, as when a search is typed on. Such
+ * an answer can stand in for the later one until it comes.
+ */
+export function standsInFor(earlier: string, later: string): boolean {
+  const words = later.split(" ");
+  return earlier !== "" && earlier.split(" ").every((word) => words.some((other) => other.includes(word)));
+}
+
+/** What a find is named by in a row: `Gate g2`, `Criterion c3` or `Description`. */
+export function foundLabel(found: Found): string {
+  const part = found.id.includes(".") ? ` ${found.id.split(".").pop()}` : "";
+  if (found.in === "gate") return `Gate${part}`;
+  if (found.in === "criterion") return `Criterion${part}`;
+  return "Description";
+}
+
+/** An excerpt split at the words searched for, so that a row can mark them. */
+export function markedParts(excerpt: string, search: string): { text: string; hit: boolean }[] {
+  const lower = excerpt.toLowerCase();
+  const words = searchWords(search);
+  // A letter whose lower case is longer would put every later mark in the wrong place.
+  if (!words.length || lower.length !== excerpt.length) return excerpt ? [{ text: excerpt, hit: false }] : [];
+  const parts: { text: string; hit: boolean }[] = [];
+  let from = 0;
+  while (from < excerpt.length) {
+    let at = -1;
+    let length = 0;
+    for (const word of words) {
+      const found = lower.indexOf(word, from);
+      if (found >= 0 && (at < 0 || found < at || (found === at && word.length > length))) {
+        at = found;
+        length = word.length;
+      }
+    }
+    if (at < 0) break;
+    if (at > from) parts.push({ text: excerpt.slice(from, at), hit: false });
+    parts.push({ text: excerpt.slice(at, at + length), hit: true });
+    from = at + length;
+  }
+  if (from < excerpt.length) parts.push({ text: excerpt.slice(from), hit: false });
+  return parts;
+}
+
+/**
+ * Whether the search finds the record: every word typed is in its id or its title, or the
+ * server found every word somewhere in the record's text (KYO-933). The first is known at
+ * once from the row; `finds` is the server's answer for this search text, when it has come.
+ */
+export function matchesSearch(row: RecordRow, search: string, finds?: Finds): boolean {
+  if (finds?.has(row.id)) return true;
   const id = row.id.toLowerCase();
   const title = row.title.toLowerCase();
   return searchWords(search).every((word) => id.includes(word) || title.includes(word));
@@ -156,11 +248,11 @@ export function matchesSearch(row: RecordRow, search: string): boolean {
 /**
  * The rows the filters and the search leave, in the order given. Open keeps the records
  * whose status is `open`; Dispatchable keeps those in `ready`; Awaiting you keeps those in
- * `awaiting`; all of them combine.
+ * `awaiting`; all of them combine. `finds` is the server's answer for the search text.
  */
 export function narrow<T extends RecordRow>(
   rows: T[], narrowing: Narrowing, ready: ReadonlySet<string>,
-  awaiting: ReadonlySet<string> = new Set(),
+  awaiting: ReadonlySet<string> = new Set(), finds?: Finds,
 ): T[] {
   const kinds = kindsOf(narrowing.search);
   return rows.filter((row) =>
@@ -168,7 +260,7 @@ export function narrow<T extends RecordRow>(
     && (!narrowing.open || standingOf(row) === "open")
     && (!narrowing.dispatchable || ready.has(row.id))
     && (!narrowing.awaiting || awaiting.has(row.id))
-    && matchesSearch(row, narrowing.search));
+    && matchesSearch(row, narrowing.search, finds));
 }
 
 /** How many viewed records are remembered. */
