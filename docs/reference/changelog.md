@@ -661,6 +661,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-917` (task) — Mac app: a scratchpad's head is its first line, the gutters swap, and a heading's section has a line down its side
 - **2026-11-14** — `KYO-903` (task) — Mac app: one sendable prompt, and the other boxes are scratchpads
 - **2026-11-14** — `KYO-902` (task) — Mac app: the composer draws indent guides and heading dividers
+- **2026-11-14** — `KYO-901` (bug) — Mac app: the task list is not shown when no session is live
 - **2026-11-13** — `KYO-919` (bug) — kyo confirm prints the cited turns and the latest-turn-not-cited line twice
 - **2026-11-13** — `KYO-914` (bug) — A decision's refining_turn refuses the prompt id that --turn accepts
 - **2026-11-13** — `KYO-913` (task) — Mac app: a heading's section and a list item's nested lines fold in the composer
