@@ -2660,6 +2660,12 @@ function showMark(editor: EditorView, id: number): void {
   });
   const field = document.createElement("input");
   field.placeholder = "Add a tag…";
+  // A tag is a name, not prose: the system's correction, capitalisation and substitutions
+  // (smart dashes among them) are kept off the field (KYO-941).
+  field.spellcheck = false;
+  field.autocomplete = "off";
+  field.setAttribute("autocorrect", "off");
+  field.setAttribute("autocapitalize", "off");
   // The suggestions are drawn in the panel: the system's own list for a field opened in
   // the wrong place in the app's web view.
   const suggestions = document.createElement("div");
