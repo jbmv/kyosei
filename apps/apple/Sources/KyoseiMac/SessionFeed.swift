@@ -186,14 +186,25 @@ final class SessionFeed {
 
     private static let serverKey = "serverURL"
     private static let projectKey = "project"
+    private static var environment: [String: String] { ProcessInfo.processInfo.environment }
+
+    #if KYOSEI_CHECK
+    /// A check build (KYO-944) reads the server its run names and no other. It has neither
+    /// the saved server nor the default one, so it cannot reach the person's own server by
+    /// falling back to it, and `CheckBuild.refusal` ends the process before this is read
+    /// when the run names none.
+    static var savedServer: String {
+        environment[CheckBuild.serverVariable] ?? ""
+    }
+    #else
     private static let localServer = "http://127.0.0.1:47370"
     private static let tokenService = "dev.kyosei.device-token"
-    private static var environment: [String: String] { ProcessInfo.processInfo.environment }
 
     static var savedServer: String {
         environment["KYOSEI_SERVE_URL"] ?? UserDefaults.standard.string(forKey: serverKey)
             ?? localServer
     }
+    #endif
 
     /// The project the app last showed, or the empty string on a first run.
     static var savedProject: String {
@@ -284,6 +295,13 @@ final class SessionFeed {
         start()
     }
 
+    #if KYOSEI_CHECK
+    /// A check build (KYO-944) stores no token: its token is the one its run issued, and a
+    /// save from Settings is refused, so the build never runs `security`.
+    static func storeDeviceToken(_ token: String) -> Bool {
+        false
+    }
+    #else
     /// Stores the device token through the system's own `security` tool.
     static func storeDeviceToken(_ token: String) -> Bool {
         // A token saved under another account name, as one added by hand is, would be found
@@ -307,6 +325,7 @@ final class SessionFeed {
         process.waitUntilExit()
         return process.terminationStatus == 0
     }
+    #endif
 
     func start() {
         guard !started else { return }
@@ -449,6 +468,13 @@ final class SessionFeed {
         if let needed = ServeClient.tokenNeeded(error) { tokenNeeded = needed }
     }
 
+    #if KYOSEI_CHECK
+    /// A check build (KYO-944) sends the token its run issued, read from the environment,
+    /// and never the person's own, which the shipped app reads from the keychain.
+    private static func deviceToken() -> String? {
+        CheckBuild.token(in: environment)
+    }
+    #else
     /// The device token, read through the system's own `security` tool, which created it.
     private static func deviceToken() -> String? {
         let process = Process()
@@ -465,6 +491,7 @@ final class SessionFeed {
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    #endif
 
     private func sessionPath(_ session: String, _ route: String) -> String {
         "v1/projects/\(project)/sessions/\(session)/\(route)"
