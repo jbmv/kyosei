@@ -84,7 +84,7 @@ The files that the later sections do not name, with what each holds:
 | `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
 | `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
 | `Sources/KyoseiClient/SealKeyItem.swift` | the seal key as a synchronizable keychain item, and the `seal-key` mode's contract with `kyo` |
-| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene |
+| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server, and the delegate starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
@@ -768,6 +768,8 @@ Files and file links need it to hold the `files` permission.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.
+`package.sh check` builds the check build instead, which is described under "The check build
+and its harness" below.
 
 The package's icon is `Packaging/Kyosei.icns`: the characters 共生 in a brush hand with a red
 seal mark, on white. It is drawn by `Packaging/icon/render.html`, a canvas page that measures
@@ -785,3 +787,89 @@ item, which iCloud Keychain carries (KYO-789). The executable does that only whe
 window is made. `kyo` is to run it that way when a person chooses the `icloud-keychain` key
 store; that part of `kyo` is planned and not built. Without the two variables the package
 carries no entitlement.
+
+## The check build and its harness
+
+<!-- governs:
+- apps/apple/Sources/KyoseiMac/CheckChannel.swift
+- apps/apple/check/harness.py
+-->
+
+Checks that need the running app, a window and a server were made by hand. The harness in
+`check/` makes them by program (KYO-944): it starts the real `kyo serve` over a temporary
+store, starts a check build of the app against it, and drives and reads the app. It runs on a
+Mac, in the login session that has the screen, with `make app-check` from the repository's
+root. It is outside `tests/`, so neither `make test` nor CI runs it.
+
+**The check build.** `package.sh check` writes `KyoseiCheck.app` under `.build/package-check`,
+with the bundle identifier `dev.kyosei.apple.check`. It is built with the compilation condition
+`KYOSEI_CHECK`, for this machine's architecture, in a build directory of its own, `.build/check`,
+and leaves `.build/package` as it was. It is signed ad hoc, or with `KYOSEI_SIGN_IDENTITY`, and
+the script stops if a notarization variable or the provisioning profile is set. It differs from
+the app as follows:
+
+- It holds the check channel, `Sources/KyoseiMac/CheckChannel.swift`, whose whole content is
+  inside `#if KYOSEI_CHECK`. The app's build does not pass the condition, so the app's
+  executable holds none of the channel. `Tests/KyoseiMacTests/CheckBuildTests.swift` reads a
+  build made without the condition and fails if the name `KYOSEI_CHECK_SOCKET` is in it, and
+  the app's packaging stops if the executable it built holds that name.
+- It reads its server from `KYOSEI_SERVE_URL` alone and exits with status 64 when that names
+  none. It has no saved server and no default one, so it cannot reach a person's own server.
+- It reads its device token from `KYOSEI_CHECK_TOKEN` and never runs `security`; saving a
+  token from Settings is refused, and it has no `seal-key` command.
+- Its settings are its own identifier's, and it refuses to start under the app's identifier.
+- It does not ask to come to the front when it starts, unless `KYOSEI_CHECK_ACTIVATE` is `1`,
+  and it takes its window's frame from `KYOSEI_CHECK_FRAME`, as `x,y,width,height`.
+
+**The channel.** While `KYOSEI_CHECK_SOCKET` names a path, the check build listens there on a
+Unix socket with mode 0600 and answers one line of JSON for each line it is sent. A request is
+`{"op": ...}` with an optional `id`; an answer is `{"ok": true, "value": ...}` or
+`{"ok": false, "error": ...}`. The app acts on itself, so the channel needs no permission from
+the system.
+
+| Request | What the app does |
+|---|---|
+| `eval` | runs `script`, the body of an async function, in the page with `args` as its variables, and answers its value as JSON |
+| `menus` | answers the main menu as a tree: titles, key equivalents, and each item's enabled state after validation |
+| `menu` | validates and performs the item at `path`, such as `["Edit", "Undo"]`, as choosing it does |
+| `key` | sends one key (`key`, with `modifiers`) or types `text`, through `NSApp.sendEvent` |
+| `mouse` | sends a press, a release or both at `x`, `y` in the page's coordinates; with `menu` it answers the items of a native menu the press opened and closes the menu, and with `choose` it chooses one |
+| `snapshot` | writes a PNG of the window to `path`: the title bar and status bar from `cacheDisplay`, the page from `WKWebView.takeSnapshot` |
+| `state` | answers the window's title, frame and first responder, whether it is key, whether the app is active, and which app is in front |
+| `window` | sets the window's `frame`, makes it key (`key`), makes the page its first responder (`focus`), or activates the app (`activate`) |
+| `quit` | answers, then ends the app with `NSApp.terminate`, which runs the app's own quit path |
+
+The channel does not exercise what happens before the app: the window server's delivery of
+input, the menu bar's tracking, and activation. Measured on macOS 27 from a process started
+in tmux: `makeKey` does not make the window key while the app is not active, and the page
+then reports no focus. Keys, presses and menu items still reach the page and the menu bar.
+Whether the app can be activated from there was not measured.
+
+**The harness.** `check/harness.py` holds a run's parts and says what a run is kept from. The
+server's `KYOSEI_HOME`, `CLAUDE_CONFIG_DIR` and `HOME` are directories of the run. The first
+`tmux` on the server's `PATH` is a wrapper that maps `-L default` and `-L kyosei`, the two
+servers `kyo serve` asks for panes, to a private socket in the run's directory, refuses every
+other call, and logs each call; `check/test_tmux_wrapper.py` reads that log after the server
+has looked for a session's pane. The page's storage is moved into the run's directory with
+`CFFIXED_USER_HOME`, and the check build's settings are deleted before and after a scenario.
+A run stops only the processes it started.
+
+`check/test_scenario_f.py` is the one scenario built so far, Records and Files: a chosen
+plan's outstanding members are red, plans are named by id and then title, the side bar has no
+Latest shift note, one drawer is present in Records and in Files and docks, and an open file's
+root and path are separate elements whose right-click menu offers Copy path. The scenarios
+that need a session are planned and not built.
+
+A run writes `result.json` and `review.html` under `.build/check-run`, or under
+`KYOSEI_CHECK_OUT`, and `make app-check` prints the path. The result names what was tested (the
+commit, the digest of the check build's executable and the server's version) and holds each
+assertion with its outcome. The review sheet shows each screenshot beside the text of what it
+is a look at. The screenshots are of the check build and are taken by the app of its own
+window.
+
+The channel's requests each have a test in `Tests/KyoseiMacTests/CheckChannelTests.swift`,
+which exists only in a build with the condition:
+
+```
+swift test --scratch-path .build/check -Xswiftc -DKYOSEI_CHECK --filter 'CheckChannelTests|CheckBuildTests'
+```
