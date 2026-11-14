@@ -544,7 +544,11 @@ governs: src/kyosei/schema.py
   `source_turn`; the others are `context`, earlier turns in which what was approved was
   specified. Each row holds the session, the record uuid, the time, the words as an
   evidence artifact and the index line's commitment where it has one. A long turn is
-  stored as its head and tail and a paste is left out, each marked `[...]`. `--quote-file`
+  stored as its head and tail and a paste is left out, each marked `[...]`. Of a turn
+  that answers several gates, each under the line `kyo serve` wrote to say what it answers,
+  the approval stores the part headed for what the command credits, between the same marks
+  (KYO-934); no column records the cut, since the row cites the same turn and the words
+  check against it as a quote does. `--quote-file`
   remains for a project that does not read transcripts, for words said elsewhere, and to
   narrow what is stored of a turn.
 - **credits** and **credit_subjects** (schema_version 28, KYO-642): the person whose judgement a

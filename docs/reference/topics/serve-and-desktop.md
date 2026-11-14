@@ -1228,6 +1228,11 @@ line per anchor and none for a note with no anchor. An anchor is named by its id
 | A document or file filed with a commit | `on document <path> at <commit> lines 3-9 "<words>..."` |
 | Another note | `on note <id>` |
 
+A credit reads these lines back (KYO-934): of a turn that answers several gates, each under
+its `on record` line, it stores the part under the line naming what is credited
+([registries.md](registries.md)). The writers and the patterns that read them are in one
+module, `kyosei.message_lines`.
+
 **A record and a served file (KYO-737).** A record's line carries the id of the record or of
 the element, and the first six words the element holds when the message is made: a record's
 title, a criterion's or a note's text, a claim's statement, a gate's detail. A dispatch has no

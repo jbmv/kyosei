@@ -195,6 +195,7 @@ from . import (
     commands,
     device_tokens,
     git_queries,
+    message_lines,
     serve_attachments,
     serve_files,
     serve_send,
@@ -874,16 +875,18 @@ def _anchor_line(
         # KYO-737: the id is the address, and the words say which element it is.
         held = cmd_notes.element_words(ctx.store(), target)
         if held is None:
-            return f"on record {target} (not in the store)"
-        return f"on record {target}{f' {_words(held)}' if _clean_words(held) else ''}"
+            return message_lines.record_line(target, None)
+        return message_lines.record_line(target, _words(held) if _clean_words(held) else "")
     if files is not None and _has_lines_digest(anchor):
         return _file_line(ctx, files, anchor, session_id)
     if kind == cmd_notes.ANCHOR_NOTE:
-        return f"on note {target}"
+        return message_lines.note_line(target)
     if kind == cmd_notes.ANCHOR_TURN:
-        who = "your reply" if anchor["role"] == cmd_notes.ROLE_AGENT else "my prompt"
-        where = "" if anchor["session"] == session_id else f" in session {anchor['session']}"
-        line = f"on {who} {target}{where}"
+        line = message_lines.turn_line_head(
+            target,
+            agent=anchor["role"] == cmd_notes.ROLE_AGENT,
+            session=None if anchor["session"] == session_id else anchor["session"],
+        )
     else:
         span = (
             f"lines {anchor['line_start']}-{anchor['line_end']}"
@@ -1148,7 +1151,7 @@ def _prompt_message(
     for mark in sorted(marks, key=lambda m: m["line"]):
         start, end, entered = lines[mark["line"]]
         on = [_anchor_line(ctx, anchor, records, session_id, files) for anchor in mark["rows"]]
-        on += [f"attached {attachment['path']}" for attachment in mark["attached"]]
+        on += [message_lines.attached_line(attachment["path"]) for attachment in mark["attached"]]
         if on:
             # An empty line's own line break follows, so it becomes its `on` lines alone.
             insertions[start] = "\n".join(on) + ("\n" if end > start else "")

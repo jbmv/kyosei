@@ -2392,6 +2392,9 @@ def cmd_spawn(ctx: Context, args: Namespace) -> Output:
 
     # KYO-522: the same evidence path `kyo new` uses (KYO-521), read before anything else
     # reads stdin; required only when the source is a carried kind (a reminder).
+    # KYO-934: a person approving a source into a decision answers the source, so a turn
+    # that answers several things is cut to the part headed for it.
+    credits.credit_for(args, [source_id])
     evidence_text = _evidence_at_filing(
         registry,
         args.kind,
