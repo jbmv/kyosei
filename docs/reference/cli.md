@@ -999,7 +999,7 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--kind KIND] [--scope SCOPE] [--gate-tag TAG] [--status STATUS] [--plan ID] [--unsettled] [--person KEY] [--decided-by KEY] [--overrode] [--limit N]`
+Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--kind KIND] [--scope SCOPE] [--gate-tag TAG] [--status STATUS] [--plan ID] [--unsettled] [--person KEY] [--decided-by KEY] [--overrode] [--search WORDS] [--limit N]`
 
 ### Options
 
@@ -1012,6 +1012,7 @@ Usage: `kyo list [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [
 - `--person KEY` — optional. only records with a current credit by this person, a key under `people:` in kyosei/config.yml; refused if the project does not declare it (KYO-647)
 - `--decided-by KEY` — optional. only decision records this person decided: those with a current `decided` credit by them; refused if the project does not declare the key (KYO-647)
 - `--overrode` — optional. only records where a person overrode an agent: a `decided` credit whose outcome is `overrode`, or a credited verdict that reverses an uncredited earlier one on the same criterion (KYO-647)
+- `--search WORDS` — optional. only records in which every word of WORDS is found, without regard to case: in the id, the title, the text of an open gate, the text of a criterion or the description. A record found by a word its id and title lack is listed with where that word was found and an excerpt (`found` in --json) (KYO-933)
 - `--limit N` — optional. print at most N rows, in the listing's usual order; the summary line says how many matched and that the listing was limited
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

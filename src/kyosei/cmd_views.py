@@ -2633,6 +2633,7 @@ def cmd_list(ctx: Context, args: Namespace) -> Output:
         query.Filters.from_args(args),
         unsettled=bool(getattr(args, "unsettled", False)),
         overrode=bool(getattr(args, "overrode", False)),
+        search=getattr(args, "search", None),
     )
 
     # KYO-420.c4: `--limit N` prints the first N matching rows. The counts in the
@@ -2640,7 +2641,14 @@ def cmd_list(ctx: Context, args: Namespace) -> Output:
     # and how many it shows, so a truncated listing never reads as a short one.
     limit = getattr(args, "limit", None)
     shown = result.rows if limit is None else result.rows[:limit]
-    lines = [_record_line(item) for item in shown]
+    lines = []
+    for item in shown:
+        lines.append(_record_line(item))
+        # KYO-933: under --search, where a word outside the id and the title was found.
+        if item.get("found"):
+            where = item["found"]
+            named = "description" if where["in"] == "description" else where["id"]
+            lines.append(f"    found in {named}: {where['excerpt']}")
     summary_line = (
         f"{len(result.rows)} record(s): {result.counted} counted, "
         f"{result.not_counted} not counted (kyosei/kinds.yml policy.counted)"

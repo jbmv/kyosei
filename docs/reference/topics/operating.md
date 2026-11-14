@@ -909,6 +909,9 @@ kyo list --unsettled                       # only records not yet settled: no st
                                            # is complete or retired (statuses.yml)
 kyo list --unsettled --limit 20            # at most 20 rows; the summary line still counts
                                            # every match and says the listing was limited
+kyo list --search "dock bounce"            # records holding every word, in the id, the title, an
+                                           # open gate, a criterion or the description; a word
+                                           # found outside the id and title is shown in an excerpt
 kyo show KYO-1 --json --fields status,title   # only these keys (plus ok, command); an
                                            # unknown one is refused naming the valid ones
 kyo move KYO-1 working --json              # a write's --json is its receipt: each embedded

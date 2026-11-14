@@ -1415,6 +1415,8 @@ final class SessionFeed {
             loadRecordLists()
         case "record":
             if let id = body["id"] as? String { loadRecord(id) }
+        case "search":
+            if let text = body["text"] as? String { searchRecords(text) }
         case "history":
             if let ids = body["ids"] as? [String] { saveRecordsHistory(ids) }
         default:
@@ -1458,6 +1460,24 @@ final class SessionFeed {
                 #"{"project": \#(quoted(project)), "list": \#(document(listed)), "next": "#
                     + #"\#(document(ready)), "gates": \#(document(waiting)), "notes": "#
                     + #"\#(document(noted)), "briefs": \#(document(briefed)), "error": \#(problem)}"#)
+        }
+    }
+
+    /// Asks the server which records hold the words of `text` anywhere in their text
+    /// (`kyo list --search`, KYO-933), and hands the page the answer with the text it
+    /// answers, so that the page can tell it from the answer to an earlier text. A search
+    /// that fails sends `null`, and the page keeps what the list's own titles matched.
+    private func searchRecords(_ text: String) {
+        let project = project
+        let client = client
+        Task {
+            let reply = try? await client.command(
+                project: project, "list", flags: [(name: "search", value: text)])
+            guard project == self.project else { return }
+            send(
+                "recordSearch",
+                #"{"project": \#(quoted(project)), "text": \#(quoted(text)), "list": "#
+                    + #"\#(document(reply))}"#)
         }
     }
 

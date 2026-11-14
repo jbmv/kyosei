@@ -405,3 +405,90 @@ test("the home's Location dropdown names the Location shown, chooses one, keeps 
   assert.equal((await state()).visible, false);
   await opened.run(`document.getElementById("menu-icon").click()`);
 });
+
+/** Types in the home's search field. */
+const homeSearch = (opened: Page, text: string) => opened.run(`(() => {
+  const field = document.getElementById("records-home-search");
+  field.value = ${JSON.stringify(text)};
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+})()`);
+
+/** The texts the page has asked the app to search the records for, in order. */
+const asked = (opened: Page) => opened.run<string[]>(
+  `window.posted.filter((sent) => sent.name === "records" && sent.body.want === "search").map((sent) => sent.body.text)`);
+
+/** Waits until the page has asked for `count` searches, which it does a moment after the typing stops. */
+async function untilAsked(opened: Page, count: number): Promise<string[]> {
+  for (let tries = 0; tries < 100; tries += 1) {
+    const texts = await asked(opened);
+    if (texts.length >= count) return texts;
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  return asked(opened);
+}
+
+interface FoundRow { id: string; found: string | null; marks: string[] }
+const tableRows = (opened: Page, list = "#records-table") => opened.run<FoundRow[]>(
+  `[...document.querySelectorAll(${JSON.stringify(list)} + " [data-open]")].map((row) => ({
+    id: row.dataset.open,
+    found: row.querySelector(".rec-found")?.textContent ?? null,
+    marks: [...row.querySelectorAll(".rec-found mark")].map((mark) => mark.textContent),
+  }))`);
+
+test("a search reaches the text the rows do not hold: the server is asked once the typing stops, and a record it found is listed with where, in Awaiting you too (KYO-933)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  const gated = AWAITING[2];
+  const other = ALL[40];
+  await opened.run(`document.querySelector('#records-locations [data-location="Awaiting you"]').click()`);
+  // No title holds the word, so the rows alone find nothing.
+  await homeSearch(opened, "Do");
+  await homeSearch(opened, "Dock");
+  assert.deepEqual(await tableRows(opened), []);
+  // One request, for the text as it stood when the typing stopped, in lower case.
+  assert.deepEqual(await untilAsked(opened, 1), ["dock"]);
+  const answer = (text: string, ids: string[]) => opened.run(`window.kyo.recordSearch({ text: ${JSON.stringify(text)}, list: { records: [
+    ${ids.map((id) => `{ id: ${JSON.stringify(id)}, found: { in: "gate", id: ${JSON.stringify(`${id}.g2`)}, excerpt: "… until the Dock icon bounces …" } }`).join(",")}
+  ] } })`);
+  await answer("dock", [gated, other]);
+  // Awaiting you keeps the one that waits; the excerpt names the gate and marks the word.
+  assert.deepEqual(await tableRows(opened), [
+    { id: gated, found: "Gate g2 … until the Dock icon bounces …", marks: ["Dock"] },
+  ]);
+  await opened.run(`document.querySelector('#records-locations [data-location="All"]').click()`);
+  assert.deepEqual((await tableRows(opened)).map((row) => row.id).sort(), [gated, other].sort());
+  // An answer to a text no longer in the field changes nothing.
+  await answer("icon", [ALL[5]]);
+  assert.equal((await tableRows(opened)).length, 2);
+  // The same answer is not asked for twice, and a title's match shows no excerpt.
+  await homeSearch(opened, "");
+  await homeSearch(opened, "dock");
+  assert.equal((await tableRows(opened)).length, 2);
+  await homeSearch(opened, "KYO-834");
+  assert.deepEqual(await untilAsked(opened, 2), ["dock", "kyo-834"]);
+  await opened.run(`window.kyo.recordSearch({ text: "kyo-834", list: { records: [{ id: "KYO-834", found: null }] } })`);
+  assert.deepEqual(await tableRows(opened), [{ id: "KYO-834", found: null, marks: [] }]);
+
+  // The drawer's field searches the same way, and its Awaiting you list shows the find.
+  await opened.run(`document.querySelector('#records-table [data-open]').click()`);
+  await search(opened, "bounces");
+  assert.deepEqual((await untilAsked(opened, 3)).at(-1), "bounces");
+  await answer("bounces", [gated]);
+  assert.deepEqual(await tableRows(opened, "#records-awaiting"), [
+    { id: gated, found: "Gate g2 … until the Dock icon bounces …", marks: ["bounces"] },
+  ]);
+  assert.deepEqual((await tableRows(opened, "#records-list")).map((row) => row.id), [gated]);
+  // The lists read again after a change to the store: the search is asked again, and the
+  // rows found before stay until the new answer comes.
+  await opened.run(`window.kyo.recordLists({ list: { records: ${JSON.stringify(ROWS)} } })`);
+  assert.deepEqual((await tableRows(opened, "#records-list")).map((row) => row.id), [gated]);
+  // Both fields' texts are, the home's among them.
+  assert.deepEqual((await untilAsked(opened, 5)).slice(3).sort(), ["bounces", "kyo-834"]);
+  // A search the server could not answer leaves what the titles match, and is not repeated.
+  await search(opened, "zzz");
+  await untilAsked(opened, 6);
+  await opened.run(`window.kyo.recordSearch({ text: "zzz", list: null })`);
+  await new Promise((done) => setTimeout(done, 300));
+  assert.equal((await asked(opened)).filter((text) => text === "zzz").length, 1);
+  assert.deepEqual(await tableRows(opened, "#records-list"), []);
+});

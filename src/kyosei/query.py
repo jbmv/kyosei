@@ -168,7 +168,97 @@ OVERRODE_FLAG = "--overrode"
 #: output KYO-420 was ruled not to move. For the same reason a Base's ``status:``
 #: still takes one string, not the list a repeated ``--status`` builds. Widening the
 #: Base surface to both is left to a record of its own.
-LIST_ONLY_FLAGS: tuple[str, ...] = (UNSETTLED_FLAG, OVERRODE_FLAG, "--limit")
+#:
+#: ``--search`` (KYO-933) is free text, matched against prose the rows do not carry, and
+#: a Base's filters are exact values of fields a row shows.
+LIST_ONLY_FLAGS: tuple[str, ...] = (UNSETTLED_FLAG, OVERRODE_FLAG, "--limit", "--search")
+
+#: KYO-933: ``kyo list --search``, the words to find in a record's text.
+SEARCH_FLAG = "--search"
+
+#: How much of a text an excerpt shows on each side of the word found in it.
+EXCERPT_BEFORE = 40
+EXCERPT_AFTER = 80
+
+
+def search_words(text: str | None) -> tuple[str, ...]:
+    """The words of a search text, case-folded, each once, in the order typed."""
+    return tuple(dict.fromkeys((text or "").casefold().split()))
+
+
+def excerpt(text: str, word: str) -> str | None:
+    """A line of ``text`` around the first place ``word`` is found in it, or ``None``.
+
+    The text is flattened onto one line first, so the excerpt never holds a line break,
+    and an ellipsis stands where the text was cut. ``word`` is case-folded already.
+    """
+    flat = " ".join(text.split())
+    at = flat.casefold().find(word)
+    if at < 0:
+        return None
+    start = max(0, at - EXCERPT_BEFORE)
+    end = min(len(flat), at + len(word) + EXCERPT_AFTER)
+    if start:
+        # Begin at a word, where one begins between the cut and the word found.
+        space = flat.find(" ", start, at)
+        start = space + 1 if space >= 0 else start
+    if end < len(flat):
+        # End at a word likewise.
+        space = flat.rfind(" ", at + len(word), end + 1)
+        end = space if space >= 0 else end
+    return ("… " if start else "") + flat[start:end].strip() + (" …" if end < len(flat) else "")
+
+
+def search_records(store: Store, words: tuple[str, ...]) -> dict[str, dict | None]:
+    """The records in which every one of ``words`` is found, each with where (KYO-933).
+
+    A word is looked for in the record's id and title, in the text of its OPEN gates, in
+    the text of its criteria and in its description, without regard to case. The value
+    is ``None`` when the id and the title hold every word. Otherwise it names where the
+    first word they lack was found: ``in`` is ``gate``, ``criterion`` or ``description``,
+    tried in that order, ``id`` is the gate's or the criterion's id (the record's own
+    for a description), and ``excerpt`` is a line of that text around the word.
+
+    The match is made here and not by SQL ``LIKE``, which folds the case of ASCII
+    letters only. The whole text is read on every call; on a store of 933 records
+    holding about two million characters that took a few milliseconds (KYO-933.c4).
+    """
+    if not words:
+        return {}
+    texts: dict[str, list[tuple[str, str, str]]] = {}
+    for kind, sql in (
+        (
+            "gate",
+            "SELECT record_id, id, detail AS text FROM gates WHERE cleared_at IS NULL "
+            "ORDER BY record_id, seq",
+        ),
+        ("criterion", "SELECT record_id, id, text FROM criteria ORDER BY record_id, seq"),
+    ):
+        for row in store.conn.execute(sql):
+            if row["text"]:
+                texts.setdefault(row["record_id"], []).append((kind, row["id"], row["text"]))
+    found: dict[str, dict | None] = {}
+    for row in store.conn.execute("SELECT id, title, description FROM records ORDER BY seq"):
+        name = f"{row['id']} {row['title'] or ''}".casefold()
+        parts = texts.get(row["id"], [])
+        if row["description"]:
+            parts = [*parts, ("description", row["id"], row["description"])]
+        folded: list[str] | None = None
+        where: dict | None = None
+        for word in words:
+            if word in name:
+                continue
+            if folded is None:
+                folded = [text.casefold() for _kind, _id, text in parts]
+            index = next((i for i, text in enumerate(folded) if word in text), None)
+            if index is None:
+                break
+            if where is None:
+                kind, part_id, text = parts[index]
+                where = {"in": kind, "id": part_id, "excerpt": excerpt(text, word)}
+        else:
+            found[row["id"]] = where
+    return found
 
 
 def filter_key(name: str) -> str:
@@ -457,7 +547,12 @@ def credit_index(store: Store) -> dict[str, dict]:
 
 
 def run(
-    store: Store, filters: Filters, *, unsettled: bool = False, overrode: bool = False
+    store: Store,
+    filters: Filters,
+    *,
+    unsettled: bool = False,
+    overrode: bool = False,
+    search: str | None = None,
 ) -> Result:
     """The records matching ``filters``, in record-sequence order.
 
@@ -467,6 +562,11 @@ def run(
     ``kyo next`` already read "still in flight" from. A keyword rather than a
     :class:`Filters` field for the reason :data:`LIST_ONLY_FLAGS` gives.
 
+    ``search`` (KYO-933, ``kyo list --search``) keeps the records in which every word of
+    the text is found (:func:`search_records`) and gives each row a ``found`` field
+    saying where. A run without it carries no such field, so a Base's rows and a plain
+    ``kyo list --json`` are what they were. A text with no word in it narrows nothing.
+
     ``validate`` is the caller's to run first — separated because the two surfaces
     refuse at different moments (a flag when it is typed, a Base when its file is
     loaded) and because a caller that has already validated must not pay for it twice.
@@ -475,6 +575,8 @@ def run(
     ladder = _load_status_ladder(store)
     gate_tags, gate_counts, gate_types = _open_gates(store)
     credited = credit_index(store)
+    words = search_words(search)
+    found = search_records(store, words) if words else None
 
     query = "SELECT * FROM records"
     conditions: list[str] = []
@@ -500,6 +602,8 @@ def run(
     counted_total = 0
     not_counted_total = 0
     for row in store.conn.execute(query, params):
+        if found is not None and row["id"] not in found:
+            continue
         kind_def = registry.get(row["kind"])
         word = (
             standing(row["status"], kind_def.archetype, ladder) if kind_def else row["status"]
@@ -571,6 +675,8 @@ def run(
                 "people": credit.get("people", []),
             }
         )
+        if found is not None:
+            rows[-1]["found"] = found[row["id"]]
 
     return Result(
         rows=rows,
@@ -581,12 +687,17 @@ def run(
 
 
 def validated_run(
-    ctx: Context, filters: Filters, *, unsettled: bool = False, overrode: bool = False
+    ctx: Context,
+    filters: Filters,
+    *,
+    unsettled: bool = False,
+    overrode: bool = False,
+    search: str | None = None,
 ) -> Result:
     """``validate`` then ``run`` against the context's store — the whole engine, once."""
     store = ctx.store()
     validate(store, filters)
-    return run(store, filters, unsettled=unsettled, overrode=overrode)
+    return run(store, filters, unsettled=unsettled, overrode=overrode, search=search)
 
 
 # ------------------------------------------------------- KYO-109: the three sources

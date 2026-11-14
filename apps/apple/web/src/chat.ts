@@ -23,6 +23,7 @@ import {
   parseLink, prefixOf, pressedSort, recordSortFrom, sortRecords, standingOf, storedFilters,
   briefPage, briefRows, notePage, noteRows, sessionAt,
   recordOf, recordPage, refParts, visit, when, withKinds,
+  type Finds, findsFrom, foundLabel, markedParts, searchKey, standsInFor,
 } from "./records";
 import {
   type History, canBack, canForward, current, fresh, stepBack, stepForward, visitPlace, without,
@@ -5171,6 +5172,81 @@ function listedRows(): RecordRow[] {
 }
 let readyRecords = new Set<string>();
 let awaitingRecords = new Set<string>();
+
+// KYO-933: the rows hold a record's id and title and none of its text, so a search of the
+// gates, the criteria and the description is the server's (`kyo list --search`). The id and
+// the title are matched here at once, and the server's answer is added when it comes.
+type SearchBox = "side" | "home";
+const FINDS_WAIT_MS = 120;
+const FINDS_KEPT = 40;
+/** The server's answers since the lists were last read, by the words asked. */
+const recordFinds = new Map<string, Finds>();
+const findsAsked = new Set<string>();
+/** The answer each search field showed last, which stands in while a search typed on is answered. */
+const lastFinds: Partial<Record<SearchBox, { key: string; finds: Finds }>> = {};
+let findsTimer: number | undefined;
+
+/** The server's answer for a field's search text, or the one that stands in for it; asks when it has none. */
+function findsFor(search: string, box: SearchBox): Finds | undefined {
+  const key = searchKey(search);
+  if (!key) return undefined;
+  const held = recordFinds.get(key);
+  if (held) {
+    lastFinds[box] = { key, finds: held };
+    return held;
+  }
+  if (listsRead && !findsAsked.has(key) && findsTimer === undefined) {
+    findsTimer = window.setTimeout(askFinds, FINDS_WAIT_MS);
+  }
+  const last = lastFinds[box];
+  return last && standsInFor(last.key, key) ? last.finds : undefined;
+}
+
+/** Asks for what the two search fields hold now, so that a text typed through is not asked for. */
+function askFinds(): void {
+  findsTimer = undefined;
+  for (const search of [narrowing.search, homeSearch]) {
+    const key = searchKey(search);
+    if (!key || recordFinds.has(key) || findsAsked.has(key)) continue;
+    findsAsked.add(key);
+    post("records", { want: "search", text: key });
+  }
+}
+
+/** Forgets the answers, which were about the lists as they were; the last shown still stand in. */
+function dropFinds(): void {
+  recordFinds.clear();
+  findsAsked.clear();
+}
+
+/** What each row shows of a find, so that a draw changes only the rows whose find changed. */
+const shownFinds = new WeakMap<HTMLElement, string>();
+
+/** Shows in a row where the search found a word its id and title lack, or takes that away. */
+function showFound(item: HTMLElement, row: RecordRow, search: string, finds: Finds | undefined): HTMLElement {
+  const found = finds?.get(row.id) ?? null;
+  const state = found ? `${searchKey(search)}\n${found.id}\n${found.excerpt}` : "";
+  if ((shownFinds.get(item) ?? "") === state) return item;
+  shownFinds.set(item, state);
+  item.querySelector(":scope > .rec-found")?.remove();
+  if (!found) return item;
+  const line = document.createElement("div");
+  line.className = "rec-found";
+  line.title = `${found.in === "description" ? "Description" : found.id}: ${found.excerpt}`;
+  line.append(span("rec-found-in", foundLabel(found)), " ");
+  for (const part of markedParts(found.excerpt, search)) {
+    if (!part.hit) {
+      line.append(part.text);
+      continue;
+    }
+    const mark = document.createElement("mark");
+    mark.textContent = part.text;
+    line.append(mark);
+  }
+  item.append(line);
+  return item;
+}
+
 /** Whether the lists have been asked for, and whether an answer has come. */
 let listsAsked = false;
 let listsRead = false;
@@ -5401,7 +5477,9 @@ function drawRecordLists(): void {
     if (field.value !== narrowing.search) field.value = narrowing.search;
   });
   drawKindControls();
-  const shown = narrow(rowsNewestFirst(), narrowing, readyRecords, awaitingRecords);
+  const sideFinds = findsFor(narrowing.search, "side");
+  const sideRow = (item: HTMLElement, row: RecordRow) => showFound(item, row, narrowing.search, sideFinds);
+  const shown = narrow(rowsNewestFirst(), narrowing, readyRecords, awaitingRecords, sideFinds);
   const nothing = !listsRead ? "Reading the records." : "No record matches.";
   // KYO-862: the drawer holds Awaiting you, Recents and All, and the field, Kind and Open
   // only narrow all three. Awaiting you is not shown when nothing in it is left.
@@ -5412,16 +5490,17 @@ function drawRecordLists(): void {
   fill(awaitingList, waiting.map((row) => {
     const item = recordRow(row, "side");
     item.classList.toggle("current", row.id === openRecordId);
-    return item;
+    return sideRow(item, row);
   }));
   const narrowed = narrowing.open || narrowing.search.trim() !== "";
-  const recent = narrow(historyRows(viewedRecords, listedRows()), narrowing, readyRecords, awaitingRecords);
+  const recent = narrow(
+    historyRows(viewedRecords, listedRows()), narrowing, readyRecords, awaitingRecords, sideFinds);
   fill(
     recordsHistoryList,
     recent.length
-      ? recent.map((row) => recordRow(row, "side"))
+      ? recent.map((row) => sideRow(recordRow(row, "side"), row))
       : [emptyRow(viewedRecords.length && narrowed ? nothing : "No record has been viewed.")]);
-  fill(recordsList, shown.length ? shown.map((row) => keptRow(row, "side")) : [emptyRow(nothing)]);
+  fill(recordsList, shown.length ? shown.map((row) => sideRow(keptRow(row, "side"), row)) : [emptyRow(nothing)]);
 
   drawRecordsHome(nothing);
 
@@ -5446,7 +5525,8 @@ function homeRows(): RecordRow[] {
     ? membersOf(rowsNewestFirst(), plan)
     : located(rowsNewestFirst(), readyRecords, awaitingRecords, { notes: noteList, briefs: briefList })[homeLocation];
   const found = narrow(
-    inLocation, { open: false, dispatchable: false, awaiting: false, search: homeSearch }, readyRecords);
+    inLocation, { open: false, dispatchable: false, awaiting: false, search: homeSearch }, readyRecords,
+    undefined, findsFor(homeSearch, "home"));
   return sortRecords(found, homeSort);
 }
 
@@ -5567,10 +5647,11 @@ function drawRecordsHome(nothing: string): void {
   });
   if (recordsHomeSearch.value !== homeSearch) recordsHomeSearch.value = homeSearch;
   const rows = listsRead ? homeRows() : [];
+  const homeFinds = findsFor(homeSearch, "home");
   // KYO-883: a plan's members still outstanding are marked in red, as the plan's outline marks them.
   document.getElementById("records-landing")!.classList.toggle("plan-chosen", chosenPlan() !== null);
   fill(recordsTable, rows.length
-    ? rows.map((row) => keptRow(row, "landing"))
+    ? rows.map((row) => showFound(keptRow(row, "landing"), row, homeSearch, homeFinds))
     : [emptyRow(!listsRead ? nothing : homeSearch.trim() ? "No record matches." : "None.")]);
 }
 
@@ -5946,6 +6027,9 @@ const recordFrames = {
     notesAnswer = briefsAnswer = null;
     readyRecords = new Set();
     awaitingRecords = new Set();
+    dropFinds();
+    delete lastFinds.side;
+    delete lastFinds.home;
     listsRead = false;
     listsProblem = null;
     viewedRecords = historyFrom(frame.history);
@@ -5980,6 +6064,8 @@ const recordFrames = {
     if (Array.isArray(frame.list?.records)) {
       recordRows = frame.list.records;
       listsRead = true;
+      // KYO-933: the store changed, so a search of its text is asked again.
+      dropFinds();
     }
     if (frame.next) readyRecords = dispatchableIds(frame.next);
     if (frame.gates) awaitingRecords = awaitingIds(frame.gates);
@@ -5988,6 +6074,19 @@ const recordFrames = {
     if (openRecordDoc) drawRecord();
     // So is a record linked in the chat, in the chat's side bar.
     drawChatLinks();
+  },
+
+  /**
+   * The server's answer to a search of the records' text (KYO-933): `kyo list --search` for
+   * the words in `text`, or null when it could not be read, which is kept as no find so
+   * that it is not asked again until the lists are read anew.
+   */
+  recordSearch(frame: { text?: string; list?: unknown }): void {
+    if (typeof frame.text !== "string") return;
+    if (recordFinds.size >= FINDS_KEPT) recordFinds.clear();
+    recordFinds.set(frame.text, findsFrom(frame.list));
+    findsAsked.delete(frame.text);
+    if ([narrowing.search, homeSearch].some((search) => searchKey(search) === frame.text)) drawRecordLists();
   },
 
   /** One record as `kyo show --json` prints it, or why it could not be read. */

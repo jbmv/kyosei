@@ -530,6 +530,19 @@ record's number, which is the order of creation. A search field above the table,
 Kind control of its own, narrows the chosen Location's rows. A record is placed and shown by
 its standing, so a current decision is in Reference and not among the open work.
 
+Either search field finds a record by the words of its id and title, which the list's rows
+hold, and by the words of its open gates, its criteria and its description, which they do
+not (KYO-933). The first is matched in the page as each letter is typed. For the second the
+page asks the server once the typing has stopped, with `cmd/list?search=` (`kyo list
+--search`), and adds the records in the answer to those already shown; the filters and the
+chosen Location apply to both. A record found by a word that its id and title lack carries a
+line under its title that names where the word was found, as `Gate g2`, `Criterion c3` or
+`Description`, with an excerpt of that text in which the words are marked. The answers are
+dropped when the lists are read again, and the rows last found stay until the new answer
+comes. The text is not sent with the list because the list is read again at every change to
+the store: measured on this project's store of 933 records, the list is 342 kB and would be
+2.5 MB with the text, and a search is answered in about 75 ms.
+
 Two further Locations hold what is in the store and is no record (KYO-869): Shift notes, every
 note of the shift log, and Briefs, every brief the store kept. Each lists newest first, and
 one opens as a page in the Records view: a note with its author, its time and its text, and

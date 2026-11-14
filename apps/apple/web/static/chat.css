@@ -1104,6 +1104,11 @@ body.dock-left .place-control { display: none; }
 .rec-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rec-title { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .rec-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* KYO-933: where the search found a word that the id and the title lack, on one line. */
+.rec-found { overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.rec-found-in { font-weight: 600; }
+.rec-found mark { background: color-mix(in srgb, var(--pastel-blue) 42%, transparent); color: inherit; border-radius: 2px; }
+#records-table .rec-found { grid-column: 2 / -1; padding-bottom: 4px; }
 .rec-empty { padding: 6px 10px; color: var(--muted); font-size: 13.5px; }
 
 /* The side bar in Records: the list takes two thirds, and History the last. It stays out
