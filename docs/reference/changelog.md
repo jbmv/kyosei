@@ -657,6 +657,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-930` (task) — Mac app: Chat draws kyo serve's automated message as the server's, not the person's
 - **2026-11-14** — `KYO-929` (task) — kyo serve: one automated message to a session idle for 55 minutes, never credited to the person
 - **2026-11-14** — `KYO-926` (task) — Mac app: scratchpads are reordered by dragging their heads
+- **2026-11-14** — `KYO-925` (task) — Mac app: the composer's sections share its height, the one in use the most
 - **2026-11-14** — `KYO-923` (task) — Mac app: two blank lines or a --- line end a heading's section in a box
 - **2026-11-14** — `KYO-920` (bug) — A box's images are lost when it moves to a new session
 - **2026-11-14** — `KYO-917` (task) — Mac app: a scratchpad's head is its first line, the gutters swap, and a heading's section has a line down its side
