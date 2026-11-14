@@ -1,6 +1,7 @@
 // Run with `npm test`. The composer has one prompt, the last box, and the boxes above it are
-// scratchpads: headed by their first line (KYO-917), collapsible, never sent, and moved into the
-// prompt by Create prompt (KYO-903). A box's text is read and its caret set through `window.kyo.composer`, since the
+// scratchpads: headed by their first line (KYO-917), one of them open at a time (KYO-936), never
+// sent, and moved into the prompt by Create prompt or Send to prompt (KYO-903, KYO-936), which
+// Command-Z takes back. A box's text is read and its caret set through `window.kyo.composer`, since the
 // box is an editor (KYO-910). A machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -21,7 +22,7 @@ const START = `window.kyo.project({ project: "p", scope: "server/p" });`;
 const saved = `window.posted.filter((m) => m.name === "saveDraft").at(-1)?.body.boxes`;
 const pause = `new Promise((done) => setTimeout(done, 900))`;
 
-test("a collapsed state is part of what a box holds, and a prompt's signature is as it was", () => {
+test("a scratchpad differs from a prompt of the same words, and not by a collapsed state an earlier build saved (KYO-936.c1)", () => {
   const plain = boxSignature({ text: "a" });
   assert.equal(plain, boxSignature({ text: "a", marks: [], scratch: null }));
   const pad = boxSignature({ text: "a", scratch: {} });
@@ -29,7 +30,8 @@ test("a collapsed state is part of what a box holds, and a prompt's signature is
   // An earlier build's empty heading is no heading, and one with words still differs.
   assert.equal(pad, boxSignature({ text: "a", scratch: { heading: "" } }));
   assert.notEqual(pad, boxSignature({ text: "a", scratch: { heading: "h" } }));
-  assert.notEqual(pad, boxSignature({ text: "a", scratch: { collapsed: true } }));
+  // Which scratchpad is open is each window's own: a copy saved collapsed is the same box.
+  assert.equal(pad, boxSignature({ text: "a", scratch: { collapsed: true } }));
   assert.equal(pad, boxSignature({ text: "a", scratch: { collapsed: false } }));
 });
 
@@ -115,8 +117,10 @@ test("+ adds a scratchpad with the caret in its text, headed by its first line, 
     assert.deepEqual((await page.run<{ shown: string[] }>(HEAD)).shown, ["scratch-head"]);
     await page.run(pause);
     const kept = await page.run<{ id: string; text: string; scratch: unknown }[]>(saved);
-    assert.deepEqual(kept.map((box) => [box.text, box.scratch]), [["\ngate evidence\nseen working", { collapsed: true }]]);
-    // The same draft read on another device, or after a relaunch.
+    // KYO-936: which scratchpad is open is not saved.
+    assert.deepEqual(kept.map((box) => [box.text, box.scratch]), [["\ngate evidence\nseen working", {}]]);
+    // The same draft read on another device, or after a relaunch: no caret has been in the
+    // scratchpad there, so it is collapsed.
     await page.reload();
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(kept)}, etag: "e" }); })()`);
     boxes = await page.run<Box[]>(STATE);
@@ -141,7 +145,7 @@ test("a scratchpad an earlier build saved with a heading opens with it as its fi
     await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(older)}, etag: "e" }); })()`);
     let boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => [box.kind, box.heading, box.text, box.collapsed]), [
-      ["scratch", "topic", "topic\nnotes", true], ["scratch", "only a heading", "only a heading", false], ["prompt", null, "the prompt", false],
+      ["scratch", "topic", "topic\nnotes", true], ["scratch", "only a heading", "only a heading", true], ["prompt", null, "the prompt", false],
     ]);
     // Reading it is not an edit; the next edit saves each scratchpad with its heading in its
     // text, its mark on the line it was on, and a scratch object with no heading.
@@ -152,7 +156,7 @@ test("a scratchpad an earlier build saved with a heading opens with it as its fi
     await page.run(pause);
     const kept = await page.run<{ id: string; text: string; scratch?: unknown; marks: { line: number }[] }[]>(saved);
     assert.deepEqual(kept.map((box) => [box.id, box.text, box.scratch ?? null, box.marks.map((mark) => mark.line)]), [
-      ["a", "topic\nnotes", { collapsed: true }, [1]], ["h", "only a heading", {}, []], ["b", "the prompt!", null, []],
+      ["a", "topic\nnotes", {}, [1]], ["h", "only a heading", {}, []], ["b", "the prompt!", null, []],
     ]);
     // Read again, as on another device, the heading is not added a second time.
     await page.reload();
@@ -162,30 +166,268 @@ test("a scratchpad an earlier build saved with a heading opens with it as its fi
   } finally { await page.close(); }
 });
 
-test("Create prompt moves a scratchpad into an empty prompt and is refused while the prompt holds words", async (t) => {
+/** Each scratchpad's button: what it reads and whether it takes a press. */
+const BUTTONS = `[...document.querySelectorAll("#boxes .box.scratch .box-create")].map((button) => [button.textContent, button.disabled])`;
+/** The titles of the marks each box's gutter shows, in the boxes' order. */
+const MARKS = `[...document.querySelectorAll("#boxes .box")].map((box) => [...box.querySelectorAll(".mark.held")].map((mark) => mark.title))`;
+const OPEN = `[...document.querySelectorAll("#scratches > .box")].map((box) => !box.classList.contains("collapsed"))`;
+const FOCUSED = `window.kyo.composer.boxes().findIndex((box) => box.focused)`;
+const ALT = 1;
+
+test("one scratchpad is open at a time: the caret put in one, or + adding one, opens it and collapses the others, and a press on a collapsed head opens that one (KYO-936.c1)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    // A draft saved by an earlier build, with the second scratchpad collapsed and the others open.
+    const draft = [
+      { id: "a", text: "alpha\nnotes", scratch: {} }, { id: "b", text: "beta\nnotes", scratch: { collapsed: true } },
+      { id: "c", text: "gamma\nnotes", scratch: {} }, { id: "m", text: "the prompt" },
+    ];
+    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(draft)}, etag: "e" }); })()`);
+    // No caret has been in any of them here: none is open, whatever the draft says.
+    assert.deepEqual(await page.run(OPEN), [false, false, false]);
+    await page.run(`window.kyo.composer.select(0, 2)`);
+    assert.deepEqual(await page.run(OPEN), [true, false, false]);
+    // The focus put in another by the page, as a press in its text puts it.
+    await page.run(`window.kyo.composer.select(2, 1)`);
+    assert.deepEqual(await page.run(OPEN), [false, false, true]);
+    // A press on a collapsed head opens that one with the caret in it; on the open head, it collapses.
+    await page.run(`document.querySelectorAll("#scratches .scratch-title")[1].click()`);
+    assert.deepEqual(await page.run(OPEN), [false, true, false]);
+    assert.equal(await page.run(FOCUSED), 1);
+    assert.deepEqual(await page.run(`[...document.querySelectorAll("#scratches .scratch-toggle")].map((toggle) => toggle.getAttribute("aria-expanded"))`),
+      ["false", "true", "false"]);
+    await page.run(`document.querySelectorAll("#scratches .scratch-toggle")[1].click()`);
+    assert.deepEqual(await page.run(OPEN), [false, false, false]);
+    assert.equal(await page.run(FOCUSED), -1);
+    // + adds one, open, with the caret in it.
+    await page.run(`window.kyo.composer.select(0, 0)`);
+    await page.run(`document.getElementById("new-prompt").click()`);
+    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
+    assert.equal(await page.run(FOCUSED), 3);
+    // The caret in the prompt leaves the open one open, for when the scratchpads are gone back to.
+    await page.run(`window.kyo.composer.select(4, 0)`);
+    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
+    // None of this is an edit: nothing was saved, and another device's copy that differs only
+    // in a collapsed state changes nothing here.
+    await page.run(pause);
+    assert.equal(await page.run(`${saved} ?? null`), null);
+    await page.run(`window.kyo.composer.select(0, 2)`);
+    await page.run(`window.kyo.draftElsewhere({ boxes: ${JSON.stringify(draft.map((box) => (box.scratch ? { ...box, scratch: { collapsed: true } } : box)))}, etag: "e2" })`);
+    assert.deepEqual(await page.run(OPEN), [true, false, false, false]);
+    assert.equal(await page.run(FOCUSED), 0);
+    await page.run(pause);
+    assert.equal(await page.run(`${saved} ?? null`), null);
+  } finally { await page.close(); }
+});
+
+test("a scratchpad's button reads Create prompt while the prompt is empty and Send to prompt while it holds words or marks, and Send to prompt appends the whole scratchpad with its marks (KYO-936.c2)", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
     await page.run(`(() => { ${START}
-      window.kyo.draft({ boxes: [{ id: "a", text: "topic\\nnotes", scratch: {} }], etag: "e" });
-      window.kyo.composer.select(1, 0);
+      window.kyo.draft({ boxes: [
+        { id: "a", text: "  topic\\n\\n  notes", scratch: {}, marks: [{ line: 0, items: [{ kind: "tag", name: "first" }] }, { line: 2, items: [{ kind: "tag", name: "last" }] }] },
+        { id: "z", text: "other", scratch: {} },
+      ], etag: "e" });
     })()`);
-    await page.type("x");
-    let boxes = await page.run<Box[]>(STATE);
-    assert.deepEqual(boxes.map((box) => box.create), [false, null]);
-    await page.run(`document.querySelector(".box-create").click()`);
-    assert.deepEqual((await page.run<Box[]>(STATE)).map((box) => box.text), ["topic\nnotes", "x"]);
+    assert.deepEqual(await page.run(BUTTONS), [["Create prompt", false], ["Create prompt", false]]);
+    // A mark alone makes the prompt hold something.
+    await page.run(`(() => { window.kyo.composer.select(2, 0);
+      document.querySelector("#boxes .box.main .cm-gutter.kyo-marks").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true,
+        clientX: document.querySelector("#boxes .box.main .cm-gutter.kyo-marks").getBoundingClientRect().left + 5,
+        clientY: document.querySelector("#boxes .box.main .cm-line").getBoundingClientRect().top + 4 }));
+      const field = document.querySelector(".mark-panel input");
+      field.value = "held";
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    })()`);
+    assert.deepEqual(await page.run(BUTTONS), [["Send to prompt", false], ["Send to prompt", false]]);
+    await page.run(`window.kyo.composer.select(2, 0)`);
+    await page.type("already here");
+    assert.deepEqual(await page.run(BUTTONS), [["Send to prompt", false], ["Send to prompt", false]]);
 
-    await page.press("Backspace", 0, "deleteBackward");
-    boxes = await page.run<Box[]>(STATE);
-    assert.deepEqual(boxes.map((box) => box.create), [true, null]);
-    await page.run(`document.querySelector(".box-create").click()`);
-    // The whole text moves, the first line that headed the scratchpad included (KYO-917.c4).
-    boxes = await page.run<Box[]>(STATE);
-    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "topic\nnotes"]]);
+    await page.run(`document.querySelector("#boxes .box.scratch .box-create").click()`);
+    // The whole text goes after the prompt's last line as it was typed, its indent and its
+    // blank line kept, each mark on its line, and the scratchpad leaves.
+    const boxes = await page.run<Box[]>(STATE);
+    assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["scratch", "other"], ["prompt", "already here\n  topic\n\n  notes"]]);
+    assert.deepEqual(await page.run(MARKS), [[], ["#held", "#first", "#last"]]);
+    // The caret is at the prompt's end.
+    assert.deepEqual(await page.run(`(() => { const box = window.kyo.composer.boxes()[1]; return [box.focused, box.from]; })()`),
+      [true, "already here\n  topic\n\n  notes".length]);
     await page.run(pause);
-    const kept = await page.run<{ id: string; scratch?: unknown }[]>(saved);
-    assert.deepEqual(kept.map((box) => [box.id, box.scratch ?? null]), [["a", null]]);
+    const kept = await page.run<{ id: string; scratch?: unknown; marks?: { line: number }[] }[]>(saved);
+    // The prompt keeps its own id, which is none of the scratchpads'.
+    assert.deepEqual(kept.map((box) => [["a", "z"].includes(box.id), box.scratch ?? null, (box.marks ?? []).map((mark) => mark.line)]),
+      [[true, {}, []], [false, null, [0, 1, 3]]]);
+    assert.equal(kept[0].id, "z");
+
+    // Emptied, the prompt is created from the next scratchpad, under that scratchpad's id.
+    await page.run(`window.kyo.composer.select(1, 0, ${"already here\n  topic\n\n  notes".length})`);
+    await page.press("Backspace", 0, "deleteBackward");
+    await page.run(`(() => { for (let left = 5; left > 0 && document.querySelector("#boxes .box.main .mark.held"); left -= 1) {
+      document.querySelector("#boxes .box.main .mark.held").click();
+      document.querySelector(".mark-panel .mark-remove").click();
+    } })()`);
+    assert.deepEqual(await page.run(BUTTONS), [["Create prompt", false]]);
+    await page.run(`document.querySelector(".box-create").click()`);
+    assert.deepEqual((await page.run<Box[]>(STATE)).map((box) => [box.kind, box.text]), [["prompt", "other"]]);
+    await page.run(pause);
+    assert.deepEqual((await page.run<{ id: string; scratch?: unknown }[]>(saved)).map((box) => [box.id, box.scratch ?? null]), [["z", null]]);
+  } finally { await page.close(); }
+});
+
+/** What the composer holds that a move must put back: each box, its marks, its folds, the open scratchpad and the caret. */
+const HELD = `(() => { const all = window.kyo.composer.boxes(); const marks = ${MARKS};
+  return { boxes: all.map((box, index) => [box.kind, box.id, box.text, marks[index], window.kyo.composer.folds(index)]),
+    open: ${OPEN}, caret: all.flatMap((box) => (box.focused ? [[box.id, box.from, box.to]] : [])) }; })()`;
+/** The last draft the page asked the app to save: each box's id, kind, text and the lines its marks are on. */
+const SAVED = `(${saved} ?? []).map((box) => [box.id, box.scratch ? "scratch" : "prompt", box.text, (box.marks ?? []).map((mark) => [mark.line, mark.items.map((item) => item.name)])])`;
+const PADS = [
+  { id: "a", text: "alpha", scratch: {} },
+  { id: "b", text: "# plan\n- keep\n- take\n  - nested\n- last", scratch: {},
+    marks: [{ line: 0, items: [{ kind: "tag", name: "top" }] }, { line: 3, items: [{ kind: "tag", name: "review" }] }, { line: 4, items: [{ kind: "tag", name: "stays" }] }] },
+  { id: "c", text: "gamma", scratch: {} },
+];
+const undo = (page: { press: (key: string, modifiers?: number, command?: string) => Promise<void> }) => page.press("z", META);
+const redo = (page: { press: (key: string, modifiers?: number, command?: string) => Promise<void> }) => page.press("z", META | SHIFT);
+
+/** Opens the three scratchpads, the middle one with a fold on "- take" and the caret in it at 9. */
+async function openPads(page: NonNullable<Awaited<ReturnType<typeof openPage>>>, prompt: object[]): Promise<void> {
+  await page.reload();
+  await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify([...PADS, ...prompt])}, etag: "e" }); })()`);
+  await page.run(`window.kyo.composer.select(1, ${"# plan\n- keep\n- t".length})`);
+  await page.press("[", META | ALT);
+  await page.run(`window.kyo.composer.select(1, 9)`);
+}
+
+test("Command-Z after Create prompt puts both boxes back with marks, folds, the scratchpad's place and the caret; Command-Shift-Z repeats it, and each is saved (KYO-936.c3, c5)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await openPads(page, []);
+    const before = await page.run<{ boxes: unknown[]; open: boolean[]; caret: unknown[] }>(HELD);
+    assert.deepEqual(before.boxes.map((box) => (box as unknown[])[4]), [[], [2], [], []]);
+    assert.deepEqual([before.open, before.caret], [[false, true, false], [["b", 9, 9]]]);
+
+    await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].click()`);
+    const after = await page.run<{ boxes: unknown[]; open: boolean[]; caret: unknown[] }>(HELD);
+    assert.deepEqual(after.boxes, [
+      ["scratch", "a", "alpha", [], []], ["scratch", "c", "gamma", [], []],
+      // The mark of the line hidden under the fold is not drawn in the gutter; it is saved below.
+      ["prompt", "b", PADS[1].text, ["#top", "#stays"], [2]],
+    ]);
+    assert.deepEqual(after.caret, [["b", PADS[1].text.length, PADS[1].text.length]]);
+    await page.run(pause);
+    const savedAfter = await page.run(SAVED);
+    assert.deepEqual(savedAfter, [["a", "scratch", "alpha", []], ["c", "scratch", "gamma", []],
+      ["b", "prompt", PADS[1].text, [[0, ["top"]], [3, ["review"]], [4, ["stays"]]]]]);
+
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), before);
+    await page.run(pause);
+    assert.deepEqual(await page.run(SAVED), [["a", "scratch", "alpha", []],
+      ["b", "scratch", PADS[1].text, [[0, ["top"]], [3, ["review"]], [4, ["stays"]]]], ["c", "scratch", "gamma", []]]);
+
+    await redo(page);
+    assert.deepEqual(await page.run(HELD), after);
+    await page.run(pause);
+    assert.deepEqual(await page.run(SAVED), savedAfter);
+    // And back once more: the one move is undone and repeated as often as it is asked for.
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), before);
+  } finally { await page.close(); }
+});
+
+test("Command-Z after Send to prompt, the button's and a paragraph's, puts both boxes back, and Command-Shift-Z repeats it (KYO-936.c3, c5)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    const prompt = { id: "m", text: "- ask\n  - sub\nalready here", marks: [{ line: 2, items: [{ kind: "tag", name: "mine" }] }] };
+    await openPads(page, [prompt]);
+    // The prompt holds a fold of its own, and the caret goes back to the scratchpad.
+    await page.run(`window.kyo.composer.select(3, 0)`);
+    await page.press("[", META | ALT);
+    await page.run(`window.kyo.composer.select(1, 9)`);
+    const before = await page.run<{ boxes: unknown[]; open: boolean[]; caret: unknown[] }>(HELD);
+    assert.deepEqual(before.boxes.map((box) => (box as unknown[])[4]), [[], [2], [], [0]]);
+
+    // The button: the whole scratchpad goes after the prompt's last line.
+    await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].click()`);
+    const whole = `${prompt.text}\n${PADS[1].text}`;
+    const sent = await page.run<{ boxes: unknown[] }>(HELD);
+    assert.deepEqual(sent, {
+      boxes: [["scratch", "a", "alpha", [], []], ["scratch", "c", "gamma", [], []],
+        ["prompt", "m", whole, ["#mine", "#top", "#stays"], [0, 5]]],
+      open: [false, false], caret: [["m", whole.length, whole.length]],
+    });
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), before);
+    await page.run(pause);
+    assert.deepEqual(await page.run(SAVED), [["a", "scratch", "alpha", []],
+      ["b", "scratch", PADS[1].text, [[0, ["top"]], [3, ["review"]], [4, ["stays"]]]], ["c", "scratch", "gamma", []],
+      ["m", "prompt", prompt.text, [[2, ["mine"]]]]]);
+    await redo(page);
+    assert.deepEqual(await page.run(HELD), sent);
+    await page.run(pause);
+    assert.deepEqual(await page.run(SAVED), [["a", "scratch", "alpha", []], ["c", "scratch", "gamma", []],
+      ["m", "prompt", whole, [[2, ["mine"]], [3, ["top"]], [6, ["review"]], [7, ["stays"]]]]]);
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), before);
+
+    // A paragraph's, from the gutter's panel: "- take" goes with what is nested under it, its
+    // mark and its fold; the rest of the scratchpad stays.
+    await page.run(`(() => {
+      const gutter = document.querySelectorAll("#boxes .box.scratch")[1].querySelector(".cm-gutter.kyo-marks");
+      const at = document.querySelectorAll("#boxes .box.scratch")[1].querySelectorAll(".cm-line")[2].getBoundingClientRect();
+      gutter.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: gutter.getBoundingClientRect().left + 5, clientY: at.top + at.height / 2 }));
+      document.querySelector(".mark-to-prompt").click();
+    })()`);
+    const part = `${prompt.text}\n- take\n  - nested`;
+    const moved = await page.run<{ boxes: unknown[] }>(HELD);
+    assert.deepEqual(moved.boxes, [["scratch", "a", "alpha", [], []],
+      ["scratch", "b", "# plan\n- keep\n- last", ["#top", "#stays"], []], ["scratch", "c", "gamma", [], []],
+      ["prompt", "m", part, ["#mine"], [0, 3]]]);
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), before);
+    await redo(page);
+    assert.deepEqual(await page.run(HELD), moved);
+    await page.run(pause);
+    assert.deepEqual(await page.run(SAVED), [["a", "scratch", "alpha", []],
+      ["b", "scratch", "# plan\n- keep\n- last", [[0, ["top"]], [2, ["stays"]]]], ["c", "scratch", "gamma", []],
+      ["m", "prompt", part, [[2, ["mine"]], [4, ["review"]]]]]);
+  } finally { await page.close(); }
+});
+
+test("an edit after a move ends the chance to undo it: Command-Z then acts on the box's own history, and Edit > Undo's command reaches a move as the key does (KYO-936.c3, c7)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await openPads(page, []);
+    const before = await page.run(HELD);
+    await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].click()`);
+    const after = await page.run<{ boxes: unknown[] }>(HELD);
+    // The editing commands Edit > Undo and Edit > Redo raise in the focused box.
+    const command = (type: string) => page.run(`document.activeElement.dispatchEvent(new InputEvent("beforeinput", { inputType: ${JSON.stringify(type)}, bubbles: true, cancelable: true }))`);
+    assert.equal(await command("historyUndo"), false);
+    assert.deepEqual(await page.run(HELD), before);
+    assert.equal(await command("historyRedo"), false);
+    assert.deepEqual(await page.run(HELD), after);
+    // A letter typed in the prompt: Command-Z takes the letter back and leaves the move.
+    await page.type("!");
+    await undo(page);
+    assert.deepEqual((await page.run<{ boxes: unknown[] }>(HELD)).boxes, after.boxes);
+    await undo(page);
+    assert.deepEqual((await page.run<{ boxes: unknown[] }>(HELD)).boxes, after.boxes);
+
+    // Undone, then a letter typed in a scratchpad: Command-Shift-Z no longer repeats the move.
+    await openPads(page, []);
+    const again = await page.run(HELD);
+    await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[1].click()`);
+    await undo(page);
+    assert.deepEqual(await page.run(HELD), again);
+    await page.run(`window.kyo.composer.select(0, 5)`);
+    await page.type("!");
+    await redo(page);
+    assert.deepEqual((await page.run<Box[]>(STATE)).map((box) => [box.kind, box.text]),
+      [["scratch", "alpha!"], ["scratch", PADS[1].text], ["scratch", "gamma"], ["prompt", ""]]);
   } finally { await page.close(); }
 });
 
@@ -222,6 +464,7 @@ test("Send to prompt moves a paragraph with what is nested under it and its mark
           marks: [{ line: 2, items: [{ kind: "tag", name: "review" }] }, { line: 3, items: [{ kind: "tag", name: "stays" }] }] },
         { id: "b", text: "already here" },
       ], etag: "e" });
+      window.kyo.composer.select(0, 0);
       const gutter = document.querySelector("#boxes .box.scratch .cm-gutter.kyo-marks");
       const lines = document.querySelectorAll("#boxes .box.scratch .cm-line");
       const at = lines[1].getBoundingClientRect();

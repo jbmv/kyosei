@@ -247,12 +247,14 @@ test("a press on a scratchpad's head while they are heads goes into it, opening 
     assert.equal(seen.inUse, "scratch");
     assert.equal(seen.focused, 1);
     assert.ok(seen.pads[1].body > 0, JSON.stringify(seen.pads[1]));
+    // KYO-936: it alone is open.
     assert.deepEqual(await page.run(`[...document.querySelectorAll("#scratches > .box")].map((box) => box.classList.contains("collapsed"))`),
-      [false, false, false]);
-    // In use, a press on a head folds and opens the scratchpad as it did.
+      [true, false, true]);
+    // In use, a press on a collapsed head opens that scratchpad and collapses the one that was open.
     await page.run(`document.querySelectorAll("#scratches .scratch-toggle")[0].click()`);
     assert.deepEqual(await page.run(`[...document.querySelectorAll("#scratches > .box")].map((box) => box.classList.contains("collapsed"))`),
-      [true, false, false]);
+      [false, true, true]);
+    assert.equal((await layout(page)).focused, 0);
     // A focus the page puts in the list, as its own redraw does, opens the list.
     await page.run(`document.getElementById("agenda-add").focus()`);
     seen = await layout(page);

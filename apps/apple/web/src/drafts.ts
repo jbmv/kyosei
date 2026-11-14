@@ -8,9 +8,8 @@
 export interface DraftBox { id: string; text: string; marks?: unknown; scratch?: Scratch | null }
 
 /**
- * What makes a box a scratchpad and not the prompt (KYO-903): the object itself, and whether
- * the scratchpad is collapsed to its head. Its head shows the first line of its text that
- * holds words (KYO-917).
+ * What makes a box a scratchpad and not the prompt (KYO-903): the object itself, which now
+ * holds nothing. Its head shows the first line of its text that holds words (KYO-917).
  */
 export interface Scratch {
   /**
@@ -18,6 +17,11 @@ export interface Scratch {
    * a scratchpad that has one opens with it as its first line (`headingAsLine`).
    */
   heading?: string;
+  /**
+   * Whether the scratchpad was collapsed, as builds before KYO-936 saved it. It is no longer
+   * written or read: one scratchpad is open at a time, the one the caret was last put in, and
+   * each window has its own caret, so which is open is not part of the draft.
+   */
   collapsed?: boolean;
 }
 
@@ -70,10 +74,11 @@ function canonical(value: unknown): string {
  */
 export function boxSignature(box: { text: string; marks?: unknown; scratch?: Scratch | null }): string {
   const marks = Array.isArray(box.marks) && box.marks.length ? box.marks : [];
-  // A scratchpad differs from a prompt of the same words, and by whether it is collapsed, which
-  // is saved and merged as an edit of the text is (KYO-903). An earlier build's heading counts
-  // too, so that a box that still has one differs from the same box without it (KYO-917).
-  if (box.scratch) return canonical([box.text, marks, [box.scratch.heading ?? "", Boolean(box.scratch.collapsed)]]);
+  // A scratchpad differs from a prompt of the same words (KYO-903). An earlier build's heading
+  // counts too, so that a box that still has one differs from the same box without it
+  // (KYO-917). Whether it was saved collapsed does not (KYO-936): a copy that differs in that
+  // alone is the same box, so that it is neither saved again nor kept in two versions by a merge.
+  if (box.scratch) return canonical([box.text, marks, [box.scratch.heading ?? ""]]);
   return canonical([box.text, marks]);
 }
 

@@ -240,20 +240,44 @@ stays open after each of these, so that a second press acts again.
 
 The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
 adds one, with the caret in its text. A scratchpad's head shows the first line of its text that
-holds words (KYO-917), which is edited in the text and cannot be edited in the head, and a
-button before it, or a press on the words, collapses the scratchpad to that line. It has no
-Send. Its Create prompt button moves its whole text, the first line included, and its anchors,
-attachments and tags into the prompt, a file still uploading included (KYO-920), and is
-disabled while the prompt holds anything. One section is moved with
+holds words (KYO-917), which is edited in the text and cannot be edited in the head. One
+scratchpad is open at a time and the others are collapsed to their heads (KYO-936): putting
+the caret in one, or adding one with +, opens it and collapses the rest, a press on a
+collapsed head opens that one with the caret in it, and a press on the open head collapses
+it. It has no Send. Its button moves its whole text, the first line included, with its
+anchors, attachments, tags and folds into the prompt, a file still uploading included
+(KYO-920), and the scratchpad leaves. The button reads Create prompt while the prompt is
+empty, and the prompt is then the scratchpad's box under its id; it reads Send to prompt
+while the prompt holds words or marks, and the text is then added after the prompt's last
+line as it was typed (KYO-936). One section is moved with
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
 gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level or a section break, goes to the end of the prompt,
 outdented, with the anchors, attachments and tags of each line, and leaves the scratchpad;
 a section that was folded arrives folded (KYO-913). What a section is and how its lines move are `sectionEnd` and `moveLines` in
-`web/src/outline.ts`. A scratchpad is a box of
-the same draft with a `scratch` object, which holds whether it is collapsed, so it is saved,
-merged between devices and carried between sessions as a prompt is, and collapsing it is
-merged as an edit of the text is. Earlier builds kept a heading in that object, apart from the
+`web/src/outline.ts`.
+
+Command-Z in a box directly after one of these moves takes the move back, and
+Command-Shift-Z then makes it again (KYO-936). A move draws both boxes again, so their own
+undo histories begin after it; the page therefore keeps the composer as it stood before the
+last move and after it, and shows the one or the other: each box's text, marks, attachments
+and folds, the scratchpads' order, the open scratchpad and the caret. A file that was still
+uploading is held as the same item in both, so the server's answer reaches whichever box
+holds its line, and a file the server refuses leaves both. Putting the boxes back is saved
+with the draft as any change is. One move is held, and only until the composer next changes
+in another way: a letter typed, a mark placed or removed, a box added, deleted or dragged,
+a send, or a draft from another device that changes a box. After that the key acts on the
+box's own history, because putting the boxes back would discard the later change. Edit >
+Undo acts on the move only when WebKit raises its undo command in the box, which it does
+from its own undo stack and not from the page's (KYO-915).
+
+A scratchpad is a box of
+the same draft with a `scratch` object, so it is saved,
+merged between devices and carried between sessions as a prompt is. Which scratchpad is open
+is kept by the window, as a box's folds are, and is not saved: each device shows open the
+scratchpad its own caret was last put in, and a window that has put the caret in none shows
+them all collapsed. Builds before KYO-936 saved a `collapsed` flag in that object, which is
+no longer read. Earlier builds kept a heading in that object, apart from the
 text: a scratchpad saved with one opens with the heading as the first line of its text and its
 marks one line lower, and is saved that way with its next edit, so the heading is moved once.
 
@@ -288,8 +312,8 @@ grey line below them naming the rest by whose they are, as "2 more of yours, 4 o
 (KYO-931); each scratchpad as its head, one under another; and the prompt
 as its first line that holds words followed by an ellipsis, italic and grey, above its Delete
 and Send. A press on the list's items or line, on another summary, or on a scratchpad's head while the scratchpads are drawn as heads,
-goes into that section with the caret where it was, and a collapsed scratchpad pressed this
-way is opened. The text of a
+goes into that section with the caret where it was; a scratchpad pressed this
+way is the one opened. The text of a
 section drawn as its summary stays in the page out of sight, so that anything that puts the
 caret in it, such as an anchor chosen in the chat, opens the section. The column does not
 scroll; the scratchpads scroll together within their own part of it.
@@ -297,8 +321,8 @@ scroll; the scratchpads scroll together within their own part of it.
 A scratchpad is moved among the others by dragging its head, its fold toggle included
 (KYO-926). The box follows the pointer, a line shows where it will land, and when the button is
 let go it is put there and the draft is saved in its new order, which another device showing
-the draft then takes. A press on the head that moves less than four pixels folds or opens the
-scratchpad as before.
+the draft then takes. A press on the head that moves less than four pixels opens the
+scratchpad or collapses it, as a press without a drag does.
 
 ### Anchors in an unsent prompt
 
@@ -365,7 +389,7 @@ holds the lines nested under it, and neither runs past a section break. A chevro
 Command-Option-] fold and unfold the caret's line. A folded section is drawn as a placeholder
 after its first line, which names how many of the hidden lines hold a mark, since their marks
 are not drawn. Folding changes nothing that is saved or sent. The window keeps each box's
-folds while the app runs, also when the box is drawn again after a merge or Send to prompt,
+folds while the app runs, also when the box is drawn again after a merge, a move to the prompt or its undo,
 and they are not saved in the draft. The arrow that marks where the next anchor lands is
 drawn in the same gutter, beside the paragraph's mark. The section lines, the marks, the
 chevron and a line's first character stand at least four pixels apart, and the text starts

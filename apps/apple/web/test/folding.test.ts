@@ -337,7 +337,9 @@ test("in every box the marks gutter is the outer one and the folds stand between
       return document.getElementById("composer").getBoundingClientRect().width;
     })()`);
     assert.equal(width, 300);
-    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(BOXES)}, etag: "e" }); })()`);
+    // KYO-936: the scratchpad is opened by the caret, which then goes to the prompt.
+    await page.run(`(() => { ${START} window.kyo.draft({ boxes: ${JSON.stringify(BOXES)}, etag: "e" });
+      window.kyo.composer.select(0, 0); })()`);
     await foldAt(page, 1, 1);
     // For each box, and each line asked for, with the pointer over it: the boxes of its section
     // lines, its mark or ghost, its chevron and its first character, from the box's inner edge.
