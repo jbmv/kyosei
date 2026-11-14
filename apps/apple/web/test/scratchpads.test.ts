@@ -243,8 +243,9 @@ test("Send to prompt moves a paragraph with what is nested under it and its mark
   } finally { await page.close(); }
 });
 
-// KYO-925: the prompt in use grows to two thirds of the column, where it once grew to half.
-test("the prompt stays at the foot of the composer and grows to two thirds of its height, then scrolls inside", async (t) => {
+// KYO-935: the prompt in use grows to what the other sections' summaries leave, where it once
+// stopped at two thirds of the column (KYO-925) and before that at half.
+test("the prompt stays at the foot of the composer and grows to what the scratchpad's head leaves, then scrolls inside", async (t) => {
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
@@ -266,7 +267,7 @@ test("the prompt stays at the foot of the composer and grows to two thirds of it
         send: send.bottom <= column.getBoundingClientRect().bottom && send.height > 0,
       };
     })()`);
-    assert.ok(Math.abs(seen.prompt - seen.column * 0.66) <= 2, `${seen.prompt} of ${seen.column}`);
+    assert.ok(seen.prompt > seen.column * 0.66 && seen.prompt < seen.column, `${seen.prompt} of ${seen.column}`);
     assert.equal(seen.bottom, seen.foot);  // in view although the column is scrolled to its top
     assert.deepEqual([seen.inner, seen.send], [true, true]);
   } finally { await page.close(); }
