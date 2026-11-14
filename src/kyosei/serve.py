@@ -608,6 +608,11 @@ class KyoServer(ThreadingHTTPServer):
 
         self.held_poll_seconds = HELD_POLL_SECONDS
         self.held_messages = HeldMessages(self)
+        #: KYO-929: the idle timer, and how often it looks (a test shortens it).
+        from .serve_idle import IDLE_POLL_SECONDS, IdleTimer
+
+        self.idle_poll_seconds = IDLE_POLL_SECONDS
+        self.idle_timer = IdleTimer(self)
         #: KYO-721: the open terminal connections, each a tmux control client.
         from .serve_terminal import Terminals
 
@@ -626,6 +631,7 @@ class KyoServer(ThreadingHTTPServer):
         #: The build this process started as, the reference `stale` compares with.
         self.started_version = self.version_payload()
         self.held_messages.resume()
+        self.idle_timer.start()
 
     def handle_error(self, request, client_address) -> None:
         """A request that raised past its handler goes to the log, where it is dated."""

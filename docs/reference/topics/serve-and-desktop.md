@@ -322,7 +322,7 @@ object, at its latest version:
 
 ```
 turn:      id, at, form ("typed" | "mid-turn" | "answer" | "accepted-suggestion"), text,
-           typed, paste_known, prompt_id, images
+           typed, paste_known, prompt_id, images, automatic
            images: index, media_type, size
 reply:     message_id, uuid, at, text, thinking, thinking_omitted, model, usage, record_uuids
            usage: input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
@@ -336,7 +336,9 @@ delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, 
 ```
 
 `typed` is the person's own words (the text between any pastes), and `text` is the whole
-message. `paste_known` is false when pasted text cannot be ruled out. A reply is keyed by
+message. `automatic` is true for a turn that `kyo serve` sent itself, the idle timer's message
+(see "The idle timer"): Claude Code records such a turn as the person's, and the send log is what
+says it was not. A client draws it as the server's. The field is false for every other turn. `paste_known` is false when pasted text cannot be ruled out. A reply is keyed by
 `message_id` and a tool call by `call_id`: the same object is sent again when a later record
 changes it, as when a tool result lands, and a client replaces what it holds. A reply's
 `uuid` can change while its message is still being written, so it is not the key.
@@ -721,7 +723,9 @@ must have opted in to reading transcripts and must record the session, as for th
 | `interrupt` | `{}` | working |
 
 Any of the three may also carry `"automatic": true`, for a send nobody typed; tmux input
-reaches the transcript as the person's own, so the send log is what keeps it apart.
+reaches the transcript as the person's own, so the send log is what keeps it apart: a credit
+does not take such a turn as the person's words, and the turns route marks it (see "The idle
+timer").
 
 - A `typed` segment goes as keystrokes, a `pasted` one as a bracketed paste, in the order
   given, after the input box is cleared. Claude Code marks only a paste of four or more lines
@@ -756,6 +760,65 @@ action, project, session, device, each segment's kind, length in characters and 
 digest, whether it was automatic, and its outcome (`sent`, `refused`, `failed`) with status
 and reason. It never holds a segment's text. If the log cannot be written, or would lie inside
 a git repository, the send is refused before any key is sent.
+
+### The idle timer (KYO-929)
+
+governs: src/kyosei/serve_idle.py
+
+A person who leaves a session for most of an hour usually returns to a cold prompt cache and
+often clears the session, which discards what the agent had not yet written down. The idle
+timer sends the session one message shortly before the cache expires, so that the agent can
+complete closeout tasks while the session is still cheap to continue, or, when subagents are
+running, so that their results are read on a warm cache.
+
+It is a machine setting, off unless set, in `$KYOSEI_HOME/settings.yml` beside `serve_send`:
+
+```yaml
+serve_send: true
+serve_idle_message: true
+```
+
+The value must be `true` or `false`; anything else is refused by name. The timer runs only
+where `serve_send` is also true. The server reads `serve_idle_message` when it starts, to decide
+whether to run the timer's thread, so switching it on needs a restart; both settings are read
+again at every look, so clearing either stops the messages at once.
+
+Every thirty seconds the server looks at each recorded, unended session of the projects it
+serves, and sends a message to a session when all of these hold:
+
+- its prompt cache (the state `kyo statusline` saves) has an `expires_at` that is in the future
+  and less than five minutes away;
+- the latest entry of its transcript is at least 30 minutes old, so that a cache with a
+  five-minute lifetime never starts the timer;
+- it has a pane, and its screen is idle with an empty input box: a prompt, a dialog, a working
+  turn and text in the box each prevent it;
+- no message is held for it (see "Saved drafts and held messages");
+- it has not been sent a message already in this idle period.
+
+The message is typed as keys through the send path, never as a slash command or an interrupt.
+Its send-log row has the action `idle-message`, no device, `"automatic": true` and the reason
+`idle-timer`. With no subagent running in the pane's footer it reads, with the measured minutes
+and the cache's expiry in the server's local time filled in:
+
+> Automated message from kyo serve, not typed by the person: this session has had no activity for N minutes, and its prompt cache expires at H:MM PM. The person is likely to clear the session when they return. If you have closeout tasks, such as an interim shift note, complete them now.
+
+With a subagent running it reads:
+
+> Automated message from kyo serve, not typed by the person: the main chat has had no activity for N minutes, and subagents are still running. This message refreshed your prompt cache so that their results are read on a warm one. Nothing else is asked of you.
+
+**Once per idle period.** The message makes a turn, which refreshes the cache, which will near
+expiry again. After an idle-timer message a session is sent nothing more until a turn of the
+person's appears in its transcript later than that message, a turn the send log does not mark
+automatic. This is read from the log and the transcript at each look, so a restart does not
+forget it.
+
+**Not the person's words.** A transcript turn whose text the send log records as an automatic
+send to that session (a row with `"automatic": true` and outcome `sent`, matched by session, by the
+digest of the text and by a turn time within ten minutes after the row) is not the person's. A
+credit skips it: bare `kyo confirm`, `kyo credit` and `kyo verify` take the person's previous turn,
+`--turn` or `--context-turn` naming it is refused with `credit-turn-not-the-persons`, and
+`kyo turns --said` does not list it. The turns route marks it with `automatic: true`
+(see "Turns" above), and the Mac app draws it as an automated message from `kyo serve`.
 
 ### Saved drafts and held messages (KYO-703)
 

@@ -167,8 +167,11 @@ def _prompt_counts_at(store_root: str, modified: int, size: int) -> dict[str, in
 # ------------------------------------------------------------------- the objects as JSON
 
 
-def _turn_json(turn: Any) -> dict:
+def _turn_json(turn: Any, automatic: bool = False) -> dict:
     return {
+        # KYO-929: a turn kyo serve itself sent (the idle timer's message), which Claude Code
+        # records as the person's. The send log is what says so; a client draws it apart.
+        "automatic": automatic,
         "id": turn.id,
         "at": turn.timestamp,
         "form": turn.form,
@@ -483,8 +486,14 @@ def objects_json(lists: Iterable[list], live: Any = None) -> dict[str, list]:
     ``live`` is the session a subagent's model and effort are read through (KYO-726).
     """
     turns, replies, calls, subagents, outputs, deliveries = lists
+    from . import serve_send  # imports this module, so not at the top
+
+    sends = serve_send.automatic_sends(live.environ, live.session_id) if live and turns else []
     return {
-        "turns": [_turn_json(item) for item in _latest(turns, lambda t: t.id)],
+        "turns": [
+            _turn_json(item, serve_send.is_automatic_turn(sends, item.timestamp, item.full_text))
+            for item in _latest(turns, lambda t: t.id)
+        ],
         "replies": [_reply_json(item) for item in _latest(replies, lambda r: r.message_id)],
         "tool_calls": [_tool_call_json(item) for item in _latest(calls, lambda c: c.call_id)],
         "subagents": [

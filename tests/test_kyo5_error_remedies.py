@@ -3984,6 +3984,12 @@ UNREACHED: dict[str, str] = {
         "which `kyo turns --said` lists; proved by tests/test_kyo900_turn_credits.py::"
         "test_a_turn_that_is_not_the_persons_is_refused_and_the_remedy_clears_it"
     ),
+    # KYO-929: a --turn that names the idle timer's message, which needs the send log's row.
+    "credits.py:_refuse_automatic#0": (
+        "not provoked by this walk: a re-invocation naming one of the person's turns, which "
+        "`kyo turns --said` lists; proved by tests/test_kyo_serve_idle.py::"
+        "test_a_turn_naming_the_automated_message_is_refused_and_the_remedy_clears_it"
+    ),
     "cmd_records.py:move_targets#0": (
         "not provoked by this walk: a re-invocation naming a record before the status; proved by "
         "test_kyo877_one_id_is_unchanged_and_a_status_alone_is_a_usage_error"

@@ -164,6 +164,20 @@ class HeldMessages:
     def _path(self, session_id: str) -> Path:
         return serve_files.composer_path(self.environ, serve_files.HELD, session_id)
 
+    def session_lock(self, session_id: str) -> threading.Lock:
+        """The lock held across an attempt and a retraction, for the idle timer (KYO-929): a
+        message held while the timer sends waits for it, and the timer sends only to a session
+        that holds none."""
+        return self._lock_of(session_id)
+
+    def holds(self, session_id: str) -> bool:
+        """Whether a message is held for ``session_id``. A held file that cannot be read counts
+        as held, so that nothing is sent over a message this server cannot see."""
+        try:
+            return self._load(self._path(session_id)) is not None
+        except Refusal:
+            return True
+
     @staticmethod
     def _load(path: Path) -> dict | None:
         try:
