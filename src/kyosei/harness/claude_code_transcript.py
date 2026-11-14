@@ -62,7 +62,9 @@ WHICH RECORDS ARE THE PERSON'S WORDS. Three forms, per KYO-640:
 * an answer to a multiple-choice question: the values of ``toolUseResult.answers`` on
   the tool result of an ``AskUserQuestion`` call made in the same transcript. Only the
   answers are read, never the question text or the option descriptions beside them, so
-  the agent's own words in the question cannot match.
+  the agent's own words in the question cannot match. A turn's ``answers`` (KYO-940)
+  carries each question beside its answer for a client to draw, and no quote is checked
+  against it.
 
 A prompt the person sent from Claude Code's suggestions (``promptSource ==
 "suggestion_accepted"`` on a typed record) is read as the person's turn but under its own
@@ -325,6 +327,32 @@ class SessionImage:
 
 
 @dataclass(frozen=True)
+class AnswerPart:
+    """One piece of an answer: an option's label the person picked, or text they typed."""
+
+    text: str
+    #: True when ``text`` is the label of one of the question's options.
+    picked: bool
+
+
+@dataclass(frozen=True)
+class Answer:
+    """One answer of an ``AskUserQuestion`` result, beside the question it answers (KYO-940).
+
+    ``parts`` joined by ``", "`` is the answer as Claude Code records it. An answer to a
+    single-select question is one part. An answer to a multi-select question is the picked
+    labels joined by ``", "``, with any text typed under the question's free-text option
+    after them, and is divided on that reading: labels are taken from the front for as long
+    as one matches, and whatever remains is one typed part.
+    """
+
+    question: str
+    header: str | None
+    multi_select: bool
+    parts: tuple[AnswerPart, ...]
+
+
+@dataclass(frozen=True)
 class Turn:
     """One message of the person's, as far as this reader can tell.
 
@@ -346,6 +374,10 @@ class Turn:
     prompt_id: str | None = field(default=None, compare=False)
     #: The images the turn's record holds. Set by :class:`SessionTranscript` only.
     images: tuple[ImageRef, ...] = field(default=(), compare=False)
+    #: KYO-940: on a turn of form ``answer``, each answer with its question and whether it
+    #: was picked from the question's options, in the order of ``segments``. Empty on any
+    #: other turn, and on an answer whose record does not hold its questions.
+    answers: tuple[Answer, ...] = field(default=(), compare=False)
 
 
 @dataclass
@@ -422,6 +454,10 @@ def _parse_lines(path: Path) -> Iterable[dict]:
                 yield record
 
 
+#: The tool a session asks the person a multiple-choice question with.
+QUESTION_TOOL = "AskUserQuestion"
+
+
 def _questions_asked(record: dict) -> set[str]:
     """The ids of the ``AskUserQuestion`` calls in an assistant record."""
     found: set[str] = set()
@@ -430,7 +466,7 @@ def _questions_asked(record: dict) -> set[str]:
         if (
             isinstance(block, dict)
             and block.get("type") == "tool_use"
-            and block.get("name") == "AskUserQuestion"
+            and block.get("name") == QUESTION_TOOL
             and isinstance(block.get("id"), str)
         ):
             found.add(block["id"])
@@ -475,7 +511,16 @@ def _person_turn(record: dict, asked: set[str]) -> Turn | None:
         if not answers:
             return None
         joined = "\n".join(answers)
-        return Turn(uuid, stamp, FORM_ANSWER, SOURCE_TRANSCRIPT, answers, True, joined)
+        return Turn(
+            uuid,
+            stamp,
+            FORM_ANSWER,
+            SOURCE_TRANSCRIPT,
+            answers,
+            True,
+            joined,
+            answers=_answers_with_questions(result),
+        )
     if record.get("isMeta") or not _is_human(record.get("origin")):
         return None
     text = _text_of(content)
@@ -561,6 +606,69 @@ def _answers(record: dict, content: object, result: object, asked: set[str]) -> 
     if not paired:
         return ()
     return tuple(v for v in result["answers"].values() if isinstance(v, str) and v.strip())
+
+
+def _answer_parts(answer: str, labels: Sequence[str], multi_select: bool) -> tuple[AnswerPart, ...]:
+    """``answer`` as the labels picked and the text typed (see :class:`Answer`)."""
+    if answer in labels:
+        return (AnswerPart(answer, True),)
+    if not multi_select:
+        return (AnswerPart(answer, False),)
+    parts: list[AnswerPart] = []
+    rest = answer
+    while rest:
+        # The longest label first, so a label that begins with another is not cut short.
+        label = max(
+            (name for name in labels if rest == name or rest.startswith(name + ", ")),
+            key=len,
+            default=None,
+        )
+        if label is None:
+            parts.append(AnswerPart(rest, False))
+            break
+        parts.append(AnswerPart(label, True))
+        rest = rest[len(label) + 2 :]
+    return tuple(parts)
+
+
+def _answers_with_questions(result: dict) -> tuple[Answer, ...]:
+    """The answers :func:`_answers` returns, each beside its question, or ``()``.
+
+    ``toolUseResult`` holds the call's ``questions`` and ``answers`` keyed by a question's
+    text (measured on Claude Code 2.1.325). The answers are walked in the order
+    :func:`_answers` walks them, so the two agree one for one; when any answer's question
+    is not among ``questions`` nothing is returned, and the turn is then drawn as before.
+    """
+    questions = result.get("questions")
+    by_text = {
+        item["question"]: item
+        for item in (questions if isinstance(questions, list) else [])
+        if isinstance(item, dict) and isinstance(item.get("question"), str)
+    }
+    found: list[Answer] = []
+    for asked, answer in result["answers"].items():
+        if not isinstance(answer, str) or not answer.strip():
+            continue
+        item = by_text.get(asked)
+        if item is None:
+            return ()
+        options = item.get("options")
+        labels = [
+            option["label"]
+            for option in (options if isinstance(options, list) else [])
+            if isinstance(option, dict) and isinstance(option.get("label"), str) and option["label"]
+        ]
+        multi_select = item.get("multiSelect") is True
+        header = item.get("header")
+        found.append(
+            Answer(
+                asked,
+                header if isinstance(header, str) and header else None,
+                multi_select,
+                _answer_parts(answer, labels, multi_select),
+            )
+        )
+    return tuple(found)
 
 
 # ---------------------------------------------------------------- history
@@ -1899,6 +2007,10 @@ class SessionTranscript:
         """
         return self._permission_mode
 
+    def holds_call(self, call_id: str) -> bool:
+        """Whether a tool call with this id has been read from the file (KYO-940)."""
+        return call_id in self._call_ids
+
     @property
     def readable(self) -> bool:
         """False when no record carries ``origin``: the format is not one this reader knows.
@@ -2112,6 +2224,32 @@ class SessionTranscript:
         )
         self._subagents[agent_id] = ref
         delta.subagents.append(ref)
+
+
+def announced_question(payload: Mapping[str, object], at: str) -> ToolCall | None:
+    """The ``AskUserQuestion`` call a ``PreToolUse`` hook payload announces, or None (KYO-940).
+
+    Claude Code writes the assistant record that holds such a call when the call resolves,
+    so while the question is open no :class:`SessionTranscript` yields it. The hook's
+    payload carries the call's id (``tool_use_id``) and its whole input (``tool_input``)
+    before the dialog opens (measured on 2.1.325), and this is that call as the transcript
+    will later yield it: the same ``call_id``, ``name`` and ``input``. ``uuid`` is empty,
+    since no record holds the call yet, and ``at`` is the caller's clock.
+
+    None for any other tool, for a payload without the id or the input, and for a call a
+    subagent makes (``agent_id``), whose record goes to the subagent's own transcript and
+    would never appear in the session's.
+    """
+    call_id, tool_input = payload.get("tool_use_id"), payload.get("tool_input")
+    if (
+        payload.get("tool_name") != QUESTION_TOOL
+        or not isinstance(call_id, str)
+        or not call_id
+        or not isinstance(tool_input, dict)
+        or payload.get("agent_id")
+    ):
+        return None
+    return ToolCall("", at, call_id, QUESTION_TOOL, tool_input)
 
 
 def subagent_transcript(session_path: Path, agent_id: str) -> Path | None:

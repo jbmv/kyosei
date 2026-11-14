@@ -14,7 +14,8 @@ Under ``/v1/projects/{project}/sessions``:
 - ``GET sessions/{id}/changes`` -- the lines the session's working directory holds that no
   commit does (KYO-693), and the repository's ``origin`` remote (KYO-700);
 - ``GET sessions/{id}/events[?cursor=]`` -- Server-Sent Events carrying new transcript
-  objects, the reply in progress, changes to the screen and the terminal's text, the
+  objects, a question the session is asking before its transcript holds the call
+  (KYO-940), the reply in progress, changes to the screen and the terminal's text, the
   state of a held message (KYO-703), without its text, and a change to the session's task
   list (KYO-770), without its items;
 - ``GET sessions/{id}/screen`` -- what the pane shows now, as the session layer classifies it,
@@ -183,6 +184,17 @@ def _turn_json(turn: Any, automatic: bool = False) -> dict:
             {"index": image.index, "media_type": image.media_type, "size": image.size}
             for image in turn.images
         ],
+        # KYO-940: on an answer to a question, each answer beside its question, divided
+        # into the options picked and the text typed. A client draws the two apart.
+        "answers": [
+            {
+                "question": answer.question,
+                "header": answer.header,
+                "multi_select": answer.multi_select,
+                "parts": [{"text": part.text, "picked": part.picked} for part in answer.parts],
+            }
+            for answer in turn.answers
+        ],
     }
 
 
@@ -254,6 +266,34 @@ def _tool_call_json(call: Any) -> dict:
         "input": dict(call.input),
         "result": _result_json(call.result),
     }
+
+
+def _pending_calls_json(live: Any) -> list[dict]:
+    """The session's tool calls that are open and not yet in its transcript (KYO-940).
+
+    Claude Code writes the record of an ``AskUserQuestion`` call when the call resolves, so
+    the question a person is being asked is read from what the session's ``PreToolUse`` hook
+    saved (:func:`kyosei.cmd_sessions.read_question`). It is listed until the transcript
+    holds a call with its id, which is then the same object under :func:`_tool_call_json`:
+    a client keys both by ``call_id``. ``uuid`` is null, since the record has none yet, and
+    ``at`` is when the hook ran.
+    """
+    from .cmd_sessions import read_question
+
+    saved = read_question(live.environ, live.session_id)
+    if saved is None or live.transcript.holds_call(saved["call_id"]):
+        return []
+    return [
+        {
+            "call_id": saved["call_id"],
+            "uuid": None,
+            "at": saved["asked_at"],
+            "name": saved["name"],
+            "input": saved["input"],
+            "result": None,
+            "pending": True,
+        }
+    ]
 
 
 def _subagent_json(ref: Any, live: Any = None) -> dict:
@@ -979,6 +1019,8 @@ class _Sampler:
         self._screen: dict | None = None
         self._terminal: dict | None = None
         self._reply: str | None = None
+        #: KYO-940: the open calls the transcript does not hold yet, as last announced.
+        self._pending: list[dict] = []
         self._facts: dict | None = None
         #: KYO-770: the etag of the session's task list as last announced; None for no list.
         self._agenda: str | None = None
@@ -1017,6 +1059,7 @@ class _Sampler:
             self._screen = _screen_json(update.screen)
             self._terminal = _terminal_json(update.terminal)
             self._reply = update.reply_in_progress
+            self._pending = _pending_calls_json(self._live)
             self._facts = _facts_json(self._live.facts())
             self._agenda = _agenda_etag(self.project.environ, self.session_id)
             self._draft = _draft_etag(self.project.environ, self.session_id)
@@ -1071,6 +1114,7 @@ class _Sampler:
                 "screen": self._screen,
                 "terminal": self._terminal,
                 "reply_in_progress": self._reply,
+                "pending_tool_calls": self._pending,
                 "facts": self._facts,
                 "held": self.hub.held(self.session_id),
                 "agenda": {"etag": self._agenda},
@@ -1184,12 +1228,23 @@ class _Sampler:
             self._position = _Position()
             self._broadcast(frame("reset", {"session_id": self.session_id}))
         self._position.feed(lists)
-        if any(lists):
+        # KYO-940: the question the session's hook saved, while the transcript lacks its call.
+        # It is no object of the transcript, so the cursor does not count it, and a frame
+        # that carries only a change to it has the cursor of the frame before.
+        now_pending = _pending_calls_json(live)
+        pending_changed = now_pending != self._pending
+        self._pending = now_pending
+        if any(lists) or pending_changed:
             cursor = self._position.cursor
             self._broadcast(
                 frame(
                     "transcript",
-                    {"session_id": self.session_id, "cursor": cursor, **objects_json(lists, live)},
+                    {
+                        "session_id": self.session_id,
+                        "cursor": cursor,
+                        **objects_json(lists, live),
+                        **({"pending_tool_calls": now_pending} if pending_changed else {}),
+                    },
                     event_id=cursor,
                 )
             )

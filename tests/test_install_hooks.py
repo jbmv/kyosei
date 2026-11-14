@@ -1153,7 +1153,8 @@ def test_the_chain_is_packaged_under_stop_and_the_turn_and_session_hooks_keep_se
     events = _packaged_events_by_action()
     assert events[STOP_RECIPE] == {"Stop"}
     assert {"Stop", "SessionEnd"} <= events[TURNS_RECIPE]
-    assert {"SessionStart", "Stop", "SessionEnd"} == events[SESSIONS_RECIPE]
+    # KYO-940: and before a question, where it saves the question for `kyo serve`.
+    assert {"SessionStart", "Stop", "SessionEnd", "PreToolUse"} == events[SESSIONS_RECIPE]
 
     hooks = plugin_hooks_document()["hooks"]
     for event, expected in (("Stop", True), ("SessionEnd", False)):

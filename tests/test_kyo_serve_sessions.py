@@ -380,7 +380,8 @@ def test_turns_are_the_session_layers_objects_and_never_a_row(bed: Bed) -> None:
     assert document["readable"] is True and document["reset"] is False
 
     assert set(document["turns"][0]) == {
-        "id", "at", "form", "text", "typed", "paste_known", "prompt_id", "images", "automatic"
+        "id", "at", "form", "text", "typed", "paste_known", "prompt_id", "images", "automatic",
+        "answers",
     }  # fmt: skip
     assert {t["form"] for t in document["turns"]} >= {"typed", "mid-turn", "answer"}
     assert document["turns"][0]["text"].startswith("Write three paragraphs")
