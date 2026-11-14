@@ -675,6 +675,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-902` (task) — Mac app: the composer draws indent guides and heading dividers
 - **2026-11-14** — `KYO-901` (bug) — Mac app: the task list is not shown when no session is live
 - **2026-11-14** — `KYO-900` (task) — A credit names its turns and kyo copies the person's words from the transcript
+- **2026-11-14** — `KYO-883` (task) — Mac app polish, 2026-11-12, second session
 - **2026-11-14** — `KYO-782` (bug) — Quitting the Mac app loses the last characters typed in the composer
 - **2026-11-14** — `KYO-763` (task) — A project keeps a draft between sessions, on the server
 - **2026-11-14** — `KYO-761` (task) — Mac app: a project dropdown and live-orchestrator links in the top bar
