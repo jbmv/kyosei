@@ -1138,7 +1138,7 @@ record.
 
 ### Notes: the note routes (KYO-706)
 
-governs: src/kyosei/serve_notes.py, src/kyosei/cmd_notes.py, src/kyosei/report_entries.py
+governs: src/kyosei/serve_notes.py, src/kyosei/message_lines.py, src/kyosei/cmd_notes.py, src/kyosei/report_entries.py
 
 A note is the person's text on the places it addresses, as `kyo notes` records it
 (`kyo reference notes`). Clients file, find, tag and send notes through these routes, each
