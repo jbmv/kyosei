@@ -4088,6 +4088,11 @@ function addBox(
       return true;
     },
     onFiles: filesIn,
+    // KYO-938: a file still uploading is held by the box its line was pasted into.
+    onCarried: (view, items) => {
+      for (const upload of uploads.values()) if (items.includes(upload.item)) upload.editor = view;
+      keepMove(() => refreshMarks(view));
+    },
     // A paste is sent as a paste.
     onPaste: (view, pastedText) => pasted.set(view, [...(pasted.get(view) ?? []), pastedText]),
     onUpdate: boxUpdated,

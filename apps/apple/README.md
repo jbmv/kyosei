@@ -272,6 +272,17 @@ a send, or a draft from another device that changes a box. After that the key ac
 box's own history, because putting the boxes back would discard the later change. Edit >
 Undo and Edit > Redo act on the move as the keys do (KYO-915, below).
 
+A line's marks follow it when it is cut and pasted (KYO-938). The system clipboard carries
+text alone, so the editor keeps beside it the last cut of whole lines made in this window: a
+selection that begins at a line's start and ends at a line's end or at the start of the next
+line, with what each of those lines held. A paste of exactly that text, into the same box or
+another one of the window, puts the anchors, attachments and tags on the pasted lines, in
+their order, in the transaction that inserts the text, so that one Command-Z removes both; the
+cut is then forgotten. A copy, a cut that begins or ends inside a line, and a paste of other
+text carry nothing. A file still uploading is held as the same item, and its upload is
+repointed to the box that holds the line now. The behaviour is in `web/src/editor.ts` and is
+tested in `web/test/cutmarks.test.ts`.
+
 A scratchpad is a box of
 the same draft with a `scratch` object, so it is saved,
 merged between devices and carried between sessions as a prompt is. Which scratchpad is open
