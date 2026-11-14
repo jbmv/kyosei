@@ -95,7 +95,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
 | `web/src/terminal.ts` | the terminal drawer's sizes and the bytes of a stream's frame |
 | `web/src/history.ts` | the list of places shown, and the position in it, that the Files and Records views step back and forward through |
-| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides, heading rules and horizontal rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, and paste and drop; tested through `web/test/editor-page.ts` |
+| `web/src/editor.ts` | a composer box's editor on CodeMirror: the marks each line holds and their undo steps, the marks gutter, the hanging indent of wrapped rows, the indent guides, heading rules and horizontal rules, the lines beside a heading's section, the folded sections and their gutter, the list keys, paste and drop, and the marks of a cut line that follow it on paste; tested through `web/test/editor-page.ts` |
 
 `Sources/KyoseiMac/SessionFeed.swift` holds the window's state and every exchange between the
 page and the server, `Sources/KyoseiMac/ChatView.swift` holds the web view and the status
