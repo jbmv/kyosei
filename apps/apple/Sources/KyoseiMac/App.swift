@@ -12,8 +12,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setvbuf(stdout, nil, _IOLBF, 0)
         // Run as a plain executable, the process is otherwise not a foreground app.
         NSApp.setActivationPolicy(.regular)
+        #if KYOSEI_CHECK
+        // A check build (KYO-944) is started by a runner on a machine a person may be using,
+        // so it does not ask to come to the front unless the run says so, and it takes its
+        // window's place from the run. Its channel starts only when the run names a socket.
+        let environment = ProcessInfo.processInfo.environment
+        if environment[CheckBuild.activateVariable] == "1" { NSApp.activate() }
+        checkChannel = CheckChannel.startFromEnvironment(feed: feed)
+        if let frame = CheckBuild.frame(in: environment) {
+            Task {
+                for _ in 0..<100 {
+                    if let window = feed.webView?.window {
+                        window.setFrame(frame, display: true)
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+        }
+        #else
         NSApp.activate()
+        #endif
     }
+
+    #if KYOSEI_CHECK
+    private var checkChannel: CheckChannel?
+    #endif
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
@@ -39,6 +63,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum Entry {
     static func main() {
         let arguments = CommandLine.arguments
+        #if KYOSEI_CHECK
+        // A check build (KYO-944) refuses to start unless its run names a test server, and
+        // has no keychain command; `CheckBuild.refusal` says why.
+        if let refusal = CheckBuild.refusal(
+            arguments: arguments, environment: ProcessInfo.processInfo.environment,
+            bundleIdentifier: Bundle.main.bundleIdentifier)
+        {
+            FileHandle.standardError.write(Data((refusal + "\n").utf8))
+            exit(64)
+        }
+        #endif
         if arguments.count >= 2, arguments[1] == "seal-key" {
             let outcome = SealKeyItem.run(Array(arguments.dropFirst(2))) {
                 String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)

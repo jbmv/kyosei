@@ -3,7 +3,7 @@ VENV   := .venv
 BIN    := $(VENV)/bin
 STAMP  := $(VENV)/.install-stamp
 
-.PHONY: all venv test lint fmt doctor clean logged install-tool release
+.PHONY: all venv test lint fmt doctor clean logged install-tool release app-check
 
 all: lint test
 
@@ -54,6 +54,22 @@ lint: $(STAMP)
 
 logged:
 	$(call logged,$(CMD))
+
+# KYO-944: the Mac app's check harness (apps/apple/check, described in apps/apple/README.md).
+# It builds the check build of the app, runs the check channel's own tests in that build, then
+# starts `kyo serve` over a temporary store, starts the check build against it and runs the
+# scenarios, and prints where the result file is, whatever passed. It puts a window on the
+# screen of the login session it runs in, so it runs on a Mac on request: it is outside
+# `tests/`, the only path pyproject.toml collects, and is named by neither `make test` nor CI
+# (tests/test_kyo944_app_check.py fails if either changes). KYOSEI_CHECK_OUT moves the result.
+app-check: $(STAMP)
+	@out="$${KYOSEI_CHECK_OUT:-$$(pwd)/apps/apple/.build/check-run}"; \
+	sh apps/apple/package.sh check || exit $$?; \
+	(cd apps/apple && swift test --scratch-path .build/check -Xswiftc -DKYOSEI_CHECK \
+		--filter 'CheckChannelTests|CheckBuildTests') || exit $$?; \
+	KYOSEI_CHECK_OUT="$$out" $(BIN)/python -m pytest apps/apple/check -p no:cacheprovider; s=$$?; \
+	echo "make app-check: result file $$out/result.json (review sheet: $$out/review.html)"; \
+	exit $$s
 
 fmt: $(STAMP)
 	$(BIN)/ruff check --fix src tests tools
