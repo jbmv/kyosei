@@ -3649,12 +3649,52 @@ function focusBox(editor: EditorView): void {
   editor.focus();
 }
 
+/**
+ * Takes a box out of the composer: its folds, an open mark panel and the scratchpad that was
+ * open go with it, the prompt a deleted prompt leaves is an empty one that takes the caret,
+ * what the box was anchored to is no longer anchored (KYO-780), and the draft is saved
+ * (KYO-939). The Delete button and an empty scratchpad's leaving both end here.
+ */
+function removeBox(editor: EditorView): void {
+  const id = boxIds.get(editor);
+  const wasPrompt = !scratchOf.has(editor);
+  if (openMark?.editor === editor) hideMark();
+  if (id !== undefined) {
+    foldsById.delete(id);
+    if (openScratch === id) openScratch = null;
+  }
+  boxOf(editor).remove();
+  ensureMain();
+  if (wasPrompt) mainEditor()?.focus();
+  paintAnchors();
+  remember();
+}
+
+/** Whether a scratchpad holds no words and no marks: blank lines are no words (KYO-939). */
+function isAbandoned(editor: EditorView): boolean {
+  return scratchOf.has(editor) && !textOf(editor).trim() && marksOf(editor).items.size === 0;
+}
+
 // The caret put in a scratchpad, by a press, a key or the page, opens it and collapses the
-// others (KYO-936).
+// others (KYO-936). The caret put in any box of the composer, or in the reminder list, takes
+// away each scratchpad left empty, which is an abandoned one (KYO-939). A focus outside the
+// composer takes nothing away, so that leaving the window or pressing in the chat removes
+// nothing, and a scratchpad is no more removed while the caret is in it. A removal caused by
+// the focus moving in a move's own redraw is the move's own, which does not forget it.
 document.addEventListener("focusin", (event) => {
-  const element = event.target instanceof Element ? event.target.closest<HTMLElement>("#scratches .cm-editor") : null;
+  const target = event.target instanceof Element ? event.target : null;
+  const element = target?.closest<HTMLElement>("#boxes .cm-editor") ?? null;
   const editor = element && EditorView.findFromDOM(element);
   if (editor && scratchOf.has(editor)) openOnly(editor);
+  if (!editor && !target?.closest("#agenda")) return;
+  // The section the focus entered is in use before a removal redraws the sections, which would
+  // draw it as a summary and take the focus from it.
+  const section = sectionAt(target);
+  if (section && section !== sectionInUse) useSection(section);
+  for (const other of editors()) {
+    if (other === editor || !isAbandoned(other) || boxOf(other).classList.contains("dragging")) continue;
+    removeBox(other);
+  }
 });
 
 /** The prompt's box: the one that is not a scratchpad. */
@@ -4130,16 +4170,7 @@ function addBox(
       return;
     }
     disarm();
-    const wasPrompt = !scratchOf.has(editor);
-    foldsById.delete(id);
-    if (openScratch === id) openScratch = null;
-    box.remove();
-    ensureMain();
-    // The prompt that was deleted leaves an empty one, which takes the caret.
-    if (wasPrompt) mainEditor()?.focus();
-    // KYO-780: what the box was anchored to is no longer anchored.
-    paintAnchors();
-    remember();
+    removeBox(editor);
   });
   // Bare text in the accent colour, then the keys that do the same.
   const send = boxButton("box-send", "", () => attemptSend(editor));

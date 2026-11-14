@@ -251,7 +251,13 @@ anchors, attachments, tags and folds into the prompt, a file still uploading inc
 (KYO-920), and the scratchpad leaves. The button reads Create prompt while the prompt is
 empty, and the prompt is then the scratchpad's box under its id; it reads Send to prompt
 while the prompt holds words or marks, and the text is then added after the prompt's last
-line as it was typed (KYO-936). One section is moved with
+line as it was typed (KYO-936). A scratchpad that holds no words, blank lines being none, and
+no marks leaves when the caret is put in another box of the composer or in the reminder list
+(KYO-939): the removal is the one Delete makes, so it is saved with the draft and reaches
+another device as a deleted box does. It stays while the caret is in it and while the focus is
+outside the composer, and a mark on an empty line or a file still uploading keeps it. A removal
+made while a move is drawn is part of the move and does not end the chance to undo it. One
+section is moved with
 Send to prompt (KYO-904), in the panel of a paragraph's gutter mark, which a right-click in the
 gutter also opens, and which only a scratchpad's panel holds: the paragraph with the lines nested under it, or a heading
 with what follows it up to the next heading of its level or a section break, goes to the end of the prompt,

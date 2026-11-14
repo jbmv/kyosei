@@ -200,24 +200,26 @@ test("one scratchpad is open at a time: the caret put in one, or + adding one, o
     await page.run(`document.querySelectorAll("#scratches .scratch-toggle")[1].click()`);
     assert.deepEqual(await page.run(OPEN), [false, false, false]);
     assert.equal(await page.run(FOCUSED), -1);
-    // + adds one, open, with the caret in it.
-    await page.run(`window.kyo.composer.select(0, 0)`);
-    await page.run(`document.getElementById("new-prompt").click()`);
-    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
-    assert.equal(await page.run(FOCUSED), 3);
-    // The caret in the prompt leaves the open one open, for when the scratchpads are gone back to.
-    await page.run(`window.kyo.composer.select(4, 0)`);
-    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
     // None of this is an edit: nothing was saved, and another device's copy that differs only
     // in a collapsed state changes nothing here.
     await page.run(pause);
     assert.equal(await page.run(`${saved} ?? null`), null);
     await page.run(`window.kyo.composer.select(0, 2)`);
     await page.run(`window.kyo.draftElsewhere({ boxes: ${JSON.stringify(draft.map((box) => (box.scratch ? { ...box, scratch: { collapsed: true } } : box)))}, etag: "e2" })`);
-    assert.deepEqual(await page.run(OPEN), [true, false, false, false]);
+    assert.deepEqual(await page.run(OPEN), [true, false, false]);
     assert.equal(await page.run(FOCUSED), 0);
     await page.run(pause);
     assert.equal(await page.run(`${saved} ?? null`), null);
+    // + adds one, open, with the caret in it.
+    await page.run(`window.kyo.composer.select(0, 0)`);
+    await page.run(`document.getElementById("new-prompt").click()`);
+    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
+    assert.equal(await page.run(FOCUSED), 3);
+    // The caret in the prompt leaves the open one open, for when the scratchpads are gone back
+    // to, once it holds words (an empty one leaves with the caret, KYO-939).
+    await page.type("n");
+    await page.run(`window.kyo.composer.select(4, 0)`);
+    assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
   } finally { await page.close(); }
 });
 
@@ -703,5 +705,110 @@ test("Create prompt on a scratchpad of one line moves that line, which headed it
     await page.run(`document.querySelector(".box-create").click()`);
     const boxes = await page.run<Box[]>(STATE);
     assert.deepEqual(boxes.map((box) => [box.kind, box.text]), [["prompt", "Create prompt test"]]);
+  } finally { await page.close(); }
+});
+
+const IDS = `window.kyo.composer.boxes().map((box) => box.id)`;
+/** Puts the focus in the box at an index, as a press in its text does. */
+const into = (index: number) => `window.kyo.composer.select(${index}, 0)`;
+
+test("a scratchpad that holds no words and no marks leaves when the caret is put in another box or in the reminder list, and one with words, or a mark on an empty line, stays (KYO-939.c1, c3)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [
+        { id: "words", text: "kept", scratch: {} },
+        { id: "blank", text: "\\n \\n  ", scratch: {} },
+        { id: "marked", text: "", marks: [{ line: 0, items: [{ kind: "tag", name: "t" }] }], scratch: {} },
+        { id: "p", text: "prompt" }], etag: "e" });
+    })()`);
+    // The caret in the prompt: the blank scratchpad goes, the one with words and the one with
+    // a mark on an empty line stay.
+    await page.run(into(3));
+    assert.deepEqual(await page.run(IDS), ["words", "marked", "p"]);
+
+    // Another scratchpad's caret takes an abandoned one too: + adds an empty scratchpad, and
+    // the caret put in another scratchpad removes it.
+    await page.run(`document.getElementById("new-prompt").click()`);
+    assert.equal((await page.run<string[]>(IDS)).length, 4);
+    await page.run(into(0));
+    assert.deepEqual(await page.run(IDS), ["words", "marked", "p"]);
+
+    // The reminder list's fields take it as well.
+    await page.run(`document.getElementById("new-prompt").click()`);
+    assert.equal((await page.run<string[]>(IDS)).length, 4);
+    await page.run(`window.kyo.agenda({ state: "shown", session_id: "s", items: [], etag: null })`);
+    await page.run(`document.getElementById("agenda-summary").click()`);
+    assert.deepEqual(await page.run(IDS), ["words", "marked", "p"]);
+  } finally { await page.close(); }
+});
+
+test("an empty scratchpad stays while the caret is in it and while the focus is outside the composer (KYO-939.c2)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    assert.deepEqual((await page.run<string[]>(IDS)).length, 2);
+    // Its text emptied while the caret is in it: it stays.
+    await page.type("x");
+    await page.press("Backspace");
+    assert.equal((await page.run<string[]>(IDS)).length, 2);
+    // The focus put outside the composer, as a press in the chat does, or taken from the page
+    // by another window, removes nothing.
+    await page.run(`(() => { const outside = document.createElement("input"); outside.id = "outside";
+      document.body.append(outside); outside.focus(); })()`);
+    await page.run(`window.dispatchEvent(new Event("blur"))`);
+    assert.equal((await page.run<string[]>(IDS)).length, 2);
+    // The caret back in it is no other box.
+    await page.run(into(0));
+    assert.equal((await page.run<string[]>(IDS)).length, 2);
+    // Another box does take it.
+    await page.run(into(1));
+    assert.equal((await page.run<string[]>(IDS)).length, 1);
+  } finally { await page.close(); }
+});
+
+test("a scratchpad whose lines were cut leaves with the caret, its removal is saved, and the prompt it leaves is as it was (KYO-939.c4)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START}
+      window.kyo.draft({ boxes: [{ id: "cut", text: "\\n \\n", scratch: {} }, { id: "p", text: "prompt" }], etag: "e" });
+    })()`);
+    await page.run(`window.kyo.composer.select(0, 0)`);
+    await page.press("a", META);
+    await page.press("Backspace");
+    await page.run(pause);
+    assert.deepEqual((await page.run<{ id: string }[]>(saved)).map((box) => box.id), ["p"]);
+    await page.run(into(1));
+    assert.deepEqual(await page.run(IDS), ["p"]);
+    await page.run(pause);
+    assert.deepEqual((await page.run<{ id: string }[]>(saved)).map((box) => box.id), ["p"]);
+    // A device that reads the draft with the scratchpad still in it sees it leave, as it
+    // sees any deleted box.
+    await page.run(`window.kyo.draft({ boxes: [{ id: "cut", text: "\\n \\n", scratch: {} }, { id: "p", text: "prompt" }], etag: "f" })`);
+    await page.run(into(1));
+    assert.deepEqual(await page.run(IDS), ["p"]);
+  } finally { await page.close(); }
+});
+
+test("Command-Z after a move still restores the scratchpad it emptied when an empty scratchpad leaves in the move's own redraw (KYO-939.c5)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await openPads(page, []);
+    // An empty scratchpad added last holds the caret; Create prompt on the first moves it into
+    // the prompt and puts the caret there, which takes the empty one away in the same redraw.
+    await page.run(`document.getElementById("new-prompt").click()`);
+    const before = await page.run(HELD);
+    await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[0].click()`);
+    assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.map((box) => box[0]), ["scratch", "scratch", "prompt"]);
+    // Command-Z takes the move back: the scratchpad the move emptied is there, with its text.
+    await undo(page);
+    const restored = (await page.run<{ boxes: unknown[][] }>(HELD)).boxes;
+    assert.deepEqual(restored.slice(0, 3).map((box) => [box[1], box[2]]), [["a", "alpha"], ["b", PADS[1].text], ["c", "gamma"]]);
+    assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.length, before ? 5 : 0);
+    await redo(page);
+    assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.map((box) => box[0]), ["scratch", "scratch", "prompt"]);
   } finally { await page.close(); }
 });
