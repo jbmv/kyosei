@@ -661,6 +661,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-14** — `KYO-925` (task) — Mac app: the composer's sections share its height, the one in use the most
 - **2026-11-14** — `KYO-924` (task) — Mac app: four small fixes to Delete?, the search field and the reminder field
 - **2026-11-14** — `KYO-923` (task) — Mac app: two blank lines or a --- line end a heading's section in a box
+- **2026-11-14** — `KYO-921` (task) — Mac app: the subagent list opens from the activity line, with running times
 - **2026-11-14** — `KYO-920` (bug) — A box's images are lost when it moves to a new session
 - **2026-11-14** — `KYO-917` (task) — Mac app: a scratchpad's head is its first line, the gutters swap, and a heading's section has a line down its side
 - **2026-11-14** — `KYO-903` (task) — Mac app: one sendable prompt, and the other boxes are scratchpads
