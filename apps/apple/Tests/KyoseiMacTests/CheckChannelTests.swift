@@ -230,6 +230,9 @@ struct CheckChannelTests {
         #expect(object["id"] as? String == "b")
         #expect((object["list"] as? [Any])?.count == 2)
         #expect(try await value(bed, ["op": "eval", "script": "window.keys.length;"]) is NSNull)
+        // An answer longer than the socket's buffer arrives whole.
+        let long = try await value(bed, ["op": "eval", "script": "return 'x'.repeat(2000000);"])
+        #expect((long as? String)?.count == 2_000_000)
         let thrown = try await ask(bed, ["op": "eval", "script": "throw new Error('said so');"])
         #expect(thrown["ok"] as? Bool == false)
         #expect((thrown["error"] as? String)?.contains("said so") == true)

@@ -87,11 +87,13 @@ final class CheckChannel {
     private var accepting: DispatchSourceRead?
     private var connections: [Int32: Connection] = [:]
 
-    private final class Connection {
+    @MainActor private final class Connection {
         var buffer = Data()
         var source: DispatchSourceRead?
-        /// The requests of one connection are answered in the order they were sent.
-        var last: Task<Void, Never>?
+        /// The requests not yet answered, and whether the runner has closed its end: the
+        /// descriptor is closed when both say there is nothing more to write.
+        var pending = 0
+        var ended = false
     }
 
     init(
@@ -189,6 +191,10 @@ final class CheckChannel {
             guard descriptor >= 0 else { return }
             var on: Int32 = 1
             setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+            // An accepted socket takes the listener's non-blocking flag. An answer longer
+            // than the socket's buffer is written whole only by a write that waits, so the
+            // flag is cleared; a read is made only when the source says there are bytes.
+            _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) & ~O_NONBLOCK)
             let connection = Connection()
             let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: .main)
             source.setEventHandler { [weak self] in
@@ -209,11 +215,8 @@ final class CheckChannel {
             // were already asked for have been written.
             connection.source?.cancel()
             connections[descriptor] = nil
-            let last = connection.last
-            Task {
-                await last?.value
-                close(descriptor)
-            }
+            connection.ended = true
+            if connection.pending == 0 { close(descriptor) }
             return
         }
         connection.buffer.append(contentsOf: bytes[0..<count])
@@ -221,13 +224,23 @@ final class CheckChannel {
             let line = Data(connection.buffer[connection.buffer.startIndex..<end])
             connection.buffer = Data(connection.buffer[connection.buffer.index(after: end)...])
             guard !line.isEmpty else { continue }
-            let before = connection.last
-            connection.last = Task { [weak self] in
-                await before?.value
-                guard let self else { return }
-                let (answer, then) = await self.answer(to: line)
-                Self.write(answer + [0x0A], to: descriptor)
-                then?()
+            connection.pending += 1
+            // A request is answered from a block of the run loop and not from this handler,
+            // which the main dispatch queue calls. What a request does can wait in a run
+            // loop of its own: a quit waits there for the draft to be saved, and a menu is
+            // tracked there. The main queue is not served by a run loop nested in one of
+            // its own calls, so the work such a loop waits for, which reaches the main
+            // actor through that queue, would never run. Measured: a quit asked from this
+            // handler did not end the app.
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.answer(to: line) { answer in
+                        Self.write(answer + [0x0A], to: descriptor)
+                        connection.pending -= 1
+                        if connection.ended, connection.pending == 0 { close(descriptor) }
+                    }
+                }
             }
         }
     }
@@ -237,6 +250,7 @@ final class CheckChannel {
             var sent = 0
             while sent < raw.count {
                 let wrote = Darwin.write(descriptor, raw.baseAddress! + sent, raw.count - sent)
+                if wrote < 0, errno == EINTR || errno == EAGAIN { continue }
                 if wrote <= 0 { return }
                 sent += wrote
             }
@@ -245,7 +259,7 @@ final class CheckChannel {
 
     // MARK: Requests
 
-    /// Answers one request, and returns what is to be done once the answer has been written.
+    /// Answers one request by calling `reply` with the answer's line, once.
     ///
     /// - `eval`: `script` is the body of an async function run in the page, with the members
     ///   of `args` as its variables; the value it returns is the answer, as JSON.
@@ -259,11 +273,21 @@ final class CheckChannel {
     /// - `state`: the window's title, whether it is key, its first responder, whether the
     ///   app is active and which app is in front.
     /// - `window`: places the window, or makes it key.
-    /// - `quit`: ends the app as its Quit item does.
-    func answer(to line: Data) async -> (Data, (() -> Void)?) {
+    /// - `quit`: ends the app as its Quit item does, after the answer has been written.
+    ///
+    /// `eval` and `snapshot` wait for the page and answer later; the others answer before
+    /// this returns.
+    func answer(to line: Data, reply: @escaping (Data) -> Void) {
         var id: Any?
-        var then: (() -> Void)?
-        var body: [String: Any]
+        func encoded(_ body: [String: Any]) -> Data {
+            var body = body
+            if let id { body["id"] = id }
+            return (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]))
+                ?? Data(#"{"ok":false,"error":"the answer could not be written as JSON"}"#.utf8)
+        }
+        func failure(_ error: Error) -> Data {
+            encoded(["ok": false, "error": (error as? CheckFailure)?.message ?? "\(error)"])
+        }
         do {
             guard let request = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
                 throw CheckFailure("a request is one JSON object on one line")
@@ -272,27 +296,33 @@ final class CheckChannel {
             guard let op = request["op"] as? String else { throw CheckFailure("a request names its op") }
             let value: Any
             switch op {
-            case "eval": value = try await evaluate(request)
+            case "eval", "snapshot":
+                Task {
+                    do {
+                        let value = op == "eval"
+                            ? try await self.evaluate(request) : try await self.snapshot(request)
+                        reply(encoded(["ok": true, "value": value]))
+                    } catch {
+                        reply(failure(error))
+                    }
+                }
+                return
             case "menus": value = try menus()
             case "menu": value = try choose(request)
             case "key": value = try key(request)
             case "mouse": value = try mouse(request)
-            case "snapshot": value = try await snapshot(request)
             case "state": value = try state()
             case "window": value = try place(request)
             case "quit":
-                value = NSNull()
-                then = terminate
+                reply(encoded(["ok": true, "value": NSNull()]))
+                terminate()
+                return
             default: throw CheckFailure("there is no request named \(op)")
             }
-            body = ["ok": true, "value": value]
+            reply(encoded(["ok": true, "value": value]))
         } catch {
-            body = ["ok": false, "error": (error as? CheckFailure)?.message ?? "\(error)"]
+            reply(failure(error))
         }
-        if let id { body["id"] = id }
-        let data = (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]))
-            ?? Data(#"{"ok":false,"error":"the answer could not be written as JSON"}"#.utf8)
-        return (data, then)
     }
 
     private func theWindow() throws -> NSWindow {
