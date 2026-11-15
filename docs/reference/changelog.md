@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-15** — `KYO-953` (task) — Mac app: the Config view, reading only
 - **2026-11-11** — `KYO-468` (bug) — setTypeOfService EINVAL uncaught in the new app: its kyo serve client uses undici fetch, which the old code avoided in this Electron
 - **2026-11-11** — `KYO-449` (task) — Desktop app: check the PATH kyo against KYO_ACCEPTS and show the four compatibility states
 - **2026-10-13** — `KYO-623` (task) — Prepare apps/desktop for publication as the maintainer's working viewer
@@ -132,6 +133,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-15** — `KYO-954` (task) — Comment-keeping writers for the editable project settings
 - **2026-11-15** — `KYO-952` (task) — kyo config and the read routes for project and machine settings
 - **2026-11-12** — `KYO-444` (plan) — CLI distribution and kyo serve (KYO-443)
 - **2026-11-12** — `KYO-425` (plan) — Split the seven oversized CLI modules by subject and move their KYO history into docs/design
