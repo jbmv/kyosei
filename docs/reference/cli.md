@@ -36,6 +36,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo check-push`](#kyo-check-push) | optional | no | publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60), and, for a push, if a commit it sends carries a private term or home path (KYO-669) |
 | [`kyo claim`](#kyo-claim) | yes | yes | record a claim about a record (law 9) |
 | [`kyo close-wave`](#kyo-close-wave) | yes | yes | close a merged wave: move each record to completion, run the declared generators, commit store and generated files together, then print (or, with --run-after, run) the declared after-steps — refused before any write unless every record can finish and the declared suite passed at this code (KYO-536) |
+| [`kyo config`](#kyo-config) | optional | no | read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only and writes nothing (KYO-950) |
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
 | [`kyo credit`](#kyo-credit) | yes | yes | credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644) |
 | [`kyo devices`](#kyo-devices) | no | no | issue, list and revoke the per-device tokens kyo serve's routes check, on this machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699) |
@@ -417,6 +418,22 @@ Usage: `kyo close-wave [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--s
 - `--suite-passed COMMAND` — optional. record that this whole-suite command just passed at HEAD -- chain it on the suite's own exit status: `make test && kyo close-wave --suite-passed "make test"`. Must be a declared `close_wave: suite:` or `orchestrator_only_commands` entry; refused while anything outside kyosei/ and ideas/ is uncommitted. Kept in the checkout's git directory, never tracked
 - `--dry-run` — optional. print the whole plan -- what it would refuse, move, run, commit -- and write nothing
 - `--run-after` — optional. also run the `close_wave: after:` steps (reinstall, restart, prune), in order, stopping at the first that fails; without it they are printed only
+
+Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
+
+## `kyo config`
+
+read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only and writes nothing (KYO-950)
+
+Needs a Kyosei project: **optional** — it runs, and says so, where there is no project.
+
+Writes to the store: **no** — this command only reads.
+
+Usage: `kyo config [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--machine]`
+
+### Options
+
+- `--machine` — optional. print the machine's settings ($KYOSEI_HOME/settings.yml) in place of the project's; needs no project
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
 

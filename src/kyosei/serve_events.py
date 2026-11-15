@@ -5,10 +5,11 @@
     event: changed
     data: {"kind": "store"}
 
-with ``kind`` one of ``store``, ``ideas``, ``sessions``, ``scratchpad`` and ``draft``, and a
-``: keepalive`` comment goes out every :data:`KEEPALIVE_SECONDS` so a proxy in between (Tailscale
-Serve, say) does not close an idle stream. It replaced the hand-framed WebSocket of
-the server the desktop app once ran; ``EventSource`` is built into every browser.
+with ``kind`` one of ``store``, ``ideas``, ``sessions``, ``scratchpad``, ``draft`` and
+``config``, and a ``: keepalive`` comment goes out every :data:`KEEPALIVE_SECONDS` so a
+proxy in between (Tailscale Serve, say) does not close an idle stream. It replaced the
+hand-framed WebSocket of the server the desktop app once ran; ``EventSource`` is built into
+every browser.
 
 THE FINGERPRINT is the desktop app's former watcher rule, polled once a second with ``stat``
 only -- the standard library has no file watcher, and a second's ``stat`` of an idle
@@ -31,6 +32,12 @@ store costs nothing measurable:
   is stamped by :func:`kyosei.serve_drafts.project_stamp`. It is not part of
   :func:`fingerprint`, which reads a project's own paths: the route hands :func:`stream` the
   stamp as one of ``more``. The event says that the draft changed and carries none of it.
+
+- ``config`` (KYO-952): ``config.yml``, the files beside it that the configuration view
+  lists (``kinds.yml``, ``scopes.yml``, ``documents.yml``, ``gate-tags.yml``,
+  ``procedures.md``), the two packaged agent type files and the machine's ``settings.yml``,
+  stamped by :func:`kyosei.serve_config.change_stamp`. Like ``draft`` it reaches the stream
+  through ``more``, since the machine's file is not one of a project's own paths.
 
 A path that is not there is part of the answer (``gone``), so a store whose database
 appears later changes from ``gone`` to a stamp, which is an event.
@@ -80,6 +87,11 @@ def _file_stamp(path: Path) -> str:
     except OSError:
         return "gone"
     return f"{info.st_mtime_ns}:{info.st_size}:{info.st_ino}"
+
+
+def file_stamp(path: Path) -> str:
+    """:func:`_file_stamp`, for the modules that stamp files of their own (KYO-952)."""
+    return _file_stamp(path)
 
 
 def _ideas_stamp(root: Path) -> str:

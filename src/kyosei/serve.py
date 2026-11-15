@@ -269,6 +269,12 @@ NOT_SERVED: dict[str, str] = {
     # KYO-658: it stamps a person's turn from this machine's turn index into the store.
     "discuss": _WRITES_STORE,
     "turns": "it is a session hook writing the local turn index and archive, not a read",
+    # KYO-952: a device token is what the document is for (it reports the device's own
+    # permissions), and a `cmd/` route cannot know the token.
+    "config": (
+        "served as GET /v1/projects/{project}/config and GET /v1/settings, which need a "
+        "device token"
+    ),
     "transcripts": (
         "it reads what was said in the project's sessions, which is served only to a device "
         "token: GET /v1/projects/{project}/search"
@@ -334,6 +340,11 @@ _SEARCH_QUERY_KEYS = ("q", "limit", "cursor", "role", "context")
 
 #: KYO-826: ``projects/{project}/history/recent``, the search results opened in the app.
 HISTORY_ROUTE = "history"
+
+#: KYO-952: ``projects/{project}/config`` (GET), a project's configuration, and the
+#: machine's ``settings`` (GET). Each needs a device token of any permission.
+PROJECT_CONFIG_ROUTE = "config"
+SETTINGS_ROUTE = "settings"
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
 SESSION_ROUTES = ("turns", "events", "screen", "changes")
@@ -851,7 +862,7 @@ class ServeHandler(BaseHTTPRequestHandler):
         if segments[:1] != ["v1"]:
             raise _no_route(method, split.path)
         rest = segments[1:]
-        if rest in (["version"], ["projects"]) or (
+        if rest in (["version"], ["projects"], [SETTINGS_ROUTE]) or (
             len(rest) >= 4 and rest[0] == "projects" and rest[2] == "cmd"
         ):
             allowed: tuple[str, ...] = ("GET",)
@@ -865,6 +876,8 @@ class ServeHandler(BaseHTTPRequestHandler):
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
             allowed = ("POST",)
+        elif len(rest) == 3 and rest[0] == "projects" and rest[2] == PROJECT_CONFIG_ROUTE:
+            allowed = ("GET",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == HISTORY_ROUTE:
             if rest[3:] != ["recent"]:
                 raise _no_route(method, split.path)
@@ -953,6 +966,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(self._version())
         if rest == ["projects"]:
             return 200, _json_bytes(self._projects())
+        if rest == [SETTINGS_ROUTE]:
+            return self._config(None, split.query)
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
         if rest[2] == ORCHESTRATOR_ROUTE:
@@ -961,6 +976,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._project_files(method, rest[1], rest[3:], split.query)
         if rest[2] == SEARCH_ROUTE:
             return self._search(rest[1], split.query)
+        if rest[2] == PROJECT_CONFIG_ROUTE:
+            return self._config(rest[1], split.query)
         if rest[2] == HISTORY_ROUTE:
             return self._history(method, rest[1], split.query)
         if rest[2] == PROJECT_DRAFT_ROUTE:
@@ -1069,7 +1086,7 @@ class ServeHandler(BaseHTTPRequestHandler):
     def _events(self, paths, name: str) -> None:
         """A ``text/event-stream`` that lasts until the client leaves or the
         server stops. It takes no lock: a fingerprint reads no store content."""
-        from . import cmd_agenda, serve_drafts, serve_events
+        from . import cmd_agenda, serve_config, serve_drafts, serve_events
 
         environ = self.server.environ
 
@@ -1095,6 +1112,10 @@ class ServeHandler(BaseHTTPRequestHandler):
             more={
                 "draft": lambda: serve_drafts.project_stamp(environ, name),
                 "agenda": lambda: cmd_agenda.directory_stamp(environ),
+                # KYO-952: config.yml, the files beside it, the agent types, settings.yml.
+                "config": lambda: serve_config.change_stamp(
+                    paths.code_root, paths.kyosei_dir, environ
+                ),
             },
         )
 
@@ -1167,6 +1188,35 @@ class ServeHandler(BaseHTTPRequestHandler):
                 given.get("context"),
             )
         )
+
+    def _config(self, name: str | None, query: str) -> tuple:
+        """A project's configuration, or with no ``name`` the machine's (KYO-952).
+
+        The device token is checked first, before the project is looked up, so a request
+        without one learns nothing from the refusal (:mod:`kyosei.serve_config`).
+        """
+        from . import serve_config, serve_send
+
+        if query:
+            raise Refusal(
+                400,
+                "the configuration routes take no query string; send the token as "
+                "`Authorization: Bearer <token>`",
+            )
+        device = serve_send.require_reader(
+            self.server.environ, self.headers.get("Authorization")
+        )
+        version = self._version()
+        if name is None:
+            document, headers = serve_config.settings_document(
+                self.server.environ, device, version
+            )
+        else:
+            root = self.server.project(name).root
+            document, headers = serve_config.project_document(
+                self.server.environ, device, name, root, version
+            )
+        return 200, _json_bytes(document), _JSON_TYPE, headers
 
     def _history(self, method: str, name: str, query: str) -> tuple:
         """The search results opened in the app (KYO-826): a session read route in who may
