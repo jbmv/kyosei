@@ -15,6 +15,7 @@ chat while it is open, from the session's hook, before the transcript holds the 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from pathlib import Path
@@ -198,6 +199,15 @@ def _start(
         and row["session_id"] == session[0]["session_id"],
         {"panel_said": offered, "seconds_from_press_to_chat": seconds, "panes": panes},
     )
+    # The line under the composer is written a moment after the chat is shown. Read at once
+    # it was empty in one run of seven (KYO-947), so it is waited for, and what it says is
+    # the assertion's to judge.
+    with contextlib.suppress(harness.CheckError):
+        page.wait(
+            "the line under the composer to say something",
+            "return document.getElementById('working-text').textContent !== '';",
+            deadline=10,
+        )
     loaded = page.eval(
         "return {boxes: window.kyo.composer.boxes().map((box) => box.kind),"
         " empty: document.getElementById('empty-chat').textContent,"
