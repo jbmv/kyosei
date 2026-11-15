@@ -657,6 +657,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-15** — `KYO-946` (task) — Mac app check harness: the scripted session
 - **2026-11-15** — `KYO-945` (bug) — Mac app check harness: a run takes focus from the app in front
 - **2026-11-15** — `KYO-943` (plan) — Mac app check harness
+- **2026-11-15** — `KYO-941` (bug) — Mac app: the tag field makes a tag the server refuses at send
 - **2026-11-15** — `KYO-940` (bug) — Mac app: the question card shows in Chat only after the question is answered
 - **2026-11-15** — `KYO-939` (task) — Mac app: an empty scratchpad leaves when the caret moves to another box
 - **2026-11-14** — `KYO-944` (task) — Mac app check harness: the check build, the channel, and Records and Files
