@@ -736,7 +736,8 @@ values, or null when none was logged). An `editable` entry has a `write` descrip
 clearable, permission, one_way}`, in which `one_way` is null or the sentence a client shows
 before a change it cannot undo; it is set for `read_transcripts`, which a client may turn off
 and not on. A `request` entry has `request.header`, the first line of a request to the
-session. A key present in the file under more than one spelling, or one row covering several
+session, and so has an `editable` entry whose `one_way` is set, the request being the way
+back (KYO-959). A key present in the file under more than one spelling, or one row covering several
 keys (`recx.prior_art.on`, `.limit` and `.index_url`), has `keys_in_file`.
 
 A `config.yml` that `load_config` refuses is still reported: `files.config.readable` is
