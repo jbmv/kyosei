@@ -75,6 +75,106 @@ struct CheckFailure: Error {
     init(_ message: String) { self.message = message }
 }
 
+/// The check build's own pasteboard (KYO-947). A cut, a copy and a paste in the page go
+/// through the general pasteboard, which on a machine a person is using holds what that
+/// person last copied. A check build therefore answers every request its process makes for
+/// the general pasteboard with a pasteboard of its own name: `NSPasteboard.general`, which
+/// AppKit and the app's own Copy button ask for, and `NSPasteboard(name: .general)`, which is
+/// what WebKit was measured to ask for when the page cuts, copies and pastes. Once installed,
+/// nothing in the process reaches the general pasteboard through either call, and the only
+/// thing read of it is its change count, through `personChangeCount`.
+///
+/// A test cannot stand a pasteboard in for the general one, so it is given the other half:
+/// `standIn` is the pasteboard a request for the general one is answered with while
+/// `redirecting` is false. A test puts known words there, cuts and pastes with the redirect
+/// on and finds them untouched, then turns the redirect off and sees the same keys change
+/// them, which is what the redirect keeps from the person's pasteboard. With no stand-in the
+/// answer is the build's own pasteboard whatever `redirecting` says.
+enum CheckPasteboard {
+    private typealias General = @convention(c) (AnyClass, Selector) -> NSPasteboard
+    private typealias Named = @convention(c) (AnyClass, Selector, NSString) -> NSPasteboard
+
+    private static let generalSelector = NSSelectorFromString("generalPasteboard")
+    private static let namedSelector = NSSelectorFromString("pasteboardWithName:")
+
+    nonisolated(unsafe) private static var original: General?
+    /// The build's own pasteboard, once `install` has made it.
+    nonisolated(unsafe) private(set) static var own: NSPasteboard?
+    nonisolated(unsafe) static var standIn: NSPasteboard?
+    nonisolated(unsafe) static var redirecting = true
+
+    private static func answer() -> NSPasteboard? {
+        if !redirecting, let standIn { return standIn }
+        return own
+    }
+
+    private static let installed: Bool = {
+        guard let general = class_getClassMethod(NSPasteboard.self, generalSelector),
+            let named = class_getClassMethod(NSPasteboard.self, namedSelector)
+        else { return false }
+        let wasGeneral = unsafeBitCast(method_getImplementation(general), to: General.self)
+        let wasNamed = unsafeBitCast(method_getImplementation(named), to: Named.self)
+        let name = "dev.kyosei.apple.check.pasteboard.\(getpid())" as NSString
+        let made = wasNamed(NSPasteboard.self, namedSelector, name)
+        own = made
+        original = wasGeneral
+        let answerGeneral: @convention(block) (AnyClass) -> NSPasteboard = { _ in answer() ?? made }
+        let answerNamed: @convention(block) (AnyClass, NSString) -> NSPasteboard = { pasteboards, name in
+            if name as String == NSPasteboard.Name.general.rawValue { return answer() ?? made }
+            return wasNamed(pasteboards, namedSelector, name)
+        }
+        method_setImplementation(general, imp_implementationWithBlock(answerGeneral))
+        method_setImplementation(named, imp_implementationWithBlock(answerNamed))
+        return true
+    }()
+
+    /// Puts the build's own pasteboard in the general one's place, once, and says whether
+    /// it is there.
+    @discardableResult
+    static func install() -> Bool { installed }
+
+    /// The general pasteboard's change count, which rises by one at each write to it. It is
+    /// read through the call the redirect replaced, and nothing else of that pasteboard is.
+    static var personChangeCount: Int? {
+        guard installed, let original else { return nil }
+        return original(NSPasteboard.self, generalSelector).changeCount
+    }
+
+    /// Gives the build's pasteboard back to the pasteboard server, which keeps a named
+    /// pasteboard for as long as the login session lasts unless it is released.
+    static func release() {
+        own?.releaseGlobally()
+    }
+}
+
+/// The window that stands as the key window while the app has none (KYO-947). A check build
+/// is not brought to the front, and an app that is not active has no key window, so an action
+/// sent with no target, which is how the Edit menu's items and their key equivalents send
+/// theirs, finds no responder: Undo, Cut, Copy and Paste are disabled, and Command-X does
+/// nothing. `NSApplication.keyWindow` and `mainWindow` therefore answer with this window
+/// where AppKit's own answer is nil, once a `window` request has asked for it. AppKit then
+/// finds the action's target in that window's responder chain, validates the item against it
+/// and sends the action, as it does in an active app. The window itself does not become key:
+/// `isKeyWindow` stays false and the page still reports no focus.
+enum CheckKeyWindow {
+    nonisolated(unsafe) static weak var standing: NSWindow?
+
+    @MainActor static let installed: Bool = {
+        typealias Asked = @convention(c) (NSApplication, Selector) -> NSWindow?
+        var replaced = 0
+        for selector in [#selector(getter: NSApplication.keyWindow), #selector(getter: NSApplication.mainWindow)] {
+            guard let method = class_getInstanceMethod(NSApplication.self, selector) else { continue }
+            let was = unsafeBitCast(method_getImplementation(method), to: Asked.self)
+            let answer: @convention(block) (NSApplication) -> NSWindow? = { app in
+                was(app, selector) ?? standing
+            }
+            method_setImplementation(method, imp_implementationWithBlock(answer))
+            replaced += 1
+        }
+        return replaced == 2
+    }()
+}
+
 /// Listens on the socket and answers requests. The window and the page are asked for at each
 /// request, since the app's window is made after the channel starts.
 @MainActor
@@ -134,6 +234,11 @@ final class CheckChannel {
     /// by its owner alone: the mask is narrowed for the bind, so that there is no moment at
     /// which another account could open it, and the mode is set again afterwards.
     func start() throws {
+        // A key request can be a cut, a copy or a paste, so no channel listens in a process
+        // whose general pasteboard is still the person's (KYO-947).
+        guard CheckPasteboard.install() else {
+            throw CheckFailure("the check build's own pasteboard could not be put in the general one's place")
+        }
         var address = sockaddr_un()
         let bytes = Array(path.utf8)
         let capacity = MemoryLayout.size(ofValue: address.sun_path)
@@ -282,17 +387,22 @@ final class CheckChannel {
     ///   of `args` as its variables; the value it returns is the answer, as JSON.
     /// - `menus`: the main menu as a tree, each menu validated as opening it would.
     /// - `menu`: `path` is the titles from the menu bar to one item, which is validated and
-    ///   performed as choosing it would.
+    ///   performed as choosing it would. The answer names the item's action and the class of
+    ///   the responder AppKit found for it.
     /// - `key`: `key` is one character or a named key, with `modifiers`; or `text` is typed
     ///   one key at a time. The events go to `NSApp.sendEvent`.
     /// - `mouse`: a press, a release or both at `x`, `y` in the page's own coordinates.
     ///   With `menu` or `choose` the menu a right press opens is read, and an item of it
     ///   chosen, without the menu being put on the screen, unless `on_screen` asks for it.
     /// - `snapshot`: writes a PNG of the window to `path`.
-    /// - `state`: the window's title, whether it is key, its first responder, whether the
-    ///   app is active and which app is in front, whether the app is an accessory app, and
-    ///   how often it became active and tracked a menu on the screen since the channel began.
-    /// - `window`: places the window, or makes it key.
+    /// - `state`: the window's title, whether it is key or stands as the key window, its
+    ///   first responder, whether the app is active and which app is in front, whether the
+    ///   app is an accessory app, and how often it became active and tracked a menu on the
+    ///   screen since the channel began.
+    /// - `window`: places the window, or makes it key, or the window that stands as key.
+    /// - `pasteboard`: the check build's own pasteboard: its name, its change count and the
+    ///   text it holds, and the change count of the general pasteboard, of which nothing
+    ///   else is read.
     /// - `quit`: ends the app as its Quit item does, after the answer has been written.
     ///
     /// `eval` and `snapshot` wait for the page and answer later; the others answer before
@@ -333,6 +443,7 @@ final class CheckChannel {
             case "mouse": value = try mouse(request)
             case "state": value = try state()
             case "window": value = try place(request)
+            case "pasteboard": value = try pasteboard()
             case "quit":
                 reply(encoded(["ok": true, "value": NSNull()]))
                 terminate()
@@ -446,9 +557,18 @@ final class CheckChannel {
                 menu = submenu
                 continue
             }
-            guard item.isEnabled else { return ["performed": false, "enabled": false, "title": item.title] }
-            menu.performActionForItem(at: menu.index(of: item))
-            return ["performed": true, "enabled": true, "title": item.title]
+            // The responder the action goes to: the item's own target, or the one AppKit
+            // finds in the responder chain of the key window for an item that names none.
+            let target = item.action.flatMap { NSApp.target(forAction: $0, to: item.target, from: item) }
+            var answer: [String: Any] = [
+                "title": item.title,
+                "enabled": item.isEnabled,
+                "action": item.action.map { NSStringFromSelector($0) as Any } ?? NSNull(),
+                "target": target.map { String(describing: type(of: $0)) as Any } ?? NSNull(),
+            ]
+            if item.isEnabled { menu.performActionForItem(at: menu.index(of: item)) }
+            answer["performed"] = item.isEnabled
+            return answer
         }
         throw CheckFailure("the path named no item")
     }
@@ -849,6 +969,7 @@ final class CheckChannel {
         return [
             "title": window.title,
             "key": window.isKeyWindow,
+            "stands_as_key": CheckKeyWindow.standing === window && NSApp.keyWindow === window,
             "main": window.isMainWindow,
             "visible": window.isVisible,
             "on_screen": window.occlusionState.contains(.visible),
@@ -866,7 +987,10 @@ final class CheckChannel {
     /// Places the window (`frame`, as `[x, y, width, height]` in screen points), makes it the
     /// key window (`key`), makes the page its first responder (`focus`), or activates the
     /// app (`activate`), which brings it in front of the person's other apps and is asked
-    /// for only by a run that says so. The answer is the state afterwards.
+    /// for only by a run that says so. An app that is not active has no key window, so where
+    /// `key` leaves the window not key it is made the one that stands as key
+    /// (`CheckKeyWindow`), and `key` given as false ends that. The answer is the state
+    /// afterwards.
     private func place(_ request: [String: Any]) throws -> Any {
         let window = try theWindow()
         if let frame = request["frame"] as? [NSNumber], frame.count == 4 {
@@ -876,9 +1000,26 @@ final class CheckChannel {
                     height: frame[3].doubleValue), display: true)
         }
         if request["activate"] as? Bool == true { NSApp.activate() }
-        if request["key"] as? Bool == true { window.makeKey() }
+        if request["key"] as? Bool == true {
+            window.makeKey()
+            if !window.isKeyWindow, CheckKeyWindow.installed { CheckKeyWindow.standing = window }
+        }
+        if request["key"] as? Bool == false { CheckKeyWindow.standing = nil }
         if request["focus"] as? Bool == true { window.makeFirstResponder(try thePage()) }
         return try state()
+    }
+
+    private func pasteboard() throws -> Any {
+        guard let own = CheckPasteboard.own else {
+            throw CheckFailure("the check build has no pasteboard of its own")
+        }
+        return [
+            "name": own.name.rawValue,
+            "change_count": own.changeCount,
+            "text": own.string(forType: .string).map { $0 as Any } ?? NSNull(),
+            "is_general": NSPasteboard.general === own,
+            "person_change_count": CheckPasteboard.personChangeCount.map { $0 as Any } ?? NSNull(),
+        ]
     }
 }
 #endif

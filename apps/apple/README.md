@@ -826,6 +826,12 @@ the app as follows:
   of the app a person is using. With `KYOSEI_CHECK_ACTIVATE` set to `1` it is a regular app
   and asks to come to the front. It takes its window's frame from `KYOSEI_CHECK_FRAME`, as
   `x,y,width,height`.
+- Its general pasteboard is one of its own (KYO-947). A cut, a copy and a paste in the page go
+  through the general pasteboard, which holds what the person at the machine last copied. From
+  before the app exists, every request the process makes for that pasteboard, by
+  `NSPasteboard.general` or by name, which is how WebKit was measured to ask, is answered with
+  a pasteboard named for the process. The one thing read of the general pasteboard is its
+  change count.
 
 **The channel.** While `KYOSEI_CHECK_SOCKET` names a path, the check build listens there on a
 Unix socket with mode 0600 and answers one line of JSON for each line it is sent. A request is
@@ -837,12 +843,13 @@ the system.
 |---|---|
 | `eval` | runs `script`, the body of an async function, in the page with `args` as its variables, and answers its value as JSON |
 | `menus` | answers the main menu as a tree: titles, key equivalents, and each item's enabled state after validation |
-| `menu` | validates and performs the item at `path`, such as `["Edit", "Undo"]`, as choosing it does |
+| `menu` | validates and performs the item at `path`, such as `["Edit", "Undo"]`, as choosing it does, and answers whether it was enabled and performed, its action, and the class of the responder AppKit found for the action |
 | `key` | sends one key (`key`, with `modifiers`) or types `text`, through `NSApp.sendEvent` |
 | `mouse` | sends a press, a release or both at `x`, `y` in the page's coordinates; with `menu` it answers the items of the native menu the press opens, and with `choose` it chooses one. The menu is not put on the screen unless `on_screen` asks for it |
 | `snapshot` | writes a PNG of the window to `path`: the title bar and status bar from `cacheDisplay`, the page from `WKWebView.takeSnapshot` |
-| `state` | answers the window's title, frame and first responder, whether it is key, whether the app is active and an accessory app, which app is in front, and how often the app became active and tracked a menu on the screen since the channel started |
-| `window` | sets the window's `frame`, makes it key (`key`), makes the page its first responder (`focus`), or activates the app (`activate`) |
+| `state` | answers the window's title, frame and first responder, whether it is key or stands as the key window, whether the app is active and an accessory app, which app is in front, and how often the app became active and tracked a menu on the screen since the channel started |
+| `window` | sets the window's `frame`, makes it key or, in an app that is not active, the window that stands as key (`key`), makes the page its first responder (`focus`), or activates the app (`activate`) |
+| `pasteboard` | answers the check build's own pasteboard: its name, change count and text, whether it is what the app gets as the general pasteboard, and the general pasteboard's change count |
 | `quit` | answers, then ends the app with `NSApp.terminate`, which runs the app's own quit path |
 
 The channel does not exercise what happens before the app: the window server's delivery of
@@ -851,7 +858,27 @@ in tmux: `makeKey` does not make the window key while the app is not active, and
 then reports no focus. Keys, presses and menu items still reach the page and the menu bar,
 and text typed with `key` reaches a composer box; the page takes the keys one after another,
 so a scenario waits for the box to hold the text before it presses Send. Whether the app can
-be activated from there was not measured. A context menu is read without being shown
+be activated from there was not measured.
+
+An app with no key window finds no responder for an action sent with no target, which is how
+the Edit menu's items and their key equivalents send theirs. Measured in the check build
+before the request described next: Undo, Redo, Cut and Paste were disabled while a composer
+box held a selection and a step to undo, the `menu` request performed nothing, and Command-X
+cut nothing. A `window` request with `key` therefore makes the window the one that stands as
+key (KYO-947): `NSApplication.keyWindow` and `mainWindow` answer with it where AppKit's own
+answer is nil. From then on AppKit finds the action's responder in the window's responder
+chain, the responder validates the item, and the action is sent, each by the code that does
+so in the app a person uses. A `menu` request on Edit > Undo with a composer box in focus thus
+runs the web view's own validation and its `undo:` (KYO-915), and Command-X, Command-C and
+Command-V reach the Edit menu's items and WebKit's cut, copy and paste. What such a request
+still leaves out of a person's click: the menu bar is not on the screen and no menu is opened
+or tracked, so nothing of the pointer's path to the item, the menu's drawing or its
+highlighting is run; the app is not active and the window is not key in the window server's
+sense, so `isKeyWindow` is false and the page reports no focus; and the answer to "which
+window is key" is given by the check build and not earned by activation. The other way, activating the app for these steps
+(`KYOSEI_CHECK_ACTIVATE`, or `window` with `activate`), is not used: it takes the front from
+the app a person is using, and under a locked screen it was measured to leave the app
+inactive. A context menu is read without being shown
 (KYO-945): a menu on the screen is tracked by the window server, which takes the keyboard and
 the pointer from the app in front, so while a `mouse` request reads a menu the channel answers
 `NSMenu.popUpContextMenu(_:with:for:)` itself, tells the view the menu is opening as AppKit
@@ -913,9 +940,14 @@ reading and driving in `check/composer.py`. Scenario A is the sequence of KYO-93
 KYO-939. A scratchpad of three lines is given an anchor on a sentence of a reply, a tag and an
 image, the image uploaded through the app's `attach` route to the test server, and becomes the
 prompt by Create prompt. That move, and Send to prompt into a prompt that holds words, are each
-made, undone and redone: undone once by the call the Edit menu's item makes and once by
-Command-Z through the `key` request, and redone by Command-Shift-Z. A line cut from the prompt
-carries its anchor into a new scratchpad, a Command-Z takes the paste back and another takes
+made, undone and redone twice: by Edit > Undo and Edit > Redo through the `menu` request, and
+by Command-Z and Command-Shift-Z through the `key` request. An assertion of a menu step holds
+apart that the item was validated enabled, that the responder of its action was the app's web
+view, that the action was sent, and that the page's undo was then called once, which the
+runner never calls itself. A line cut from the prompt with Command-X and pasted into a new
+scratchpad with Command-V carries its anchor, the cut line is found on the check build's own
+pasteboard, and the general pasteboard's change count is the same before the cut and after
+the paste; a Command-Z takes the paste back and another takes
 the cut back, a scratchpad emptied by a cut and one added with + and left untyped leave when
 the caret moves to the prompt and stay while the focus is outside the composer, and Send gives
 the session's pane the anchor's line, the image's path and the text in order. After each step
@@ -924,17 +956,13 @@ are read, is compared with the composer's boxes; a box with neither words nor ma
 draft. Scenario G is the held prompt: a prompt sent during a turn is held, Edit returns it as
 the prompt and what was typed since becomes a scratchpad, and the last activity reads
 "1m ago" while the held prompt waits and "< 1m ago" once the turn has ended and the prompt is
-delivered, which takes the 80 seconds of the scripted turn.
+delivered. The scripted turn runs 64 seconds: the last assertion needs the minute after which
+the activity reads "1m ago", and nothing else in the scenario depends on the turn's length.
 
-Three things in these scenarios are not driven as a person would drive them. Edit > Undo and
-Edit > Redo cannot be chosen through the `menu` request: an app that was not brought to the
-front has no key window, so the two items are disabled and the request performs nothing, which
-the result records as `scenario_A_edit_menu_without_a_key_window`. The scenario calls
-`window.kyo.undo()` and `window.kyo.redo()`, which the items call when they are performed, and
-its assertions are named for the call. A cut and a paste are `ClipboardEvent`s dispatched in the
-page with a `DataTransfer` of the page's own, since Command-X and Command-V through the `key`
-request go through the system pasteboard, which is the person's and which the check build has no
-private substitute for. An anchor is placed through the page's context menu on a paragraph of the
+Some things in these scenarios are not driven as a person would drive them. Edit > Undo and
+Edit > Redo are chosen through the `menu` request and Command-X and Command-V through the
+`key` request, in a window that stands as key and is not key; what that leaves out is said
+under the channel above. An anchor is placed through the page's context menu on a paragraph of the
 reply, a tag through the panel a gutter's context menu opens, and a file by a paste event that
 carries it, each as the page's own tests place them, since no `mouse` request reaches the
 page's menus and panels without tracking a native menu. The scenarios of the proposal that remain

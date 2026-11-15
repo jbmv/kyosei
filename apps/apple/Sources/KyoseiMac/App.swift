@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     #if KYOSEI_CHECK
     private var checkChannel: CheckChannel?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CheckPasteboard.release()
+    }
     #endif
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -78,6 +82,13 @@ enum Entry {
         {
             FileHandle.standardError.write(Data((refusal + "\n").utf8))
             exit(64)
+        }
+        // Its pasteboard is its own from before the app exists (KYO-947), so that nothing it
+        // cuts, copies or pastes reads or writes the person's.
+        guard CheckPasteboard.install() else {
+            FileHandle.standardError.write(
+                Data("A check build does not start without a pasteboard of its own.\n".utf8))
+            exit(65)
         }
         #endif
         if arguments.count >= 2, arguments[1] == "seal-key" {

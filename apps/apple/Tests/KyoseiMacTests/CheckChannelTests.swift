@@ -413,5 +413,163 @@ struct CheckChannelTests {
         }
         #expect(bed.quits.count == 1)
     }
+
+    // MARK: The build's own pasteboard and the window that stands as key (KYO-947)
+
+    /// A main menu of one menu, Edit, whose items name no target, as the app's own Edit
+    /// menu's do: AppKit finds each action's responder from the key window.
+    private func editMenu() -> NSMenu {
+        let main = NSMenu(title: "Main")
+        let edit = NSMenu(title: "Edit")
+        for (title, action, key) in [
+            ("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"),
+            ("Paste", "paste:", "v"),
+        ] {
+            edit.addItem(NSMenuItem(title: title, action: Selector((action)), keyEquivalent: key))
+        }
+        let holder = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        holder.submenu = edit
+        main.addItem(holder)
+        return main
+    }
+
+    /// Waits up to five seconds for a script in the page to return true.
+    private func wait(_ bed: Opened, _ what: String, _ script: String) async throws {
+        for _ in 0..<100 {
+            if try await value(bed, ["op": "eval", "script": script]) as? Bool == true { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        Issue.record("waited five seconds for \(what)")
+    }
+
+    @Test func cutCopyAndPasteUseTheBuildsOwnPasteboardAndLeaveAStandInForThePersonsAlone() async throws {
+        let bed = try await open()
+        defer { close(bed) }
+        // The channel put the build's pasteboard in the general one's place when it started.
+        // No key is pressed below unless every request for the general pasteboard in this
+        // process is answered with it, so a test of a build without the redirect stops here
+        // and does not cut into the pasteboard of whoever runs it.
+        let own = try #require(CheckPasteboard.own)
+        try #require(NSPasteboard.general === own)
+        try #require(NSPasteboard(name: .general) === own)
+        let countBefore = try #require(CheckPasteboard.personChangeCount)
+
+        // A pasteboard of a name of its own stands in for the person's, holding known words.
+        let person = NSPasteboard.withUniqueName()
+        defer { person.releaseGlobally() }
+        person.clearContents()
+        person.setString("the person's own words", forType: .string)
+        let held = person.changeCount
+        CheckPasteboard.standIn = person
+        defer {
+            CheckPasteboard.redirecting = true
+            CheckPasteboard.standIn = nil
+        }
+
+        let before = NSApp.mainMenu
+        NSApp.mainMenu = editMenu()
+        defer {
+            NSApp.mainMenu = before
+            CheckKeyWindow.standing = nil
+        }
+        let state = try #require(
+            try await value(bed, ["op": "window", "key": true, "focus": true]) as? [String: Any])
+        #expect(state["key"] as? Bool == true || state["stands_as_key"] as? Bool == true)
+
+        let select = "const i = document.getElementById('i'); i.focus(); i.select(); return true;"
+        _ = try await value(
+            bed, ["op": "eval", "script": "document.getElementById('i').value = 'cut these words';" + select])
+        _ = try await value(bed, ["op": "key", "key": "x", "modifiers": ["command"]])
+        try await wait(bed, "Command-X to cut the words", "return document.getElementById('i').value === '';")
+        #expect(own.string(forType: .string) == "cut these words")
+        _ = try await value(bed, ["op": "key", "key": "v", "modifiers": ["command"]])
+        try await wait(
+            bed, "Command-V to paste the words",
+            "return document.getElementById('i').value === 'cut these words';")
+        let told = try #require(try await value(bed, ["op": "pasteboard"]) as? [String: Any])
+        #expect(told["text"] as? String == "cut these words")
+        #expect(told["name"] as? String == own.name.rawValue)
+        #expect(told["is_general"] as? Bool == true)
+        #expect(told["change_count"] as? Int == own.changeCount)
+
+        // The stand-in holds what it held, and was written to by nothing.
+        #expect(person.string(forType: .string) == "the person's own words")
+        #expect(person.changeCount == held)
+
+        // With the redirect off the same key writes to the stand-in, which is what the
+        // redirect keeps from the person's pasteboard. The general pasteboard itself is
+        // reached in neither state.
+        CheckPasteboard.redirecting = false
+        _ = try await value(bed, ["op": "eval", "script": select])
+        _ = try await value(bed, ["op": "key", "key": "c", "modifiers": ["command"]])
+        for _ in 0..<100 where person.changeCount == held {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(person.changeCount != held)
+        #expect(person.string(forType: .string) == "cut these words")
+        CheckPasteboard.redirecting = true
+
+        // The general pasteboard's change count, the one thing read of it, did not move.
+        // It moves when the person at the machine copies something during this test.
+        #expect(CheckPasteboard.personChangeCount == countBefore)
+    }
+
+    @Test func anItemThatNamesNoTargetIsValidatedAndPerformedThroughTheWindowThatStandsAsKey() async throws {
+        let bed = try await open()
+        defer { close(bed) }
+        let before = NSApp.mainMenu
+        NSApp.mainMenu = editMenu()
+        defer {
+            NSApp.mainMenu = before
+            CheckKeyWindow.standing = nil
+        }
+        // The page says a composer box holds the focus with a step to undo and none to redo,
+        // and counts the calls the app's two actions make (KYO-915).
+        bed.page.undoState = ChatPage.UndoState(message: ["box": true, "undo": true, "redo": false])
+        _ = try await value(
+            bed,
+            [
+                "op": "eval",
+                "script": "window.calls = {undo: 0, redo: 0};"
+                    + "window.kyo = {undo() { window.calls.undo += 1; }, redo() { window.calls.redo += 1; }};",
+            ])
+        let undo: [String: Any] = ["op": "menu", "path": ["Edit", "Undo"]]
+
+        // An app that is not active has no key window, so the action finds no responder.
+        _ = try await value(bed, ["op": "window", "key": false])
+        if !bed.window.isKeyWindow {
+            let without = try #require(try await value(bed, undo) as? [String: Any])
+            #expect(without["enabled"] as? Bool == false)
+            #expect(without["performed"] as? Bool == false)
+            #expect(without["target"] is NSNull)
+        }
+
+        let state = try #require(
+            try await value(bed, ["op": "window", "key": true, "focus": true]) as? [String: Any])
+        #expect(state["key"] as? Bool == true || state["stands_as_key"] as? Bool == true)
+        #expect(NSApp.keyWindow === bed.window)
+        let done = try #require(try await value(bed, undo) as? [String: Any])
+        #expect(done["enabled"] as? Bool == true)
+        #expect(done["performed"] as? Bool == true)
+        #expect(done["action"] as? String == "undo:")
+        #expect(done["target"] as? String == "ChatPage")
+        try await wait(bed, "the item's action to call the page", "return window.calls.undo === 1;")
+
+        // The view validates Redo itself and says there is nothing to redo.
+        let redo = try #require(
+            try await value(bed, ["op": "menu", "path": ["Edit", "Redo"]]) as? [String: Any])
+        #expect(redo["target"] as? String == "ChatPage")
+        #expect(redo["enabled"] as? Bool == false)
+        #expect(redo["performed"] as? Bool == false)
+
+        // With no box in focus the view takes neither action, and the item is another's.
+        bed.page.undoState = ChatPage.UndoState()
+        let passed = try #require(try await value(bed, undo) as? [String: Any])
+        #expect(passed["target"] as? String != "ChatPage")
+        let calls = try #require(
+            try await value(bed, ["op": "eval", "script": "return window.calls;"]) as? [String: Any])
+        #expect(calls["undo"] as? Int == 1)
+        #expect(calls["redo"] as? Int == 0)
+    }
 }
 #endif
