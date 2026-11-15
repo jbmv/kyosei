@@ -897,7 +897,7 @@ tests each rule against the server's routes, the transcript and the session's ow
 session imitates Claude Code 2.1.319 as the recorded screens under
 `tests/fixtures/session_layer/` show it, and can drift from later releases as those do.
 
-Two scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
+Four scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
 plan's outstanding members are red, plans are named by id and then title, the side bar has no
 Latest shift note, one drawer is present in Records and in Files and docks, and an open file's
 root and path are separate elements whose right-click menu offers Copy path.
@@ -906,8 +906,39 @@ scripted session, a prompt typed into the composer appears dimmed at the press a
 dimming when the server has typed it into the session's pane, the working line is one row
 with its whole text in its tooltip, and with the chat scrolled up new replies leave the place
 unchanged and are counted on the arrow. It ends with a short check that a question the
-session asks reaches the chat from the session's hook while its dialog is open. The other
-scenarios of the proposal are planned and not built.
+session asks reaches the chat from the session's hook while its dialog is open.
+
+`check/test_scenario_a.py` holds two scenarios of the composer (KYO-947), with the page's
+reading and driving in `check/composer.py`. Scenario A is the sequence of KYO-936, KYO-938 and
+KYO-939. A scratchpad of three lines is given an anchor on a sentence of a reply, a tag and an
+image, the image uploaded through the app's `attach` route to the test server, and becomes the
+prompt by Create prompt. That move, and Send to prompt into a prompt that holds words, are each
+made, undone and redone: undone once by the call the Edit menu's item makes and once by
+Command-Z through the `key` request, and redone by Command-Shift-Z. A line cut from the prompt
+carries its anchor into a new scratchpad, a Command-Z takes the paste back and another takes
+the cut back, a scratchpad emptied by a cut and one added with + and left untyped leave when
+the caret moves to the prompt and stay while the focus is outside the composer, and Send gives
+the session's pane the anchor's line, the image's path and the text in order. After each step
+the draft on the test server, which is what a second device reads and from which the marks
+are read, is compared with the composer's boxes; a box with neither words nor marks has no
+draft. Scenario G is the held prompt: a prompt sent during a turn is held, Edit returns it as
+the prompt and what was typed since becomes a scratchpad, and the last activity reads
+"1m ago" while the held prompt waits and "< 1m ago" once the turn has ended and the prompt is
+delivered, which takes the 80 seconds of the scripted turn.
+
+Three things in these scenarios are not driven as a person would drive them. Edit > Undo and
+Edit > Redo cannot be chosen through the `menu` request: an app that was not brought to the
+front has no key window, so the two items are disabled and the request performs nothing, which
+the result records as `scenario_A_edit_menu_without_a_key_window`. The scenario calls
+`window.kyo.undo()` and `window.kyo.redo()`, which the items call when they are performed, and
+its assertions are named for the call. A cut and a paste are `ClipboardEvent`s dispatched in the
+page with a `DataTransfer` of the page's own, since Command-X and Command-V through the `key`
+request go through the system pasteboard, which is the person's and which the check build has no
+private substitute for. An anchor is placed through the page's context menu on a paragraph of the
+reply, a tag through the panel a gutter's context menu opens, and a file by a paste event that
+carries it, each as the page's own tests place them, since no `mouse` request reaches the
+page's menus and panels without tracking a native menu. The scenarios of the proposal that remain
+are planned and not built.
 
 A run writes `result.json` and `review.html` under `.build/check-run`, or under
 `KYOSEI_CHECK_OUT`, and `make app-check` prints the path. The result names what was tested (the
