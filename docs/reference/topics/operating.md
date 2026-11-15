@@ -627,6 +627,23 @@ key that is shown or a request is refused, naming its class; a request key is ch
 asking the session. `worker_model` must match the pattern `kyo install-agents` applies to a
 model id. The commands are refused in a dispatch worktree.
 
+Two more writers (KYO-955) are not for `config.yml`. `kyo config --machine set
+serve_idle_message true|false` changes that one line of `$KYOSEI_HOME/settings.yml` through the
+same splice, validated by the parser the readers of that file use (`home_settings.parse`),
+and refuses a missing file and every other machine key; `serve_send` and
+`orchestrator_command` are set at the machine by hand, and the file's spelling of the command
+key (`controller_command` or `orchestrator_command`) is never changed. `kyo install-agents
+--type TEMPLATE=MODEL[:EFFORT] --in-place` changes only the `model:` and `effort:` lines of the
+front matter of an existing agent type (the block between its first two `---` lines), and
+leaves the rest of the file and its line endings as they were. It refuses a missing file, a
+file without front matter or whose `name:` is not the template's, a model outside the model
+pattern and an effort outside `low`, `medium`, `high`, `xhigh` and `max`, and it is not
+combined with `--force`. Both writers accept `--if-match sha256:<hex>`, the digest of the file
+as it was read, and refuse when the file's digest differs. Each write and each refused write is
+a row of `$KYOSEI_HOME/config-log.jsonl`, which `kyo config` reports as `last_change` of the
+setting (of the machine document) and of the agent type (in `agent_types`, whose row carries
+the previous and new `{model, effort}`).
+
 All of them change the file through one splice, which edits a single line and returns every
 other line unchanged. It applies four rules in order: replace the value of a key present on
 one line, keeping a trailing comment; replace the commented example of an absent key

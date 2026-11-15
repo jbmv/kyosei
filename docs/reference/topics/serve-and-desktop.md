@@ -860,7 +860,9 @@ serve_send: true
 serve_idle_message: true
 ```
 
-The value must be `true` or `false`; anything else is refused by name. The timer runs only
+`kyo config --machine set serve_idle_message true|false` writes the line (KYO-955); it needs
+the file to exist, keeps its comments, and accepts `true` while `serve_send` is off, since the
+person at the terminal is at the machine. The value must be `true` or `false`; anything else is refused by name. The timer runs only
 where `serve_send` is also true. The server reads `serve_idle_message` when it starts, to decide
 whether to run the timer's thread, so switching it on needs a restart; both settings are read
 again at every look, so clearing either stops the messages at once.

@@ -722,7 +722,7 @@ def _beside(kyosei_dir: Path) -> dict:
 # ----------------------------------------------------------------------------- agent types
 
 
-def _agent_type_documents(code_root: Path, items: dict) -> list[dict]:
+def _agent_type_documents(code_root: Path, items: dict, environ: dict[str, str]) -> list[dict]:
     from .cmd_install_agents import _MODEL  # noqa: F401 - the pattern the writer applies
 
     found = []
@@ -732,6 +732,7 @@ def _agent_type_documents(code_root: Path, items: dict) -> list[dict]:
         data, text = _read_file(path)
         if data is None:
             continue
+        logged = config_splice.latest_changes(environ, path).get(name)
         meta: dict = {}
         if text.startswith("---"):
             parts = text.split("---", 2)
@@ -746,6 +747,11 @@ def _agent_type_documents(code_root: Path, items: dict) -> list[dict]:
                 "model": str(model) if model is not None else None,
                 "effort": str(effort) if effort is not None else None,
                 "etag": etag_of(data),
+                "last_change": (
+                    {k: logged.get(k) for k in ("at", "device", "key", "previous", "new")}
+                    if logged
+                    else None
+                ),
                 "class": CLASS_EDITABLE,
                 "why": "Two front-matter lines, validated by the model pattern and the "
                 "effort levels `kyo install-agents` uses; creating or removing a type is "
@@ -814,7 +820,7 @@ def build_project_document(
             _row_document(row, text, raw, where, items, withhold=withhold, latest=latest)
             for row in SETTINGS
         ],
-        "agent_types": _agent_type_documents(layout.code_root, items),
+        "agent_types": _agent_type_documents(layout.code_root, items, environ),
         "beside": _beside(layout.store_root / "kyosei"),
         "decisions": [
             _decision_document(decision, items, where)

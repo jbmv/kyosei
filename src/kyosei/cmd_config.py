@@ -15,6 +15,13 @@ through :func:`kyosei.config_splice.apply_change`, which keeps the file's commen
 atomically and logs the attempt; every other key is refused, naming its class. The two other
 editable keys have their own commands, ``kyo prior-art-setting`` and ``kyo docs coverage
 --level``, which write through the same splice.
+
+KYO-955 adds ``kyo config --machine set serve_idle_message true|false``, the one editable key of
+``$KYOSEI_HOME/settings.yml``. It splices that line, validates the candidate with
+:func:`kyosei.home_settings.parse` (the parser the readers use) and logs the attempt; the
+machine file is never created, and ``serve_send`` and ``orchestrator_command`` are set at the
+machine by hand. Whether ``serve_send`` is on is not checked at the terminal: that refusal
+belongs to the served route.
 """
 
 from __future__ import annotations
@@ -125,10 +132,7 @@ def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
     from .config import config_path_for, refuse_store_write, validate_config_text
 
     if args.machine:
-        raise UsageError(
-            "`kyo config --machine set` is not built yet: edit $KYOSEI_HOME/settings.yml by "
-            "hand (the machine's settings are written at the machine)"
-        )
+        return _cmd_write_machine(ctx, args, action)
     key = args.key
     if not key:
         raise UsageError(
@@ -174,6 +178,7 @@ def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
         actor=ctx.actor,
         precheck=precheck,
         probe_root=layout.store_root,
+        expected_etag=getattr(args, "if_match", None),
     )
     shown = config_splice.shown(applied.value)
     if applied.written:
@@ -193,6 +198,89 @@ def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
             "etag": applied.etag,
             "config_path": str(path),
             "wrote_to_store": True,
+        },
+    )
+
+
+#: The machine keys no writer changes, and what is said of each.
+MACHINE_BY_HAND = ("serve_send", "orchestrator_command", "controller_command")
+
+
+def _cmd_write_machine(ctx: Context, args: Namespace, action: str) -> Output:
+    """``kyo config --machine set serve_idle_message true|false`` (KYO-955)."""
+    from . import home_settings
+
+    key = args.key
+    if action != "set":
+        raise UsageError(
+            "`kyo config --machine` writes with `set` only: "
+            "`kyo config --machine set serve_idle_message true|false`"
+        )
+    if not key or args.value is None:
+        raise UsageError(
+            "`kyo config --machine set` needs a key and a value: "
+            "`kyo config --machine set serve_idle_message true|false`"
+        )
+    path = home_settings.settings_path(ctx.environ)
+    project = "machine"
+
+    def refuse(reason: str) -> KyoseiError:
+        config_splice.log_refusal(
+            ctx.environ, project=project, file=path, key=key, reason=reason, actor=ctx.actor
+        )
+        return KyoseiError(reason)
+
+    if key in MACHINE_BY_HAND:
+        raise refuse(
+            f"{key} is set at the machine by hand: edit {path} yourself. `kyo config --machine "
+            f"set` writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
+        )
+    if key != home_settings.SERVE_IDLE_MESSAGE_KEY:
+        raise refuse(
+            f"{key!r} is not a setting of {path} that `kyo config --machine set` writes; it "
+            f"writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
+        )
+    lowered = args.value.strip().lower()
+    if lowered not in ("true", "false"):
+        raise refuse(f"{key} takes `true` or `false`; got {args.value!r}")
+    if not path.is_file():
+        raise refuse(
+            f"{path} does not exist, and `kyo config --machine set` does not create it; create "
+            f"the file by hand (an empty file is enough) and set {key} again"
+        )
+    change = config_splice.Change(key, lowered == "true")
+
+    def validate(candidate: str) -> None:
+        home_settings.parse(candidate, path)
+
+    applied = config_splice.apply_change(
+        path=path,
+        change=change,
+        validate=validate,
+        environ=ctx.environ,
+        project=project,
+        actor=ctx.actor,
+        expected_etag=getattr(args, "if_match", None),
+    )
+    shown = config_splice.shown(applied.value)
+    if applied.written:
+        line = f"{key}: {shown} (was {config_splice.shown(applied.previous)}) in {path}"
+    else:
+        line = f"{key}: already {shown} in {path}; nothing written"
+    return Output(
+        [line, f"  logged in {config_splice.log_path(ctx.environ)}"],
+        {
+            "ok": True,
+            "command": "config",
+            "machine": True,
+            "action": action,
+            "key": key,
+            "previous": applied.previous,
+            "value": applied.value,
+            "written": applied.written,
+            "etag": applied.etag,
+            "settings_path": str(path),
+            "wrote_to_store": False,
         },
     )
 

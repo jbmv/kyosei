@@ -3986,24 +3986,50 @@ UNREACHED: dict[str, str] = {
         + "test_a_key_that_is_not_editable_is_refused_naming_its_class"
     ),
     "cmd_config.py:_cmd_write#0": (
-        "not provoked by this walk: a hand edit of $KYOSEI_HOME/settings.yml, since the "
-        "machine's settings have no writer in this build; the refusal names no command that "
-        "could clear it"
-    ),
-    "cmd_config.py:_cmd_write#1": (
         "not provoked by this walk: the same command with a key; proved by "
         + "tests/test_kyo950_config_writers.py::"
         + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
     ),
-    "cmd_config.py:_cmd_write#2": (
+    "cmd_config.py:_cmd_write#1": (
         "not provoked by this walk: the same command with a value; proved by "
         + "tests/test_kyo950_config_writers.py::"
         + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
     ),
-    "cmd_config.py:_cmd_write#3": (
+    "cmd_config.py:_cmd_write#2": (
         "not provoked by this walk: `kyo config unset` with the key alone; proved by "
         + "tests/test_kyo950_config_writers.py::"
         + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
+    ),
+    # KYO-955: `kyo config --machine set`. Each is a re-invocation with the arguments the
+    # message quotes, which this walk has no standing to invent.
+    "cmd_config.py:_cmd_write_machine#0": (
+        "not provoked by this walk: `kyo config --machine set serve_idle_message true|false`, "
+        "the one command the message names; proved by "
+        + "tests/test_kyo950_machine_writers.py::"
+        + "test_another_key_and_a_value_that_is_not_a_boolean_are_refused"
+    ),
+    "cmd_config.py:_cmd_write_machine#1": (
+        "not provoked by this walk: the same command with a key and a value; proved by "
+        + "tests/test_kyo950_machine_writers.py::"
+        + "test_another_key_and_a_value_that_is_not_a_boolean_are_refused"
+    ),
+    "cmd_install_agents.py:_front_matter_span#0": (
+        "not provoked by this walk: restoring the file with "
+        "`kyo install-agents --type ... --force`; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_the_remedy_for_a_file_without_front_matter_clears_it"
+    ),
+    "cmd_install_agents.py:_front_matter_span#1": (
+        "not provoked by this walk: restoring the file with `--force`, "
+        "or closing the front matter by hand; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_the_remedy_for_a_file_without_front_matter_clears_it"
+    ),
+    "cmd_install_agents.py:_front_line#0": (
+        "not provoked by this walk: restoring the file with `--force`, "
+        "or adding the line by hand; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_the_remedy_for_a_file_without_front_matter_clears_it"
     ),
     # KYO-900: a --turn that names a task notification, which needs a transcript and a turn
     # index holding one.
@@ -4766,7 +4792,7 @@ FINDINGS: dict[str, str] = {}
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
     # KYO-954: the writers of the editable settings.
-    "cmd_config.py:_cmd_write#4": (
+    "cmd_config.py:_cmd_write#3": (
         "a re-invocation inside a Kyosei project, or with --root naming one; proved by "
         + "tests/test_kyo950_config_writers.py::"
         + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
@@ -4781,6 +4807,12 @@ RECORDED: dict[str, str] = {
         ""
         "tests/test_kyo950_config_writers.py::"
         "test_the_log_that_cannot_be_opened_is_cleared_by_the_remedy_it_names"
+    ),
+    "config_splice.py:apply_edit#1": (
+        "reading the file again and repeating the change: a file that changed while the change "
+        "was being prepared is refused, and the repeat is the remedy; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_in_place_etag_is_checked_again_before_the_rename"
     ),
     "config_splice.py:apply_change#1": (
         "reading the file again and repeating the change: a file that changed since it was "
@@ -4848,22 +4880,22 @@ RECORDED: dict[str, str] = {
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
     ),
-    "home_settings.py:load#1": (
+    "home_settings.py:parse#0": (
         "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
     ),
-    "home_settings.py:load#2": (
+    "home_settings.py:parse#1": (
         "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
     ),
-    "home_settings.py:load#3": (
+    "home_settings.py:parse#2": (
         "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
     ),
-    "home_settings.py:load#6": (
+    "home_settings.py:parse#5": (
         "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
@@ -5198,7 +5230,28 @@ RECORDED: dict[str, str] = {
         "re-invoking with each template named once; proved by tests/test_install_agents.py"
         "::test_a_type_named_twice_is_refused, which runs the corrected call to exit 0"
     ),
-    "cmd_install_agents.py:cmd_install_agents#2": (
+    # KYO-955: `kyo install-agents --in-place`; the remedy of each is a re-invocation or a
+    # hand edit of the file the message names, run by the test it cites.
+    "cmd_install_agents.py:_cmd_in_place#0": (
+        "dropping --force, or naming one --type with --if-match; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_in_place_refuses_a_different_etag_and_the_current_one_clears_it"
+    ),
+    "cmd_install_agents.py:_cmd_in_place#1": (
+        "naming one --type with --if-match; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_in_place_refuses_a_different_etag_and_the_current_one_clears_it"
+    ),
+    "cmd_install_agents.py:_cmd_in_place#3": (
+        "reading the file again and repeating the change with its current digest; proved by "
+        "tests/test_kyo950_machine_writers.py::"
+        "test_in_place_refuses_a_different_etag_and_the_current_one_clears_it"
+    ),
+    "cmd_install_agents.py:edit_front_matter#2": (
+        "a hand edit of the two lines the message names; the splice refuses only a line it "
+        "cannot change exactly, which the tests do not construct"
+    ),
+    "cmd_install_agents.py:cmd_install_agents#3": (
         "re-invoking with `--force` to replace the differing file (or `--print` to read "
         "the text first); proved by tests/test_install_agents.py::"
         "test_an_existing_differing_file_is_refused_and_force_clears_it"
