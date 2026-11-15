@@ -660,6 +660,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 - **2026-11-15** — `KYO-941` (bug) — Mac app: the tag field makes a tag the server refuses at send
 - **2026-11-15** — `KYO-940` (bug) — Mac app: the question card shows in Chat only after the question is answered
 - **2026-11-15** — `KYO-939` (task) — Mac app: an empty scratchpad leaves when the caret moves to another box
+- **2026-11-15** — `KYO-922` (bug) — Mac app: a terminal question is not shown in Chat, nor signalled as waiting
 - **2026-11-14** — `KYO-944` (task) — Mac app check harness: the check build, the channel, and Records and Files
 - **2026-11-14** — `KYO-942` (proposal) — Mac app: an end-to-end check harness that drives the packaged app against a real kyo serve
 - **2026-11-14** — `KYO-938` (task) — Mac app: a cut line's marks follow it when it is pasted in a composer box
