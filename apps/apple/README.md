@@ -968,6 +968,29 @@ carries it, each as the page's own tests place them, since no `mouse` request re
 page's menus and panels without tracking a native menu. The scenarios of the proposal that remain
 are planned and not built.
 
+`check/test_scenario_b.py` and `check/test_scenario_c.py` are the lifecycle scenarios
+(KYO-948), with the project switcher's reading and driving in `check/lifecycle.py`. They start
+the check build without `KYOSEI_PROJECT`, so that the project it shows is the one it saved in
+its own defaults domain, which the harness sets with `harness.save_project` and clears with
+`harness.forget_settings`. Scenario B serves three projects from one test server, one with the
+scripted session. With no saved project the app shows the list of projects; a prompt is left
+unsent in each project, and the window is switched among them with the dropdown, each time
+checking the title, the chat, Records, Files and the composer against the project chosen and
+that nothing of the project left is drawn. The status bar is native and is compared by the
+pixels of its right-hand label in a snapshot, not read. A live-session link switches to its
+project and follows its session, the prompts survive a quit and a start, and a saved project
+the server no longer lists shows the list of projects. A second test, with no live session,
+saves a tagged prompt to the project's draft as another device would, and checks that the app
+shows it, that a session started has it once in its composer, and that a session ended with an
+unsent prompt leaves it to the next. Scenario C types through the `key` request, waits for the
+text to be in the box, and sends `quit` as the very next request; between the two runs the page's
+own storage under the run's substitute home is removed, so that the text restored can only have
+come from the server or from what the app kept in its defaults. A second test suspends the test
+server with SIGSTOP, to the pid the harness recorded for it and resumed in a `finally`, types,
+quits, and starts the app again once the server answers, expecting the text and the line that
+says it was restored. A `quit` sent before the page has taken its first key leaves the
+composer with the first key only; the scenarios therefore wait for the typed text.
+
 A run writes `result.json` and `review.html` under `.build/check-run`, or under
 `KYOSEI_CHECK_OUT`, and `make app-check` prints the path. The result names what was tested (the
 commit, the digest of the check build's executable and the server's version), whether the
