@@ -348,6 +348,7 @@ final class SessionFeed {
         }
         sendRecordsStart()
         sendFilesStart()
+        send("configStart", #"{"project": \#(quoted(project))}"#)
         recordsTask = Task { await followProject() }
     }
 
@@ -1543,6 +1544,7 @@ final class SessionFeed {
         while !Task.isCancelled {
             if lost {
                 send("recordsChanged", #"{"kind": "store"}"#)
+                send("configChanged", #"{"kind": "config"}"#)
                 draftChanged(.project)
                 projectAgendaChanged()
             }
@@ -1556,6 +1558,9 @@ final class SessionFeed {
                         draftChanged(.project)
                     } else if event.data.contains(#""agenda""#) {
                         projectAgendaChanged()
+                    } else if event.data.contains(#""config""#) {
+                        // KYO-953: a setting, a file beside it or an agent type changed.
+                        send("configChanged", event.data)
                     } else {
                         send("recordsChanged", event.data)
                     }
@@ -1820,6 +1825,52 @@ final class SessionFeed {
         default:
             break
         }
+    }
+
+    // MARK: The Config view (KYO-953)
+
+    /// Window > Config… and the button in Settings: the page turns to its Config view, and the
+    /// window comes to the front so that the view is seen. A check build is never brought to
+    /// the front (KYO-945), so there the page is turned and the window left where it is.
+    func showConfig() {
+        send("openView", #"{"view": "config"}"#)
+        #if !KYOSEI_CHECK
+        if let window = webView?.window {
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+        }
+        #endif
+    }
+
+    /// The page's Config view asks for the project's document and the machine's, which the two
+    /// read routes of KYO-952 serve to a device token of any permission. Each is handed to the
+    /// page with its status, since a refusal, an absent token and a server older than the
+    /// routes are each something the view says in its own words. A 404 also names the
+    /// server's build, which is the only thing such a server can tell.
+    func config(body: [String: Any]) {
+        guard body["want"] as? String == "read" else { return }
+        let project = project
+        let client = client
+        let token = Self.deviceToken()
+        Task {
+            async let own = try? client.config(project: project, token: token)
+            async let machine = try? client.settings(token: token)
+            let (project_, machine_) = await (own, machine)
+            var build = "null"
+            if project_?.status == 404 || machine_?.status == 404 {
+                build = quoted(await client.serverBuild())
+            }
+            guard project == self.project else { return }
+            send(
+                "configRead",
+                #"{"project": \#(quoted(project)), "version": \#(build), "#
+                    + #""read": \#(configReading(project_)), "machine": \#(configReading(machine_))}"#)
+        }
+    }
+
+    private func configReading(_ reply: ServeClient.FileReply?) -> String {
+        #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
+            + #""error": \#(filesProblem(reply))}"#
     }
 
     private func send(_ function: String, _ json: String) {

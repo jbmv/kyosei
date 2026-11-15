@@ -56,6 +56,10 @@ import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
 } from "./searchhistory";
 import { type StartFrame, startView } from "./start";
+import {
+  type ConfigFrame, type Control, type RowView, type SectionView, CLASS_LABELS, CLASS_MEANINGS,
+  chosenSection, fileProblem, machineSections, projectSections, readState,
+} from "./config";
 import { Terminal } from "@xterm/xterm";
 import {
   TERMINAL_FONT, type TerminalSize, bytesOf, fontToFit, lineBreakKeys, viewSize,
@@ -354,6 +358,7 @@ const ICONS = {
   code: '<path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5.5l-3 13"/>',
   image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5L20 17"/>',
   history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.2 4.8v3.6h3.6"/><path d="M12 8v4.3l2.8 1.7"/>',
+  config: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
 };
 
 /** A bare line icon in the colour of the text around it. */
@@ -5412,6 +5417,7 @@ const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () 
   { id: "records", name: "Records", icon: "records", entered: () => enterRecords() },
   { id: "files", name: "Files", icon: "folder", entered: () => enterFiles() },
   { id: "history", name: "History", icon: "history", entered: () => enterHistory() },
+  { id: "config", name: "Config", icon: "config", entered: () => enterConfig() },
 ];
 let currentView = "chat";
 
@@ -6601,6 +6607,7 @@ const recordFrames = {
     if (frame.gates) awaitingRecords = awaitingIds(frame.gates);
     drawRecordLists();
     drawAgenda();
+    if (currentView === "config") drawConfig();
     // A link or a member on the open page is named by the list's titles.
     if (openRecordDoc) drawRecord();
     // So is a record linked in the chat, in the chat's side bar.
@@ -8755,4 +8762,323 @@ drawNav("history", true, readerPlaces);
 drawHistory();
 drawOpened();
 
-(window as any).kyo = Object.assign(kyo, recordFrames, fileFrames, historyFrames);
+// ---------------------------------------------------------------- Config (KYO-953)
+
+/** The two documents as the app last read them, and what to show of them. */
+let configRead: ConfigFrame | null = null;
+/** Whether the documents have been asked for; after that a `config` event reads them again. */
+let configAsked = false;
+/** The section shown, as `project:<id>` or `machine:<id>`. */
+let configShown: string | null = null;
+/** The comments a reader has opened, by row, which a redraw keeps open. */
+const configOpened = new Set<string>();
+const configPane = document.getElementById("view-config")!;
+const configPage = document.getElementById("config-page")!;
+const configSide = document.getElementById("config-side")!;
+
+function enterConfig(): void {
+  if (!configAsked) {
+    configAsked = true;
+    post("config", { want: "read" });
+  }
+  // The records' prefixes are what makes an id in a comment a link, and are read with the lists.
+  if (!listsAsked) {
+    listsAsked = true;
+    post("records", { want: "lists" });
+  }
+  drawConfig();
+}
+
+function configNote(text: string, tone = "plain"): HTMLElement {
+  const note = document.createElement("div");
+  note.className = "config-note";
+  note.dataset.tone = tone;
+  note.textContent = text;
+  return note;
+}
+
+/** A setting's words, with the record ids in them as links and nothing else drawn from them. */
+function configText(source: string): DocumentFragment {
+  return linked(source);
+}
+
+function configControl(control: Control): HTMLElement {
+  const holder = document.createElement("div");
+  holder.className = "config-control";
+  holder.dataset.control = control.kind;
+  const button = (label: string, pressed?: boolean): HTMLButtonElement => {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.disabled = true;
+    made.textContent = label;
+    if (pressed !== undefined) made.setAttribute("aria-pressed", String(pressed));
+    return made;
+  };
+  const field = (value: string, kind: string, label: string): HTMLInputElement => {
+    const made = document.createElement("input");
+    made.type = kind;
+    made.value = value;
+    made.disabled = true;
+    made.setAttribute("aria-label", label);
+    return made;
+  };
+  switch (control.kind) {
+    case "text":
+    case "number":
+      holder.append(field(control.value, control.kind, "Value"), button("Save"));
+      if (control.clearable) holder.append(button("Clear"));
+      break;
+    case "segments":
+      holder.append(...control.options.map((option) => {
+        const made = button(option, option === control.value);
+        made.className = "chip";
+        return made;
+      }));
+      break;
+    case "switch": {
+      const made = field("", "checkbox", "On or off");
+      made.checked = control.value === true;
+      made.setAttribute("role", "switch");
+      holder.append(made, span("config-switch-state", control.value === null ? "not set" : control.value ? "on" : "off"));
+      break;
+    }
+    case "turn-off":
+      holder.append(button("Turn off"));
+      if (control.value === false) holder.append(span("config-switch-state", "off"));
+      break;
+    case "fields":
+      for (const entry of control.fields) {
+        const label = span("config-field-label", entry.label);
+        holder.append(label, field(entry.value, "text", entry.label));
+      }
+      holder.append(button("Save"));
+      break;
+  }
+  return holder;
+}
+
+function configRow(row: RowView): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "config-row";
+  box.dataset.class = row.klass;
+  box.dataset.name = row.name;
+  const head = document.createElement("div");
+  head.className = "config-head";
+  const name = span("config-name", row.name);
+  const badge = span("config-class", row.label);
+  badge.dataset.class = row.klass;
+  head.append(name);
+  if (row.decision) head.append(span("config-decision", row.decision));
+  head.append(badge);
+  for (const status of row.statuses) {
+    const chip = span("config-status", status.label ? `${status.label}: ${status.status}` : status.status);
+    chip.dataset.status = status.status;
+    if (status.detail) chip.title = status.detail;
+    head.append(chip);
+  }
+  box.append(head);
+  if (row.hasValue) {
+    const value = document.createElement("div");
+    value.className = "config-value";
+    if (row.value === null) {
+      value.append(span("config-unset", "not set"), span("config-absent", row.absent ? `: ${row.absent}` : ""));
+    } else if (row.block) {
+      const pre = document.createElement("pre");
+      pre.className = "config-value-text";
+      pre.textContent = row.value;
+      value.append(pre);
+    } else {
+      value.append(span("config-value-text", row.value));
+    }
+    if (row.trailing) value.append(span("config-trailing", row.trailing));
+    box.append(value);
+  }
+  // A decision holds no value; what its onboard items say is the row's content.
+  if (!row.hasValue) {
+    for (const status of row.statuses) {
+      if (!status.detail) continue;
+      const line = document.createElement("div");
+      line.className = "config-detail";
+      line.append(configText(status.detail));
+      if (status.fix) line.append(" ", span("config-fix", `Fix: ${status.fix}`));
+      box.append(line);
+    }
+  } else {
+    for (const status of row.statuses) {
+      if (status.status === "present" || (!status.detail && !status.fix)) continue;
+      const line = document.createElement("div");
+      line.className = "config-detail";
+      line.append(configText(status.detail ?? ""));
+      if (status.fix) line.append(" ", span("config-fix", `Fix: ${status.fix}`));
+      box.append(line);
+    }
+  }
+  if (row.comment.length) {
+    const full = row.comment.join("\n");
+    if (row.comment.length === 1) {
+      const line = document.createElement("div");
+      line.className = "config-comment";
+      const textHolder = span("config-comment-text", "");
+      textHolder.append(configText(full));
+      line.append(textHolder);
+      box.append(line);
+    } else {
+      const details = document.createElement("details");
+      details.className = "config-comment";
+      details.open = configOpened.has(row.id);
+      details.addEventListener("toggle", () => {
+        if (details.open) configOpened.add(row.id);
+        else configOpened.delete(row.id);
+      });
+      const summary = document.createElement("summary");
+      summary.append(span("config-first", row.first ?? ""),
+        span("config-more", `+${row.comment.length - 1} more ${row.comment.length === 2 ? "line" : "lines"}`));
+      const pre = document.createElement("pre");
+      pre.className = "config-comment-text";
+      pre.append(configText(full));
+      details.append(summary, pre);
+      box.append(details);
+    }
+  }
+  if (row.control) {
+    box.append(configControl(row.control));
+    if (row.oneWay) {
+      const warning = document.createElement("div");
+      warning.className = "config-warning";
+      warning.textContent = row.oneWay;
+      box.append(warning);
+    }
+  }
+  if (row.how) box.append(span("config-how", row.how));
+  if (row.why) box.append(span("config-why", row.why));
+  return box;
+}
+
+function configSectionPage(section: SectionView, problem: string | null, problemOf: string): HTMLElement[] {
+  const parts: HTMLElement[] = [];
+  const title = document.createElement("h2");
+  title.className = "config-title";
+  title.textContent = section.title;
+  parts.push(title);
+  if (problem) {
+    parts.push(configNote(
+      `This build cannot read ${problemOf}: ${problem.replace(/[.\s]*$/, "")}. The values below are read from the file as written, `
+      + "and no control works until it is read.", "problem"));
+  }
+  for (const fact of section.facts) {
+    const line = document.createElement("div");
+    line.className = "config-fact";
+    if (fact.tone) line.dataset.tone = fact.tone;
+    line.append(span("config-fact-label", fact.label), configText(fact.text));
+    parts.push(line);
+  }
+  if (section.rows.some((row) => row.klass !== "shown" || row.control)) {
+    const legend = document.createElement("div");
+    legend.className = "config-legend";
+    for (const klass of ["shown", "editable", "request"] as const) {
+      if (!section.rows.some((row) => row.klass === klass)) continue;
+      const item = document.createElement("span");
+      item.className = "config-legend-item";
+      const badge = span("config-class", CLASS_LABELS[klass]);
+      badge.dataset.class = klass;
+      item.append(badge, ` ${CLASS_MEANINGS[klass]}`);
+      legend.append(item);
+    }
+    parts.push(legend);
+  }
+  for (const listing of section.listings) {
+    const line = document.createElement("div");
+    line.className = "config-listing";
+    line.append(span("config-listing-label", listing.label), span("config-listing-names", listing.names.join(", ")));
+    parts.push(line);
+  }
+  parts.push(...section.rows.map(configRow));
+  return parts;
+}
+
+function drawConfig(): void {
+  const project = readState(configRead?.read, configRead?.version);
+  const machine = readState(configRead?.machine, configRead?.version);
+  const projectSecs = project.kind === "ok" ? projectSections(project.document) : [];
+  const machineSecs = machine.kind === "ok" ? machineSections(machine.document) : [];
+  const keyed = (group: string, sections: SectionView[]) => sections.map((section) => ({ key: `${group}:${section.id}`, section, group }));
+  const all = [...keyed("project", projectSecs), ...keyed("machine", machineSecs)];
+  const shown = all.find((entry) => entry.key === configShown) ?? all[0] ?? null;
+  const side: HTMLElement[] = [];
+  const group = (heading: string, group_: string, entries: ReturnType<typeof keyed>, failed: string | null) => {
+    const title = document.createElement("h4");
+    title.textContent = heading;
+    side.push(title);
+    for (const entry of entries) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "config-section-button";
+      button.dataset.section = entry.key;
+      button.textContent = entry.section.title;
+      if (shown && entry.key === shown.key) button.setAttribute("aria-current", "true");
+      button.addEventListener("click", () => {
+        configShown = entry.key;
+        drawConfig();
+        configPane.scrollTop = 0;
+      });
+      side.push(button);
+    }
+    if (failed) side.push(emptyRow(failed));
+  };
+  group(`Project${configRead?.project ? ` ${configRead.project}` : ""}`, "project", keyed("project", projectSecs),
+    project.kind === "failed" ? "Not read." : project.kind === "waiting" ? "Reading…" : null);
+  group("Machine", "machine", keyed("machine", machineSecs),
+    machine.kind === "failed" ? "Not read." : machine.kind === "waiting" ? "Reading…" : null);
+  configSide.replaceChildren(...side);
+
+  const page: HTMLElement[] = [];
+  const failures: [string, ReturnType<typeof readState>][] = [["The project's configuration", project], ["The machine's settings", machine]];
+  for (const [what, state] of failures) {
+    if (state.kind === "failed") page.push(configNote(`${what}: ${state.message}`, "failed"));
+  }
+  if (shown) {
+    const document_ = (shown.group === "project" ? project : machine);
+    const problem = document_.kind === "ok"
+      ? fileProblem(document_.document, shown.group === "project" ? "config" : "settings") : null;
+    page.push(...configSectionPage(shown.section, problem,
+      shown.group === "project" ? "kyosei/config.yml" : "the machine's settings.yml"));
+  } else if (project.kind === "waiting" || machine.kind === "waiting") {
+    page.push(configNote("Reading the configuration…"));
+  }
+  configPage.replaceChildren(...page);
+  document.getElementById("config-count")!.textContent = shown
+    ? `${shown.group === "project" ? "Project" : "Machine"} · ${shown.section.title}` : "";
+}
+
+const configFrames = {
+  /** The window turned to another project, or started: what was read belongs to the last. */
+  configStart(_frame: { project?: string }): void {
+    configRead = null;
+    configShown = null;
+    configOpened.clear();
+    configAsked = currentView === "config";
+    if (configAsked) post("config", { want: "read" });
+    drawConfig();
+  },
+
+  /** What the two read routes answered, each with its status, document and refusal. */
+  configRead(frame: ConfigFrame): void {
+    if (menu?.project && frame.project && frame.project !== menu.project) return;
+    configRead = frame;
+    drawConfig();
+  },
+
+  /** The project's event stream reported a change of a configuration file. */
+  configChanged(_frame: { kind?: string }): void {
+    if (configAsked) post("config", { want: "read" });
+  },
+
+  /** Settings' button and the app menu's Config… turn the window to a view. */
+  openView(frame: { view?: string }): void {
+    if (frame.view && VIEWS.some((view) => view.id === frame.view)) showView(frame.view);
+  },
+};
+
+drawConfig();
+
+(window as any).kyo = Object.assign(kyo, recordFrames, fileFrames, historyFrames, configFrames);

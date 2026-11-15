@@ -32,6 +32,16 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            Section {
+                HStack {
+                    Text("Project and machine configuration is in the window's Config view.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Open Config") { feed.showConfig() }
+                }
+            }
             HStack {
                 Text(note).foregroundStyle(.secondary)
                 Spacer()

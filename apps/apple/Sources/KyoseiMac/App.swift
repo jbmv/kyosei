@@ -128,6 +128,11 @@ struct KyoseiMacApp: App {
                 Button("Projects…") { feed.toggleProjectList() }
                     .keyboardShortcut("o", modifiers: .command)
             }
+            // KYO-953: the page's Config view, beside Settings in the app menu.
+            CommandGroup(after: .appSettings) {
+                Button("Config…") { feed.showConfig() }
+                    .keyboardShortcut(",", modifiers: [.command, .option])
+            }
             SpellingCommands()
         }
 

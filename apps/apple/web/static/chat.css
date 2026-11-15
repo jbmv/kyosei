@@ -272,7 +272,7 @@ html, body { overflow: hidden; }
 /* KYO-883: with new messages below, the arrow reads how many. */
 #jump-bottom.counted { gap: 6px; padding: 0 14px 0 11px; color: var(--link); font-size: 13px; }
 #jump-count:empty { display: none; }
-body.view-records #jump-bottom, body.view-files #jump-bottom { display: none; }
+body.view-records #jump-bottom, body.view-files #jump-bottom, body.view-config #jump-bottom { display: none; }
 body.terminal-open #jump-bottom { display: none; }
 
 #composer {
@@ -1488,3 +1488,75 @@ body.home-page #files-side.searching > .files-home-side { display: block; }
 .mark-to-prompt, .mark-action { margin-left: 10px; padding: 2px 0; border: 0; background: none; color: var(--link); font-size: 13px; font-weight: 600; }
 .mark-to-prompt:hover, .mark-action:hover:not(:disabled) { text-decoration: underline; }
 .mark-action:disabled { color: var(--muted); }
+
+/* ---------------------------------------------------------------------------- Config (KYO-953) */
+body.view-config { --view-tint: color-mix(in srgb, var(--kind-decision) 16%, var(--background)); }
+body.view-config #views, body.view-config #top { background: var(--view-tint); }
+body.view-config .view-item[aria-current="page"] { color: var(--kind-decision); }
+body.view-config #menu-panel { display: flex; flex-direction: column; overflow: hidden; }
+#config-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+#config-side > h4 { margin: 16px 8px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; overflow-wrap: anywhere; }
+#config-side > h4:first-child { margin-top: 0; }
+.config-section-button { display: block; width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.config-section-button:hover { background: var(--panel); }
+.config-section-button[aria-current="true"] { background: color-mix(in srgb, var(--kind-decision) 22%, transparent); }
+#config-count { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The three classes of row, told apart at a glance by the bar at a row's left and the badge:
+   grey for what is only shown, green for what will be editable here, amber for what is
+   changed by asking the session. */
+.config-inner { --class-shown: var(--muted); --class-editable: var(--kind-evidence); --class-request: var(--amber); max-width: 780px; margin: 0 auto; padding: 22px 28px 40px; }
+.config-title { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.config-note { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.config-note[data-tone="problem"], .config-note[data-tone="failed"] { border-color: var(--failed); color: var(--text); background: color-mix(in srgb, var(--failed) 8%, var(--background)); }
+.config-fact { display: flex; gap: 10px; margin: 0 0 4px; font-size: 13.5px; overflow-wrap: anywhere; }
+.config-fact-label { flex: none; min-width: 120px; color: var(--muted); }
+.config-fact[data-tone="warn"] { color: var(--amber); }
+.config-legend { display: flex; flex-direction: column; gap: 3px; margin: 12px 0 14px; color: var(--muted); font-size: 12.5px; }
+.config-listing { display: flex; gap: 10px; margin: 0 0 4px; font-size: 13px; overflow-wrap: anywhere; }
+.config-listing-label { flex: none; min-width: 120px; color: var(--muted); text-transform: capitalize; }
+.config-row { margin: 0 0 10px; padding: 9px 12px 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--class-shown); border-radius: 8px; }
+.config-row[data-class="editable"] { border-left-color: var(--class-editable); }
+.config-row[data-class="request"] { border-left-color: var(--class-request); }
+.config-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.config-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.config-decision { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.config-class { padding: 0 8px; border: 1px solid var(--class-shown); border-radius: 999px; color: var(--class-shown); font-size: 11.5px; white-space: nowrap; }
+.config-class[data-class="editable"] { border-color: var(--class-editable); color: var(--class-editable); }
+.config-class[data-class="request"] { border-color: var(--class-request); color: var(--class-request); }
+.config-status { padding: 0 8px; border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.config-status[data-status="present"] { color: var(--text); }
+.config-status:not([data-status="present"]) { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--text); }
+.config-value { margin-top: 5px; font-size: 13.5px; overflow-wrap: anywhere; }
+.config-value-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+pre.config-value-text { margin: 0; padding: 6px 8px; max-height: 220px; overflow: auto; background: var(--panel); border-radius: 6px; white-space: pre-wrap; }
+.config-unset { color: var(--muted); font-style: italic; }
+.config-absent, .config-trailing { color: var(--muted); }
+.config-trailing { margin-left: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.config-detail { margin-top: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.config-fix { color: var(--text); }
+.config-comment { margin-top: 5px; color: var(--muted); font-size: 12.5px; }
+.config-comment summary { cursor: pointer; list-style: none; overflow-wrap: anywhere; }
+.config-comment summary::-webkit-details-marker { display: none; }
+.config-comment summary::before { content: "\25B8"; display: inline-block; width: 12px; }
+.config-comment[open] summary::before { content: "\25BE"; }
+.config-comment[open] .config-first, .config-comment[open] .config-more { display: none; }
+.config-comment[open] summary::after { content: "Comment"; }
+.config-more { margin-left: 6px; opacity: 0.8; }
+.config-comment-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+pre.config-comment-text { margin: 4px 0 0; white-space: pre-wrap; }
+.config-first { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.config-control { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 7px; }
+.config-control input[type="text"], .config-control input[type="number"] { min-width: 180px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; font-size: 13px; }
+.config-control button { padding: 2px 11px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 12.5px; }
+.config-control button.chip { border-radius: 999px; color: var(--muted); }
+.config-control button.chip[aria-pressed="true"] { color: var(--text); }
+.config-control :disabled { opacity: 0.55; cursor: default; }
+.config-field-label, .config-switch-state { color: var(--muted); font-size: 12.5px; }
+.config-warning { margin-top: 6px; padding: 5px 9px; border-radius: 6px; background: color-mix(in srgb, var(--amber) 16%, transparent); font-size: 12.5px; line-height: 1.4; }
+.config-how { display: block; margin-top: 6px; color: var(--class-request); font-size: 12.5px; }
+.config-why { display: block; margin-top: 5px; color: var(--muted); font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .config-inner { padding: 14px 12px 28px; }
+  .config-fact, .config-listing { flex-direction: column; gap: 0; }
+}
