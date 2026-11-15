@@ -1050,6 +1050,10 @@ def test_the_skill_s_report_section_names_verify_from_report(path: Path) -> None
 #: Disagree with one of these by deleting its entry and writing the sentence in the skill
 #: — that is the whole intended workflow for this dict.
 LEAVE_TO_REFERENCE_COMMANDS: dict[str, str] = {
+    "config": (
+        "the read of a project's and the machine's settings (KYO-952), built for the Mac "
+        "app's Config view; no step of the orchestrator's workflow runs it"
+    ),
     "statusline": (
         "Claude Code's status line command, installed once per machine with `--install` "
         "(KYO-714); Claude Code runs it, and an orchestrator never does"

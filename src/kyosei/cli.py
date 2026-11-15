@@ -38,6 +38,7 @@ from . import (
     cmd_check_clean,
     cmd_check_command,
     cmd_close_wave,
+    cmd_config,
     cmd_confirm,
     cmd_controller,
     cmd_discuss,
@@ -361,6 +362,11 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # unconfigured directory rather than refusing it. Not in MUTATING_COMMANDS: it writes
     # nothing anywhere, and never opens a database.
     "onboard": (cmd_onboard.cmd_onboard, PROJECT_NONE),
+    # KYO-952: a project's or the machine's configuration, each setting placed in a class.
+    # PROJECT_OPTIONAL: `--machine` needs no project, and a project whose config.yml this
+    # build refuses is still reported, so no store is opened. Not in MUTATING_COMMANDS: it
+    # writes nothing anywhere.
+    "config": (cmd_config.cmd_config, PROJECT_OPTIONAL),
     # KYO-594: the link to this build's Claude Code plugin and its
     # registration. PROJECT_OPTIONAL: it links and registers anywhere, and enables the
     # plugin only when a Kyosei project resolves here. Not in MUTATING_COMMANDS: it writes
@@ -2661,6 +2667,21 @@ def build_parser() -> KyoseiParser:
         action="store_true",
         help="with --check: check every project in $KYOSEI_HOME/projects.json, one block "
         "per project (implies --check)",
+    )
+
+    p_config = sub.add_parser(
+        "config",
+        parents=[common],
+        help="read a project's configuration (kyosei/config.yml, the agent types, the files "
+        "beside it) or with --machine the machine's (settings.yml), each setting placed as "
+        "shown, editable or a request, with the reason; reads files only and writes nothing "
+        "(KYO-950)",
+    )
+    p_config.add_argument(
+        "--machine",
+        action="store_true",
+        help="print the machine's settings ($KYOSEI_HOME/settings.yml) in place of the "
+        "project's; needs no project",
     )
 
     p_harness = sub.add_parser(

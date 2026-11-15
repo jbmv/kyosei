@@ -259,7 +259,7 @@ governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/c
 | Routes | Token |
 |---|---|
 | `version`, `projects`, `cmd/...` (the records and everything else the CLI's `--json` reads), `docs/...`, `ideas/...`, `scratchpad`, the project's `events` | none |
-| The session routes in the table below, `search` and `history/recent` | any token that has not been revoked |
+| The session routes in the table below, `search`, `history/recent`, `config` and `settings` | any token that has not been revoked |
 | `sessions/<id>/send`, `slash`, `interrupt`; the draft, held-message and task-list routes; `attachments` | `send` |
 | `notes`, `tags`, `sessions/<id>/marks` and the routes that send notes | `notes`, and `send` where the notes are sent to a session |
 | `orchestrator/start` | `start` |
@@ -696,6 +696,58 @@ read routes refuse one, and a body without the three fields as text is refused (
 
 The list is one JSON file per project under `$KYOSEI_HOME/composer/recent-history/`, beside
 the recently opened files, outside every repository and readable by this account alone.
+
+### A project's and the machine's configuration: `kyo config` and the config routes (KYO-952)
+
+governs: src/kyosei/config_view.py, src/kyosei/cmd_config.py, src/kyosei/serve_config.py
+
+`kyo config` reads a project's configuration and `kyo config --machine` the machine's, and
+`GET /v1/projects/<name>/config` and `GET /v1/settings` serve the same two documents to a
+client of `kyo serve`. The command reads files, opens no database and writes nothing, and
+`--json` prints the document that the routes serve. This build has no writer of any setting;
+the document describes the changes a later build offers and the routes that make them are
+not served.
+
+Each setting is placed in one class, with the reason, by the registry in
+`src/kyosei/config_view.py`: `shown` (read, with no control), `editable` (changed by a client
+through a writer), `request` (shown, and changed by asking the session) or `omitted` (a setup
+decision that stores nothing). A test fails when a key of `kyosei/config.yml`
+(`schema.CONFIG_CONSUMERS`) or of `settings.yml` (`home_settings.KNOWN_KEYS`) has no row, so a
+client draws whatever the document lists and holds no list of keys.
+
+The project document carries `files` (the path, `etag`, `readable` and `problem` of
+`config.yml`, and whether `.claude/agents` exists), `settings`, `agent_types`, `beside` (the
+names in `kinds.yml`, `scopes.yml`, `documents.yml` and `gate-tags.yml`, and the titles under
+`## Project rules` of `procedures.md`) and `decisions` (the setup decisions that hold no key).
+Each entry of `settings` has `key`, `file`, `decision`, `section`, `class`, `why`, `present`,
+`value`, `absent_means`, `consumers`, `comment` (the comment lines directly above the key),
+`trailing`, `lines` (the first and last line of the key and its value), `status` (the item
+that `kyo onboard --check` reports for it, or null) and `last_change` (null in this build,
+which keeps no write log). An `editable` entry has a `write` descriptor, `{route, value,
+clearable, permission, one_way}`, in which `one_way` is null or the sentence a client shows
+before a change it cannot undo; it is set for `read_transcripts`, which a client may turn off
+and not on. A `request` entry has `request.header`, the first line of a request to the
+session. A key present in the file under more than one spelling, or one row covering several
+keys (`recx.prior_art.on`, `.limit` and `.index_url`), has `keys_in_file`.
+
+A `config.yml` that `load_config` refuses is still reported: `files.config.readable` is
+`false`, `problem` holds the refusal verbatim, and the values are those of the raw file. The
+machine document has the same shape for `orchestrator_command` (or `controller_command`),
+`serve_send` and `serve_idle_message`, with `machine` items, and `effective` on
+`serve_idle_message`, which is true when `serve_send` is also true.
+
+The routes need a device token of any permission, checked before the project is looked up,
+and refuse a request without one as the session read routes do. They take no query string and
+answer `Cache-Control: private, no-store` with an `ETag` header of the file the document is
+about. The served documents add `device` (the presenting device's name and permissions) and
+`server` (the build and whether it is stale), and replace the value of each `NAME=value`
+argument of `orchestrator_command` with `(withheld)`, naming the indexes in `withheld`; the
+command prints it in full. The `config` command is on `NOT_SERVED` for the reason that a
+`cmd/` route cannot know the token.
+
+The project's `events` stream reports `{"kind": "config"}` when `config.yml`, `kinds.yml`,
+`scopes.yml`, `documents.yml`, `gate-tags.yml`, `procedures.md`, `.claude/agents/kyosei-worker.md`,
+`.claude/agents/kyosei-designer.md` or the machine's `settings.yml` changes.
 
 ### Sending input: the send routes (KYO-699)
 
