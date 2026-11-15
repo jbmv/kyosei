@@ -86,7 +86,7 @@ The files that the later sections do not name, with what each holds:
 | `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
 | `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
 | `Sources/KyoseiClient/SealKeyItem.swift` | the seal key as a synchronizable keychain item, and the `seal-key` mode's contract with `kyo` |
-| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server, and the delegate starts the app as an accessory app and starts the check channel |
+| `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server and puts the build's own pasteboard in the general one's place, and the delegate starts the app as an accessory app and starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
