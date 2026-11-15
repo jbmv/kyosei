@@ -260,6 +260,17 @@ def write(
         return _write_machine_key(environ, device, file, key, document, if_match, refuse)
     except KyoseiError as exc:
         raise _writer_refusal(exc, environ, device, project=name, file=file, key=key) from exc
+    except Refusal:
+        raise
+    except Exception as exc:
+        # KYO-957 F1, the backstop: an error no writer converted would otherwise close the
+        # connection with no answer and leave no row of the attempt.
+        raise refuse(
+            500,
+            f"the change to {key} failed inside the server ({type(exc).__name__}: {exc}); "
+            f"read {file} at the machine before repeating it",
+            "failed",
+        ) from exc
 
 
 def _value_of(document: dict, refuse) -> object:

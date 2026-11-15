@@ -191,9 +191,11 @@ def edit_front_matter(
     meta = yaml.safe_load("".join(_lines_of(candidate)[1:end]))
     if (
         not isinstance(meta, dict)
-        or str(meta.get("name")) != wanted
-        or str(meta.get("model")) != model
-        or str(meta.get("effort")) != effort
+        # KYO-957 F4: compared as read, never through str(), so that a value YAML reads
+        # back as a number (`model: 123`) is refused and not written.
+        or meta.get("name") != wanted
+        or meta.get("model") != model
+        or meta.get("effort") != effort
     ):
         raise KyoseiError(
             f"{path} could not be changed to model {model}, effort {effort} without disturbing "

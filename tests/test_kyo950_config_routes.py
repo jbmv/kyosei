@@ -27,6 +27,7 @@ from kyosei import (
     serve_config,
     serve_files,
 )
+from kyosei.errors import KyoseiError
 
 from .conftest import invoke
 from .test_kyo_serve import Client, body_json, register, start, stop
@@ -638,3 +639,103 @@ def test_the_cli_writers_name_cli_in_their_rows(project: Path) -> None:
     assert run.code == 0, run
     assert [(row["device"], row["device_id"]) for row in rows()] == [("cli", "cli")]
     assert cmd_config.WRITABLE  # the writer the routes share
+
+
+# ------------------------------------------------- KYO-957: the review's findings F1, F3, F4
+
+
+def test_a_file_that_is_not_utf8_is_answered_and_logged_and_left_alone(
+    writer: Device, project: Path
+) -> None:
+    """KYO-957 F1: the route closed its connection with no answer and no row."""
+    path = config_file(project)
+    path.write_bytes(path.read_bytes() + b"# caf\xe9\n")
+    held = path.read_bytes()
+    before = len(rows())
+    status, document = writer.post(
+        f"{BASE}/config/worker_model", {"value": "opus"}, if_match=etag(path)
+    )
+    assert status == 422 and "is not UTF-8 text" in document["error"], document
+    assert path.read_bytes() == held
+    assert len(rows()) == before + 1 and rows()[-1]["outcome"] == "refused"
+
+    settings = settings_file()
+    settings.write_bytes(settings.read_bytes() + b"# caf\xe9\n")
+    held = settings.read_bytes()
+    for value in (False, True):
+        before = len(rows())
+        status, document = writer.post(
+            "/v1/settings/serve_idle_message", {"value": value}, if_match=etag(settings)
+        )
+        assert status in (422, 500) and "is not UTF-8 text" in document["error"], document
+        assert settings.read_bytes() == held
+        assert len(rows()) == before + 1
+
+
+def test_an_error_no_writer_converted_is_a_logged_500_and_not_a_closed_connection(
+    writer: Device, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KYO-957 F1, the backstop in ``serve_config.write``."""
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("no such thing")
+
+    monkeypatch.setattr(serve_config, "_write_project_key", broken)
+    before = len(rows())
+    status, document = writer.post(
+        f"{BASE}/config/worker_model", {"value": "opus"}, if_match=etag(config_file(project))
+    )
+    assert status == 500 and document["reason"] == "failed", document
+    assert "RuntimeError" in document["error"]
+    assert len(rows()) == before + 1
+
+
+def test_a_model_yaml_reads_as_a_number_is_refused_and_not_written(
+    writer: Device, project: Path
+) -> None:
+    """KYO-957 F4: `model: 123` read back as an integer and passed a str() comparison."""
+    path = agent_file(project)
+    before = path.read_bytes()
+    status, document = writer.post(
+        f"{BASE}/agent-types/kyosei-worker",
+        {"model": "123", "effort": "high"},
+        if_match=etag(path),
+    )
+    assert status == 422 and "hand edit" in document["error"], document
+    assert path.read_bytes() == before
+
+
+def test_a_failed_check_restores_only_the_bytes_this_write_put_there(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KYO-957 F3: the restore after a refused probe overwrote a change made meanwhile."""
+    path = config_file(project)
+    text = "\n".join(
+        line for line in path.read_text().splitlines()
+        if not line.lstrip("# ").startswith("worker_command_timeout_ceiling_seconds")
+    ) + "\n"
+    path.write_text(text)
+
+    def refuse_and_let_another_writer_in(*args, **kwargs):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("# written by someone else during the check\n")
+        return "the older build refuses it"
+
+    monkeypatch.setattr(config_splice, "_probe_refusal", refuse_and_let_another_writer_in)
+    run = invoke(
+        ["--root", str(project), "config", "set", "worker_command_timeout_ceiling_seconds", "90"]
+    )
+    assert run.code != 0 and "nothing was restored" in run.err, run
+    assert "# written by someone else during the check\n" in path.read_text()
+
+
+def test_a_settings_file_that_is_not_utf8_is_refused_and_removing_it_clears_it(
+    store_home: Path,
+) -> None:
+    """KYO-957 F1: `home_settings.load` raised a UnicodeDecodeError, which no caller expects."""
+    path = settings_file()
+    path.write_bytes(path.read_bytes() + b"# caf\xe9\n")
+    with pytest.raises(KyoseiError, match="is not UTF-8 text"):
+        home_settings.load()
+    path.unlink()
+    assert home_settings.load().source == "default"

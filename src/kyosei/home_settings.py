@@ -140,6 +140,9 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
         return HomeSettings(path, DEFAULT_CONTROLLER_COMMAND, "default")
     except OSError as exc:
         raise _refuse(path, f"could not be read ({exc.strerror or exc})") from exc
+    except UnicodeDecodeError as exc:
+        # KYO-957 F1: a byte that is not UTF-8 is a malformed file, refused like any other.
+        raise _refuse(path, f"is not UTF-8 text ({exc.reason})") from exc
     return parse(text, path)
 
 

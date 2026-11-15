@@ -635,7 +635,12 @@ def apply_change(
                     f"{path} changed since it was read (its digest is {etag_of(data)}, not "
                     f"{expected_etag}); read it again and repeat the change"
                 )
-            text = data.decode("utf-8")
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                # KYO-957 F1: outside this conversion the error left no row, and a route
+                # closed its connection without an answer.
+                raise KyoseiError(f"{path} is not UTF-8 text ({exc.reason})") from exc
             present, previous = read_value(text, change.key, path)
             row["previous"] = previous if present else None
             if precheck is not None:
@@ -658,6 +663,17 @@ def apply_change(
         if not present and not change.remove:
             problem = _probe_refusal(probe_root, environ) if probe_root is not None else None
             if problem is not None:
+                # KYO-957 F3: the check can run for seconds, so restore only bytes this
+                # write put there; another writer's change made meanwhile is left alone.
+                if path.read_bytes() != candidate.encode("utf-8"):
+                    reason = (
+                        f"the `kyo` on PATH cannot open the store with {change.key} added "
+                        f"({problem}), and {path} changed during that check, so nothing was "
+                        f"restored; read {path} and remove {change.key} from it if it is "
+                        "still there"
+                    )
+                    _append(descriptor, {**row, "outcome": OUTCOME_FAILED, "reason": reason})
+                    raise _logged(KyoseiError(reason))
                 atomic_write_text(path, text)
                 reason = (
                     f"the `kyo` on PATH cannot open the store with {change.key} added "
