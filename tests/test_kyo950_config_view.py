@@ -107,6 +107,13 @@ def test_the_project_document_lists_every_key_once_with_its_class(project: Path)
     by_key = {row["key"]: row for row in document["settings"]}
     assert by_key["worker_model"]["class"] == "editable"
     assert by_key["worktree_setup"]["class"] == "request"
+    # KYO-959: the one setting the view changes one way only is editable and also carries the
+    # request, the way back; an ordinary editable setting carries none.
+    assert by_key["read_transcripts"]["class"] == "editable"
+    assert by_key["read_transcripts"]["request"]["header"].startswith(
+        "[kyo-config-request] read_transcripts"
+    )
+    assert "request" not in by_key["worker_model"]
     assert by_key["project_prefix"]["class"] == "shown"
     assert by_key["project_prefix"]["value"] == "TST"
     assert by_key["worktree_setup"]["request"]["header"].startswith(

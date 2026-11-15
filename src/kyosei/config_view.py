@@ -627,7 +627,9 @@ def _row_document(
         document["value"], document["withheld"] = withhold_command(value)
     if row.klass == CLASS_EDITABLE:
         document["write"] = row.write
-    if row.klass == CLASS_REQUEST:
+    # KYO-959: a setting the view can change one way only carries the request too, which is
+    # the way back (`read_transcripts`, turned off in the view and on by asking the session).
+    if row.klass == CLASS_REQUEST or (row.write or {}).get("one_way"):
         document["request"] = {
             "header": _request_header(row.id, where, row.decision, lines)
         }
