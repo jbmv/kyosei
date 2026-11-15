@@ -89,6 +89,7 @@ The files that the later sections do not name, with what each holds:
 | `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server and puts the build's own pasteboard in the general one's place, and the delegate starts the app as an accessory app and starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
+| `web/src/config.ts` | the Config view's logic: sections and rows made from the two served documents, and the states of a failed read |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
@@ -720,6 +721,48 @@ list. Command-Shift-F opens the view. It needs a device token of any permission 
 that has opted in to reading transcripts. The logic is in `web/src/searchhistory.ts`, and the
 
 
+### Config
+
+<!-- governs:
+- apps/apple/web/src/config.ts
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#config
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#showConfig
+- apps/apple/web/src/chat.ts#enterConfig
+- apps/apple/web/src/chat.ts#drawConfig
+- apps/apple/web/src/chat.ts#configFrames
+-->
+
+Config (KYO-953, the first build of proposal KYO-950) shows a project's configuration and the
+machine's, reading only. It is the last item of the views bar, and also opens from the app
+menu's Config… item (Option-Command-comma) and from a button in the Settings window, which
+send the page an `openView` frame. The page asks the app for two documents, which the app reads
+with the device token and hands back with each one's status: `GET /v1/projects/{project}/config`
+and `GET /v1/settings`, served by the routes of KYO-952. The side column lists sections and the
+page shows one. The page holds the order and titles of the sections (`PROJECT_SECTIONS`,
+`MACHINE_SECTIONS` in `web/src/config.ts`) and no list of setting keys: every row is drawn from
+an entry of the document, so a key a later build adds appears as a row, in a section titled by
+its id when the page does not know it. Decisions of the setup guide that hold no key are rows of
+the Setup decisions section, and omitted ones are not drawn.
+
+A row shows the setting's name, its decision id, its value, or "not set" with the document's
+`absent_means`, its onboard status as a chip, the reason for its class, and the comment above
+the key, verbatim: collapsed to its first line, and open to the whole text. A record id in a
+comment is a link that opens the record in Records. The class is told by the bar at the row's
+left and a badge: shown only (grey), editable (green) or request (amber); a shown row the
+document marks `request_also` says so in its badge. In this build no control is live. An
+editable row draws the control its `write` descriptor describes, disabled, with the warning the
+document carries for a change that cannot be undone; a request row says it is changed by asking
+the session, and the request button comes with the write routes.
+
+The view reads again on a `config` change event of the project's stream and when the window
+turns to another project. Without a token (401) it prints the server's refusal and how a token
+is issued; against a server older than the routes (404) it says so and names the server's build
+from `/v1/version`; a `config.yml` the build refuses (`readable: false`) is shown with the
+refusal and the values of the raw file. The logic is in `web/src/config.ts`, tested in
+`web/test/config.test.ts`, and scenario H of the check build (`check/test_scenario_h.py`) drives
+the view against a real server. Whether the three classes of row read clearly together is the
+maintainer's look and has not been made.
+
 ### Files outside the served roots
 
 <!-- governs:
@@ -924,7 +967,7 @@ tests each rule against the server's routes, the transcript and the session's ow
 session imitates Claude Code 2.1.319 as the recorded screens under
 `tests/fixtures/session_layer/` show it, and can drift from later releases as those do.
 
-Four scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
+Scenario H (`check/test_scenario_h.py`) is the Config view: sections drawn from the served document, a comment shown whole, a record id opening Records, and a refused `config.yml` shown with its refusal and read again on the config event. Four further scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
 plan's outstanding members are red, plans are named by id and then title, the side bar has no
 Latest shift note, one drawer is present in Records and in Files and docks, and an open file's
 root and path are separate elements whose right-click menu offers Copy path.

@@ -862,6 +862,27 @@ extension ServeClient {
             token: token, post: post)
     }
 
+    /// The project's configuration document (`GET /v1/projects/{project}/config`, KYO-952),
+    /// which answers as the file routes do: the body and status, a refusal's own document
+    /// included, so that a 401 or a 404 is read by the page and not thrown.
+    public func config(project: String, token: String?) async throws -> FileReply {
+        try await route(projectURL(project: project, under: "config"), token: token)
+    }
+
+    /// The machine's settings document (`GET /v1/settings`, KYO-952), answered likewise.
+    public func settings(token: String?) async throws -> FileReply {
+        try await route(base.appending(path: "v1/settings"), token: token)
+    }
+
+    /// The server's build as `GET /v1/version` states it, for a page that must name a server
+    /// too old to have a route. Nil when the server does not answer with one.
+    public func serverBuild() async -> String? {
+        guard let data = try? await get("v1/version"),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["kyosei"] as? String
+    }
+
     /// `method` names another verb for a body than POST, as unstarring a file is a DELETE.
     private func route(
         _ url: URL, token: String?, ifNoneMatch: String? = nil, post: Data? = nil,

@@ -68,6 +68,9 @@
         </span>
         <span id="history-count"></span>
       </span>
+      <span class="top-part" data-view="config" hidden>
+        <span id="config-count"></span>
+      </span>
       <span class="top-part" data-view="files" hidden>
         <span class="nav-icons" data-nav="files">
           <button id="files-home" class="nav-icon" data-nav-icon="home" title="Home" aria-label="Home"></button>
@@ -145,6 +148,8 @@
           <h4>Recently opened</h4>
           <div id="history-recent"></div>
         </div>
+        <!-- Config (KYO-953): the sections of the project's configuration and the machine's. -->
+        <div id="config-side" data-view="config" hidden></div>
         <div id="files-side" data-view="files" hidden>
           <!-- KYO-883: on the home, the home's Finder-style column (KYO-835); beside an open
                file, the search, the tree and the lists below. -->
@@ -309,6 +314,9 @@
       </div>
       <!-- KYO-836: a session opened from a result, its prompts and replies, never the chat's. -->
       <main id="history-reader" hidden></main>
+    </section>
+    <section id="view-config" class="view-pane" data-view="config" hidden>
+      <div class="config-inner" id="config-page"></div>
     </section>
     <section id="view-files" class="view-pane" data-view="files" hidden>
       <div class="files-inner">
