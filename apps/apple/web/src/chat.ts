@@ -1900,6 +1900,10 @@ const kyo = {
       focusBox(editor);
       editor.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
     },
+    /** Adds the tag `name` to line `line` (counted from 0) of box `index`, as the panel's field does. */
+    tag(index: number, line: number, name: string): void {
+      placeItem<Item>(editors()[index], line, { kind: "tag", name });
+    },
     /** The lines (counted from 0) of box `index` whose sections are folded (KYO-913). */
     folds(index: number): number[] {
       return foldedLines(editors()[index].state).map((fold) => fold.line);
@@ -2607,6 +2611,12 @@ function showMark(editor: EditorView, id: number): void {
   }
   const refocus = openMark?.editor === editor && openMark.id === id
     && markPanel.contains(document.activeElement);
+  // KYO-941: the panel is drawn again whenever the box's marks are (a saved draft's echo is
+  // one such time, about a second after typing stops), and what is in the tag field then is
+  // still being typed: it is carried to the new field with its caret.
+  const typing = openMark?.editor === editor && openMark.id === id
+    ? markPanel.querySelector<HTMLInputElement>("input") : null;
+  const typed = typing ? { value: typing.value, from: typing.selectionStart, to: typing.selectionEnd } : null;
   openMark = { editor, id };
   // Adding and removing are steps of the box's own history, as placing an anchor is (KYO-910).
   const lineNow = () => lineOfId(editor.state, id);
@@ -2733,6 +2743,10 @@ function showMark(editor: EditorView, id: number): void {
     actions.push(move);
   }
   markPanel.replaceChildren(...chips, ...actions, divider, field, note, suggestions);
+  if (typed?.value) {
+    field.value = typed.value;
+    field.setSelectionRange(typed.from, typed.to);
+  }
   suggest();
   // Below its paragraph's first row, in the box, which the panel is placed in.
   const box = boxOf(editor);

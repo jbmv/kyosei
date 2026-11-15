@@ -117,3 +117,22 @@ test("a refused tag kept in an older draft is marked invalid on its chip (KYO-94
     assert.match(chips[0].title, /1 to 64 characters with no space or comma/);
   } finally { await page.close(); }
 });
+
+test("text in the tag field stays when the panel is drawn again for the same paragraph (KYO-941.c5)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(OPEN);
+    await page.type("slow");
+    // The paragraph's marks change under the open panel, as they do when the saved draft comes
+    // back about a second after typing stops: the panel is drawn again, with a new field.
+    const redrawn = await page.run<{ again: boolean; value: string; focused: boolean }>(`(() => {
+      const before = document.querySelector(".mark-panel input");
+      window.kyo.composer.tag(0, 0, "other");
+      const field = document.querySelector(".mark-panel input");
+      return { again: field !== before, value: field.value, focused: document.activeElement === field };
+    })()`);
+    assert.equal(redrawn.again, true, "the panel was not drawn again, so this test shows nothing");
+    assert.deepEqual([redrawn.value, redrawn.focused], ["slow", true]);
+  } finally { await page.close(); }
+});
