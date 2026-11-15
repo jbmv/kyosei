@@ -156,6 +156,18 @@ that turns "the install is broken" into "the store was written by a different bu
 - **Prior art.** `kyo prior-art <id>` retries a search and `kyo new --no-prior-art` skips one;
   "The `PRIOR-ART:` line is a question for the operator" below has the rest.
 
+### A `[kyo-config-request]` prompt (KYO-959)
+
+The Mac app's Config view shows each setting that a person changes by asking the session, and
+its Ask the session control places the request's first line, which the served document gives
+(`request.header`), in the composer; the person adds what they want and sends it. The line
+names the setting, the file and its line range, and the setup decision, and does not copy the
+value, which may be long: read it from the file. A change made in the view itself is only a
+setting change and arrives as a line in the brief, not as a prompt. A request is the person's
+turn, so a decision filed from it can credit their words in the ordinary way, but most requests
+are small changes whose provenance is the comment above the key, and a decision is filed only
+for a standing one.
+
 ### Why the brief replaces reading files
 
 The brief gives you deltas since the last brief, in-flight dispatches, gated work with its

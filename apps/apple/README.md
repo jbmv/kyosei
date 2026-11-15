@@ -89,7 +89,7 @@ The files that the later sections do not name, with what each holds:
 | `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server and puts the build's own pasteboard in the general one's place, and the delegate starts the app as an accessory app and starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
 | `web/static/chat.css` | the page's styles |
-| `web/src/config.ts` | the Config view's logic: sections and rows made from the two served documents, and the states of a failed read |
+| `web/src/config.ts` | the Config view's logic: sections and rows made from the two served documents, the control each editable row has, the reasons a control is disabled, and what a write's answer comes to |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
@@ -727,13 +727,16 @@ that has opted in to reading transcripts. The logic is in `web/src/searchhistory
 - apps/apple/web/src/config.ts
 - apps/apple/Sources/KyoseiMac/SessionFeed.swift#config
 - apps/apple/Sources/KyoseiMac/SessionFeed.swift#showConfig
+- apps/apple/Sources/KyoseiMac/SessionFeed.swift#configWrite
+- apps/apple/web/src/chat.ts#askSession
+- apps/apple/web/src/chat.ts#configControl
 - apps/apple/web/src/chat.ts#enterConfig
 - apps/apple/web/src/chat.ts#drawConfig
 - apps/apple/web/src/chat.ts#configFrames
 -->
 
-Config (KYO-953, the first build of proposal KYO-950) shows a project's configuration and the
-machine's, reading only. It is the last item of the views bar, and also opens from the app
+Config (KYO-953, KYO-959; proposal KYO-950) shows a project's configuration and the
+machine's, and changes the settings that the document marks editable. It is the last item of the views bar, and also opens from the app
 menu's Config… item (Option-Command-comma) and from a button in the Settings window, which
 send the page an `openView` frame. The page asks the app for two documents, which the app reads
 with the device token and hands back with each one's status: `GET /v1/projects/{project}/config`
@@ -749,18 +752,46 @@ A row shows the setting's name, its decision id, its value, or "not set" with th
 the key, verbatim: collapsed to its first line, and open to the whole text. A record id in a
 comment is a link that opens the record in Records. The class is told by the bar at the row's
 left and a badge: shown only (grey), editable (green) or request (amber); a shown row the
-document marks `request_also` says so in its badge. In this build no control is live. An
-editable row draws the control its `write` descriptor describes, disabled, with the warning the
-document carries for a change that cannot be undone; a request row says it is changed by asking
-the session, and the request button comes with the write routes.
+document marks `request_also` says so in its badge.
+
+An editable row carries the control its `write` descriptor describes, chosen from the shape of
+the value the descriptor names and never from the setting's name: a text field with Save and
+Clear (`worker_model`), a number field with Clear (the timeout ceiling, sent as a whole number
+when it is one and otherwise as typed, for the server to refuse), a segmented choice
+(`docs_coverage.level`, the prior-art state), a switch (`serve_idle_message`), a model field and
+a menu for the effort of an agent type, and Turn off where only `false` is accepted
+(`read_transcripts`). A control writes by the route the descriptor names, as a POST through the
+app (`configWrite`) with the etag of the file the document was read from as `If-Match`. A write
+that succeeds is followed by a read, which shows the new value and the row's latest change from
+the document (`last_change`). A setting whose `write.one_way` is set shows that sentence, and
+asks for confirmation before the write is sent.
+
+A refused write leaves the control at the server's value and prints the refusal's sentence under
+it. A 412 also reads the document again and says what the value now is, and keeps the attempted
+value in the field. An answer that is not a refusal (no answer, a 5xx) is printed as a failure,
+and the row is not known to be written until the next read. Every control is disabled, with its
+reason printed under it, when the device lacks the `config` permission (naming `kyo devices grant
+<device> --permission config`), when the server is stale, and when the file is one the build
+cannot read.
+
+A request row whose document entry carries `request.header` has Ask the session…. It places the
+header and an empty line in the composer of the session the window follows: in the prompt box
+when that is empty, and otherwise in a new scratchpad. With no session live it is in the
+project's draft, which the next session takes, and the row says so. The control sends nothing.
+While a box whose first line is the header exists, the row reads In the composer, and no other
+mark; deleting the box clears it. The page does not compose a header, and a setting the document
+gives none (`serve_send`, `orchestrator_command`) has no request control. `read_transcripts`
+carries a write descriptor and no request header, so it has Turn off and no request control.
 
 The view reads again on a `config` change event of the project's stream and when the window
 turns to another project. Without a token (401) it prints the server's refusal and how a token
 is issued; against a server older than the routes (404) it says so and names the server's build
 from `/v1/version`; a `config.yml` the build refuses (`readable: false`) is shown with the
 refusal and the values of the raw file. The logic is in `web/src/config.ts`, tested in
-`web/test/config.test.ts`, and scenario H of the check build (`check/test_scenario_h.py`) drives
-the view against a real server. Whether the three classes of row read clearly together is the
+`web/test/config.test.ts`, and the scenarios of the check build drive the view against a real
+server: H reads (`check/test_scenario_h.py`), I writes, refuses and meets a 412
+(`check/test_scenario_i.py`) and J places requests (`check/test_scenario_j.py`), with the check
+build's device given the `config` permission in the run's own `KYOSEI_HOME`. Whether the three classes of row read clearly together is the
 maintainer's look and has not been made.
 
 ### Files outside the served roots
@@ -967,7 +998,7 @@ tests each rule against the server's routes, the transcript and the session's ow
 session imitates Claude Code 2.1.319 as the recorded screens under
 `tests/fixtures/session_layer/` show it, and can drift from later releases as those do.
 
-Scenario H (`check/test_scenario_h.py`) is the Config view: sections drawn from the served document, a comment shown whole, a record id opening Records, and a refused `config.yml` shown with its refusal and read again on the config event. Four further scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
+Scenario H (`check/test_scenario_h.py`) is the Config view: sections drawn from the served document, a comment shown whole, a record id opening Records, and a refused `config.yml` shown with its refusal and read again on the config event. Scenarios I and J are the controls and the request control: a `worker_model` write with every other line of the file unchanged and a log row naming the device, a refusal under its control, a 412, and a request placed in the prompt box or in a scratchpad. Four further scenarios are built. `check/test_scenario_f.py` is Records and Files: a chosen
 plan's outstanding members are red, plans are named by id and then title, the side bar has no
 Latest shift note, one drawer is present in Records and in Files and docks, and an open file's
 root and path are separate elements whose right-click menu offers Copy path.
