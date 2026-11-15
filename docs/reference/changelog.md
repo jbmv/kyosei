@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-15** — `KYO-946` (task) — Mac app check harness: the scripted session
 - **2026-11-14** — `KYO-944` (task) — Mac app check harness: the check build, the channel, and Records and Files
 - **2026-11-14** — `KYO-942` (proposal) — Mac app: an end-to-end check harness that drives the packaged app against a real kyo serve
 - **2026-11-14** — `KYO-938` (task) — Mac app: a cut line's marks follow it when it is pasted in a composer box
