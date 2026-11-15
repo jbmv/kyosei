@@ -152,6 +152,8 @@ struct CheckChannelTests {
     private func close(_ bed: Opened) {
         bed.channel.stop()
         bed.window.orderOut(nil)
+        // The socket's file is the test's own, under /tmp, and is not left there.
+        unlink(bed.path)
     }
 
     /// Asks one request and returns its answer, which must be an object.
