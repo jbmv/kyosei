@@ -30,6 +30,7 @@ and CI do not run it. ``make app-check`` does.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import html
 import http.client
@@ -350,7 +351,13 @@ class Server:
                 self.process.wait(timeout=10)
 
     def ask(
-        self, method: str, path: str, body: Any = None, *, timeout: float = 30
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        timeout: float = 30,
+        headers: dict[str, str] | None = None,
     ) -> tuple[int, Any]:
         """One request to a route of the project, with the run's device token."""
         request = urllib.request.Request(  # noqa: S310 - the test server's own address
@@ -360,6 +367,7 @@ class Server:
             headers={
                 "Authorization": f"Bearer {self.token}",
                 "Content-Type": "application/json",
+                **(headers or {}),
             },
         )
         try:
@@ -371,6 +379,10 @@ class Server:
                 return refusal.code, json.loads(raw)
             except ValueError:
                 return refusal.code, raw.decode("utf-8", "replace")
+
+    def of(self, project: Path) -> Server:
+        """The same server, asked about another of the projects it serves."""
+        return dataclasses.replace(self, project=project, name=project.name)
 
     def get(self, path: str) -> Any:
         status, document = self.ask("GET", path)
@@ -446,12 +458,12 @@ class Events:
             self.connection.close()
 
 
-def make_project(run: Run, name: str = "checked") -> Path:
+def make_project(run: Run, name: str = "checked", prefix: str = "CHK") -> Path:
     """A git repository with a Kyosei store in it, registered under the run's own home."""
     project = run.directory / name
     project.mkdir()
     run.git("init", "-q", "-b", "main", ".", cwd=project)
-    run.kyo("init", ".", "--in-repo", "--prefix", "CHK", "--read-transcripts", "yes", cwd=project)
+    run.kyo("init", ".", "--in-repo", "--prefix", prefix, "--read-transcripts", "yes", cwd=project)
     return project
 
 
@@ -607,6 +619,29 @@ def forget_settings() -> None:
     )
 
 
+def saved_project() -> str | None:
+    """The project the check build last showed, as its own defaults hold it, or None."""
+    assert CHECK_IDENTIFIER != SHIPPED_IDENTIFIER and CHECK_IDENTIFIER.endswith(".check")
+    done = subprocess.run(  # noqa: S603
+        ["/usr/bin/defaults", "read", CHECK_IDENTIFIER, "project"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def save_project(name: str) -> None:
+    """Set the project the check build shows when its run names none, in its own defaults
+    domain, which is the only one this module ever writes."""
+    assert CHECK_IDENTIFIER != SHIPPED_IDENTIFIER and CHECK_IDENTIFIER.endswith(".check")
+    subprocess.run(  # noqa: S603
+        ["/usr/bin/defaults", "write", CHECK_IDENTIFIER, "project", "-string", name],
+        capture_output=True,
+        check=True,
+    )
+
+
 #: For each check build a run has ended: how often it became the active app and how many
 #: menus it tracked on the screen, as its channel counted them.
 FRONT_TAKEN: list[dict[str, Any]] = []
@@ -622,19 +657,21 @@ class App:
     #: Whether the run asked this app to come to the front.
     asked_to_activate: bool = False
 
-    def quit(self, *, deadline: float = 15.0) -> int:
+    def quit(self, *, deadline: float = 15.0, at_once: bool = False) -> int:
         """End the app as its Quit item does, and return its exit status. What the app says
-        it did to the front is read first and kept in :data:`FRONT_TAKEN` (KYO-945)."""
-        with contextlib.suppress(CheckError, OSError):
-            state = self.channel.request("state")
-            FRONT_TAKEN.append(
-                {
-                    "pid": self.process.pid,
-                    "asked_to_activate": self.asked_to_activate,
-                    "became_active": state.get("became_active"),
-                    "menus_on_screen": state.get("menus_on_screen"),
-                }
-            )
+        it did to the front is read first and kept in :data:`FRONT_TAKEN` (KYO-945), unless
+        ``at_once``, which sends the quit as the very next request and reads nothing."""
+        if not at_once:
+            with contextlib.suppress(CheckError, OSError):
+                state = self.channel.request("state")
+                FRONT_TAKEN.append(
+                    {
+                        "pid": self.process.pid,
+                        "asked_to_activate": self.asked_to_activate,
+                        "became_active": state.get("became_active"),
+                        "menus_on_screen": state.get("menus_on_screen"),
+                    }
+                )
         with contextlib.suppress(CheckError, OSError):
             self.channel.request("quit")
         self.channel.close()
