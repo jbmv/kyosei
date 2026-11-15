@@ -3,8 +3,12 @@
 // and the titles of its sections and nothing keyed by a setting's name: each row is drawn from
 // what the document says of the setting, its class and its reason included, so that a key a
 // later build adds appears as a row in an older app. This build reads and writes nothing; a row
-// that will have a control says which, and the control is drawn disabled. The module holds no
-// state and touches no element, so that it can be tested without a page.
+// that has a control gets the control the document's `write` descriptor describes (KYO-959): a
+// control is chosen from the descriptor's value shape and never from a key's name, and it is
+// drawn disabled, with the reason, when the document says that nothing can be written. A row
+// the document marks as a request carries the request's own header, which the page places in
+// the composer. The module holds no state and touches no element, so that it can be tested
+// without a page.
 
 /** The three classes a row is drawn in. A decision the document marks `omitted` has no row. */
 export type RowClass = "shown" | "editable" | "request";
@@ -35,14 +39,26 @@ export interface Status {
   label?: string;
 }
 
-/** The control a row will have, drawn disabled in this build. */
+/** One field of an object-valued write: a text field, or a menu when the descriptor lists values. */
+export interface FieldView { name: string; value: string; options: string[] | null }
+
+/** The control a row has, from the shape of the value its `write` descriptor names. */
 export type Control =
   | { kind: "text"; value: string; clearable: boolean }
   | { kind: "number"; value: string; clearable: boolean }
   | { kind: "segments"; options: string[]; value: string | null }
   | { kind: "switch"; value: boolean | null }
   | { kind: "turn-off"; value: boolean | null }
-  | { kind: "fields"; fields: { label: string; value: string }[] };
+  | { kind: "fields"; fields: FieldView[] };
+
+/** Where a row's control writes: the route under the project (or the server), and the file's etag. */
+export interface WriteSpec {
+  route: string;
+  /** The etag the document gave for the file the setting is in, sent as `If-Match`. */
+  etag: string | null;
+  /** Whether the route is the server's (`settings/...`) and not a project's. */
+  machine: boolean;
+}
 
 export interface RowView {
   /** A key of the document, or the title of a decision: the name the row is drawn under. */
@@ -70,6 +86,13 @@ export interface RowView {
   /** The first line of the comment, which is all that is drawn while it is collapsed. */
   first: string | null;
   control: Control | null;
+  write: WriteSpec | null;
+  /** Why the control is disabled, or null while it can be used. */
+  disabled: string | null;
+  /** The document's latest change of the setting, in words, or null when none was logged. */
+  lastChange: string | null;
+  /** The first line of a request about this row, from the document; null offers no request. */
+  requestHeader: string | null;
   /** The sentence to show before a change that cannot be undone, from the document. */
   oneWay: string | null;
   /** The sentence for a request row: how it is changed. */
@@ -101,7 +124,7 @@ export const CLASS_LABELS: Record<RowClass, string> = {
 /** What each class means, drawn once above a section's rows. */
 export const CLASS_MEANINGS: Record<RowClass, string> = {
   shown: "read from the project, with no way to change it from this view",
-  editable: "will have a control here; the control is not live in this build",
+  editable: "changed here, by the control the row carries",
   request: "changed by asking the session, which edits the file",
 };
 
@@ -232,8 +255,24 @@ function classOf(value: unknown): RowClass | null {
   return value === "shown" || value === "editable" || value === "request" ? value : null;
 }
 
-/** The control a row will have, from the document's own description of how it is written. */
-export function controlOf(write: unknown, value: unknown): Control | null {
+/** The fields of an object-valued write: each entry of the shape that describes a value. */
+function fieldsOf(shape: Record<string, unknown>, now: Record<string, unknown>): FieldView[] {
+  return Object.entries(shape)
+    .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry))
+    .map(([name, entry]) => {
+      const options = strings(record(entry).enum);
+      const value = now[name];
+      return { name, value: value === null || value === undefined ? "" : String(value), options: options.length ? options : null };
+    });
+}
+
+/**
+ * The control a row has, from the document's own description of how it is written: a value
+ * that names its options is a segmented choice, a boolean is a switch (or Turn off when only
+ * false is accepted), a whole number a number field, a string a text field, and an object
+ * one field to each of its parts. `now` is the object's current parts, for the last.
+ */
+export function controlOf(write: unknown, value: unknown, now: Record<string, unknown> = {}): Control | null {
   const shape = record(record(write).value);
   const clearable = record(write).clearable === true;
   const options = strings(shape.enum);
@@ -241,18 +280,58 @@ export function controlOf(write: unknown, value: unknown): Control | null {
   switch (shape.type) {
     case "boolean": {
       const allowed = Array.isArray(shape.values) ? shape.values : [];
-      const now = typeof value === "boolean" ? value : null;
+      const current = typeof value === "boolean" ? value : null;
       return allowed.length === 1 && allowed[0] === false
-        ? { kind: "turn-off", value: now }
-        : { kind: "switch", value: now };
+        ? { kind: "turn-off", value: current }
+        : { kind: "switch", value: current };
     }
     case "integer":
       return { kind: "number", value: value === null || value === undefined ? "" : String(value), clearable };
     case "string":
       return { kind: "text", value: text(value) ?? "", clearable };
+    case "object": {
+      const fields = fieldsOf(shape, now);
+      return fields.length ? { kind: "fields", fields } : null;
+    }
     default:
       return null;
   }
+}
+
+/** A value as the log of a change prints it. */
+function loggedValue(value: unknown): string {
+  if (value === null || value === undefined) return "not set";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+/** The document's latest change of a setting, in one sentence, or null when none was logged. */
+export function lastChangeText(change: unknown): string | null {
+  const found = record(change);
+  const at = text(found.at);
+  if (!at) return null;
+  const who = text(found.device);
+  return `Last changed ${at}${who ? ` by ${who}` : ""}: ${loggedValue(found.previous)} to ${loggedValue(found.new)}.`;
+}
+
+/**
+ * Why a document's controls cannot be used, or null when they can. A stale server refuses every
+ * write; a file this build cannot read is shown from its raw text and nothing is written to it;
+ * a device without the `config` permission is refused by the server and is told how to get it.
+ */
+export function blockedReason(document: Record<string, unknown>, file: string): string | null {
+  const server = record(document.server);
+  if (server.stale === true) {
+    const detail = text(server.stale_detail) ?? "a newer build is installed than the one this server runs";
+    return `The server is stale: ${detail.replace(/[.\s]*$/, "")}. Restart it with \`kyo serve --restart\` and the controls work again.`;
+  }
+  const problem = fileProblem(document, file);
+  if (problem) return `This build cannot read the file: ${problem.replace(/[.\s]*$/, "")}. Nothing is written to it until it reads.`;
+  const device = record(document.device);
+  if (device.holds_config !== true) {
+    const name = text(device.name) ?? "<device>";
+    return `This device does not hold the config permission. On the server's machine run \`kyo devices grant ${name} --permission config\`.`;
+  }
+  return null;
 }
 
 function statusOf(value: unknown, label?: string): Status | null {
@@ -262,7 +341,9 @@ function statusOf(value: unknown, label?: string): Status | null {
   return { status, detail: text(found.detail), fix: text(found.fix), label: label ?? text(found.label) ?? undefined };
 }
 
-function settingRow(setting: Record<string, unknown>, file: string): RowView | null {
+function settingRow(
+  setting: Record<string, unknown>, file: string, etag: string | null, blocked: string | null,
+): RowView | null {
   const klass = classOf(setting.class);
   const name = text(setting.key);
   if (!klass || !name) return null;
@@ -271,6 +352,7 @@ function settingRow(setting: Record<string, unknown>, file: string): RowView | n
   const comment = strings(setting.comment);
   const status = statusOf(setting.status);
   const control = klass === "editable" ? controlOf(setting.write, present ? setting.value : null) : null;
+  const route = text(record(setting.write).route);
   const trailing = text(setting.trailing);
   return {
     name,
@@ -287,6 +369,10 @@ function settingRow(setting: Record<string, unknown>, file: string): RowView | n
     comment,
     first: firstLine(comment),
     control,
+    write: control && route ? { route, etag, machine: route.startsWith("settings/") } : null,
+    disabled: control ? blocked : null,
+    lastChange: lastChangeText(setting.last_change),
+    requestHeader: text(record(setting.request).header),
     oneWay: text(record(setting.write).one_way),
     how: klass === "request" ? "Changed by asking the session, which edits the file." : null,
     id: `${file}:${name}`,
@@ -316,19 +402,25 @@ function decisionRow(decision: Record<string, unknown>, file: string): RowView |
     comment: [],
     first: null,
     control: null,
+    write: null,
+    disabled: null,
+    lastChange: null,
+    requestHeader: text(record(decision.request).header),
     oneWay: null,
     how: klass === "request" || alsoAsked ? "Changed by asking the session." : null,
     id: `${file}:decision:${id}`,
   };
 }
 
-function agentRow(agent: Record<string, unknown>): RowView | null {
+function agentRow(agent: Record<string, unknown>, blocked: string | null): RowView | null {
   const name = text(agent.name);
   const klass = classOf(agent.class);
   if (!name || !klass) return null;
   const model = text(agent.model);
   const effort = text(agent.effort);
   const status = statusOf(agent.status);
+  const control = klass === "editable" ? controlOf(agent.write, null, agent) : null;
+  const route = text(record(agent.write).route);
   return {
     name,
     decision: null,
@@ -343,10 +435,12 @@ function agentRow(agent: Record<string, unknown>): RowView | null {
     statuses: status ? [status] : [],
     comment: [],
     first: null,
-    control: klass === "editable"
-      ? { kind: "fields", fields: [{ label: "model", value: model ?? "" }, { label: "effort", value: effort ?? "" }] }
-      : null,
-    oneWay: null,
+    control,
+    write: control && route ? { route, etag: text(agent.etag), machine: false } : null,
+    disabled: control ? blocked : null,
+    lastChange: lastChangeText(agent.last_change),
+    requestHeader: text(record(agent.request).header),
+    oneWay: text(record(agent.write).one_way),
     how: klass === "request" ? "Changed by asking the session." : null,
     id: `agent:${name}`,
   };
@@ -404,12 +498,14 @@ export function projectSections(document: Record<string, unknown>): SectionView[
   const known = new Set(PROJECT_SECTIONS.map((section) => section.id));
   const sections = titled(PROJECT_SECTIONS, [...new Set(settings.map((entry) => text(entry.section)).filter(
     (id): id is string => id !== null && !known.has(id)))]);
+  const blocked = blockedReason(document, "config");
+  const etag = text(record(record(document.files).config).etag);
   for (const entry of settings) {
-    const row = settingRow(entry, text(entry.file) ?? "config");
+    const row = settingRow(entry, text(entry.file) ?? "config", etag, blocked);
     if (row) place(sections, text(entry.section) ?? "identity").rows.push(row);
   }
   for (const entry of (Array.isArray(document.agent_types) ? document.agent_types : []).map(record)) {
-    const row = agentRow(entry);
+    const row = agentRow(entry, blocked);
     if (row) place(sections, "workers").rows.push(row);
   }
   const beside = record(document.beside);
@@ -433,8 +529,10 @@ export function projectSections(document: Record<string, unknown>): SectionView[
 export function machineSections(document: Record<string, unknown>): SectionView[] {
   const sections = titled(MACHINE_SECTIONS, []);
   const settings = (Array.isArray(document.settings) ? document.settings : []).map(record);
+  const blocked = blockedReason(document, "settings");
+  const etag = text(record(record(document.files).settings).etag);
   for (const entry of settings) {
-    const row = settingRow(entry, text(entry.file) ?? "settings");
+    const row = settingRow(entry, text(entry.file) ?? "settings", etag, blocked);
     if (row) place(sections, "machine").rows.push(row);
   }
   for (const entry of (Array.isArray(document.decisions) ? document.decisions : []).map(record)) {
@@ -463,4 +561,80 @@ export function machineSections(document: Record<string, unknown>): SectionView[
 /** The section to show: the one chosen when it is still there, and otherwise the first. */
 export function chosenSection(sections: SectionView[], wanted: string | null): SectionView | null {
   return sections.find((section) => section.id === wanted) ?? sections[0] ?? null;
+}
+
+// ---------------------------------------------------------------- writing (KYO-959)
+
+/** What a write came to, as the app sends it: the status, the server's body and a failure. */
+export interface WriteResult {
+  status: number;
+  /** The server's JSON body, whether it was a success or a refusal. */
+  document: unknown;
+  /** The refusal's sentence, when the server gave one, or why no answer came. */
+  error: string | null;
+}
+
+/** What is printed under a control after a write that did not take, and what the field keeps. */
+export interface RowNote {
+  /** `refused` for an answer that changed nothing, `failed` for one that may have. */
+  tone: "refused" | "failed";
+  text: string;
+  /** The attempted value, kept in the field after a 412; null puts the server's value back. */
+  keep: boolean;
+}
+
+/** A value as one line of a sentence: an object by its parts, which an agent type's is. */
+export function plainValue(value: unknown): string {
+  if (value === null || value === undefined) return "not set";
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return Object.entries(record(value)).map(([key, part]) => `${key} ${plainValue(part)}`).join(", ");
+  }
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+/** A whole number as the route takes it. Anything else is sent as typed, for the server to refuse. */
+export function numberBody(input: string): number | string {
+  const trimmed = input.trim();
+  return /^-?\d+$/.test(trimmed) ? Number(trimmed) : input;
+}
+
+/** The body of a write from the control's parts; one value, or an object for a row of fields. */
+export function writeBody(value: unknown): unknown {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : { value };
+}
+
+/**
+ * What to print under the control after a write, or null when it was written. A refusal is
+ * the server's own sentence, which names its remedy. A 412 also says what the value now is,
+ * from the `current` the server returned, and keeps what was attempted in the field. Any
+ * other answer (no answer, a 5xx) is a failure, and the row is not known to be written.
+ */
+export function noteAfter(result: WriteResult): RowNote | null {
+  if (result.status === 200) return null;
+  const body = record(result.document);
+  const said = result.error ?? text(body.error);
+  if (result.status === 412) {
+    const now = plainValue(record(body.current).value);
+    return {
+      tone: "refused", keep: true,
+      text: `${said ? `${said.replace(/[.\s]*$/, "")}. ` : ""}Changed elsewhere since this view was read; it now reads ${now}.`,
+    };
+  }
+  if (result.status >= 400 && result.status < 500) {
+    return { tone: "refused", keep: false, text: said ?? `The server answered ${result.status}.` };
+  }
+  return {
+    tone: "failed", keep: true,
+    text: `${said ?? `The server answered ${result.status}.`} Whether the change was written is not known until the view reads the file again.`,
+  };
+}
+
+/** The request's text for the composer: its header, a line break and an empty line. */
+export function requestText(header: string): string {
+  return `${header}\n\n`;
+}
+
+/** Whether a box's text is the request with this header: its first line is the header. */
+export function holdsRequest(boxText: string, header: string): boolean {
+  return boxText.split("\n", 1)[0] === header;
 }

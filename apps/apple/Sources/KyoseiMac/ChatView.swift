@@ -702,7 +702,7 @@ struct ChatWebView: NSViewRepresentable {
         for name in [
             "send", "retract", "interrupt", "saveDraft", "saveAgenda", "attach", "start",
             "sendNow", "copy", "attention", "quicklook", "composerMenu",
-            "terminal", "records", "files", "history", "config", "project", "projects",
+            "terminal", "records", "files", "history", "config", "configWrite", "project", "projects",
         ] {
             configuration.userContentController.add(context.coordinator, name: name)
         }
@@ -851,6 +851,10 @@ struct ChatWebView: NSViewRepresentable {
             }
             if message.name == "config", let body = message.body as? [String: Any] {
                 feed.config(body: body)
+                return
+            }
+            if message.name == "configWrite", let body = message.body as? [String: Any] {
+                feed.configWrite(body: body)
                 return
             }
             if message.name == "start" {

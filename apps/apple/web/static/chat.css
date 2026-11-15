@@ -1554,6 +1554,18 @@ pre.config-comment-text { margin: 4px 0 0; white-space: pre-wrap; }
 .config-control :disabled { opacity: 0.55; cursor: default; }
 .config-field-label, .config-switch-state { color: var(--muted); font-size: 12.5px; }
 .config-warning { margin-top: 6px; padding: 5px 9px; border-radius: 6px; background: color-mix(in srgb, var(--amber) 16%, transparent); font-size: 12.5px; line-height: 1.4; }
+.config-control select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; font-size: 13px; }
+.config-control button:not(:disabled) { cursor: pointer; }
+.config-control button:not(:disabled):hover { background: var(--panel); }
+.config-control button.chip[aria-pressed="true"] { border-color: var(--class-editable); }
+.config-blocked, .config-last { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.config-refusal { margin-top: 6px; padding: 5px 9px; border: 1px solid var(--failed); border-radius: 6px; background: color-mix(in srgb, var(--failed) 8%, var(--background)); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.config-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 7px; }
+.config-ask button { padding: 2px 11px; border: 1px solid var(--class-request); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.config-ask button:hover { background: var(--panel); }
+.config-mark { padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--class-request) 22%, transparent); font-size: 11.5px; white-space: nowrap; }
+.config-placed { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.config-ask [hidden] { display: none; }
 .config-how { display: block; margin-top: 6px; color: var(--class-request); font-size: 12.5px; }
 .config-why { display: block; margin-top: 5px; color: var(--muted); font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-width: 760px) {

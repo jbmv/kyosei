@@ -76,7 +76,9 @@ MAPPED_SOCKETS = ("default", "kyosei")
 DEFAULT_FRAME = "60,60,1180,860"
 
 #: Every permission a device token can carry, so that the app under test is refused nothing.
-PERMISSIONS = ("send", "notes", "start", "terminal", "files")
+#: ``config`` (KYO-956) is granted to the check build's device inside the run's own
+#: ``KYOSEI_HOME``, by ``kyo devices issue`` in the run's environment, and nowhere else.
+PERMISSIONS = ("send", "notes", "start", "terminal", "files", "config")
 
 LSREGISTER = (
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"

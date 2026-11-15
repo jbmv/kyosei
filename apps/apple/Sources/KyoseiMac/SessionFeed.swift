@@ -1868,6 +1868,45 @@ final class SessionFeed {
         }
     }
 
+    /// The page's Config view writes one setting (KYO-959): a POST to the route its document
+    /// names, with the etag of the file the document was read from as `If-Match`. The server's
+    /// answer goes back to the page as it came, a refusal's own document included, since the
+    /// page prints the refusal's sentence and, for a 412, the value now in the file. The write is
+    /// sent only with this device's token, and nothing here decides whether it is permitted.
+    func configWrite(body: [String: Any]) {
+        guard let id = body["id"] as? String, let route = body["route"] as? String,
+            let payload = body["body"], JSONSerialization.isValidJSONObject(payload),
+            let data = try? JSONSerialization.data(withJSONObject: payload)
+        else { return }
+        let project = project
+        let client = client
+        let path = body["machine"] as? Bool == true ? "v1/\(route)" : "v1/projects/\(project)/\(route)"
+        let etag = body["etag"] as? String
+        guard let token = Self.deviceToken() else {
+            send(
+                "configWritten",
+                #"{"id": \#(quoted(id)), "project": \#(quoted(project)), "status": 401, "document": null, "#
+                    + #""error": "This device has no token, so nothing was written. Issue one with `kyo devices issue <name>` and enter it in Settings."}"#)
+            return
+        }
+        Task {
+            let reply = try? await client.authorised(
+                "POST", path, token: token, body: data, ifMatch: etag)
+            guard project == self.project, client.base == self.client.base else { return }
+            let document: String
+            if let reply, (try? JSONSerialization.jsonObject(with: reply.data)) != nil {
+                document = String(decoding: reply.data, as: UTF8.self)
+            } else {
+                document = "null"
+            }
+            let error = reply == nil ? quoted("The server could not be reached.") : "null"
+            send(
+                "configWritten",
+                #"{"id": \#(quoted(id)), "project": \#(quoted(project)), "#
+                    + #""status": \#(reply?.status ?? 0), "document": \#(document), "error": \#(error)}"#)
+        }
+    }
+
     private func configReading(_ reply: ServeClient.FileReply?) -> String {
         #"{"status": \#(reply?.status ?? 0), "document": \#(filesDocument(reply)), "#
             + #""error": \#(filesProblem(reply))}"#
