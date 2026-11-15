@@ -6,16 +6,21 @@ becomes the prompt, and each move is undone twice, and redone. The session is th
 (``scripted_session.py``) started by the app's own Start button (KYO-946); the words are typed
 with key events and the moves are made with the page's own buttons.
 
-WHAT IS DRIVEN HOW (``composer.py`` says the rest). Command-Z and Command-Shift-Z go through
-the check channel's ``key`` request, which passes through the app's menu bar and responder
-chain as a hardware key does. Edit > Undo through the ``menu`` request cannot be driven: an
-app that was not brought to the front has no key window, so the item is disabled and the
-request performs nothing (measured, ``scenario_A_edit_menu_without_a_key_window``). The
-scenario calls ``window.kyo.undo()`` and ``window.kyo.redo()``, which the app's two items call
-when they are performed (KYO-915), and says so in the assertion. Command-X and Command-V
-through the ``key`` request would go through the system pasteboard, which is the person's, and
-the check build has none of its own, so a cut and a paste are events of the page's own
-carrying a ``DataTransfer`` of the page's making.
+WHAT IS DRIVEN HOW (``composer.py`` says the rest). Command-Z, Command-Shift-Z, Command-X and
+Command-V go through the check channel's ``key`` request, which passes through the app's menu
+bar and responder chain as a hardware key does. Edit > Undo and Edit > Redo are chosen through
+the ``menu`` request. An app that was not brought to the front has no key window, and without
+one the Edit menu's items are disabled and Command-X does nothing (measured before the window
+request, ``scenario_A_edit_menu_without_a_key_window``); the scenario's first request makes
+the window the one that stands as key (``CheckKeyWindow`` in the app's source), after which
+the app finds each action's responder, validates the item against it and sends the action,
+all with its own code. An assertion of a menu step therefore holds four things apart: the item
+was validated enabled, the responder was the app's web view, the action sent was ``undo:``,
+and the page's ``window.kyo.undo`` was then called once, by that action, the runner never
+calling it. A cut and a paste use the check build's own pasteboard, which stands in the
+general one's place in that process (``CheckPasteboard``), and step 6 asserts that the general
+pasteboard's change count, the one thing read of it, did not move across the cut and the
+paste. What a menu request leaves out of a person's click is said in the app's README.
 
 The marks of a box are read from the draft on the test server, which is what a second device
 reads; the page has no read of its marks but the DOM, which shows a mark's title only.
@@ -81,14 +86,15 @@ def test_scenario_a_the_composer_sequence(run: harness.Run, check_build: Path, r
     page = app.channel
     composer = Composer(page, server)
     try:
-        made_key = page.request("window", key=True, focus=True)
-        results.measurements["scenario_A_window"] = made_key
         _open(page, run, server)
         composer.session = server.live_session()["session_id"]
         _reply(composer, run)
         pad = _step_1(scenario, composer)
-        first = _move(scenario, composer, "A.2", "Create prompt", "Create prompt", pad)
         _measure_edit_menu(composer, results)
+        made_key = page.request("window", key=True, focus=True)
+        results.measurements["scenario_A_window"] = made_key
+        composer.count_undo_calls()
+        first = _move(scenario, composer, "A.2", "Create prompt", "Create prompt", pad)
         full = _step_5(scenario, composer, first)
         _step_6(scenario, composer, full)
         _step_7(scenario, composer, full)
@@ -105,7 +111,8 @@ def test_scenario_a_the_composer_sequence(run: harness.Run, check_build: Path, r
                     "the tag",
                     "three marks",
                     "Create prompt",
-                    "kyo.undo()",
+                    "Edit > Undo",
+                    "Edit > Redo",
                     "Command-Z",
                     "redone",
                     "Send to prompt",
@@ -208,22 +215,32 @@ def _state(c: Composer, what: str) -> dict[str, Any]:
     return {"composed": c.composed(), "held": c.held(), "second_device_equal": equal["equal"]}
 
 
-def _undo(c: Composer, how: str) -> Any:
-    """``call`` is ``window.kyo.undo()``, which Edit > Undo calls when it is performed (KYO-915);
-    ``key`` is Command-Z through the check channel's ``key`` request."""
-    if how == "call":
-        return c.page.eval("return window.kyo.undo();")
-    return c.page.request("key", key="z", modifiers=COMMAND)
-
-
-def _redo(c: Composer, how: str) -> Any:
-    if how == "call":
-        return c.page.eval("return window.kyo.redo();")
-    return c.page.request("key", key="z", modifiers=COMMAND_SHIFT)
-
-
 def _same(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return left["composed"] == right["composed"] and left["held"] == right["held"]
+
+
+def _edit_items(c: Composer, undo: bool, redo: bool) -> dict[str, Any]:
+    """The Edit menu's Undo and Redo, validated as opening the menu validates them, once they
+    are enabled as said or five seconds have passed: the page tells the app what its Undo
+    would act on a moment after each change."""
+    end = time.monotonic() + 5
+    while True:
+        menu = c.edit_menu()
+        items = {name: menu.get(name, {}).get("enabled") for name in ("Undo", "Redo")}
+        if items == {"Undo": undo, "Redo": redo} or time.monotonic() > end:
+            return items
+        time.sleep(0.1)
+
+
+def _chosen(answer: dict[str, Any], action: str) -> bool:
+    """Whether a ``menu`` request found the item enabled, with the app's web view as the
+    responder of ``action``, and sent it."""
+    return (
+        answer.get("enabled") is True
+        and answer.get("performed") is True
+        and answer.get("action") == action
+        and answer.get("target") == "ChatPage"
+    )
 
 
 def _move(
@@ -234,9 +251,10 @@ def _move(
     label: str,
     before: dict[str, Any],
 ) -> dict[str, Any]:
-    """One move made with the page's button and undone twice: once through Edit > Undo, once
-    through Command-Z, each with Command-Shift-Z or Edit > Redo after. Each time the composer
-    is what it was before the move, with the marks on the lines they were on."""
+    """One move made with the page's button, then undone and redone twice: by Edit > Undo and
+    Edit > Redo through the ``menu`` request, and by Command-Z and Command-Shift-Z through the
+    ``key`` request. Each undo leaves the composer what it was before the move, with the marks
+    on the lines they were on, and each redo what the move made it."""
     pad_label = c.labels()
     assert pad_label == [label], f"the scratchpad's button says {pad_label}, not {label}"
     c.press(CREATE)
@@ -252,40 +270,82 @@ def _move(
         len(after["composed"]) == 1 and after["second_device_equal"],
         {"button_said": pad_label, **after},
     )
-    # The page's call that Edit > Undo makes. The item itself is disabled in an app that was
-    # not brought to the front, which has no key window to validate it (measured below).
-    done = _undo(c, "call")
-    _wait_composed(c, f"{name} undone by kyo.undo()", before["composed"])
-    undone = _state(c, f"{name} undone by kyo.undo()")
+
+    # Edit > Undo. The page's undo is called by the item's action alone: the runner makes the
+    # menu request and nothing else between the two counts.
+    validated = _edit_items(c, undo=True, redo=False)
+    calls = c.undo_calls()
+    chosen = c.choose("Edit", "Undo")
+    # Not a wait that ends the scenario: an action that ran and undid nothing is this
+    # assertion's own failure, with what the menu request answered beside it.
+    _becomes(c, before["composed"], 10.0)
+    undone = _state(c, f"{name} undone by Edit > Undo")
+    called = c.undo_calls()
     scenario.check(
-        f"{id}.undo-call",
-        f"{name}, window.kyo.undo(), which Edit > Undo calls: the scratchpad is back with its "
-        "marks on their lines and the prompt is as it was. Not the menu item: see "
-        "scenario_A_edit_menu_without_a_key_window in the measurements.",
-        _same(undone, before) and done is True,
-        {"returned": done, "undone": undone, "before": before},
+        f"{id}.undo-menu",
+        f"{name}, Edit > Undo chosen through the menu request: the app validated the item "
+        "enabled, and Redo disabled, against its web view; it sent undo: to that view; the "
+        "page's undo was then called once, by that action; and the scratchpad is back with its "
+        "marks on their lines and the prompt as it was.",
+        validated == {"Undo": True, "Redo": False}
+        and _chosen(chosen, "undo:")
+        and called == {"undo": calls["undo"] + 1, "redo": calls["redo"]}
+        and _same(undone, before),
+        {
+            "validated_before": validated,
+            "menu_request": chosen,
+            "page_undo_calls": [calls, called],
+            "undone": undone,
+            "before": before,
+        },
     )
-    # Again, and Command-Z.
-    c.press(CREATE)
-    _wait_composed(c, f"{name} again", after["composed"])
-    again = _state(c, f"{name} again")
-    _undo(c, "key")
+
+    # Edit > Redo.
+    validated = _edit_items(c, undo=False, redo=True)
+    calls = called
+    chosen = c.choose("Edit", "Redo")
+    _becomes(c, after["composed"], 10.0)
+    again = _state(c, f"{name} redone by Edit > Redo")
+    called = c.undo_calls()
+    scenario.check(
+        f"{id}.redo-menu",
+        f"{name}, Edit > Redo chosen through the menu request: validated enabled, redo: sent "
+        "to the web view, the page's redo called once by it, and the lines and marks are in the "
+        "prompt again.",
+        validated["Redo"] is True
+        and _chosen(chosen, "redo:")
+        and called == {"undo": calls["undo"], "redo": calls["redo"] + 1}
+        and _same(again, after),
+        {
+            "validated_before": validated,
+            "menu_request": chosen,
+            "page_undo_calls": [calls, called],
+            "redone": again,
+        },
+    )
+
+    # Command-Z. The key is offered to the page before the menu bar, as a hardware key is,
+    # so which of the two took it is recorded and not asserted.
+    calls = called
+    c.page.request("key", key="z", modifiers=COMMAND)
     _wait_composed(c, f"{name} undone by Command-Z", before["composed"])
     undone_key = _state(c, f"{name} undone by Command-Z")
+    after_undo = c.undo_calls()
     scenario.check(
         f"{id}.undo-key",
-        f"{name}, Command-Z through the key request: the same as the call.",
-        _same(again, after) and _same(undone_key, before),
-        {"again": again, "undone": undone_key},
+        f"{name}, Command-Z through the key request: the scratchpad is back with its marks on "
+        "their lines and the prompt as it was.",
+        _same(undone_key, before),
+        {"undone": undone_key, "page_undo_calls_through_the_app": [calls, after_undo]},
     )
-    _redo(c, "key")
+    c.page.request("key", key="z", modifiers=COMMAND_SHIFT)
     _wait_composed(c, f"{name} redone by Command-Shift-Z", after["composed"])
-    redone = _state(c, f"{name} redone")
+    redone = _state(c, f"{name} redone by Command-Shift-Z")
     scenario.check(
         f"{id}.redo-key",
         f"{name}, Command-Shift-Z puts the lines into the prompt again.",
         _same(redone, after),
-        redone,
+        {"redone": redone, "page_undo_calls_through_the_app": [after_undo, c.undo_calls()]},
     )
     return after
 
@@ -327,23 +387,31 @@ def _step_1(scenario: harness.Scenario, c: Composer) -> dict[str, Any]:
 
 
 def _measure_edit_menu(c: Composer, results) -> None:
-    """Whether the Edit menu's items can be chosen in an app that was not brought to the front.
-    The prompt holds a move that can be undone and a box holds the caret, so the page has
-    told the app that Undo has something to act on."""
-    menu = c.edit_menu()
+    """What the Edit menu and Command-X do in an app that was not brought to the front and
+    has not been given a window that stands as key. A box holds the caret and an anchor
+    placed in it is a step its Undo would take back, which the page has told the app; the
+    whole scratchpad is selected, so there are words for a cut to take. This is read before
+    the scenario's ``window`` request, and nothing here is performed: a disabled item is not
+    chosen, and the key is left with no item to reach."""
     state = c.page.request("state")
+    c.select(0, 0, len(JOINED))
+    menu = c.edit_menu()
     measured: dict[str, Any] = {
         "window_is_key": state["key"],
+        "window_stands_as_key": state["stands_as_key"],
         "app_is_active": state["active"],
-        "undo_enabled": menu["Undo"].get("enabled"),
-        "redo_enabled": menu["Redo"].get("enabled"),
-        "a_move_could_be_undone": c.page.eval(
-            "return window.kyo.composer.boxes().some((b) => b.text !== '');"
-        ),
+        "enabled": {name: menu[name].get("enabled") for name in ("Undo", "Redo", "Cut", "Paste")},
     }
     if not menu["Undo"].get("enabled"):
-        # A disabled item is not performed, so this changes nothing.
-        measured["menu_request"] = c.page.request("menu", path=["Edit", "Undo"])
+        measured["menu_request"] = c.choose("Edit", "Undo")
+    if not menu["Cut"].get("enabled"):
+        board = c.pasteboard()
+        c.page.request("key", key="x", modifiers=COMMAND)
+        time.sleep(0.5)
+        measured["command_x_cut_nothing"] = (
+            c.composed()[0][1] == JOINED and c.pasteboard()["change_count"] == board["change_count"]
+        )
+    c.select(0, len(JOINED))
     results.measurements["scenario_A_edit_menu_without_a_key_window"] = measured
 
 
@@ -377,22 +445,54 @@ def _step_5(scenario: harness.Scenario, c: Composer, first: dict[str, Any]) -> d
     return after
 
 
+def _becomes(c: Composer, expected: list[list[str]], deadline: float = 5.0) -> bool:
+    """Whether the composer's boxes become ``expected`` within the limit. Unlike a wait, this
+    does not end the scenario, so that what it finds is recorded as the step's own assertion."""
+    try:
+        _wait_composed(c, "the boxes", expected, deadline)
+    except harness.CheckError:
+        return False
+    return True
+
+
 def _step_6(scenario: harness.Scenario, c: Composer, full: dict[str, Any]) -> None:
     text = full["composed"][0][1]
     first = LINES[0] + "\n"
     rest = text[len(first) :]
+    board = c.pasteboard()
     c.cut(0, 0, len(first))
-    _wait_composed(c, "the first line cut from the prompt", [["prompt", rest]])
+    _wait_composed(c, "the first line cut from the prompt by Command-X", [["prompt", rest]])
+    cut_board = c.pasteboard()
     c.new_scratchpad()
     c.paste(0, 0)
-    _wait_composed(c, "the line pasted into a scratchpad", [["scratch", first], ["prompt", rest]])
+    _wait_composed(
+        c,
+        "the line pasted into a scratchpad by Command-V",
+        [["scratch", first], ["prompt", rest]],
+    )
+    pasted_board = c.pasteboard()
+    scenario.check(
+        "A.6.pasteboard",
+        "Command-X and Command-V went through the check build's own pasteboard, which is what "
+        "the app gets when it asks for the general one: it held the cut line after the cut and "
+        "its change count rose. The general pasteboard's change count, the one thing read of "
+        "it, was the same before the cut and after the paste; it moves if the person at the "
+        "machine copies something in those moments.",
+        board["is_general"] is True
+        and board["name"] != "Apple CFPasteboard general"
+        and cut_board["text"] == first
+        and cut_board["change_count"] > board["change_count"]
+        and board["person_change_count"] is not None
+        and board["person_change_count"] == pasted_board["person_change_count"],
+        {"before": board, "after_the_cut": cut_board, "after_the_paste": pasted_board},
+    )
     pasted = _state(c, "the paste")
     pad_marks = pasted["held"][0][2]
     prompt_marks = pasted["held"][1][2]
     scenario.check(
         "A.6.carried",
-        "A line cut from the prompt and pasted into a new scratchpad carries its anchor, and "
-        "the lines the prompt kept hold none.",
+        "A line cut from the prompt with Command-X and pasted into a new scratchpad with "
+        "Command-V carries its anchor, and the lines the prompt kept hold none.",
         len(pad_marks) == 1
         and pad_marks[0][0] == 0
         and pad_marks[0][1][0].startswith("anchor:r:")
@@ -407,44 +507,50 @@ def _step_6(scenario: harness.Scenario, c: Composer, full: dict[str, Any]) -> No
     scenario.check(
         "A.6.undo-paste",
         "One Command-Z in the scratchpad takes back the pasted text and its mark together.",
-        undone["held"] == [["prompt", rest, prompt_marks]]
-        or undone["held"][-1][2] == prompt_marks
-        and not any(
-            item.startswith("anchor")
-            for box in undone["held"][:-1]
-            for _, items in box[2]
-            for item in items
-        ),
+        undone["held"] == [["prompt", rest, prompt_marks]],
         undone,
     )
-    # The cut itself, taken back in the prompt: the line returns with what it held.
+    # The cut itself, taken back in the prompt: the line returns with what it held. The
+    # emptied scratchpad leaves as the caret moves, which is step 7's rule and is asserted
+    # there; this step waits for it no longer than three seconds and reads the prompt alone.
     c.select(1, 0)
-    _wait_composed(c, "the empty scratchpad to leave", [["prompt", rest]])
+    left = _becomes(c, [["prompt", rest]], 3.0)
     c.page.request("key", key="z", modifiers=COMMAND)
-    _wait_composed(c, "the cut undone", [["prompt", text]])
+    c.page.wait(
+        "the cut undone",
+        "return window.kyo.composer.boxes().at(-1).text === text;",
+        text=text,
+    )
     back = _state(c, "the cut undone")
     scenario.check(
         "A.6.undo-cut",
         "One Command-Z in the prompt takes back the cut, and the line returns with its anchor.",
         back["held"] == full["held"],
-        back,
+        {"the_emptied_scratchpad_had_left": left, **back},
     )
 
 
 def _step_7(scenario: harness.Scenario, c: Composer, full: dict[str, Any]) -> None:
+    """Each of the step's three rules is one recorded assertion, reached whatever the
+    others found: a scratchpad added with + is the box above the prompt, and is named by
+    that place, and nothing here ends the scenario on a wait for a scratchpad to leave."""
     text = full["composed"][0][1]
     c.new_scratchpad()
-    c.type("temporary words", "temporary words", 0)
-    c.cut(0, 0, len("temporary words"))
-    _wait_composed(c, "the scratchpad emptied by a cut", [["scratch", ""], ["prompt", text]])
-    c.select(1, 0)
-    _wait_composed(c, "the emptied scratchpad to leave", [["prompt", text]])
+    pad = len(c.boxes()) - 2
+    c.type("temporary words", "temporary words", pad)
+    c.cut(pad, 0, len("temporary words"))
+    c.page.wait(
+        "the scratchpad emptied by Command-X",
+        "return window.kyo.composer.boxes().at(-2).text === '';",
+    )
+    c.select(len(c.boxes()) - 1, 0)
     scenario.check(
         "A.7.cut",
         "A scratchpad emptied by a cut leaves when the caret moves to the prompt.",
-        c.composed() == [["prompt", text]],
+        _becomes(c, [["prompt", text]]),
         c.composed(),
     )
+    standing = len(c.boxes())
     c.new_scratchpad()
     c.page.eval("document.activeElement.blur();")
     outside = c.page.eval(
@@ -458,15 +564,18 @@ def _step_7(scenario: harness.Scenario, c: Composer, full: dict[str, Any]) -> No
     scenario.check(
         "A.7.outside",
         "A scratchpad added with + and left untyped stays while the focus is outside the composer.",
-        outside and counts == {2},
-        {"focus_outside_the_composer": outside, "box_counts_over_1.5_s": sorted(counts)},
+        outside and counts == {standing + 1},
+        {
+            "focus_outside_the_composer": outside,
+            "boxes_before_the_plus": standing,
+            "box_counts_over_1.5_s": sorted(counts),
+        },
     )
-    c.select(1, 0)
-    _wait_composed(c, "the untyped scratchpad to leave", [["prompt", text]])
+    c.select(len(c.boxes()) - 1, 0)
     scenario.check(
         "A.7.untyped",
         "The scratchpad added with + and left untyped leaves when the caret moves to the prompt.",
-        c.composed() == [["prompt", text]],
+        _becomes(c, [["prompt", text]]),
         c.composed(),
     )
 
@@ -541,8 +650,11 @@ LATER = "Please add this afterwards"
 TYPED_SINCE = "typed while it was held"
 #: How long the scripted turn runs. The last activity reads "1m ago" from a minute after the
 #: turn's first record, so a prompt delivered when the turn ends finds it so, and the turn
-#: writes nothing that would reset it before then.
-TURN_SECONDS = 80
+#: writes nothing that would reset it before then. The minute is what the last assertion
+#: depends on and cannot be shortened; the four seconds over it are for the page, which
+#: draws the activity once a second, to have shown "1m ago" before the turn ends. Holding
+#: the prompt and returning it happen within the turn and do not depend on its length.
+TURN_SECONDS = 64
 
 G_SCRIPT: dict[str, Any] = {
     "named": {LONG_TURN: [{"wait": TURN_SECONDS}], LATER: [{"say": "Added."}]}

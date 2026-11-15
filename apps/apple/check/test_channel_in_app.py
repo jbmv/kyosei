@@ -55,6 +55,7 @@ def test_the_app_started_is_the_check_build_and_shows_the_test_servers_project(
     results.measurements["window_without_activation"] = {
         "asked": "window.makeKey() and makeFirstResponder(page), with no NSApp.activate()",
         "key": made_key["key"],
+        "stands_as_key": made_key["stands_as_key"],
         "main": made_key["main"],
         "app_active": made_key["active"],
         "frontmost_app_is_the_check_build": made_key["frontmost"] == harness.CHECK_IDENTIFIER,
@@ -76,7 +77,14 @@ def test_the_apps_own_menu_is_read_and_an_item_of_it_is_performed(app: harness.A
     # File > Projects… shows the list of projects in place of the chat (KYO-766).
     before = app.channel.eval("return document.body.className;")
     done = app.channel.request("menu", path=["File", "Projects…"])
-    assert done == {"performed": True, "enabled": True, "title": "Projects…"}
+    # The item is SwiftUI's own, whose target is an object of its making.
+    assert done == {
+        "performed": True,
+        "enabled": True,
+        "title": "Projects…",
+        "action": "menuAction:",
+        "target": "MenuItemCallback",
+    }
     after = app.channel.wait(
         "the page to change for File > Projects…",
         "return document.body.className !== before ? document.body.className : '';",

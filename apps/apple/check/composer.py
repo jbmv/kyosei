@@ -3,9 +3,12 @@
 ``Composer`` wraps the check channel and the test server for scenarios A and G: it reads the
 composer's boxes through ``window.kyo.composer``, reads the marks from the draft on the test
 server, which is what a second device reads, and makes the moves a person makes. Keys go
-through the channel's ``key`` request; the events a web view takes from the window server and
-the pasteboard (a context menu on the chat, a gutter's mark panel, a paste of a file, a cut
-and a paste) are dispatched in the page, as the page's own tests dispatch them.
+through the channel's ``key`` request, Command-X and Command-V among them: the check build's
+general pasteboard is one of its own (``CheckPasteboard``), which the ``pasteboard`` request
+reads. The Edit menu's items are chosen through the ``menu`` request. Both need the window to
+stand as the key window, which a scenario asks for once with ``window``. The events a web
+view takes from the window server (a context menu on the chat, a gutter's mark panel) and a
+paste of a file are dispatched in the page, as the page's own tests dispatch them.
 """
 
 from __future__ import annotations
@@ -233,19 +236,42 @@ class Composer:
         menus = {menu["title"]: menu.get("items", []) for menu in self.page.request("menus")}
         return {item["title"]: item for item in menus["Edit"] if item.get("title")}
 
-    def cut(self, index: int, start: int, end: int) -> None:
-        self.select(index, start, end)
+    def choose(self, *path: str) -> dict[str, Any]:
+        """Choose an item of the menu bar by its titles. The app validates the item against
+        the responder its action goes to and, if that enables it, sends the action; the
+        answer says which of those happened, the action's name and the responder's class."""
+        return self.page.request("menu", path=list(path))
+
+    def count_undo_calls(self) -> None:
+        """Count the calls of the page's ``window.kyo.undo`` and ``window.kyo.redo`` from now
+        on. The app's ``undo:`` and ``redo:`` call them (KYO-915) and the runner never does,
+        so a count that rises by one at a menu request is the item's action having run."""
         self.page.eval(
-            "window.clip = new DataTransfer();"
-            "document.activeElement.dispatchEvent(new ClipboardEvent('cut',"
-            " {clipboardData: window.clip, bubbles: true, cancelable: true}));"
+            "if (!window.checkUndoCalls) {"
+            "  window.checkUndoCalls = {undo: 0, redo: 0};"
+            "  for (const name of ['undo', 'redo']) {"
+            "    const own = window.kyo[name];"
+            "    window.kyo[name] = (...given) => {"
+            "      window.checkUndoCalls[name] += 1; return own(...given); };"
+            "  }"
+            "}"
         )
 
+    def undo_calls(self) -> dict[str, int]:
+        return self.page.eval("return window.checkUndoCalls;")
+
+    def pasteboard(self) -> dict[str, Any]:
+        """The check build's own pasteboard: its name, change count and text, whether it is
+        what the app gets when it asks for the general pasteboard, and the change count of
+        the general pasteboard itself, the one thing read of it."""
+        return self.page.request("pasteboard")
+
+    def cut(self, index: int, start: int, end: int) -> None:
+        """Command-X on a selection, through the ``key`` request and the Edit menu's Cut."""
+        self.select(index, start, end)
+        self.page.request("key", key="x", modifiers=["command"])
+
     def paste(self, index: int, at: int) -> None:
+        """Command-V at a place, through the ``key`` request and the Edit menu's Paste."""
         self.select(index, at)
-        self.page.eval(
-            "const data = new DataTransfer();"
-            "data.setData('text/plain', window.clip.getData('text/plain'));"
-            "document.activeElement.dispatchEvent(new ClipboardEvent('paste',"
-            " {clipboardData: data, bubbles: true, cancelable: true}));"
-        )
+        self.page.request("key", key="v", modifiers=["command"])
