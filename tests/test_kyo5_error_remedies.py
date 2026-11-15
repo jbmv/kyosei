@@ -4014,17 +4014,20 @@ UNREACHED: dict[str, str] = {
         + "test_another_key_and_a_value_that_is_not_a_boolean_are_refused"
     ),
     "cmd_install_agents.py:_front_matter_span#0": (
-        "not provoked by this walk: restoring the file with `kyo install-agents --type ... --force`; proved by "
+        "not provoked by this walk: restoring the file with "
+        "`kyo install-agents --type ... --force`; proved by "
         "tests/test_kyo950_machine_writers.py::"
         "test_the_remedy_for_a_file_without_front_matter_clears_it"
     ),
     "cmd_install_agents.py:_front_matter_span#1": (
-        "not provoked by this walk: restoring the file with `--force`, or closing the front matter by hand; proved by "
+        "not provoked by this walk: restoring the file with `--force`, "
+        "or closing the front matter by hand; proved by "
         "tests/test_kyo950_machine_writers.py::"
         "test_the_remedy_for_a_file_without_front_matter_clears_it"
     ),
     "cmd_install_agents.py:_front_line#0": (
-        "not provoked by this walk: restoring the file with `--force`, or adding the line by hand; proved by "
+        "not provoked by this walk: restoring the file with `--force`, "
+        "or adding the line by hand; proved by "
         "tests/test_kyo950_machine_writers.py::"
         "test_the_remedy_for_a_file_without_front_matter_clears_it"
     ),
