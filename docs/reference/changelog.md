@@ -133,6 +133,8 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-15** — `KYO-957` (investigation) — Review of the config write routes before merge (KYO-956)
+- **2026-11-15** — `KYO-956` (task) — Config write routes and the config device permission
 - **2026-11-15** — `KYO-955` (task) — Writers for serve_idle_message and an agent type's model and effort
 - **2026-11-15** — `KYO-954` (task) — Comment-keeping writers for the editable project settings
 - **2026-11-15** — `KYO-952` (task) — kyo config and the read routes for project and machine settings
