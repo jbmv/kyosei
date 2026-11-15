@@ -752,7 +752,15 @@ def _cmd_docs_coverage_level(ctx: Context, args: Namespace) -> Output:
     docs_coverage.parse(
         block, docs_coverage.config_path_for(ctx.root), code_root=ctx.code_root
     )
-    path = docs_coverage.write_level(ctx.root, level)
+    path = docs_coverage.write_level(
+        ctx.root,
+        level,
+        environ=ctx.environ,
+        project=ctx.code_root.name,
+        actor=ctx.actor,
+        main_checkout=None if ctx.layout is None else ctx.layout.store_via_main_checkout,
+        code_root=ctx.code_root,
+    )
     stored = yaml.safe_load(path.read_text(encoding="utf-8"))[docs_coverage.DOCS_COVERAGE_KEY]
     return Output(
         [

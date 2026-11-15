@@ -36,6 +36,7 @@ from pathlib import Path
 
 import yaml
 
+from . import config_splice
 from .errors import KyoseiError
 
 CLASS_SHOWN = "shown"
@@ -581,6 +582,7 @@ def _row_document(
     items: dict,
     *,
     withhold: bool,
+    latest: dict | None = None,
 ) -> dict:
     present_keys = [key for key in row.keys if _dig(raw, key)[0]]
     if row.alias:
@@ -617,7 +619,7 @@ def _row_document(
         "trailing": trailing,
         "lines": lines,
         "status": _status_of(items, row.item),
-        "last_change": None,
+        "last_change": _last_change(row, latest or {}),
     }
     if row.alias:
         document["spelling"] = shown_key
@@ -630,6 +632,15 @@ def _row_document(
             "header": _request_header(row.id, where, row.decision, lines)
         }
     return document
+
+
+def _last_change(row: Setting, latest: dict) -> dict | None:
+    """The latest logged write of any spelling of this setting (section 5.5), or ``None``."""
+    rows = [latest[key] for key in (row.id, *row.keys) if key in latest]
+    if not rows:
+        return None
+    newest = max(rows, key=lambda logged: str(logged.get("at", "")))
+    return {name: newest.get(name) for name in ("at", "device", "key", "previous", "new")}
 
 
 def _consumers(row: Setting) -> list[str]:
@@ -788,6 +799,7 @@ def build_project_document(
     raw = _parse(text)
     items = _items_by_label(project_items(layout))
     where = _display_path(layout, path)
+    latest = config_splice.latest_changes(environ, path)
     agents_dir = layout.code_root / ".claude" / "agents"
     return {
         "ok": True,
@@ -799,7 +811,8 @@ def build_project_document(
             "agent_types": {"path": ".claude/agents", "present": agents_dir.is_dir()},
         },
         "settings": [
-            _row_document(row, text, raw, where, items, withhold=withhold) for row in SETTINGS
+            _row_document(row, text, raw, where, items, withhold=withhold, latest=latest)
+            for row in SETTINGS
         ],
         "agent_types": _agent_type_documents(layout.code_root, items),
         "beside": _beside(layout.store_root / "kyosei"),
@@ -834,8 +847,9 @@ def build_machine_document(environ: dict[str, str], *, withhold: bool = False) -
         problem = str(exc)
     raw = _parse(text)
     items = _items_by_label(machine_items(environ))
+    latest = config_splice.latest_changes(environ, path)
     rows = [
-        _row_document(row, text, raw, "settings.yml", items, withhold=withhold)
+        _row_document(row, text, raw, "settings.yml", items, withhold=withhold, latest=latest)
         for row in MACHINE_SETTINGS
     ]
     for row in rows:

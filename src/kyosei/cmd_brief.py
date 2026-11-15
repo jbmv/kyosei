@@ -1156,6 +1156,18 @@ def _docs_coverage_ask(store: Store) -> dict | None:
     }
 
 
+def _config_changes(ctx: Context, store: Store, since: str | None) -> list[dict]:
+    """The logged writes of this project's ``config.yml`` after ``since``, each with the
+    plain line that states it (:func:`kyosei.config_splice.change_line`)."""
+    from . import config_splice
+    from .config import config_path_for
+
+    rows = config_splice.changes_since(
+        ctx.environ, config_path_for(store.config.root), since
+    )
+    return [{**row, "line": config_splice.change_line(row)} for row in rows]
+
+
 def cmd_brief(ctx: Context, args: Namespace) -> Output:
     """``kyo brief [--compact] [--session-start]`` (KYO-8.c6) — the session briefing, derived
     entirely from the store: counts by kind, ready work, gated work with
@@ -1328,6 +1340,10 @@ def cmd_brief(ctx: Context, args: Namespace) -> Output:
         # neither on nor off at recx.prior_art.state; null otherwise. Asked with find_spec
         # and no import, so a project without recx pays one path lookup for it.
         "prior_art_unchosen": prior_art.unchosen_line(store.config.root),
+        # KYO-954.c9: each change a writer logged to this project's config.yml since the
+        # previous brief, stated and asking nothing: a value the orchestrator remembers
+        # from an earlier read may no longer be the one in the file.
+        "config_changes": _config_changes(ctx, store, previous_brief_at),
         # KYO-802.c1: the project's counts for the docs-coverage block, or null once any
         # level is recorded, where no document exists, or where nothing is ungoverned.
         "docs_coverage_ask": _docs_coverage_ask(store),

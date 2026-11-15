@@ -573,25 +573,32 @@ def finding(coverage: Coverage, config: CoverageConfig) -> list[str]:
 # ---------------------------------------------------------------- the level, written
 
 
-def _scalar(level: str) -> str:
-    """``level`` as YAML writes it: ``off`` is quoted, since a bare one reads as false."""
-    import yaml
-
-    return yaml.safe_dump(level).splitlines()[0]
-
-
-def write_level(root: Path, level: str) -> Path:
+def write_level(
+    root: Path,
+    level: str,
+    *,
+    environ: dict[str, str] | None = None,
+    project: str | None = None,
+    actor: str | None = None,
+    main_checkout: Path | None = None,
+    code_root: Path | None = None,
+) -> Path:
     """Record ``level`` under ``docs_coverage:`` in ``kyosei/config.yml``, keeping the
-    rest of the key and of the file, and the file's schema version as it stands.
+    rest of the file, comments included, and its schema version as it stands.
 
-    The key is appended as a block when absent and its ``level:`` line replaced when
-    present, so the project's comments survive; any other shape of the file is
-    re-rendered from its values, as :func:`kyosei.config.record_publication_acknowledgement`
-    does. The result is read back and compared with what was meant before it is written.
+    KYO-954: the change goes through :func:`kyosei.config_splice.splice` and is written
+    atomically; there is no longer a fallback that re-renders the file from its values,
+    which dropped every comment a project wrote. A file the splice cannot change exactly
+    (``docs_coverage`` written as a flow mapping, say) is refused, naming the hand edit.
+    Each candidate is read back by :func:`kyosei.config.validate_config_text` and
+    :func:`parse`, the readers of the key.
     """
+    import os
+
     import yaml
 
-    from .config import render_config
+    from . import config_splice
+    from .config import refuse_store_write, validate_config_text
 
     if level not in LEVELS:
         raise KyoseiError(f"level must be one of {', '.join(LEVELS)}; got {level!r}")
@@ -602,42 +609,23 @@ def write_level(root: Path, level: str) -> Path:
             f"{path} does not exist or has no project_prefix, so there is nothing to record "
             "the level in -- run this in a Kyosei project"
         )
-    current = raw.get(DOCS_COVERAGE_KEY)
-    block = dict(current) if isinstance(current, dict) else {}
-    block["level"] = level
-    expected = dict(raw)
-    expected[DOCS_COVERAGE_KEY] = block
-    before = path.read_text(encoding="utf-8")
-    after = None
-    if current is None and DOCS_COVERAGE_KEY not in raw:
-        candidate = (
-            before.rstrip("\n")
-            + f"\n\n# KYO-801. Whether, and how strictly, to report code that no document "
-            "section governs.\n"
-            f"{DOCS_COVERAGE_KEY}:\n  level: {_scalar(level)}\n"
-        )
-        if yaml.safe_load(candidate) == expected:
-            after = candidate
-    elif isinstance(current, dict) and "level" in current:
-        lines = before.splitlines(keepends=True)
-        start = next(
-            (i for i, line in enumerate(lines) if re.match(rf"{DOCS_COVERAGE_KEY}[ \t]*:", line)),
-            None,
-        )
-        if start is not None:
-            for index in range(start + 1, len(lines)):
-                if lines[index].strip() and not lines[index][0].isspace():
-                    break
-                match = re.match(r"^([ \t]+)level[ \t]*:", lines[index])
-                if match:
-                    lines[index] = f"{match.group(1)}level: {_scalar(level)}\n"
-                    candidate = "".join(lines)
-                    if yaml.safe_load(candidate) == expected:
-                        after = candidate
-                    break
-    if after is None:
-        after = render_config(expected)
-    if after != before:
-        path.write_text(after, encoding="utf-8")
-    return path
 
+    def validate(candidate: str) -> None:
+        validate_config_text(candidate, path)
+        parsed = yaml.safe_load(candidate) or {}
+        parse(parsed.get(DOCS_COVERAGE_KEY), path, code_root=code_root)
+
+    def precheck(present: bool, previous: object) -> None:
+        refuse_store_write(main_checkout, code_root or root, "record the docs coverage level")
+
+    config_splice.apply_change(
+        path=path,
+        change=config_splice.Change(f"{DOCS_COVERAGE_KEY}.level", level),
+        validate=validate,
+        environ=os.environ.copy() if environ is None else environ,
+        project=project or root.name,
+        actor=actor,
+        precheck=precheck,
+        probe_root=root,
+    )
+    return path
