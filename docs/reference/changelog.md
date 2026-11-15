@@ -133,6 +133,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-15** — `KYO-955` (task) — Writers for serve_idle_message and an agent type's model and effort
 - **2026-11-15** — `KYO-954` (task) — Comment-keeping writers for the editable project settings
 - **2026-11-15** — `KYO-952` (task) — kyo config and the read routes for project and machine settings
 - **2026-11-12** — `KYO-444` (plan) — CLI distribution and kyo serve (KYO-443)
