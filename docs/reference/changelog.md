@@ -652,6 +652,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-15** — `KYO-950` (proposal) — Mac app: a config menu for project and machine settings
 - **2026-11-15** — `KYO-948` (task) — Mac app check harness: the lifecycle scenarios
 - **2026-11-15** — `KYO-947` (task) — Mac app check harness: the composer scenarios
 - **2026-11-15** — `KYO-946` (task) — Mac app check harness: the scripted session
