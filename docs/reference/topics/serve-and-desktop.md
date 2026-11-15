@@ -704,9 +704,11 @@ governs: src/kyosei/config_view.py, src/kyosei/cmd_config.py, src/kyosei/serve_c
 `kyo config` reads a project's configuration and `kyo config --machine` the machine's, and
 `GET /v1/projects/<name>/config` and `GET /v1/settings` serve the same two documents to a
 client of `kyo serve`. The command reads files, opens no database and writes nothing, and
-`--json` prints the document that the routes serve. This build has no writer of any setting;
-the document describes the changes a later build offers and the routes that make them are
-not served.
+`--json` prints the document that the routes serve. `kyo config set`, `unset` and `--log`
+(KYO-954) write and report the three editable keys it names, at the terminal only; no route
+writes a setting yet, so the document describes the changes a later build offers through
+them. The writers are described under "Writing the editable project settings" in the
+operating reference.
 
 Each setting is placed in one class, with the reason, by the registry in
 `src/kyosei/config_view.py`: `shown` (read, with no control), `editable` (changed by a client
@@ -722,8 +724,9 @@ names in `kinds.yml`, `scopes.yml`, `documents.yml` and `gate-tags.yml`, and the
 Each entry of `settings` has `key`, `file`, `decision`, `section`, `class`, `why`, `present`,
 `value`, `absent_means`, `consumers`, `comment` (the comment lines directly above the key),
 `trailing`, `lines` (the first and last line of the key and its value), `status` (the item
-that `kyo onboard --check` reports for it, or null) and `last_change` (null in this build,
-which keeps no write log). An `editable` entry has a `write` descriptor, `{route, value,
+that `kyo onboard --check` reports for it, or null) and `last_change` (the latest written row of
+`$KYOSEI_HOME/config-log.jsonl` for the setting, with its time, device, previous and new
+values, or null when none was logged). An `editable` entry has a `write` descriptor, `{route, value,
 clearable, permission, one_way}`, in which `one_way` is null or the sentence a client shows
 before a change it cannot undo; it is set for `read_transcripts`, which a client may turn off
 and not on. A `request` entry has `request.header`, the first line of a request to the
