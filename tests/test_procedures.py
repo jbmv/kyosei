@@ -612,6 +612,9 @@ STORE_ONLY_RULES = frozenset(
         "Commit messages describe the change, never the maintainer's circumstances",
         # 2026-11-11: AGENTS.md's "Writing documents" is this repository's own section.
         "Write public documents by the rules in AGENTS.md's Writing documents",
+        # 2026-11-14 (KYO-943): `make app-check` is this repository's Mac app harness.
+        "Run make app-check before gating Mac app work, and keep harness criteria apart "
+        "from human looks",
     }
 )
 
