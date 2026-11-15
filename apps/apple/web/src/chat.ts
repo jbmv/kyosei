@@ -57,7 +57,8 @@ import {
 } from "./searchhistory";
 import { type StartFrame, startView } from "./start";
 import {
-  type ConfigFrame, type Control, type RowView, type SectionView, CLASS_LABELS, CLASS_MEANINGS,
+  type ConfigFrame, type Control, type RowNote, type RowView, type SectionView, type WriteResult, CLASS_LABELS,
+  CLASS_MEANINGS, holdsRequest, noteAfter, numberBody, requestText, writeBody,
   chosenSection, fileProblem, machineSections, projectSections, readState,
 } from "./config";
 import { Terminal } from "@xterm/xterm";
@@ -8802,59 +8803,205 @@ function configText(source: string): DocumentFragment {
   return linked(source);
 }
 
-function configControl(control: Control): HTMLElement {
+/** What the controls of a row hold while the page is drawn again: what was typed, and what is asked. */
+interface ConfigRowState {
+  /** What was typed in each field, by the field's name, kept over a redraw and a refusal. */
+  typed: Record<string, string>;
+  /** A write waiting for the confirmation of a change that cannot be undone. */
+  confirming: unknown;
+  busy: boolean;
+  note: RowNote | null;
+}
+const configRows = new Map<string, ConfigRowState>();
+/** Where each request was placed, by its header, while a box holding it stands in the composer. */
+const configPlaced = new Map<string, string>();
+
+function configRowState(id: string): ConfigRowState {
+  let state = configRows.get(id);
+  if (!state) {
+    state = { typed: {}, confirming: null, busy: false, note: null };
+    configRows.set(id, state);
+  }
+  return state;
+}
+
+/** Sends one write of a row to the app, after the confirmation a one-way change asks for. */
+function configWrite(row: RowView, body: unknown, confirmed = false): void {
+  if (!row.write) return;
+  const state = configRowState(row.id);
+  if (row.oneWay && !confirmed) {
+    state.confirming = body;
+    state.note = null;
+    drawConfig();
+    return;
+  }
+  state.confirming = null;
+  state.note = null;
+  state.busy = true;
+  post("configWrite", {
+    id: row.id, project: configRead?.project ?? "", route: row.write.route, machine: row.write.machine,
+    etag: row.write.etag, body,
+  });
+  drawConfig();
+}
+
+function configControl(row: RowView, control: Control): HTMLElement {
+  const state = configRowState(row.id);
   const holder = document.createElement("div");
   holder.className = "config-control";
   holder.dataset.control = control.kind;
-  const button = (label: string, pressed?: boolean): HTMLButtonElement => {
+  const off = row.disabled !== null || state.busy;
+  const button = (label: string, onPress: () => void, pressed?: boolean): HTMLButtonElement => {
     const made = document.createElement("button");
     made.type = "button";
-    made.disabled = true;
+    made.disabled = off;
     made.textContent = label;
     if (pressed !== undefined) made.setAttribute("aria-pressed", String(pressed));
+    made.addEventListener("click", onPress);
     return made;
   };
-  const field = (value: string, kind: string, label: string): HTMLInputElement => {
+  const field = (name: string, shown: string, kind: string, label: string, onEnter?: () => void): HTMLInputElement => {
     const made = document.createElement("input");
     made.type = kind;
-    made.value = value;
-    made.disabled = true;
+    made.value = state.typed[name] ?? shown;
+    made.disabled = off;
+    made.dataset.field = name;
     made.setAttribute("aria-label", label);
+    made.addEventListener("input", () => { state.typed[name] = made.value; });
+    if (onEnter) made.addEventListener("keydown", (event) => { if (event.key === "Enter") onEnter(); });
     return made;
   };
+  const clear = (name: string) => { delete state.typed[name]; };
   switch (control.kind) {
     case "text":
-    case "number":
-      holder.append(field(control.value, control.kind, "Value"), button("Save"));
-      if (control.clearable) holder.append(button("Clear"));
+    case "number": {
+      const save = () => {
+        const typed = state.typed.value ?? control.value;
+        configWrite(row, { value: control.kind === "number" ? numberBody(typed) : typed });
+      };
+      holder.append(field("value", control.value, "text", control.kind === "number" ? "Seconds or a whole number" : "Value", save),
+        button("Save", save));
+      if (control.clearable) holder.append(button("Clear", () => { clear("value"); configWrite(row, { value: null }); }));
       break;
+    }
     case "segments":
       holder.append(...control.options.map((option) => {
-        const made = button(option, option === control.value);
+        const made = button(option, () => { if (option !== control.value) configWrite(row, { value: option }); },
+          option === control.value);
         made.className = "chip";
         return made;
       }));
       break;
     case "switch": {
-      const made = field("", "checkbox", "On or off");
+      const made = field("value", "", "checkbox", "On or off");
       made.checked = control.value === true;
       made.setAttribute("role", "switch");
+      made.addEventListener("change", () => { delete state.typed.value; configWrite(row, { value: made.checked }); });
       holder.append(made, span("config-switch-state", control.value === null ? "not set" : control.value ? "on" : "off"));
       break;
     }
     case "turn-off":
-      holder.append(button("Turn off"));
-      if (control.value === false) holder.append(span("config-switch-state", "off"));
+      if (control.value !== false) {
+        if (state.confirming === null) holder.append(button("Turn off", () => configWrite(row, { value: false })));
+      } else holder.append(span("config-switch-state", "off"));
       break;
-    case "fields":
+    case "fields": {
+      const save = () => {
+        const body: Record<string, string> = {};
+        for (const entry of control.fields) body[entry.name] = state.typed[entry.name] ?? entry.value;
+        configWrite(row, writeBody(body));
+      };
       for (const entry of control.fields) {
-        const label = span("config-field-label", entry.label);
-        holder.append(label, field(entry.value, "text", entry.label));
+        const label = span("config-field-label", entry.name);
+        if (entry.options) {
+          const menu_ = document.createElement("select");
+          menu_.disabled = off;
+          menu_.dataset.field = entry.name;
+          menu_.setAttribute("aria-label", entry.name);
+          for (const option of entry.options) {
+            const made = document.createElement("option");
+            made.value = made.textContent = option;
+            menu_.append(made);
+          }
+          menu_.value = state.typed[entry.name] ?? entry.value;
+          menu_.addEventListener("change", () => { state.typed[entry.name] = menu_.value; });
+          holder.append(label, menu_);
+        } else {
+          holder.append(label, field(entry.name, entry.value, "text", entry.name, save));
+        }
       }
-      holder.append(button("Save"));
+      holder.append(button("Save", save));
       break;
+    }
   }
+  if (state.confirming !== null) {
+    const body = state.confirming;
+    holder.append(
+      button("Confirm change", () => configWrite(row, body, true)),
+      button("Cancel", () => { state.confirming = null; drawConfig(); }),
+    );
+  }
+  if (state.busy) holder.append(span("config-switch-state", "Saving…"));
   return holder;
+}
+
+/** The mark a request row carries while its box stands in the composer, and no other. */
+function configMarks(): void {
+  if (currentView !== "config") return;
+  const texts = editors().map(textOf);
+  for (const row of configPage.querySelectorAll<HTMLElement>(".config-row[data-header]")) {
+    const header = row.dataset.header!;
+    const there = texts.some((box) => holdsRequest(box, header));
+    if (!there) configPlaced.delete(header);
+    const ask = row.querySelector<HTMLElement>(".config-ask")!;
+    const mark = ask.querySelector<HTMLElement>(".config-mark")!;
+    const where = ask.querySelector<HTMLElement>(".config-placed")!;
+    mark.hidden = !there;
+    where.hidden = !there || !configPlaced.has(header);
+    where.textContent = configPlaced.get(header) ?? "";
+  }
+}
+
+/** Whose composer the words go to: the session the window follows while it runs, else the project's draft. */
+function composerPlace(): { live: boolean; who: string } {
+  const row = menu?.sessions.sessions.find((item) => item.session_id === menu?.current);
+  if (menu?.current && row?.live) {
+    return { live: true, who: row.title ? `the session "${row.title}"` : "the session this window follows" };
+  }
+  return { live: false, who: "the project" };
+}
+
+/** Ask the session… on a request row: the request's header is placed in the composer and nothing is sent. */
+function askSession(header: string): void {
+  const existing = editors().find((editor) => holdsRequest(textOf(editor), header));
+  if (existing) {
+    focusBox(existing);
+    return;
+  }
+  const words = requestText(header);
+  const main = mainEditor();
+  let where: string;
+  let target: EditorView;
+  if (main && !isDraft(main)) {
+    main.dispatch({ changes: { from: 0, insert: words }, selection: { anchor: words.length }, userEvent: "input.paste" });
+    target = main;
+    const place = composerPlace();
+    where = place.live
+      ? `Placed in the prompt box of ${place.who}. Nothing was sent.`
+      : "No session is running, so it is in the project's draft, which the next session takes. Nothing was sent.";
+  } else {
+    lastMove = null;
+    target = addBox(words, [], boxId(), {});
+    syncCreate();
+    target.dispatch({ selection: { anchor: words.length } });
+    const place = composerPlace();
+    where = place.live
+      ? `Placed in a new scratchpad of ${place.who}, since the prompt box holds words. Nothing was sent.`
+      : "No session is running, so it is in a new scratchpad of the project's draft, since the prompt box holds words, which the next session takes. Nothing was sent.";
+  }
+  configPlaced.set(header, where);
+  focusBox(target);
+  configMarks();
 }
 
 function configRow(row: RowView): HTMLElement {
@@ -8941,13 +9088,39 @@ function configRow(row: RowView): HTMLElement {
     }
   }
   if (row.control) {
-    box.append(configControl(row.control));
+    box.append(configControl(row, row.control));
+    const state = configRows.get(row.id);
+    if (row.disabled) box.append(span("config-blocked", row.disabled));
+    if (state?.note) {
+      const note = document.createElement("div");
+      note.className = "config-refusal";
+      note.dataset.tone = state.note.tone;
+      note.textContent = state.note.text;
+      box.append(note);
+    }
+    if (row.lastChange) box.append(span("config-last", row.lastChange));
     if (row.oneWay) {
       const warning = document.createElement("div");
       warning.className = "config-warning";
       warning.textContent = row.oneWay;
       box.append(warning);
     }
+  }
+  if (row.requestHeader) {
+    box.dataset.header = row.requestHeader;
+    const ask = document.createElement("div");
+    ask.className = "config-ask";
+    const press = document.createElement("button");
+    press.type = "button";
+    press.textContent = "Ask the session…";
+    const header = row.requestHeader;
+    press.addEventListener("click", () => askSession(header));
+    const mark = span("config-mark", "In the composer");
+    mark.hidden = true;
+    const placed = span("config-placed", "");
+    placed.hidden = true;
+    ask.append(press, mark, placed);
+    box.append(ask);
   }
   if (row.how) box.append(span("config-how", row.how));
   if (row.why) box.append(span("config-why", row.why));
@@ -8997,6 +9170,26 @@ function configSectionPage(section: SectionView, problem: string | null, problem
 }
 
 function drawConfig(): void {
+  // A redraw while a field is being typed in keeps the caret where it was.
+  const active = document.activeElement as HTMLElement | null;
+  const held = active && configPage.contains(active) && active.dataset.field
+    ? {
+      row: active.closest<HTMLElement>(".config-row")?.dataset.name, field: active.dataset.field,
+      at: active instanceof HTMLInputElement && active.type === "text" ? active.selectionStart : null,
+    } : null;
+  drawConfigNow();
+  if (held) {
+    const row = [...configPage.querySelectorAll<HTMLElement>(".config-row")].find((entry) => entry.dataset.name === held.row);
+    const again = row?.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field='${held.field}']`);
+    if (again && !again.disabled) {
+      again.focus();
+      if (held.at !== null && again instanceof HTMLInputElement) again.setSelectionRange(held.at, held.at);
+    }
+  }
+  configMarks();
+}
+
+function drawConfigNow(): void {
   const project = readState(configRead?.read, configRead?.version);
   const machine = readState(configRead?.machine, configRead?.version);
   const projectSecs = project.kind === "ok" ? projectSections(project.document) : [];
@@ -9056,6 +9249,7 @@ const configFrames = {
     configRead = null;
     configShown = null;
     configOpened.clear();
+    configRows.clear();
     configAsked = currentView === "config";
     if (configAsked) post("config", { want: "read" });
     drawConfig();
@@ -9065,6 +9259,25 @@ const configFrames = {
   configRead(frame: ConfigFrame): void {
     if (menu?.project && frame.project && frame.project !== menu.project) return;
     configRead = frame;
+    // A write that may or may not have landed is settled by this read, which shows the file.
+    for (const state of configRows.values()) if (state.note?.tone === "failed") state.note = null;
+    drawConfig();
+  },
+
+  /**
+   * What a write answered (KYO-959). A write that took clears the row and reads the documents
+   * again, which shows the new value and the row's latest change. A refusal leaves the control
+   * at the server's value, or with what was attempted after a 412, which also reads again so
+   * that the value now in the file is shown.
+   */
+  configWritten(frame: WriteResult & { id: string; project?: string }): void {
+    if (menu?.project && frame.project && frame.project !== menu.project) return;
+    const state = configRowState(frame.id);
+    state.busy = false;
+    const note = noteAfter(frame);
+    state.note = note;
+    if (!note || !note.keep) state.typed = {};
+    if (!note || frame.status === 412) post("config", { want: "read" });
     drawConfig();
   },
 
@@ -9080,5 +9293,13 @@ const configFrames = {
 };
 
 drawConfig();
+
+// A box of the composer opened, emptied or removed changes what the request rows read.
+let configMarksQueued = false;
+new MutationObserver(() => {
+  if (currentView !== "config" || configMarksQueued) return;
+  configMarksQueued = true;
+  queueMicrotask(() => { configMarksQueued = false; configMarks(); });
+}).observe(boxes, { childList: true, subtree: true, characterData: true });
 
 (window as any).kyo = Object.assign(kyo, recordFrames, fileFrames, historyFrames, configFrames);

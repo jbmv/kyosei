@@ -5,8 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type Reading, chosenSection, controlOf, fileProblem, firstLine, machineSections, projectSections, readState,
-  valueText,
+  type Reading, blockedReason, chosenSection, controlOf, fileProblem, firstLine, holdsRequest, lastChangeText,
+  machineSections, noteAfter, numberBody, projectSections, readState, requestText, valueText, writeBody,
 } from "../src/config.ts";
 import { openPage } from "./chrome.ts";
 
@@ -250,7 +250,7 @@ test("the page draws every section, each row from its document, and a comment wh
   }
 });
 
-test("a row says its class at a glance, shows its control disabled and no control writes anything", async (t) => {
+test("a row says its class at a glance, shows its control disabled with the reason, and no control writes anything", async (t) => {
   const page = await configPage(t, { project: answered(projectDocument()), machine: answered(machineDocument()) });
   if (!page) return;
   try {
@@ -280,6 +280,10 @@ test("a row says its class at a glance, shows its control disabled and no contro
     assert.equal(seen.unset, "not set: a brief states that nothing is declared");
     assert.equal(seen.warning, "Turning this off cannot be undone from this view.");
     assert.equal(seen.posted, 0);
+    // Without the config permission each control says so, naming the grant on the machine.
+    const reasons = await page.run<string[]>(`[...document.querySelectorAll(".config-blocked")].map((e) => e.textContent)`);
+    assert.equal(reasons.length, 1);
+    assert.match(reasons[0], /kyo devices grant laptop --permission config/);
   } finally {
     await page.close();
   }
@@ -353,6 +357,309 @@ test("the page is readable at a narrow width and in both colour schemes", async 
     })()`);
     assert.deepEqual(seen, { overflow: false, rows: 2 });
     assert.ok((await page.shot()).length > 1000);
+  } finally {
+    await page.close();
+  }
+});
+
+// ------------------------------------------------------------------------------ controls (KYO-959)
+
+/** A document a device holding the config permission reads: an editable row of each shape, and requests. */
+const editorDocument = (over: Record<string, unknown> = {}) => projectDocument({
+  device: { name: "laptop", permissions: ["send", "config"], holds_config: true },
+  settings: [
+    setting({
+      key: "worker_model", class: "editable", section: "workers", value: "claude-sonnet-5-5",
+      last_change: { at: "2026-11-15T20:01Z", device: "laptop", key: "worker_model", previous: "claude-opus-5-5", new: "claude-sonnet-5-5" },
+      write: { route: "config/worker_model", clearable: true, one_way: null, permission: "config", value: { type: "string", pattern: "x" } },
+    }),
+    setting({
+      key: "worker_command_timeout_ceiling_seconds", class: "editable", section: "workers", present: false, value: null,
+      write: { route: "config/worker_command_timeout_ceiling_seconds", clearable: true, one_way: null, permission: "config",
+        value: { type: "integer", minimum: 1 } },
+    }),
+    setting({
+      key: "docs_coverage.level", class: "editable", section: "docs", value: "notice",
+      write: { route: "config/docs_coverage.level", clearable: false, one_way: null, permission: "config",
+        value: { type: "string", enum: ["off", "notice", "problem"] } },
+    }),
+    setting({
+      key: "read_transcripts", class: "editable", section: "people", value: true,
+      write: { route: "config/read_transcripts", clearable: false, permission: "config",
+        one_way: "Turning this off cannot be undone from this view.", value: { type: "boolean", values: [false] } },
+    }),
+    setting({
+      key: "worktree_setup", class: "request", section: "workers", present: false, value: null,
+      request: { header: "[kyo-config-request] worktree_setup, kyosei/config.yml lines 67-85 (setup decision D4)" },
+    }),
+  ],
+  agent_types: [{
+    name: "kyosei-worker", model: "sonnet", effort: "medium", etag: "sha256:agent", class: "editable", status: null,
+    write: { route: "agent-types/kyosei-worker", clearable: false, permission: "config", one_way: null,
+      value: { type: "object", model: { type: "string", pattern: "x" }, effort: { type: "string", enum: ["low", "medium", "high"] } } },
+  }],
+  ...over,
+}) as Record<string, unknown>;
+
+const rowOf = (document: Record<string, unknown>, name: string) =>
+  projectSections(document).flatMap((section) => section.rows).find((row) => row.name === name)!;
+
+test("a control is drawn from the write descriptor's value shape, with the file's etag and the route it names", () => {
+  const document = editorDocument();
+  const model = rowOf(document, "worker_model");
+  assert.deepEqual(model.write, { route: "config/worker_model", etag: "sha256:1", machine: false });
+  assert.equal(model.disabled, null);
+  assert.equal(model.lastChange, "Last changed 2026-11-15T20:01Z by laptop: claude-opus-5-5 to claude-sonnet-5-5.");
+  assert.deepEqual(rowOf(document, "worker_command_timeout_ceiling_seconds").control, { kind: "number", value: "", clearable: true });
+  assert.deepEqual(rowOf(document, "docs_coverage.level").control,
+    { kind: "segments", options: ["off", "notice", "problem"], value: "notice" });
+  // An object-valued write is one field to each part: the part that lists values is a menu.
+  const agent = rowOf(document, "kyosei-worker");
+  assert.deepEqual(agent.control, { kind: "fields", fields: [
+    { name: "model", value: "sonnet", options: null }, { name: "effort", value: "medium", options: ["low", "medium", "high"] }] });
+  assert.deepEqual(agent.write, { route: "agent-types/kyosei-worker", etag: "sha256:agent", machine: false });
+  // The machine's route is the server's, with the settings file's etag.
+  const machine = machineSections({ ...machineDocument(), server: { kyosei: "k", stale: false },
+    device: { name: "laptop", permissions: ["config"], holds_config: true } } as Record<string, unknown>);
+  assert.deepEqual(machine[1].rows[0].write, { route: "settings/serve_idle_message", etag: "sha256:2", machine: true });
+  assert.deepEqual(machine[1].rows[0].control, { kind: "switch", value: false });
+});
+
+test("the controls are disabled with a reason: a stale server, a file this build cannot read, a device without config", () => {
+  const stale = { ...editorDocument(), server: { kyosei: "k", stale: true, stale_detail: "older than the install" } };
+  assert.match(blockedReason(stale, "config")!, /stale: older than the install.*kyo serve --restart/);
+  const refused = editorDocument({ files: { config: { path: "/s", etag: "e", present: true, readable: false, problem: "worker_model: bad" } } });
+  assert.match(blockedReason(refused, "config")!, /cannot read the file: worker_model: bad/);
+  assert.equal(rowOf(refused, "kyosei-worker").disabled, blockedReason(refused, "config"));
+  const bare = { ...editorDocument(), device: { name: "phone", permissions: ["send"], holds_config: false } };
+  assert.match(blockedReason(bare, "config")!, /kyo devices grant phone --permission config/);
+  assert.equal(blockedReason(editorDocument(), "config"), null);
+});
+
+test("a refusal prints the server's sentence, a 412 also says what the value now is, and a failure is not known to be written", () => {
+  assert.equal(noteAfter({ status: 200, document: { ok: true }, error: null }), null);
+  assert.deepEqual(noteAfter({ status: 422, document: { error: "docs_coverage.level: problem needs a code list. Add one." }, error: null }),
+    { tone: "refused", keep: false, text: "docs_coverage.level: problem needs a code list. Add one." });
+  const changed = noteAfter({ status: 412, document: { error: "the file changed", current: { value: "claude-opus-5-5", etag: "e2" } }, error: null })!;
+  assert.equal(changed.keep, true);
+  assert.equal(changed.text, "the file changed. Changed elsewhere since this view was read; it now reads claude-opus-5-5.");
+  assert.equal(noteAfter({ status: 412, document: { current: { value: { model: "opus", effort: "high" } } }, error: null })!.text,
+    "Changed elsewhere since this view was read; it now reads model opus, effort high.");
+  const failed = noteAfter({ status: 0, document: null, error: "The server could not be reached." })!;
+  assert.equal(failed.tone, "failed");
+  assert.match(failed.text, /not known until the view reads the file again/);
+  assert.equal(noteAfter({ status: 500, document: { error: "log-unwritable" }, error: null })!.tone, "failed");
+});
+
+test("bodies: a number is sent as a number when it is one and as typed otherwise, and an object is the body as it is", () => {
+  assert.equal(numberBody(" 900 "), 900);
+  assert.equal(numberBody("9.5"), "9.5");
+  assert.equal(numberBody("abc"), "abc");
+  assert.deepEqual(writeBody("x"), { value: "x" });
+  assert.deepEqual(writeBody({ model: "m", effort: "low" }), { model: "m", effort: "low" });
+  assert.equal(lastChangeText(null), null);
+});
+
+test("a request is its header and an empty line, and a box holds it when its first line is the header", () => {
+  assert.equal(requestText("[kyo-config-request] trunk"), "[kyo-config-request] trunk\n\n");
+  assert.equal(holdsRequest("[kyo-config-request] trunk\n\nmore", "[kyo-config-request] trunk"), true);
+  assert.equal(holdsRequest("words\n[kyo-config-request] trunk", "[kyo-config-request] trunk"), false);
+  // Only a row the document gives a request header has a request: serve_send and orchestrator_command have none.
+  const machine = machineSections({ ...machineDocument(), settings: [
+    setting({ key: "serve_send", class: "shown", file: "settings", section: "machine", value: true }),
+    setting({ key: "orchestrator_command", class: "shown", file: "settings", section: "machine", value: ["claude"] }),
+  ] } as Record<string, unknown>);
+  assert.deepEqual(machine.flatMap((section) => section.rows).map((row) => row.requestHeader), [null, null, null]);
+});
+
+/** What the page posted to the app as a write, in order. */
+const writes = (page: { run<T>(e: string): Promise<T> }) =>
+  page.run<unknown[]>(`window.posted.filter((p) => p.name === "configWrite").map((p) => p.body)`);
+
+const choose = (title: string) =>
+  `[...document.querySelectorAll(".config-section-button")].find((b) => b.textContent === "${title}").click();`;
+
+test("a control writes through its route with the file's etag; a write that took reads again and clears the row", async (t) => {
+  const page = await configPage(t, { project: answered(editorDocument()), machine: answered(machineDocument()) });
+  if (!page) return;
+  try {
+    await page.run(`(() => {
+      ${choose("Workers")}
+      const row = document.querySelector('.config-row[data-name="worker_model"]');
+      const input = row.querySelector("input");
+      input.value = "claude-opus-5-5"; input.dispatchEvent(new Event("input"));
+      [...row.querySelectorAll("button")].find((b) => b.textContent === "Save").click();
+    })()`);
+    assert.deepEqual(await writes(page), [{
+      id: "config:worker_model", project: "p", route: "config/worker_model", machine: false, etag: "sha256:1",
+      body: { value: "claude-opus-5-5" },
+    }]);
+    // While it is out the row's controls are off.
+    assert.equal(await page.run<number>(`document.querySelectorAll('.config-row[data-name="worker_model"] input:not(:disabled)').length`), 0);
+    const before = await page.run<number>(`window.posted.filter((p) => p.name === "config").length`);
+    const after = await page.run<{ reads: number; value: string; last: string }>(`(() => {
+      window.kyo.configWritten({ id: "config:worker_model", project: "p", status: 200, error: null,
+        document: { ok: true, key: "worker_model", value: "claude-opus-5-5" } });
+      const doc = ${JSON.stringify(editorDocument())};
+      doc.settings[0].value = "claude-opus-5-5";
+      doc.settings[0].last_change = { at: "2026-11-15T21:00Z", device: "laptop", previous: "claude-sonnet-5-5", new: "claude-opus-5-5" };
+      window.kyo.configRead({ project: "p", version: null, read: { status: 200, error: null, document: doc },
+        machine: { status: 200, error: null, document: ${JSON.stringify(machineDocument())} } });
+      const row = document.querySelector('.config-row[data-name="worker_model"]');
+      return { reads: window.posted.filter((p) => p.name === "config").length,
+        value: row.querySelector("input").value, last: row.querySelector(".config-last").textContent };
+    })()`);
+    assert.equal(after.reads, before + 1);
+    assert.equal(after.value, "claude-opus-5-5");
+    assert.equal(after.last, "Last changed 2026-11-15T21:00Z by laptop: claude-sonnet-5-5 to claude-opus-5-5.");
+    // The number field sends a number, Clear sends null, a segment sends its option, the agent type both fields.
+    await page.run(`(() => {
+      const row = (n) => document.querySelector('.config-row[data-name="' + n + '"]');
+      const input = row("worker_command_timeout_ceiling_seconds").querySelector("input");
+      input.value = "900"; input.dispatchEvent(new Event("input"));
+      [...row("worker_command_timeout_ceiling_seconds").querySelectorAll("button")].find((b) => b.textContent === "Save").click();
+      [...row("worker_model").querySelectorAll("button")].find((b) => b.textContent === "Clear").click();
+      const agent = row("kyosei-worker");
+      const effort = agent.querySelector("select"); effort.value = "high"; effort.dispatchEvent(new Event("change"));
+      [...agent.querySelectorAll("button")].find((b) => b.textContent === "Save").click();
+    })()`);
+    const sent = (await writes(page)).slice(1) as { route: string; body: unknown; etag: string }[];
+    assert.deepEqual(sent.map((w) => [w.route, w.body, w.etag]), [
+      ["config/worker_command_timeout_ceiling_seconds", { value: 900 }, "sha256:1"],
+      ["config/worker_model", { value: null }, "sha256:1"],
+      ["agent-types/kyosei-worker", { model: "sonnet", effort: "high" }, "sha256:agent"],
+    ]);
+    await page.run(`(${choose("Records and documents").replace(/;$/, "")}, document.querySelector('.config-row[data-name="docs_coverage.level"] .chip:not([aria-pressed="true"])').click())`);
+    assert.deepEqual(((await writes(page)).at(-1) as { body: unknown }).body, { value: "off" });
+  } finally {
+    await page.close();
+  }
+});
+
+test("a change that cannot be undone shows its sentence and asks before it writes", async (t) => {
+  const page = await configPage(t, { project: answered(editorDocument()), machine: answered(machineDocument()) });
+  if (!page) return;
+  try {
+    const seen = await page.run<{ warned: string; before: number; buttons: string[]; after: number }>(`(() => {
+      ${choose("People and transcripts")}
+      const row = () => document.querySelector('.config-row[data-name="read_transcripts"]');
+      const warned = row().querySelector(".config-warning").textContent;
+      [...row().querySelectorAll("button")].find((b) => b.textContent === "Turn off").click();
+      const before = window.posted.filter((p) => p.name === "configWrite").length;
+      const buttons = [...row().querySelectorAll(".config-control button")].map((b) => b.textContent);
+      return { warned, before, buttons, after: 0 };
+    })()`);
+    assert.equal(seen.warned, "Turning this off cannot be undone from this view.");
+    assert.equal(seen.before, 0);
+    assert.deepEqual(seen.buttons, ["Confirm change", "Cancel"]);
+    // Cancel sends nothing and the question goes.
+    await page.run(`[...document.querySelectorAll(".config-control button")].find((b) => b.textContent === "Cancel").click()`);
+    assert.equal((await writes(page)).length, 0);
+    await page.run(`[...document.querySelectorAll(".config-control button")].find((b) => b.textContent === "Turn off").click();
+      [...document.querySelectorAll(".config-control button")].find((b) => b.textContent === "Confirm change").click()`);
+    assert.deepEqual((await writes(page)).map((w) => (w as { body: unknown }).body), [{ value: false }]);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a refused write leaves the server's value and prints the sentence; a 412 keeps what was typed and reads again", async (t) => {
+  const page = await configPage(t, { project: answered(editorDocument()), machine: answered(machineDocument()) });
+  if (!page) return;
+  try {
+    await page.run(`(() => {
+      ${choose("Workers")}
+      const row = document.querySelector('.config-row[data-name="worker_model"]');
+      const input = row.querySelector("input");
+      input.value = "bad model"; input.dispatchEvent(new Event("input"));
+      [...row.querySelectorAll("button")].find((b) => b.textContent === "Save").click();
+      window.kyo.configWritten({ id: "config:worker_model", project: "p", status: 422, error: null,
+        document: { ok: false, error: "worker_model: a model id has no spaces. Try claude-sonnet-5-5." } });
+    })()`);
+    const refused = await page.run<{ text: string; value: string; tone: string }>(`(() => {
+      const row = document.querySelector('.config-row[data-name="worker_model"]');
+      return { text: row.querySelector(".config-refusal").textContent, value: row.querySelector("input").value,
+        tone: row.querySelector(".config-refusal").dataset.tone };
+    })()`);
+    assert.deepEqual(refused, { text: "worker_model: a model id has no spaces. Try claude-sonnet-5-5.", value: "claude-sonnet-5-5", tone: "refused" });
+    const before = await page.run<number>(`window.posted.filter((p) => p.name === "config").length`);
+    const kept = await page.run<{ text: string; value: string; reads: number }>(`(() => {
+      const row = () => document.querySelector('.config-row[data-name="worker_model"]');
+      const input = row().querySelector("input");
+      input.value = "claude-haiku-5"; input.dispatchEvent(new Event("input"));
+      [...row().querySelectorAll("button")].find((b) => b.textContent === "Save").click();
+      window.kyo.configWritten({ id: "config:worker_model", project: "p", status: 412, error: null,
+        document: { ok: false, error: "kyosei/config.yml changed", reason: "changed", current: { value: "claude-opus-5-5", etag: "sha256:9" } } });
+      return { text: row().querySelector(".config-refusal").textContent, value: row().querySelector("input").value,
+        reads: window.posted.filter((p) => p.name === "config").length };
+    })()`);
+    assert.equal(kept.value, "claude-haiku-5");
+    assert.match(kept.text, /Changed elsewhere since this view was read; it now reads claude-opus-5-5\./);
+    assert.equal(kept.reads, before + 1);
+  } finally {
+    await page.close();
+  }
+});
+
+test("Ask the session… places the request in the empty prompt box, or in a scratchpad when it holds words, and sends nothing", async (t) => {
+  const page = await configPage(t, { project: answered(editorDocument()), machine: answered(machineDocument()) });
+  if (!page) return;
+  const header = "[kyo-config-request] worktree_setup, kyosei/config.yml lines 67-85 (setup decision D4)";
+  try {
+    const first = await page.run<{ boxes: string[]; mark: boolean; placed: string }>(`(() => {
+      ${choose("Workers")}
+      document.querySelector('.config-row[data-name="worktree_setup"] .config-ask button').click();
+      const row = document.querySelector('.config-row[data-name="worktree_setup"]');
+      return { boxes: [...document.querySelectorAll("#boxes .cm-content")].map((e) => e.textContent),
+        mark: !row.querySelector(".config-mark").hidden, placed: row.querySelector(".config-placed").textContent };
+    })()`);
+    assert.deepEqual(first.boxes, [header]);
+    assert.equal(first.mark, true);
+    // No session is live in the stub, so the words are in the project's draft, which the sentence says.
+    assert.match(first.placed, /No session is running, so it is in the project's draft/);
+    assert.match(first.placed, /Nothing was sent/);
+    // Pressing it again goes to the box that holds it, and adds none.
+    const again = await page.run<number>(`(() => {
+      document.querySelector('.config-row[data-name="worktree_setup"] .config-ask button').click();
+      return document.querySelectorAll("#boxes .cm-content").length;
+    })()`);
+    assert.equal(again, 1);
+    assert.equal(await page.run<number>(`window.posted.filter((p) => ["send", "sendNow"].includes(p.name)).length`), 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test("with words in the prompt box the request opens a scratchpad, and the row reads In the composer only while a box holds it", async (t) => {
+  const page = await configPage(t, { project: answered(editorDocument()), machine: answered(machineDocument()) });
+  if (!page) return;
+  const header = "[kyo-config-request] worktree_setup, kyosei/config.yml lines 67-85 (setup decision D4)";
+  try {
+    await page.run(`(() => {
+      const content = document.querySelector("#boxes .box.main .cm-content");
+      content.focus();
+    })()`);
+    await page.type("my own words");
+    const seen = await page.run<{ boxes: string[]; scratch: number; mark: boolean; main: string }>(`(() => {
+      ${choose("Workers")}
+      document.querySelector('.config-row[data-name="worktree_setup"] .config-ask button').click();
+      const row = document.querySelector('.config-row[data-name="worktree_setup"]');
+      return { boxes: [...document.querySelectorAll("#boxes .cm-content")].map((e) => e.textContent),
+        scratch: document.querySelectorAll("#boxes .box.scratch").length, mark: !row.querySelector(".config-mark").hidden,
+        main: document.querySelector("#boxes .box.main .cm-content").textContent };
+    })()`);
+    assert.equal(seen.scratch, 1);
+    assert.equal(seen.main, "my own words");
+    assert.ok(seen.boxes.includes(header));
+    assert.equal(seen.mark, true);
+    // The mark follows the box: delete the scratchpad's words and it goes.
+    const gone = await page.run<Promise<boolean>>(`new Promise((done) => {
+      document.querySelector("#boxes .box.scratch .box-remove, #boxes .box.scratch [data-action='delete']")?.click();
+      const view = document.querySelector("#boxes .box.scratch .cm-content");
+      if (view) { view.focus(); document.execCommand("selectAll"); document.execCommand("delete"); }
+      setTimeout(() => done(document.querySelector('.config-row[data-name="worktree_setup"] .config-mark').hidden), 150);
+    })`);
+    assert.equal(gone, true);
   } finally {
     await page.close();
   }
