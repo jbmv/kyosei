@@ -57,7 +57,9 @@ orchestrator_command: ["claude", "--chrome", "--remote-control", "{prefix}"]
 Before KYO-519 the key was spelled `controller_command`, and that spelling is still read;
 both with different values is refused by name. A `kyo` older than KYO-519 refuses
 `orchestrator_command`, and `kyo orchestrator start` fails there, so a machine running one
-keeps the older spelling until it is upgraded. Nothing writes this file.
+keeps the older spelling until it is upgraded. No command writes this key or renames it: the
+file's one writer, `kyo config --machine set serve_idle_message`, changes that setting's line
+and leaves the rest as it is (KYO-955).
 
 The setting belongs to the machine, so it is never read from or written to a
 project's `kyosei/config.yml`. An unknown key there is refused by an older
