@@ -615,8 +615,11 @@ and runs no orchestrator; it only views and talks to them.
   project's Claude Code sessions (any token, where D14 is yes), send input to a session and
   keep drafts and a task list for it (`send`), file the operator's notes in the store
   (`notes`), start an orchestrator session (`start`), type into a session's terminal
-  (`terminal`) and read a project's files (`files`). Notes are the one thing the server
-  writes to a store, and no viewer changes a record.
+  (`terminal`), read a project's files (`files`) and change the editable settings of a project
+  and of the machine (`config`: a worker model, a timeout ceiling, prior-art search, the docs
+  coverage level, an agent type's model and effort, turning `read_transcripts` off, and the
+  idle message). Notes are the one thing the server writes to a store, and no viewer changes
+  a record.
 - **Tokens and sending are not part of setup.** No token exists until the operator runs
   `kyo devices issue <name> --permission <p>` on the machine, and the send and terminal
   routes also refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.
@@ -624,8 +627,10 @@ and runs no orchestrator; it only views and talks to them.
   that lets the server send an idle session one automated message (it takes effect only with
   `serve_send: true`), is written by `kyo config --machine set serve_idle_message true|false`,
   which changes that line of an existing `settings.yml`, keeps its comments and the spelling of
-  its command key, and refuses a missing file. `serve_send` and `orchestrator_command` are set
-  at the machine by hand.
+  its command key, and refuses a missing file. A device token holding `config` writes the same
+  line through `POST /v1/settings/serve_idle_message`, which refuses to turn it on while
+  `serve_send` is not true. `serve_send` and `orchestrator_command` are set at the machine by
+  hand, and no route writes either.
 - **Locally:** `kyo serve` in a terminal for a trial, or `kyo serve --install --apply` to
   run it at login (a LaunchAgent on macOS, a systemd user unit on Linux).
 - **Restart it after every upgrade** (`kyo serve --restart`). A running server keeps

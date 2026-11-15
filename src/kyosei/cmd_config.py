@@ -129,7 +129,7 @@ def _parse_value(key: str, text: str) -> object:
 
 
 def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
-    from .config import config_path_for, refuse_store_write, validate_config_text
+    from .config import config_path_for
 
     if args.machine:
         return _cmd_write_machine(ctx, args, action)
@@ -150,34 +150,13 @@ def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
             "project is configured here; run it inside one (or with --root)"
         )
     path = config_path_for(layout.store_root)
-    project = layout.code_root.name
-    try:
-        change = _change_for(action, key, args.value)
-    except KyoseiError as exc:
-        config_splice.log_refusal(
-            ctx.environ, project=project, file=path, key=key, reason=str(exc), actor=ctx.actor
-        )
-        raise
-
-    def precheck(present: bool, previous: object) -> None:
-        refuse_store_write(
-            layout.store_via_main_checkout,
-            ctx.code_root,
-            f"{'change' if action == 'set' else 'clear'} {key}",
-        )
-
-    def validate(candidate: str) -> None:
-        validate_config_text(candidate, path)
-
-    applied = config_splice.apply_change(
-        path=path,
-        change=change,
-        validate=validate,
-        environ=ctx.environ,
-        project=project,
+    applied = write_project_setting(
+        layout,
+        ctx.environ,
+        action,
+        key,
+        text=args.value,
         actor=ctx.actor,
-        precheck=precheck,
-        probe_root=layout.store_root,
         expected_etag=getattr(args, "if_match", None),
     )
     shown = config_splice.shown(applied.value)
@@ -202,6 +181,67 @@ def _cmd_write(ctx: Context, args: Namespace, action: str) -> Output:
     )
 
 
+_NO_VALUE = object()
+
+
+def write_project_setting(
+    layout,
+    environ: dict[str, str],
+    action: str,
+    key: str,
+    *,
+    text: str | None = None,
+    value: object = _NO_VALUE,
+    actor: str | None = None,
+    device: str | None = None,
+    device_id: str | None = None,
+    expected_etag: str | None = None,
+) -> config_splice.Applied:
+    """Change (``set``) or clear (``unset``) one editable key of the project's ``config.yml``.
+
+    The one path of ``kyo config set`` and of the served routes (KYO-956): the value is given
+    as the terminal's ``text`` or, from a route, as the JSON ``value`` it carried. A refusal
+    made before the file is read is a row of the log, as one made after it is; ``device`` and
+    ``device_id`` name the presenting device in the row, and the terminal's rows name ``cli``.
+    """
+    from .config import config_path_for, refuse_store_write, validate_config_text
+
+    path = config_path_for(layout.store_root)
+    project = layout.code_root.name
+    acting = {} if device is None else {"device": device, "device_id": device_id}
+    try:
+        change = _change_for(action, key, text, value)
+    except KyoseiError as exc:
+        config_splice.log_refusal(
+            environ, project=project, file=path, key=key, reason=str(exc), actor=actor, **acting
+        )
+        config_splice._logged(exc)
+        raise
+
+    def precheck(present: bool, previous: object) -> None:
+        refuse_store_write(
+            layout.store_via_main_checkout,
+            layout.code_root,
+            f"{'change' if action == 'set' else 'clear'} {key}",
+        )
+
+    def validate(candidate: str) -> None:
+        validate_config_text(candidate, path)
+
+    return config_splice.apply_change(
+        path=path,
+        change=change,
+        validate=validate,
+        environ=environ,
+        project=project,
+        actor=actor,
+        precheck=precheck,
+        probe_root=layout.store_root,
+        expected_etag=expected_etag,
+        **acting,
+    )
+
+
 #: The machine keys no writer changes, and what is said of each.
 MACHINE_BY_HAND = ("serve_send", "orchestrator_command", "controller_command")
 
@@ -222,43 +262,10 @@ def _cmd_write_machine(ctx: Context, args: Namespace, action: str) -> Output:
             "`kyo config --machine set serve_idle_message true|false`"
         )
     path = home_settings.settings_path(ctx.environ)
-    project = "machine"
-
-    def refuse(reason: str) -> KyoseiError:
-        config_splice.log_refusal(
-            ctx.environ, project=project, file=path, key=key, reason=reason, actor=ctx.actor
-        )
-        return KyoseiError(reason)
-
-    if key in MACHINE_BY_HAND:
-        raise refuse(
-            f"{key} is set at the machine by hand: edit {path} yourself. `kyo config --machine "
-            f"set` writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
-        )
-    if key != home_settings.SERVE_IDLE_MESSAGE_KEY:
-        raise refuse(
-            f"{key!r} is not a setting of {path} that `kyo config --machine set` writes; it "
-            f"writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
-        )
-    lowered = args.value.strip().lower()
-    if lowered not in ("true", "false"):
-        raise refuse(f"{key} takes `true` or `false`; got {args.value!r}")
-    if not path.is_file():
-        raise refuse(
-            f"{path} does not exist, and `kyo config --machine set` does not create it; create "
-            f"the file by hand (an empty file is enough) and set {key} again"
-        )
-    change = config_splice.Change(key, lowered == "true")
-
-    def validate(candidate: str) -> None:
-        home_settings.parse(candidate, path)
-
-    applied = config_splice.apply_change(
-        path=path,
-        change=change,
-        validate=validate,
-        environ=ctx.environ,
-        project=project,
+    applied = write_machine_setting(
+        ctx.environ,
+        key,
+        args.value,
         actor=ctx.actor,
         expected_etag=getattr(args, "if_match", None),
     )
@@ -285,12 +292,95 @@ def _cmd_write_machine(ctx: Context, args: Namespace, action: str) -> Output:
     )
 
 
-def _change_for(action: str, key: str, text: str | None) -> config_splice.Change:
-    """The change a request names, or the refusal that says why it cannot be made."""
+def write_machine_setting(
+    environ: dict[str, str],
+    key: str,
+    text: str,
+    *,
+    actor: str | None = None,
+    device: str | None = None,
+    device_id: str | None = None,
+    expected_etag: str | None = None,
+) -> config_splice.Applied:
+    """Set ``serve_idle_message`` in ``settings.yml`` to ``text`` (``true`` or ``false``).
+
+    The one path of ``kyo config --machine set`` and of ``POST /v1/settings/{key}``
+    (KYO-956); every refusal, the ones made before the file is read included, is a row of the
+    log naming ``device`` (or ``cli``).
+    """
+    from . import home_settings
+
+    path = home_settings.settings_path(environ)
+    project = "machine"
+    acting = {} if device is None else {"device": device, "device_id": device_id}
+
+    def refuse(reason: str) -> KyoseiError:
+        config_splice.log_refusal(
+            environ, project=project, file=path, key=key, reason=reason, actor=actor, **acting
+        )
+        return config_splice._logged(KyoseiError(reason))
+
+    if key in MACHINE_BY_HAND:
+        raise refuse(
+            f"{key} is set at the machine by hand: edit {path} yourself. `kyo config --machine "
+            f"set` writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
+        )
+    if key != home_settings.SERVE_IDLE_MESSAGE_KEY:
+        raise refuse(
+            f"{key!r} is not a setting of {path} that `kyo config --machine set` writes; it "
+            f"writes {home_settings.SERVE_IDLE_MESSAGE_KEY} only"
+        )
+    lowered = text.strip().lower()
+    if lowered not in ("true", "false"):
+        raise refuse(f"{key} takes `true` or `false`; got {text!r}")
+    if not path.is_file():
+        raise refuse(
+            f"{path} does not exist, and `kyo config --machine set` does not create it; create "
+            f"the file by hand (an empty file is enough) and set {key} again"
+        )
+    change = config_splice.Change(key, lowered == "true")
+
+    def validate(candidate: str) -> None:
+        home_settings.parse(candidate, path)
+
+    return config_splice.apply_change(
+        path=path,
+        change=change,
+        validate=validate,
+        environ=environ,
+        project=project,
+        actor=actor,
+        expected_etag=expected_etag,
+        **acting,
+    )
+
+
+def _change_for(
+    action: str, key: str, text: str | None, value: object = _NO_VALUE
+) -> config_splice.Change:
+    """The change a request names, or the refusal that says why it cannot be made.
+
+    ``text`` is what the terminal typed; ``value`` is what a served route's JSON body held,
+    which is checked for its type here and otherwise left to the readers' own validation.
+    """
     row = _setting(key)
     if row is None or row.klass != config_view.CLASS_EDITABLE or key not in WRITABLE:
         raise _class_refusal(key, row)
     if action == "unset":
         return config_splice.Change(key, remove=True)
+    if value is not _NO_VALUE:
+        return config_splice.Change(key, _typed_value(key, value))
     assert text is not None
     return config_splice.Change(key, _parse_value(key, text))
+
+
+def _typed_value(key: str, value: object) -> object:
+    if key == "worker_model":
+        if not isinstance(value, str):
+            raise KyoseiError(f"worker_model takes a model id as a string, or null; got {value!r}")
+        return check_model(value.strip())
+    if key == "read_transcripts":
+        if not isinstance(value, bool):
+            raise KyoseiError(f"read_transcripts takes true or false; got {value!r}")
+        return value
+    return value

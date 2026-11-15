@@ -45,6 +45,13 @@ nothing else (:func:`kyosei.serve_files.document_target`).
 ``tests/test_kyo_serve_files.py`` fails if any other ``kyosei.serve*`` module calls a
 file-writing function.
 
+THE CONFIG WRITE ROUTES (KYO-956). ``POST /v1/projects/{project}/config/{key}``,
+``.../agent-types/{type}`` and ``POST /v1/settings/{key}`` change the editable settings, each
+needing a device token holding the ``config`` permission and an ``If-Match`` etag; they are
+:mod:`kyosei.serve_config`'s, and the file is written inside
+:func:`kyosei.serve_files.replace_config_text`. No route writes ``serve_send`` or
+``orchestrator_command``.
+
 THE SESSION ROUTES (KYO-689). Under ``/v1/projects/{project}/``: ``sessions`` (GET),
 ``sessions/{id}/turns``, ``sessions/{id}/events`` (Server-Sent Events),
 ``sessions/{id}/screen``, ``sessions/{id}/changes``, ``sessions/{id}/images/{turn}/{index}``
@@ -344,6 +351,7 @@ HISTORY_ROUTE = "history"
 #: KYO-952: ``projects/{project}/config`` (GET), a project's configuration, and the
 #: machine's ``settings`` (GET). Each needs a device token of any permission.
 PROJECT_CONFIG_ROUTE = "config"
+PROJECT_AGENT_TYPES_ROUTE = "agent-types"
 SETTINGS_ROUTE = "settings"
 
 #: KYO-689: what follows ``sessions/{id}/``. Every session route answers GET only.
@@ -866,6 +874,14 @@ class ServeHandler(BaseHTTPRequestHandler):
             len(rest) >= 4 and rest[0] == "projects" and rest[2] == "cmd"
         ):
             allowed: tuple[str, ...] = ("GET",)
+        elif len(rest) == 2 and rest[0] == SETTINGS_ROUTE:
+            allowed = ("POST",)  # KYO-956: POST /v1/settings/{key}
+        elif (
+            len(rest) == 4
+            and rest[0] == "projects"
+            and rest[2] in (PROJECT_CONFIG_ROUTE, PROJECT_AGENT_TYPES_ROUTE)
+        ):
+            allowed = ("POST",)  # KYO-956: .../config/{key} and .../agent-types/{type}
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] in FILE_ROUTES:
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
@@ -968,6 +984,10 @@ class ServeHandler(BaseHTTPRequestHandler):
             return 200, _json_bytes(self._projects())
         if rest == [SETTINGS_ROUTE]:
             return self._config(None, split.query)
+        if len(rest) == 2 and rest[0] == SETTINGS_ROUTE:
+            return self._config_write(None, SETTINGS_ROUTE, rest[1], split.query)
+        if len(rest) == 4 and rest[2] in (PROJECT_CONFIG_ROUTE, PROJECT_AGENT_TYPES_ROUTE):
+            return self._config_write(rest[1], rest[2], rest[3], split.query)
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
         if rest[2] == ORCHESTRATOR_ROUTE:
@@ -1217,6 +1237,30 @@ class ServeHandler(BaseHTTPRequestHandler):
                 self.server.environ, device, name, root, version
             )
         return 200, _json_bytes(document), _JSON_TYPE, headers
+
+    def _config_write(self, name: str | None, route: str, key: str, query: str) -> tuple:
+        """A change to one editable setting (KYO-956). Everything it decides is
+        :func:`kyosei.serve_config.write`'s, which checks the device token first."""
+        from . import serve_config
+
+        if query:
+            raise Refusal(
+                400,
+                "the configuration routes take no query string; send the token as "
+                "`Authorization: Bearer <token>` and the value in the JSON body",
+            )
+        document = serve_config.write(
+            self.server,
+            self.headers.get("Authorization"),
+            self.headers.get("If-Match"),
+            self._body,
+            self._version,
+            project=name,
+            route=route,
+            key=key,
+            root_of=None if name is None else (lambda: self.server.project(name).root),
+        )
+        return 200, _json_bytes(document), _JSON_TYPE, {"Cache-Control": "private, no-store"}
 
     def _history(self, method: str, name: str, query: str) -> tuple:
         """The search results opened in the app (KYO-826): a session read route in who may

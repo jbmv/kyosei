@@ -665,6 +665,13 @@ reports the latest written row for it, and the next `kyo brief` states each chan
 previous brief in one line, `config: <key> changed from <old> to <new> by <device> at
 <time>`, which asks nothing.
 
+A device holding the `config` permission makes the same changes through the routes of
+`kyo serve` (KYO-956), described under "Changing a setting from a device" in
+`serve-and-desktop.md`. Each route calls the writer above, with `device` and `device_id` of
+the presenting device in the row in place of `cli`, so a refusal of a writer reaches the
+device with the writer's sentence. The writers of `prior_art.py`, `docs_coverage.py` and
+`cmd_install_agents.py` take the device and the expected etag for that purpose.
+
 ### What an in-repo store costs the repository (KYO-268)
 
 Under the in-repo layout the store is committed beside the code, so every

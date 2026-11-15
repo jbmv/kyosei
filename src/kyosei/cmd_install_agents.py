@@ -202,6 +202,49 @@ def edit_front_matter(
     return candidate, previous, {"model": model, "effort": effort}
 
 
+def apply_in_place(
+    code_root: Path,
+    environ: dict[str, str],
+    template: str,
+    model: str,
+    effort: str,
+    *,
+    actor: str | None = None,
+    device: str | None = None,
+    device_id: str | None = None,
+    expected_etag: str | None = None,
+) -> config_splice.Applied:
+    """Change the ``model:`` and ``effort:`` lines of one existing type file (KYO-956).
+
+    What ``--in-place`` does for one ``--type``, for a served route: a missing file is
+    refused, and nothing else of the file changes. Each attempt is a row of the log naming
+    ``device`` (or ``cli``).
+    """
+    path = code_root / AGENTS_DIR / f"{agent_name(template)}.md"
+    project = code_root.name
+    acting = {} if device is None else {"device": device, "device_id": device_id}
+    if not path.is_file():
+        reason = (
+            f"{path} does not exist, and --in-place changes an existing type; creating "
+            "one is `kyo install-agents --type ...` without it"
+        )
+        config_splice.log_refusal(
+            environ, project=project, file=path, key=agent_name(template), reason=reason,
+            actor=actor, **acting,
+        )
+        raise config_splice._logged(KyoseiError(reason))
+    return config_splice.apply_edit(
+        path=path,
+        key=agent_name(template),
+        edit=lambda text: edit_front_matter(text, template, model, effort, path),
+        environ=environ,
+        project=project,
+        actor=actor,
+        expected_etag=expected_etag,
+        **acting,
+    )
+
+
 def _cmd_in_place(ctx: Context, args: Namespace, chosen: dict[str, tuple[str, str]]) -> Output:
     """``--in-place``: edit the two lines of each existing file; nothing is written when any
     file is refused, and each attempt is a row of the configuration log."""

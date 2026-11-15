@@ -75,6 +75,7 @@ import re
 import stat
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -536,6 +537,104 @@ def put_file(
         "etag": etag_of(data),
         "created": current is None,
     }
+
+
+def _config_tags(header: str) -> list[str]:
+    """The etags an ``If-Match`` names, quotes and a weak mark taken off: the digest of
+    ``kyo config``'s documents, ``sha256:...``, is the token."""
+    tags = []
+    for item in header.split(","):
+        item = item.strip()
+        if item.startswith("W/"):
+            item = item[2:]
+        item = item.strip('"')
+        if item:
+            tags.append(item)
+    return tags
+
+
+def replace_config_text(
+    target: Path,
+    shown: str,
+    write: Callable[[str], object],
+    *,
+    if_match: str | None,
+    current_value: Callable[[bytes], object],
+    refused: Callable[[str], None],
+) -> object:
+    """Run ``write`` on a configuration file the caller has resolved, under ``If-Match``.
+
+    KYO-956. A configuration file is the one thing a route changes that is not under
+    ``ideas/``: ``kyosei/config.yml``, an agent type's file or ``$KYOSEI_HOME/settings.yml``.
+    Its text is computed, spliced, validated and renamed into place by the writer the CLI
+    uses (:mod:`kyosei.config_splice`, which reads the file and writes it atomically), and
+    ``write`` is that call, handed the etag it must hold the file to. This function is the
+    boundary around it: it takes the lock this module's other writes take, refuses a missing
+    or unmet precondition before ``write`` runs, and refuses with the file's current value
+    and etag when the file changed between the precondition and the rename.
+
+    ``current_value`` reads the key's value from the bytes, for the 412 body; ``refused`` is
+    told the reason of a refusal made here, so that it is a row of the configuration log
+    (the writer's own refusals are rows already).
+    """
+    from . import config_splice
+
+    def stale(data: bytes, why: str, *, log: bool = True) -> Refusal:
+        try:
+            value = current_value(data)
+        except Exception:  # a file the reader refuses has no value to show
+            value = None
+        if log:
+            refused(why)
+        return Refusal(
+            412,
+            why,
+            reason="changed",
+            path=shown,
+            etag=config_splice.etag_of(data),
+            current={"value": value, "etag": config_splice.etag_of(data)},
+        )
+
+    with _WRITE_LOCK:
+        if if_match is None or not if_match.strip():
+            why = (
+                f"a change to {shown} must say what it expects to replace: send If-Match: "
+                "<etag> (the etag of the file in the document the view was drawn from), so "
+                "that two writers never overwrite each other silently"
+            )
+            refused(why)
+            raise Refusal(428, why, reason="if-match-required", path=shown)
+        try:
+            data = target.read_bytes()
+        except FileNotFoundError:
+            data = None
+        except IsADirectoryError as exc:
+            raise Refusal(409, f"{target} is a directory, not a file") from exc
+        if data is not None and config_splice.etag_of(data) not in _config_tags(if_match):
+            raise stale(
+                data,
+                f"{shown} changed since that etag was read: read the document again and "
+                "repeat the change with the current etag",
+            )
+        held = config_splice.etag_of(data) if data is not None else if_match.strip()
+        try:
+            return write(held)
+        except Exception:
+            # The writer re-checks the digest when it reads and before the rename, and has
+            # logged what it refused; a file another writer changed in between is the same
+            # refusal as one changed before, with the file's current value.
+            try:
+                now = target.read_bytes()
+            except OSError:
+                now = None
+            if now is not None and config_splice.etag_of(now) != held:
+                raise stale(
+                    now,
+                    f"{shown} changed while the change was being made: read the document "
+                    "again and repeat the change with the current etag",
+                    log=False,
+                ) from None
+            raise
 
 
 def _write_atomically(path: Path, data: bytes, *, create: bool, private: bool = False) -> None:
