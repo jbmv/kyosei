@@ -48,7 +48,8 @@ serves every project in `projects.json` to a viewer.
   --permission <p>`, a device can also read a project's Claude Code sessions (any token),
   send input to a session and keep drafts and a task list for it (`send`), file your notes
   in the store (`notes`), start an orchestrator session (`start`), type into a session's
-  terminal (`terminal`) and read a project's files (`files`). Sending and the terminal also
+  terminal (`terminal`), read a project's files (`files`) and change the editable settings
+  (`config`). Sending and the terminal also
   need `serve_send: true` in `~/kyosei/settings.yml`, and are off until you add it.
 - No viewer changes a record. Notes are the one thing the server writes to a store.
 

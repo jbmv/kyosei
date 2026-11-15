@@ -4880,6 +4880,10 @@ RECORDED: dict[str, str] = {
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"
         " and test_an_unreadable_machine_settings_file_is_refused_and_removing_it_clears_it"
     ),
+    "home_settings.py:load#1": (
+        "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
+        "tests/test_kyo950_config_routes.py::test_a_settings_file_that_is_not_utf8_is_refused_and_removing_it_clears_it"
+    ),
     "home_settings.py:parse#0": (
         "fixing or removing $KYOSEI_HOME/settings.yml, which is not a `kyo` command; proved by "
         "tests/test_kyo764_helper_sites.py::test_a_malformed_machine_settings_file_is_refused_and_removing_it_clears_it"

@@ -285,6 +285,15 @@ def unchosen_line(root: Path) -> str | None:
     return UNCHOSEN_LINE if cfg.state == STATE_ABSENT else None
 
 
+def _acting(device: str | None, device_id: str | None, expected_etag: str | None) -> dict:
+    """The keywords of :func:`kyosei.config_splice.apply_change` that name a served device and
+    the etag it read (KYO-956); empty for the CLI, whose rows name ``cli``."""
+    acting: dict = {"expected_etag": expected_etag}
+    if device is not None:
+        acting.update(device=device, device_id=device_id)
+    return acting
+
+
 def set_prior_art_state(
     root: Path,
     state: str,
@@ -294,6 +303,9 @@ def set_prior_art_state(
     actor: str | None = None,
     main_checkout: Path | None = None,
     code_root: Path | None = None,
+    device: str | None = None,
+    device_id: str | None = None,
+    expected_etag: str | None = None,
 ) -> tuple[PriorArtConfig, PriorArtConfig, bool]:
     """Record ``state`` (``on`` or ``off``) at ``recx.prior_art.state`` in this project's
     ``kyosei/config.yml``. Returns the configuration before and after, and whether the
@@ -342,6 +354,7 @@ def set_prior_art_state(
         actor=actor,
         precheck=precheck,
         probe_root=root,
+        **_acting(device, device_id, expected_etag),
     )
     return before, read_prior_art_config(root), True
 

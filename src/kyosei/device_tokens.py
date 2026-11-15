@@ -69,6 +69,13 @@ PERMISSION_TERMINAL = "terminal"
 #: issued to read every file of the code and store repositories.
 PERMISSION_FILES = "files"
 
+#: The permission that lets a token change the editable settings of a project and of this
+#: machine through the config routes (KYO-956, proposal KYO-950 section 5.3). A name of its
+#: own, because a token issued to send, read files or file notes was not issued to change what
+#: the next dispatch, the idle timer or the transcript opt-in does, and a token issued before
+#: it exists does not gain it. Reading the configuration needs no permission.
+PERMISSION_CONFIG = "config"
+
 #: Every permission this build can grant.
 PERMISSIONS: tuple[str, ...] = (
     PERMISSION_SEND,
@@ -76,6 +83,7 @@ PERMISSIONS: tuple[str, ...] = (
     PERMISSION_START,
     PERMISSION_TERMINAL,
     PERMISSION_FILES,
+    PERMISSION_CONFIG,
 )
 
 #: Marks a string as a Kyosei token, for a person reading it and for secret scanners.

@@ -582,6 +582,9 @@ def write_level(
     actor: str | None = None,
     main_checkout: Path | None = None,
     code_root: Path | None = None,
+    device: str | None = None,
+    device_id: str | None = None,
+    expected_etag: str | None = None,
 ) -> Path:
     """Record ``level`` under ``docs_coverage:`` in ``kyosei/config.yml``, keeping the
     rest of the file, comments included, and its schema version as it stands.
@@ -627,5 +630,7 @@ def write_level(
         actor=actor,
         precheck=precheck,
         probe_root=root,
+        expected_etag=expected_etag,
+        **({} if device is None else {"device": device, "device_id": device_id}),
     )
     return path

@@ -466,6 +466,17 @@ def open_log(environ: dict[str, str]) -> int:
         raise _log_refusal(path, str(exc)) from exc
 
 
+def _logged(exc: KyoseiError) -> KyoseiError:
+    """``exc``, marked as already a row of the log, so a caller that logs refusals of its
+    own (the served routes, KYO-956) does not write a second row for the same attempt."""
+    exc.logged = True  # type: ignore[attr-defined]
+    return exc
+
+
+def was_logged(exc: BaseException) -> bool:
+    return bool(getattr(exc, "logged", False))
+
+
 def _append(descriptor: int, row: dict) -> None:
     os.write(descriptor, (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
 
@@ -538,6 +549,7 @@ def log_refusal(
     reason: str,
     actor: str | None = None,
     device: str = DEVICE_CLI,
+    device_id: str | None = None,
 ) -> None:
     """Append a refused attempt that was refused before the file was read. The refusal itself
     is what the caller reports, so a log that cannot be opened is not reported over it."""
@@ -551,7 +563,7 @@ def log_refusal(
             {
                 "at": now(),
                 "device": device,
-                "device_id": device,
+                "device_id": device_id or device,
                 "actor": actor,
                 "project": project,
                 "file": str(file),
@@ -585,6 +597,7 @@ def apply_change(
     project: str,
     actor: str | None = None,
     device: str = DEVICE_CLI,
+    device_id: str | None = None,
     precheck: Callable[[bool, object], None] | None = None,
     expected_etag: str | None = None,
     probe_root: Path | None = None,
@@ -604,7 +617,7 @@ def apply_change(
     row: dict = {
         "at": now(),
         "device": device,
-        "device_id": device,
+        "device_id": device_id or device,
         "actor": actor,
         "project": project,
         "file": str(path),
@@ -622,7 +635,12 @@ def apply_change(
                     f"{path} changed since it was read (its digest is {etag_of(data)}, not "
                     f"{expected_etag}); read it again and repeat the change"
                 )
-            text = data.decode("utf-8")
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                # KYO-957 F1: outside this conversion the error left no row, and a route
+                # closed its connection without an answer.
+                raise KyoseiError(f"{path} is not UTF-8 text ({exc.reason})") from exc
             present, previous = read_value(text, change.key, path)
             row["previous"] = previous if present else None
             if precheck is not None:
@@ -630,6 +648,7 @@ def apply_change(
             candidate = splice(text, change, validate=validate, path=path)
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
+            _logged(exc)
             raise
         if candidate == text:
             return Applied(path, change.key, row["previous"], row["new"], False, etag_of(data))
@@ -639,11 +658,22 @@ def apply_change(
                 "repeat the change"
             )
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": reason})
-            raise KyoseiError(reason)
+            raise _logged(KyoseiError(reason))
         atomic_write_text(path, candidate)
         if not present and not change.remove:
             problem = _probe_refusal(probe_root, environ) if probe_root is not None else None
             if problem is not None:
+                # KYO-957 F3: the check can run for seconds, so restore only bytes this
+                # write put there; another writer's change made meanwhile is left alone.
+                if path.read_bytes() != candidate.encode("utf-8"):
+                    reason = (
+                        f"the `kyo` on PATH cannot open the store with {change.key} added "
+                        f"({problem}), and {path} changed during that check, so nothing was "
+                        f"restored; read {path} and remove {change.key} from it if it is "
+                        "still there"
+                    )
+                    _append(descriptor, {**row, "outcome": OUTCOME_FAILED, "reason": reason})
+                    raise _logged(KyoseiError(reason))
                 atomic_write_text(path, text)
                 reason = (
                     f"the `kyo` on PATH cannot open the store with {change.key} added "
@@ -651,7 +681,7 @@ def apply_change(
                     "build as the one on PATH, then repeat the change"
                 )
                 _append(descriptor, {**row, "outcome": OUTCOME_FAILED, "reason": reason})
-                raise KyoseiError(reason)
+                raise _logged(KyoseiError(reason))
         _append(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None})
         return Applied(
             path, change.key, row["previous"], row["new"], True, etag_of(candidate.encode())
@@ -669,6 +699,7 @@ def apply_edit(
     project: str,
     actor: str | None = None,
     device: str = DEVICE_CLI,
+    device_id: str | None = None,
     expected_etag: str | None = None,
 ) -> Applied:
     """:func:`apply_change` for a file whose edit is not a key's value: read ``path``, let
@@ -686,7 +717,7 @@ def apply_edit(
     row: dict = {
         "at": now(),
         "device": device,
-        "device_id": device,
+        "device_id": device_id or device,
         "actor": actor,
         "project": project,
         "file": str(path),
@@ -712,6 +743,7 @@ def apply_edit(
             row["previous"], row["new"] = previous, new
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
+            _logged(exc)
             raise
         if candidate == text:
             return Applied(path, key, previous, new, False, etag_of(data))
@@ -721,7 +753,7 @@ def apply_edit(
                 "repeat the change"
             )
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": reason})
-            raise KyoseiError(reason)
+            raise _logged(KyoseiError(reason))
         atomic_write_text(path, candidate)
         _append(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None})
         return Applied(path, key, previous, new, True, etag_of(candidate.encode()))

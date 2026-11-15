@@ -532,7 +532,7 @@ Needs a Kyosei project: **no** — it never searches for one.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal,files}] [--token-only] {list,issue,grant,revoke} [NAME|ID]`
+Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--permission {send,notes,start,terminal,files,config}] [--token-only] {list,issue,grant,revoke} [NAME|ID]`
 
 ### Positional arguments
 
@@ -541,7 +541,7 @@ Usage: `kyo devices [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim
 
 ### Options
 
-- `--permission {send,notes,start,terminal,files}` — optional. with issue: a permission the token carries (repeatable); with grant: one to add to a live token; with revoke: one to remove, leaving the token live (KYO-747). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), `terminal` the routes that draw a session's pane and type into it (KYO-721), and `files` the routes that read a project's files (KYO-735); a token issued without the one a route asks for is refused there
+- `--permission {send,notes,start,terminal,files,config}` — optional. with issue: a permission the token carries (repeatable); with grant: one to add to a live token; with revoke: one to remove, leaving the token live (KYO-747). `send` lets it use the send routes, `notes` the note routes, `start` the route that starts a project's orchestrator session (KYO-719), `terminal` the routes that draw a session's pane and type into it (KYO-721), and `files` the routes that read a project's files (KYO-735), and `config` the routes that change an editable setting (KYO-956); a token issued without the one a route asks for is refused there
 - `--token-only` — optional. with issue: print the token and nothing else, with no trailing newline, so `kyo devices issue NAME --token-only | pbcopy` copies the token alone (KYO-747)
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

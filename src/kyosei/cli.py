@@ -2625,7 +2625,8 @@ def build_parser() -> KyoseiParser:
         "send routes, `notes` the note routes, `start` the route that starts a "
         "project's orchestrator session (KYO-719), `terminal` the routes that draw a "
         "session's pane and type into it (KYO-721), and `files` the routes that read a "
-        "project's files (KYO-735); a token issued without the one a route "
+        "project's files (KYO-735), and `config` the routes that change an editable "
+        "setting (KYO-956); a token issued without the one a route "
         "asks for is refused there",
     )
     p_devices.add_argument(

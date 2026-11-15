@@ -192,6 +192,7 @@ def test_a_token_of_any_permission_reads_both_documents(server: Client, permissi
     assert document["device"] == {
         "name": "laptop",
         "permissions": [permission] if permission else [],
+        "holds_config": permission == device_tokens.PERMISSION_CONFIG,
     }
     assert document["project"] == "proj"
     assert document["server"]["stale"] is False

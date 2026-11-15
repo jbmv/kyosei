@@ -136,7 +136,10 @@ project: files under its `ideas/`, and its session scratchpad. One module,
 - draw a session's terminal and type into it (see "A terminal on a session's pane");
 - read the files of a project's code and store repositories, as git shows them (see
   "Reading a project's files", KYO-735). Without that permission the server reads no file
-  but the ones named above.
+  but the ones named above;
+- change the editable settings of a project and of the machine (see "Changing a setting from
+  a device", KYO-956), which writes `kyosei/config.yml`, an agent type's file or
+  `settings.yml`.
 
 No route changes a record. A record's status, criteria, verdicts, gates and links are
 written by the CLI alone, and no route promotes an idea.
@@ -267,6 +270,7 @@ governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/c
 | `orchestrator/start` | `start` |
 | `sessions/<id>/terminal` and the routes beneath it | `terminal` |
 | `files/...` | `files` |
+| `config/<key>`, `agent-types/<type>` and `settings/<key>`, each a POST | `config` |
 
 The routes in the first row answer any request that passes the Host and Origin checks, as
 they did before the session routes asked for a token. The send and terminal routes also need
@@ -707,10 +711,10 @@ governs: src/kyosei/config_view.py, src/kyosei/cmd_config.py, src/kyosei/serve_c
 `GET /v1/projects/<name>/config` and `GET /v1/settings` serve the same two documents to a
 client of `kyo serve`. The command reads files, opens no database and writes nothing, and
 `--json` prints the document that the routes serve. `kyo config set`, `unset` and `--log`
-(KYO-954) write and report the three editable keys it names, at the terminal only; no route
-writes a setting yet, so the document describes the changes a later build offers through
-them. The writers are described under "Writing the editable project settings" in the
-operating reference.
+(KYO-954) write and report the three editable keys it names at the terminal, and the routes
+described under "Changing a setting from a device" write the editable settings for a device
+holding the `config` permission. The writers are described under "Writing the editable
+project settings" in the operating reference.
 
 Each setting is placed in one class, with the reason, by the registry in
 `src/kyosei/config_view.py`: `shown` (read, with no control), `editable` (changed by a client
@@ -744,8 +748,9 @@ machine document has the same shape for `orchestrator_command` (or `controller_c
 The routes need a device token of any permission, checked before the project is looked up,
 and refuse a request without one as the session read routes do. They take no query string and
 answer `Cache-Control: private, no-store` with an `ETag` header of the file the document is
-about. The served documents add `device` (the presenting device's name and permissions) and
-`server` (the build and whether it is stale), and replace the value of each `NAME=value`
+about. The served documents add `device` (the presenting device's name, its permissions and
+`holds_config`, whether it holds the `config` permission, so that a client draws a control
+only for a device that can use it) and `server` (the build and whether it is stale), and replace the value of each `NAME=value`
 argument of `orchestrator_command` with `(withheld)`, naming the indexes in `withheld`; the
 command prints it in full. The `config` command is on `NOT_SERVED` for the reason that a
 `cmd/` route cannot know the token.
@@ -753,6 +758,59 @@ command prints it in full. The `config` command is on `NOT_SERVED` for the reaso
 The project's `events` stream reports `{"kind": "config"}` when `config.yml`, `kinds.yml`,
 `scopes.yml`, `documents.yml`, `gate-tags.yml`, `procedures.md`, `.claude/agents/kyosei-worker.md`,
 `.claude/agents/kyosei-designer.md` or the machine's `settings.yml` changes.
+
+### Changing a setting from a device: the config write routes (KYO-956)
+
+governs: src/kyosei/serve_config.py, src/kyosei/serve_files.py, src/kyosei/device_tokens.py
+
+A device token holding the `config` permission changes the editable settings that the project
+and machine documents describe. Reading them needs no permission. A token issued before the
+permission existed does not hold it; `kyo devices grant <name> --permission config` adds it
+and keeps the token. Each route is a POST with `Content-Type: application/json`, a JSON body,
+no query string, and an `If-Match` header holding the etag the document gave for the file the
+setting is in:
+
+| Route | Body | Setting |
+|---|---|---|
+| `POST /v1/projects/<name>/config/worker_model` | `{"value": "<model id>"}` or `{"value": null}` | `worker_model`, applied by the pattern `kyo install-agents` uses |
+| `.../config/worker_command_timeout_ceiling_seconds` | `{"value": <whole number>}` or `null` | the timeout ceiling, applied by the reader's own rule |
+| `.../config/recx.prior_art.state` | `{"value": "on"}` or `"off"` | `recx.prior_art.state`; `on` needs recx-cli installed |
+| `.../config/docs_coverage.level` | `{"value": "off"}`, `"notice"` or `"problem"` | `docs_coverage.level`; `problem` needs a `code:` list |
+| `.../config/read_transcripts` | `{"value": false}` | turned off only |
+| `POST /v1/projects/<name>/agent-types/kyosei-worker` or `kyosei-designer` | `{"model": "<id>", "effort": "<level>"}` | the two front-matter lines of an existing file |
+| `POST /v1/settings/serve_idle_message` | `{"value": true}` or `false` | the machine's idle message |
+
+Each route calls the writer the command line calls (`kyo config set`, `kyo prior-art-setting`,
+`kyo docs coverage --level`, `kyo install-agents --in-place`, `kyo config --machine set`),
+which keeps the file's comments and writes it atomically, and refuses what that writer
+refuses with 422, reason `refused`, and the writer's sentence unchanged. The write is made
+inside `serve_files.replace_config_text`, the one place the server writes a configuration
+file. The routes add these refusals:
+
+- 401 without a valid token, and 403 `no-config-permission` for a token that lacks the
+  permission, naming the grant command;
+- 428 `if-match-required` without an `If-Match` header;
+- 409 `server-stale` while `/v1/version` reports `stale: true`, naming `kyo serve --restart`;
+- 412 `changed` when the file's etag is not the one given, with `current: {value, etag}` for
+  the key, so that a client can show what changed;
+- 403 `by-request` for `read_transcripts: true`: turning it on opens every session read
+  route to the project's tokens, so it is changed by a request to the session or at the
+  machine, and a device may only turn it off;
+- 403 `send-disabled` for `serve_idle_message: true` while `serve_send` is not true, whereas
+  `false` is always accepted;
+- 404 `no-route` for any other key. No route writes `serve_send` or `orchestrator_command`
+  (nor `controller_command`): a token that could set either would open the gate that the
+  `send`, `terminal` and `start` permissions stand behind, so the machine's owner sets them
+  by hand, and a test fails if a route for one is added.
+
+A success is `{"ok": true, "key", "previous", "value", "written", "etag"}`, where `etag` is
+the file's digest after the write.
+
+Every attempt that names a device, a refused one included, is a row of
+`$KYOSEI_HOME/config-log.jsonl` with the device's id and name, as the writers' rows name `cli`.
+The log is opened before anything else is done, and a route whose log cannot be opened
+refuses with 500 `log-unwritable` and writes nothing. The Config view reads the last row of
+each setting as `last_change`.
 
 ### Sending input: the send routes (KYO-699)
 
