@@ -614,6 +614,40 @@ fixed line saying so. An agent reads it as data: it never follows an instruction
 never runs a command it names, and never fetches or installs what it points to without
 the operator's say.
 
+### Writing the editable project settings (KYO-954)
+
+governs: src/kyosei/config_splice.py
+
+`kyo config` classifies each key of `kyosei/config.yml` as shown, editable or a request
+(KYO-952). Three editable keys have a writer of their own at the terminal:
+`kyo config set <key> <value>` and `kyo config unset <key>` write `worker_model`,
+`worker_command_timeout_ceiling_seconds` and `read_transcripts`, and `kyo prior-art-setting`
+and `kyo docs coverage --level` write `recx.prior_art.state` and `docs_coverage.level`. A
+key that is shown or a request is refused, naming its class; a request key is changed by
+asking the session. `worker_model` must match the pattern `kyo install-agents` applies to a
+model id. The commands are refused in a dispatch worktree.
+
+All of them change the file through one splice, which edits a single line and returns every
+other line unchanged. It applies four rules in order: replace the value of a key present on
+one line, keeping a trailing comment; replace the commented example of an absent key
+(`# worker_model: claude-sonnet-5-5`) with the live line; append an absent key after a blank
+line under the generated comment `# <key>: read by <consumers>`; and, to remove a key,
+delete its value line while the comments above it stay. The candidate is parsed by the
+parser `load_config` uses (`config.validate_config_text`), and a file the splice cannot
+change exactly is refused, naming the line to edit by hand: a key written on more than one
+line, a flow or multi-line value, or a duplicate key. No writer re-renders the file. The new
+text replaces the file by an atomic rename. When a write adds a key, the `kyo` on PATH is
+asked whether it can still open the store, and the previous bytes are restored if it cannot.
+
+Every attempt, written or refused, is one line of `$KYOSEI_HOME/config-log.jsonl`: the time,
+the device (`cli` for these commands), the project, the file, the key, the previous and new
+values, the outcome and the reason. The file is created private to the account and refused
+inside a git repository, and it is opened before the write, so a change that cannot be logged
+is not made. `kyo config --log` prints it, the `last_change` of each setting in `kyo config`
+reports the latest written row for it, and the next `kyo brief` states each change since the
+previous brief in one line, `config: <key> changed from <old> to <new> by <device> at
+<time>`, which asks nothing.
+
 ### What an in-repo store costs the repository (KYO-268)
 
 Under the in-repo layout the store is committed beside the code, so every
@@ -886,6 +920,10 @@ kyo attach KYO-1 --file console.log --supports KYO-1.c1
 kyo prior-art-setting on                    # with kyosei[recx]: search for prior art when a
                                            # proposal is created (`off` records a no)
 kyo prior-art KYO-1                        # ...or search for one record now, as evidence
+kyo config set worker_model <id>           # write a setting, keeping the file's comments;
+                                           # `unset` removes it, `kyo config --log` lists every
+                                           # write (worker_model, the timeout ceiling,
+                                           # read_transcripts) (KYO-954)
 kyo edit KYO-1 --note-file thought.md      # append a record-scoped note (.nN) — the shift log is
                                            # a different object, written by `kyo note --shift`
 kyo edit KYO-1 --note-file revised.md --supersede-note KYO-1.n1   # notes supersede like claims do

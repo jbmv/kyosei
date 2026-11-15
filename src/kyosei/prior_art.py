@@ -285,122 +285,35 @@ def unchosen_line(root: Path) -> str | None:
     return UNCHOSEN_LINE if cfg.state == STATE_ABSENT else None
 
 
-_TOP_KEY_RE = re.compile(rf"^{CONFIG_KEY}[ \t]*:")
-_STATE_LINE_RE = re.compile(r"^(?P<indent>[ \t]+)state[ \t]*:(?P<rest>[^\r\n]*)(?P<end>\r?\n?)$")
-
-
-def _block_end(lines: list[str], start: int) -> int:
-    """The index after the last indented line of the top-level block starting at ``start``."""
-    end = start + 1
-    index = start + 1
-    while index < len(lines):
-        line = lines[index]
-        if line.strip() == "":
-            index += 1
-            continue
-        if line[0] in " \t":
-            index += 1
-            end = index
-            continue
-        break
-    return end
-
-
-def _rendered_block(block: dict) -> str:
-    """``recx:`` with ``prior_art:`` under it, ``state`` first and written bare."""
-    import yaml
-
-    lines = [f"{CONFIG_KEY}:", f"  {SUBKEY}:", f"    state: {block['state']}"]
-    rest = {k: v for k, v in block.items() if k != "state"}
-    if rest:
-        dumped = yaml.safe_dump(rest, sort_keys=False, default_flow_style=False)
-        lines.extend(f"    {line}" for line in dumped.rstrip("\n").splitlines())
-    return "\n".join(lines) + "\n"
-
-
-def _trailing_comment(value_text: str) -> str:
-    """The comment after a ``state:`` line's value, with its spacing, or ``""``."""
-    match = re.search(r"[ \t]+#.*$", value_text)
-    return match.group(0) if match else ""
-
-
-def _spliced_config(text: str, block: dict, state: str) -> list[str]:
-    """Candidate texts for ``kyosei/config.yml`` with ``recx.prior_art`` replaced, most
-    conservative first: only the ``state:`` line substituted; then the ``recx:`` block
-    re-rendered in place; or, where there is no ``recx:`` key, the block appended under its
-    generated comment. Every line outside the block is kept byte for byte in each."""
-    from .schema import CONFIG_CONSUMERS
-
-    lines = text.splitlines(keepends=True)
-    starts = [i for i, line in enumerate(lines) if _TOP_KEY_RE.match(line)]
-    rendered = _rendered_block(block)
-    if not starts:
-        # A blank line before the generated comment, without adding a second one.
-        lead = "\n\n" if text and not text.endswith("\n") else ""
-        if text.endswith("\n") and not text.endswith("\n\n"):
-            lead = "\n"
-        consumers = ", ".join(CONFIG_CONSUMERS[CONFIG_KEY])
-        return [f"{text}{lead}# {CONFIG_KEY}: read by {consumers}\n{rendered}"]
-    if len(starts) > 1:
-        return []
-    start = starts[0]
-    end = _block_end(lines, start)
-    candidates = []
-    state_lines = [i for i in range(start + 1, end) if _STATE_LINE_RE.match(lines[i])]
-    if len(state_lines) == 1:
-        index = state_lines[0]
-        match = _STATE_LINE_RE.match(lines[index])
-        assert match is not None
-        substituted = list(lines)
-        substituted[index] = (
-            f"{match.group('indent')}state: {state}{_trailing_comment(match.group('rest'))}"
-            f"{match.group('end') or chr(10)}"
-        )
-        candidates.append("".join(substituted))
-    candidates.append("".join(lines[:start]) + rendered + "".join(lines[end:]))
-    return candidates
-
-
-def _without_state(block: object) -> dict:
-    """A ``prior_art`` mapping with YAML 1.1's boolean ``on`` key named, less ``state``."""
-    if not isinstance(block, dict):
-        return {}
-    return {("on" if k is True else k): v for k, v in block.items() if k != "state"}
-
-
-def _accepted(candidate: str, *, others: dict, block: dict, path: Path, state: str) -> bool:
-    """Whether ``candidate`` reads back as exactly the change asked for: the other keys
-    unchanged, ``recx.prior_art`` valid with this state, and its other keys as they were."""
-    import yaml
-
-    try:
-        parsed = yaml.safe_load(candidate) or {}
-    except yaml.YAMLError:
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    if {k: v for k, v in parsed.items() if k != CONFIG_KEY} != others:
-        return False
-    try:
-        after = parse_prior_art(parsed.get(CONFIG_KEY), path)
-    except KyoseiError:
-        return False
-    recx_raw = parsed.get(CONFIG_KEY)
-    written = recx_raw.get(SUBKEY) if isinstance(recx_raw, dict) else None
-    return after.state == state and _without_state(written) == _without_state(block)
-
-
-def set_prior_art_state(root: Path, state: str) -> tuple[PriorArtConfig, PriorArtConfig, bool]:
+def set_prior_art_state(
+    root: Path,
+    state: str,
+    *,
+    environ: dict[str, str] | None = None,
+    project: str | None = None,
+    actor: str | None = None,
+    main_checkout: Path | None = None,
+    code_root: Path | None = None,
+) -> tuple[PriorArtConfig, PriorArtConfig, bool]:
     """Record ``state`` (``on`` or ``off``) at ``recx.prior_art.state`` in this project's
     ``kyosei/config.yml``. Returns the configuration before and after, and whether the
     file was written.
 
     Any ``on``, ``limit`` or ``index_url`` already there is kept, and so is every line
-    outside the block: the change is a splice, and each candidate is re-read by
-    :func:`parse_prior_art` before it is written, so this writer and that reader cannot
-    disagree. ``off`` is written as explicitly as ``on``; only a missing block reads as
-    not chosen.
+    outside the changed one: the change goes through :func:`kyosei.config_splice.splice`
+    (KYO-954), whose candidate is validated by the reader this module's
+    :func:`parse_prior_art` and :func:`kyosei.config.validate_config_text` apply, so this
+    writer and the reader cannot disagree. A file the splice cannot change exactly is
+    refused naming the hand edit. ``off`` is written as explicitly as ``on``; only a
+    missing block reads as not chosen.
     """
+    import os
+
+    import yaml
+
+    from . import config_splice
+    from .config import refuse_store_write, validate_config_text
+
     path = config_path_for(root)
     before = read_prior_art_config(root)
     if state == STATE_ON and not extra_installed():
@@ -411,21 +324,26 @@ def set_prior_art_state(root: Path, state: str) -> tuple[PriorArtConfig, PriorAr
         )
     if before.state == state:
         return before, before, False
-    text = path.read_text(encoding="utf-8")
-    raw = read_raw_config(root)
-    recx_raw = raw.get(CONFIG_KEY)
-    existing = recx_raw.get(SUBKEY) if isinstance(recx_raw, dict) else None
-    block: dict[str, object] = {"state": state, **_without_state(existing)}
-    others = {k: v for k, v in raw.items() if k != CONFIG_KEY}
-    for candidate in _spliced_config(text, block, state):
-        if _accepted(candidate, others=others, block=block, path=path, state=state):
-            path.write_text(candidate, encoding="utf-8")
-            return before, read_prior_art_config(root), True
-    raise KyoseiError(
-        f"{path} could not be updated without disturbing lines outside "
-        f"{CONFIG_KEY}.{SUBKEY} -- hand edit {path}: under `{CONFIG_KEY}:` and "
-        f"`{SUBKEY}:`, write `state: {state}`"
+
+    def validate(candidate: str) -> None:
+        validate_config_text(candidate, path)
+        parsed = yaml.safe_load(candidate) or {}
+        parse_prior_art(parsed.get(CONFIG_KEY), path)
+
+    def precheck(present: bool, previous: object) -> None:
+        refuse_store_write(main_checkout, code_root or root, "record the prior-art choice")
+
+    config_splice.apply_change(
+        path=path,
+        change=config_splice.Change(f"{CONFIG_KEY}.{SUBKEY}.state", state, literal=state),
+        validate=validate,
+        environ=os.environ.copy() if environ is None else environ,
+        project=project or root.name,
+        actor=actor,
+        precheck=precheck,
+        probe_root=root,
     )
+    return before, read_prior_art_config(root), True
 
 
 def _state_label(state: str) -> str:
@@ -442,7 +360,15 @@ def _trigger_text(cfg: PriorArtConfig) -> str:
 
 def cmd_prior_art_setting(ctx: Context, args: Namespace) -> Output:
     """``kyo prior-art-setting on|off`` (KYO-586): record this project's choice."""
-    before, after, written = set_prior_art_state(ctx.root, args.state)
+    before, after, written = set_prior_art_state(
+        ctx.root,
+        args.state,
+        environ=ctx.environ,
+        project=ctx.code_root.name,
+        actor=ctx.actor,
+        main_checkout=None if ctx.layout is None else ctx.layout.store_via_main_checkout,
+        code_root=ctx.code_root,
+    )
     path = config_path_for(ctx.root)
     where = f"{CONFIG_KEY}.{SUBKEY}.state in {path}"
     if written:

@@ -365,7 +365,8 @@ COMMAND_TABLE: dict[str, tuple[Handler, str]] = {
     # KYO-952: a project's or the machine's configuration, each setting placed in a class.
     # PROJECT_OPTIONAL: `--machine` needs no project, and a project whose config.yml this
     # build refuses is still reported, so no store is opened. Not in MUTATING_COMMANDS: it
-    # writes nothing anywhere.
+    # writes no table; `set` and `unset` (KYO-954) write kyosei/config.yml, as
+    # `prior-art-setting` does.
     "config": (cmd_config.cmd_config, PROJECT_OPTIONAL),
     # KYO-594: the link to this build's Claude Code plugin and its
     # registration. PROJECT_OPTIONAL: it links and registers anywhere, and enables the
@@ -2674,8 +2675,25 @@ def build_parser() -> KyoseiParser:
         parents=[common],
         help="read a project's configuration (kyosei/config.yml, the agent types, the files "
         "beside it) or with --machine the machine's (settings.yml), each setting placed as "
-        "shown, editable or a request, with the reason; reads files only and writes nothing "
-        "(KYO-950)",
+        "shown, editable or a request, with the reason; reads files only. `config set KEY "
+        "VALUE` and `config unset KEY` write worker_model, "
+        "worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, "
+        "keeping its comments, and `config --log` prints the log of every attempt (KYO-950, "
+        "KYO-954)",
+    )
+    p_config.add_argument(
+        "action",
+        nargs="?",
+        choices=("set", "unset"),
+        help="`set` or `unset` a setting; omit to read the configuration",
+    )
+    p_config.add_argument("key", nargs="?", help="with set or unset: the setting's name")
+    p_config.add_argument("value", nargs="?", help="with set: the new value")
+    p_config.add_argument(
+        "--log",
+        action="store_true",
+        help="print $KYOSEI_HOME/config-log.jsonl: every write and refused write of the "
+        "settings, with the device that made it",
     )
     p_config.add_argument(
         "--machine",

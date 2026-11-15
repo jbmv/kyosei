@@ -472,9 +472,11 @@ def test_level_changes_one_line_and_keeps_the_rest_of_the_declaration(
     result = kyo("docs", "coverage", "--level", "problem")
     assert result.code == 0, result
     text = _config(git_project).read_text(encoding="utf-8")
-    assert "  level: problem\n" in text and "not yet" not in text
+    # KYO-954: the splice keeps a trailing comment and its spacing, which this test once
+    # required to be dropped with the old value.
+    assert "  level: problem  # not yet\n" in text
     assert text.split("\ndocs_coverage:\n", 1)[1] == block.split("docs_coverage:\n", 1)[1].replace(
-        "  level: notice  # not yet\n", "  level: problem\n"
+        "  level: notice", "  level: problem"
     )
     assert "unmapped: 1 entry" in result.out and "code: declared" in result.out
     # The config still loads and reads back what was stored.

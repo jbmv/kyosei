@@ -2179,6 +2179,13 @@ def brief_text(data: dict, *, compact: bool) -> str:
         out.append("")
         out.append(data["prior_art_unchosen"])
 
+    # KYO-954.c9: a change a writer made to config.yml since the previous brief, one plain
+    # line each and no question, under `--compact` too.
+    changes = data.get("config_changes") or []
+    if changes:
+        out.append("")
+        out.extend(change["line"] for change in changes)
+
     # KYO-802.c1: a decision for the project's person, put at session start, under
     # `--compact` too, until a coverage level is recorded.
     out.extend(docs_coverage_ask_lines(data.get("docs_coverage_ask")))

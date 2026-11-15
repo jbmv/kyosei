@@ -3977,6 +3977,34 @@ PROVOKED: dict[str, Expectation] = {
 #: claim about why provoking it is out of reach here, and each is a candidate for the
 #: next pass rather than a decision that it does not matter.
 UNREACHED: dict[str, str] = {
+    # KYO-954: `kyo config set` and `unset`. Each names `kyo config` and is a re-invocation
+    # with a key or a value the caller supplies, which this walk has no standing to invent.
+    "cmd_config.py:_change_for#0": (
+        "not provoked by this walk: a re-invocation naming a key `kyo config` lists as "
+        "editable, or the command that writes it; proved by "
+        + "tests/test_kyo950_config_writers.py::"
+        + "test_a_key_that_is_not_editable_is_refused_naming_its_class"
+    ),
+    "cmd_config.py:_cmd_write#0": (
+        "not provoked by this walk: a hand edit of $KYOSEI_HOME/settings.yml, since the "
+        "machine's settings have no writer in this build; the refusal names no command that "
+        "could clear it"
+    ),
+    "cmd_config.py:_cmd_write#1": (
+        "not provoked by this walk: the same command with a key; proved by "
+        + "tests/test_kyo950_config_writers.py::"
+        + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
+    ),
+    "cmd_config.py:_cmd_write#2": (
+        "not provoked by this walk: the same command with a value; proved by "
+        + "tests/test_kyo950_config_writers.py::"
+        + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
+    ),
+    "cmd_config.py:_cmd_write#3": (
+        "not provoked by this walk: `kyo config unset` with the key alone; proved by "
+        + "tests/test_kyo950_config_writers.py::"
+        + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
+    ),
     # KYO-900: a --turn that names a task notification, which needs a transcript and a turn
     # index holding one.
     "credits.py:_find_in#2": (
@@ -4551,7 +4579,7 @@ UNREACHED: dict[str, str] = {
         "runner shares with the whole suite; provoking it safely needs a chdir this file does "
         "not do"
     ),
-    "config.py:load_config#5": (
+    "config.py:validate_config_text#4": (
         "needs a config.yml whose `publication_acknowledged` key is a scalar; the remedy names "
         "a hand edit followed by a command, and this check has no vocabulary for a remedy whose "
         "first step is not a command"
@@ -4737,6 +4765,27 @@ FINDINGS: dict[str, str] = {}
 #: is provoked or excused. What is NOT checked is whether the remedy works — that is the
 #: honest limit, and reporting it as present-but-unverified is the improvement.
 RECORDED: dict[str, str] = {
+    # KYO-954: the writers of the editable settings.
+    "cmd_config.py:_cmd_write#4": (
+        "a re-invocation inside a Kyosei project, or with --root naming one; proved by "
+        + "tests/test_kyo950_config_writers.py::"
+        + "test_config_set_and_unset_write_the_three_keys_keeping_every_comment"
+    ),
+    "config_splice.py:splice#1": (
+        "a hand edit of config.yml at the key the message names, then the same change; "
+        "proved by tests/test_kyo950_config_writers.py::test_the_remedy_a_refusal_names_clears_it"
+    ),
+    "config_splice.py:open_log#0": (
+        "pointing $KYOSEI_HOME at a directory outside every git repository, then the same "
+        "change; proved by "
+        ""
+        "tests/test_kyo950_config_writers.py::"
+        "test_the_log_that_cannot_be_opened_is_cleared_by_the_remedy_it_names"
+    ),
+    "config_splice.py:apply_change#1": (
+        "reading the file again and repeating the change: a file that changed since it was "
+        "read is a refusal the caller clears by passing the current digest; the CLI passes none"
+    ),
     # KYO-660: the draft or pack is written to the session's recorded scratch directory,
     # or to the file --out names.
     "cmd_excerpt.py:_scratch#0": (
@@ -5657,7 +5706,7 @@ RECORDED: dict[str, str] = {
         "and take the changelog on stdout. No `kyo` command makes a directory, and which "
         "of the two the caller wanted is the thing the refusal cannot tell"
     ),
-    "config.py:load_config#3": (
+    "config.py:validate_config_text#2": (
         "hand edit, or a code change: remove the unread keys from config.yml, or ship "
         "their consumer (law 2). No command does either, and the second is a commit"
     ),
@@ -5665,7 +5714,7 @@ RECORDED: dict[str, str] = {
     # editor; the backticked `git log` only shows the value to restore.
     # `tests/test_config_load_validation.py` writes the bad value, asserts the refusal,
     # restores the number and asserts the command runs clean.
-    "config.py:load_config#9": (
+    "config.py:validate_config_text#8": (
         "hand edit: write the store's schema_version back into config.yml as a whole "
         "number. `git log -p` is named only to show what that number was; no command "
         "writes it, because every command that could is blocked by this refusal"
@@ -5679,7 +5728,7 @@ RECORDED: dict[str, str] = {
         "hand edit: delete one of the two entries, or rename one if both were meant. "
         "Which of them is right is the author's call and no command can make it"
     ),
-    "config.py:load_config#6": (
+    "config.py:validate_config_text#5": (
         "hand edit: delete the worker_model line from config.yml, or give it a value. "
         "The whole remedy is a text editor — the case KYO-84 was filed about, and the "
         "one site on this surface that names no command of any kind"
@@ -5691,7 +5740,7 @@ RECORDED: dict[str, str] = {
     # the bad value, asserts the refusal, writes `false`, and asserts the refusal is
     # gone, which is the KYO-5.c2 guarantee run against the exact remedy this message
     # names.
-    "config.py:load_config#7": (
+    "config.py:validate_config_text#6": (
         "hand edit: write docs_suggest_notice: false in config.yml, or delete the line. "
         "Both are a text editor, and which of the two is meant is the project's own "
         "decision about whether it wants the notice — the thing the refusal must not "
@@ -5705,12 +5754,12 @@ RECORDED: dict[str, str] = {
     # KYO-416: a `code_repo_id` that is not a string of root shas. The remedy is a text
     # editor — delete the line. `tests/test_init_store_identity.py` writes the bad
     # value, asserts the refusal, deletes the line and asserts the config loads.
-    "config.py:load_config#12": (
+    "config.py:validate_config_text#11": (
         "hand edit: delete the code_repo_id line from config.yml. No command writes it "
         "back, because every command that reads this store is blocked by this refusal "
         "until the line is fixed"
     ),
-    "config.py:load_config#8": (
+    "config.py:validate_config_text#7": (
         "hand edit: write kind_grants_notice: false in config.yml, or delete the line. "
         "A text editor either way, and which is meant is the project's decision about "
         "whether it wants the notice; no command is named because `kyo doctor`, the one "
@@ -5727,11 +5776,11 @@ RECORDED: dict[str, str] = {
     ),
     # KYO-656: a text editor again; test_kyo656_transcript_opt_in.py writes the bad value,
     # asserts the refusal, deletes the line and asserts the config loads.
-    "config.py:load_config#14": (
+    "config.py:validate_config_text#13": (
         "hand edit: write read_transcripts: true or false in config.yml, or delete the "
         "line; proved by test_a_read_transcripts_value_that_is_not_a_boolean_is_refused"
     ),
-    "config.py:load_config#13": (
+    "config.py:validate_config_text#12": (
         "hand edit: write kind_policy_notice: false in config.yml, or delete the line. "
         "A text editor either way, and which is meant is the project's decision about "
         "whether it wants the notice; no command is named because `kyo doctor`, the one "
@@ -5740,7 +5789,7 @@ RECORDED: dict[str, str] = {
     # KYO-410: a blank or non-string `trunk:`, parsed as `worker_model` is. The remedy is a
     # text editor. `tests/test_guard_git_config.py` writes each bad value, asserts the
     # refusal, deletes the line and asserts the config loads.
-    "config.py:load_config#11": (
+    "config.py:validate_config_text#10": (
         "hand edit: delete the trunk line from config.yml, or give it a branch name. A "
         "text editor either way, and which branch is the trunk is the project's own fact"
     ),
@@ -5872,7 +5921,7 @@ RECORDED: dict[str, str] = {
     # KYO-312, two of two in one parser, and `_parse_controller_only_commands`'s shape:
     # `worker_command_timeout_ceiling_seconds` is a number a person types into config.yml,
     # so every way it can be malformed is a text editor away from correct and none of them
-    # is a `kyo` command. Recorded rather than provoked for `config.py:load_config#7`'s
+    # is a `kyo` command. Recorded rather than provoked for `config.py:validate_config_text#6`'s
     # reason and not for want of a provoker -- tests/test_kyo298_command_guard.py writes
     # `4m`, asserts the refusal, writes `240`, asserts it loads, then deletes the line and
     # asserts the ceiling is gone: the KYO-5.c2 guarantee run against both endings these
@@ -7016,7 +7065,7 @@ def _site(key: str) -> ErrorSite:
 def test_a_remedy_that_is_not_a_kyo_command_is_on_the_surface() -> None:
     """KYO-84.c1, at the two sites that make the point in different ways.
 
-    ``config.py:load_config#6`` is the strong case: its whole remedy is "delete the
+    ``config.py:validate_config_text#5`` is the strong case: its whole remedy is "delete the
     line, or give it a value", a text editor and nothing else. It carries no backticked
     command of any kind, so under KYO-77's surface there was no way for it to be seen at
     all — not unverified, absent.
@@ -7028,7 +7077,7 @@ def test_a_remedy_that_is_not_a_kyo_command_is_on_the_surface() -> None:
     is the whole of c1 — being checked is not what was asked for, being visible is.
     """
     surface = {site.key for site in sites_that_name_a_remedy()}
-    for key in ("config.py:load_config#6", "cmd_dispatch.py:_cmd_dispatch_create#2"):
+    for key in ("config.py:validate_config_text#5", "cmd_dispatch.py:_cmd_dispatch_create#2"):
         site = _site(key)
         assert not site.remedies, f"{key} names a `kyo` command now; pick another witness"
         assert site.recorded, f"{key} names no remedy this walk can see: {_message_of(site)}"
@@ -7036,7 +7085,7 @@ def test_a_remedy_that_is_not_a_kyo_command_is_on_the_surface() -> None:
         assert key in _classified(), f"{key} is on the surface and in no table"
     # And the first of them names no command at all, which is what makes it the case
     # KYO-77's surface could not have carried under any reading.
-    assert not shell_remedies(_message_of(_site("config.py:load_config#6")))
+    assert not shell_remedies(_message_of(_site("config.py:validate_config_text#5")))
 
 
 def test_the_widened_surface_strictly_contains_the_kyo_only_one() -> None:

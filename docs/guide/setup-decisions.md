@@ -280,7 +280,9 @@ governs: src/kyosei/cmd_install_agents.py, src/kyosei/defaults/agents/worker.md,
   a different reason: the harness can kill a foreground command.
 - **Where it lives:** the worker rule "Keep every foreground command under about four
   minutes" in procedures, and `worker_command_timeout_ceiling_seconds` in config (unset by
-  default).
+  default). `kyo config set worker_command_timeout_ceiling_seconds <seconds>` writes it and
+  `kyo config unset worker_command_timeout_ceiling_seconds` removes it; both keep the file's
+  comments, and the change is logged (KYO-954).
 - **Decides:** nothing to decide unless the operator's plan changes the cache lifetime.
 
 ### D4. Fresh-worktree setup
@@ -462,8 +464,8 @@ governs: src/kyosei/cmd_install_agents.py, src/kyosei/defaults/agents/worker.md,
   status change. `kyo prior-art <record-id>` searches for any record on demand, whatever
   the answer.
 - **Where it lives:** `recx.prior_art` in `kyosei/config.yml`. `kyo prior-art-setting on`
-  and `kyo prior-art-setting off` write its `state`, so a no is recorded as `off` rather
-  than under `onboarding:`. The trigger is `recx.prior_art.on` (by default
+  and `kyo prior-art-setting off` write its `state` through the comment-keeping splice
+  (KYO-954), so a no is recorded as `off` rather than under `onboarding:`. The trigger is `recx.prior_art.on` (by default
   `proposal: [new, promote, spawn]`), edited by hand.
 - **Why it is asked at all:** installing the extra may not change the build, so nothing
   else would tell an existing project that the choice exists. While the extra is installed
@@ -544,10 +546,13 @@ were written then and are unchanged, without seeing the rest (KYO-663).
   carries only what is listed as stored.
 - **Where it lives:** `read_transcripts: true` or `read_transcripts: false` in
   `kyosei/config.yml`, written by `kyo init` from the flag. Every later feature that reads a
-  transcript consults the same key.
+  transcript consults the same key. `kyo config set read_transcripts true|false` and
+  `kyo config unset read_transcripts` change it afterwards at the terminal, keeping the
+  file's comments, and each change is logged (KYO-954).
 - **Without it:** a credit is still written, and records its transcript check as
   `not-applicable`.
-- **Change later:** set the key. A credit already written keeps the check it recorded.
+- **Change later:** `kyo config set read_transcripts true` or `false`. A credit already
+  written keeps the check it recorded.
 - **Decides:** the operator, after reading the disclosure above.
 - **Detect:** `kyo onboard --check` reads the key back, and reports it as missing until it
   is set, whatever `onboarding:` says.

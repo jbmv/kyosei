@@ -1334,10 +1334,36 @@ def load_config(
     path = config_path_for(root)
     if not path.is_file():
         raise KyoseiError(f"{path} does not exist; {root} is not a Kyosei project")
+    return validate_config_text(
+        path.read_text(encoding="utf-8"),
+        path,
+        root=root,
+        code_root=code_root,
+        store_via_main_checkout=store_via_main_checkout,
+    )
+
+
+def validate_config_text(
+    text: str,
+    path: Path,
+    *,
+    root: Path | None = None,
+    code_root: Path | None = None,
+    store_via_main_checkout: Path | None = None,
+) -> Config:
+    """``config.yml``'s text parsed and validated, or the refusal :func:`load_config` gives.
+
+    KYO-954: the body of :func:`load_config`, factored out so that a writer validating a
+    candidate text (:mod:`kyosei.config_splice`) and the reader apply one parser and cannot
+    disagree about what a file may hold. ``path`` is only used to name the file in a
+    refusal; ``root`` defaults to the store root ``path`` sits in.
+    """
+    if root is None:
+        root = path.parent.parent
     try:
         # KYO-413.c6: a repeated key is refused by name rather than resolved to
         # whichever copy came last.
-        raw = load_yaml_refusing_duplicates(path.read_text(encoding="utf-8"), path) or {}
+        raw = load_yaml_refusing_duplicates(text, path) or {}
     except yaml.YAMLError as exc:  # pragma: no cover - depends on user damage
         raise KyoseiError(f"{path} is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
