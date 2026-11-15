@@ -775,8 +775,8 @@ def build_project_document(
 
     if not layout.configured:
         raise KyoseiError(
-            f"no Kyosei project at {layout.code_root}; run `kyo onboard` there, or name one "
-            "with --root"
+            f"no Kyosei project is configured at {layout.code_root}, so there is no "
+            "configuration to read"
         )
     path = config_path_for(layout.store_root)
     data, text = _read_file(path)
