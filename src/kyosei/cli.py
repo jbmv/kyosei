@@ -2359,6 +2359,21 @@ def build_parser() -> KyoseiParser:
         help="replace an existing file that differs from what would be written",
     )
     p_install_agents.add_argument(
+        "--in-place",
+        dest="in_place",
+        action="store_true",
+        help="change only the `model:` and `effort:` lines of the front matter of an existing "
+        "file, leaving every other line as it is; refuses a missing file, a file without "
+        "front matter or whose `name:` is not the template's (KYO-955)",
+    )
+    p_install_agents.add_argument(
+        "--if-match",
+        dest="if_match",
+        metavar="ETAG",
+        help="with --in-place and one --type: refuse unless the file's digest "
+        "(`sha256:<hex>`, as `kyo config --json` reports it) is ETAG",
+    )
+    p_install_agents.add_argument(
         "--print",
         dest="print_only",
         action="store_true",
@@ -2678,8 +2693,9 @@ def build_parser() -> KyoseiParser:
         "shown, editable or a request, with the reason; reads files only. `config set KEY "
         "VALUE` and `config unset KEY` write worker_model, "
         "worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, "
-        "keeping its comments, and `config --log` prints the log of every attempt (KYO-950, "
-        "KYO-954)",
+        "keeping its comments, `config --machine set serve_idle_message true|false` writes "
+        "that one key of settings.yml, and `config --log` prints the log of every attempt "
+        "(KYO-950, KYO-954, KYO-955)",
     )
     p_config.add_argument(
         "action",
@@ -2694,6 +2710,12 @@ def build_parser() -> KyoseiParser:
         action="store_true",
         help="print $KYOSEI_HOME/config-log.jsonl: every write and refused write of the "
         "settings, with the device that made it",
+    )
+    p_config.add_argument(
+        "--if-match",
+        dest="if_match",
+        metavar="ETAG",
+        help="with set or unset: refuse unless the file's digest (`sha256:<hex>`) is ETAG",
     )
     p_config.add_argument(
         "--machine",

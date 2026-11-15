@@ -18,9 +18,16 @@ server starts and again at each look, so that clearing it stops the messages wit
 
 KYO-519 (from KYO-513): before the controller -> orchestrator rename the key was spelled
 ``controller_command``, and that spelling is read permanently. Both present with different
-values is refused by name. Nothing writes the file: the operator renames the key by hand,
+values is refused by name. Nothing else writes the file: the operator renames the key by hand,
 and only once this machine's ``kyo`` is at least KYO-519, because an older one refuses the
 new spelling and ``kyo orchestrator start`` fails on this machine.
+
+KYO-955 (proposal KYO-950): one key has a writer, ``serve_idle_message``, set by
+``kyo config --machine set serve_idle_message true|false``. It changes that one line through
+:mod:`kyosei.config_splice`, validated by :func:`parse`, and keeps every other line, every
+comment and the spelling of the command key as they were. It refuses a missing file, so that
+creating the file stays a hand edit, and every other key: ``serve_send`` and
+``orchestrator_command`` are set at the machine by hand.
 
 WHY NOT A PROJECT'S ``kyosei/config.yml``. Two reasons, both in the record. Which
 flags claude takes on this machine (``--chrome`` needs this machine's browser; a
@@ -133,6 +140,16 @@ def load(environ: Mapping[str, str] | None = None) -> HomeSettings:
         return HomeSettings(path, DEFAULT_CONTROLLER_COMMAND, "default")
     except OSError as exc:
         raise _refuse(path, f"could not be read ({exc.strerror or exc})") from exc
+    return parse(text, path)
+
+
+def parse(text: str, path: Path) -> HomeSettings:
+    """The settings ``text`` holds, as :func:`load` reads the file at ``path``.
+
+    KYO-955: factored out of :func:`load` so that the writer of ``serve_idle_message``
+    (:mod:`kyosei.cmd_config`) validates its candidate with the parser the readers use, and
+    keeps no second one. A malformed text is refused by name, as the file would be.
+    """
     try:
         raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:

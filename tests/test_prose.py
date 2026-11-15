@@ -250,6 +250,9 @@ def test_no_flag_accepts_multi_line_prose(kyo) -> None:
         # KYO-878: `kyo discuss close --produced` names record ids, each checked to exist
         # before anything is written; the prose of what is not a record is `--why`.
         "--produced",
+        # KYO-955: `kyo config --if-match` and `kyo install-agents --if-match` take a file's
+        # sha256 digest, compared with the file's own and never stored.
+        "--if-match",
     }
     assert value_flags <= text_bearing | file_bearing | structural, value_flags
 

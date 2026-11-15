@@ -224,7 +224,10 @@ governs: src/kyosei/cmd_install_agents.py, src/kyosei/defaults/agents/worker.md,
   --type designer=<model>[:<effort>]` writes `.claude/agents/kyosei-worker.md` and
   `kyosei-designer.md` from packaged templates, naming only the types chosen (effort
   defaults to medium and high). It refuses to replace an existing file unless given
-  `--force`. The
+  `--force`. `--in-place` instead changes the `model:` and `effort:` lines of an existing
+  file's front matter and leaves every other line as it is; it refuses a missing file, a file
+  without front matter or whose `name:` is not the template's, a model outside the model
+  pattern and an unknown effort, and logs each write in `$KYOSEI_HOME/config-log.jsonl`. The
   setup agent also adds a line to the project's CLAUDE.md saying which type the
   orchestrator dispatches which work to; with none, it dispatches to the general-purpose
   subagent.
@@ -617,7 +620,12 @@ and runs no orchestrator; it only views and talks to them.
 - **Tokens and sending are not part of setup.** No token exists until the operator runs
   `kyo devices issue <name> --permission <p>` on the machine, and the send and terminal
   routes also refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.
-  The setup agent does neither; it says that both exist.
+  The setup agent does neither; it says that both exist. `serve_idle_message`, the setting
+  that lets the server send an idle session one automated message (it takes effect only with
+  `serve_send: true`), is written by `kyo config --machine set serve_idle_message true|false`,
+  which changes that line of an existing `settings.yml`, keeps its comments and the spelling of
+  its command key, and refuses a missing file. `serve_send` and `orchestrator_command` are set
+  at the machine by hand.
 - **Locally:** `kyo serve` in a terminal for a trial, or `kyo serve --install --apply` to
   run it at login (a LaunchAgent on macOS, a systemd user unit on Linux).
 - **Restart it after every upgrade** (`kyo serve --restart`). A running server keeps

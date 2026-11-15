@@ -36,7 +36,7 @@ Each of these is accepted both before the command (`kyo --json show ID`) and aft
 | [`kyo check-push`](#kyo-check-push) | optional | no | publication guard: fail if pushing this repository would publish an unacknowledged Kyosei store (KYO-60), and, for a push, if a commit it sends carries a private term or home path (KYO-669) |
 | [`kyo claim`](#kyo-claim) | yes | yes | record a claim about a record (law 9) |
 | [`kyo close-wave`](#kyo-close-wave) | yes | yes | close a merged wave: move each record to completion, run the declared generators, commit store and generated files together, then print (or, with --run-after, run) the declared after-steps — refused before any write unless every record can finish and the declared suite passed at this code (KYO-536) |
-| [`kyo config`](#kyo-config) | optional | no | read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only. `config set KEY VALUE` and `config unset KEY` write worker_model, worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, keeping its comments, and `config --log` prints the log of every attempt (KYO-950, KYO-954) |
+| [`kyo config`](#kyo-config) | optional | no | read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only. `config set KEY VALUE` and `config unset KEY` write worker_model, worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, keeping its comments, `config --machine set serve_idle_message true\|false` writes that one key of settings.yml, and `config --log` prints the log of every attempt (KYO-950, KYO-954, KYO-955) |
 | [`kyo confirm`](#kyo-confirm) | yes | yes | the maintainer looked and approves: verify the criterion met (human-observed) with their words as evidence, clear the answered human gate, and walk the record to completion (KYO-494) |
 | [`kyo credit`](#kyo-credit) | yes | yes | credit a person for rows that already exist: a human-observed verdict, a cleared human gate, or a record they decided or authorized; a reconstructed credit needs --basis (KYO-644) |
 | [`kyo devices`](#kyo-devices) | no | no | issue, list and revoke the per-device tokens kyo serve's routes check, on this machine ($KYOSEI_HOME/device-tokens.json holds digests only) (KYO-699) |
@@ -423,13 +423,13 @@ Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `
 
 ## `kyo config`
 
-read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only. `config set KEY VALUE` and `config unset KEY` write worker_model, worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, keeping its comments, and `config --log` prints the log of every attempt (KYO-950, KYO-954)
+read a project's configuration (kyosei/config.yml, the agent types, the files beside it) or with --machine the machine's (settings.yml), each setting placed as shown, editable or a request, with the reason; reads files only. `config set KEY VALUE` and `config unset KEY` write worker_model, worker_command_timeout_ceiling_seconds and read_transcripts in kyosei/config.yml, keeping its comments, `config --machine set serve_idle_message true|false` writes that one key of settings.yml, and `config --log` prints the log of every attempt (KYO-950, KYO-954, KYO-955)
 
 Needs a Kyosei project: **optional** — it runs, and says so, where there is no project.
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo config [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--log] [--machine] [{set,unset}] [key] [value]`
+Usage: `kyo config [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--log] [--if-match ETAG] [--machine] [{set,unset}] [key] [value]`
 
 ### Positional arguments
 
@@ -440,6 +440,7 @@ Usage: `kyo config [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim]
 ### Options
 
 - `--log` — optional. print $KYOSEI_HOME/config-log.jsonl: every write and refused write of the settings, with the device that made it
+- `--if-match ETAG` — optional. with set or unset: refuse unless the file's digest (`sha256:<hex>`) is ETAG
 - `--machine` — optional. print the machine's settings ($KYOSEI_HOME/settings.yml) in place of the project's; needs no project
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.
@@ -933,12 +934,14 @@ Needs a Kyosei project: **yes** — it searches upward for one and fails if ther
 
 Writes to the store: **no** — this command only reads.
 
-Usage: `kyo install-agents [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--type TEMPLATE=MODEL[:EFFORT]] [--force] [--print]`
+Usage: `kyo install-agents [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [--slim] [--compact-json] [--pretty] [--type TEMPLATE=MODEL[:EFFORT]] [--force] [--in-place] [--if-match ETAG] [--print]`
 
 ### Options
 
 - `--type TEMPLATE=MODEL[:EFFORT]` — optional. one agent type to write (repeatable): TEMPLATE is worker (build tasks whose design is settled; effort medium unless named) or designer (proposals, measurements, judgement calls; effort high unless named), written as .claude/agents/kyosei-TEMPLATE.md; EFFORT is one of low, medium, high, xhigh, max
 - `--force` — optional. replace an existing file that differs from what would be written
+- `--in-place` — optional. change only the `model:` and `effort:` lines of the front matter of an existing file, leaving every other line as it is; refuses a missing file, a file without front matter or whose `name:` is not the template's (KYO-955)
+- `--if-match ETAG` — optional. with --in-place and one --type: refuse unless the file's digest (`sha256:<hex>`, as `kyo config --json` reports it) is ETAG
 - `--print` — optional. show what would be written without writing it
 
 Also accepts the options every command accepts: `--help`, `--root`, `--actor`, `--json`, `--full`, `--slim`, `--compact-json`, `--pretty`.

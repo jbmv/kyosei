@@ -658,3 +658,72 @@ def apply_change(
         )
     finally:
         os.close(descriptor)
+
+
+def apply_edit(
+    *,
+    path: Path,
+    key: str,
+    edit: Callable[[str], tuple[str, object, object]],
+    environ: dict[str, str],
+    project: str,
+    actor: str | None = None,
+    device: str = DEVICE_CLI,
+    expected_etag: str | None = None,
+) -> Applied:
+    """:func:`apply_change` for a file whose edit is not a key's value: read ``path``, let
+    ``edit`` return ``(candidate, previous, new)``, write it atomically and log it under
+    ``key``.
+
+    KYO-955. An agent type's ``model:`` and ``effort:`` lines are two lines of a front matter,
+    which :func:`splice` does not address. ``edit`` raises :class:`KyoseiError` to refuse and
+    does its own validation; the log, the etag compared at the read and again before the
+    rename, and the atomic write are the ones of :func:`apply_change`.
+    """
+    from .export import atomic_write_text
+
+    descriptor = open_log(environ)
+    row: dict = {
+        "at": now(),
+        "device": device,
+        "device_id": device,
+        "actor": actor,
+        "project": project,
+        "file": str(path),
+        "key": key,
+        "previous": None,
+        "new": None,
+    }
+    try:
+        try:
+            if not path.is_file():
+                raise KyoseiError(f"{path} does not exist, so there is nothing to change in it")
+            data = path.read_bytes()
+            if expected_etag is not None and etag_of(data) != expected_etag:
+                raise KyoseiError(
+                    f"{path} changed since it was read (its digest is {etag_of(data)}, not "
+                    f"{expected_etag}); read it again and repeat the change"
+                )
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise KyoseiError(f"{path} is not UTF-8 text ({exc.reason})") from exc
+            candidate, previous, new = edit(text)
+            row["previous"], row["new"] = previous, new
+        except KyoseiError as exc:
+            _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
+            raise
+        if candidate == text:
+            return Applied(path, key, previous, new, False, etag_of(data))
+        if path.read_bytes() != data:
+            reason = (
+                f"{path} changed while the change was being prepared; read it again and "
+                "repeat the change"
+            )
+            _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": reason})
+            raise KyoseiError(reason)
+        atomic_write_text(path, candidate)
+        _append(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None})
+        return Applied(path, key, previous, new, True, etag_of(candidate.encode()))
+    finally:
+        os.close(descriptor)
