@@ -17,6 +17,7 @@ import yaml
 
 from kyosei import cmd_onboard, prior_art
 from kyosei.cli import COMMAND_TABLE, MUTATING_COMMANDS
+from kyosei.errors import KyoseiError
 
 REPO = Path(__file__).resolve().parent.parent
 DECISIONS = REPO / "docs" / "guide" / "setup-decisions.md"
@@ -118,14 +119,27 @@ def test_c1_keeps_the_operators_trigger_limit_index_url_and_comments(kyo, projec
     assert result.json["on"] == {"proposal": ["new"]}
 
 
-def test_c1_a_block_with_no_state_line_is_rerendered_with_its_keys_kept(project) -> None:
-    """The splice's fallback: a flow-style block has no `state:` line to substitute."""
+def test_c1_a_flow_style_block_is_refused_unchanged_and_the_hand_edit_clears_it(project) -> None:
+    """KYO-954: a flow-style block has no `state:` line to substitute. The writer re-rendered
+    the block until the splice replaced it; a value written as a flow mapping is now refused
+    by name and never guessed at, and writing the block out by hand is the remedy."""
     _append(project, "recx: {prior_art: {state: off, limit: 7}}\nworker_model: opus\n")
+    text = _config(project).read_text(encoding="utf-8")
+    with pytest.raises(KyoseiError, match="hand edit"):
+        prior_art.set_prior_art_state(project, "on")
+    assert _config(project).read_text(encoding="utf-8") == text, "a refusal writes nothing"
+    # The remedy the refusal names: the same block, written as a block mapping.
+    _config(project).write_text(
+        text.replace(
+            "recx: {prior_art: {state: off, limit: 7}}",
+            "recx:\n  prior_art:\n    state: off\n    limit: 7",
+        ),
+        encoding="utf-8",
+    )
     before, after, written = prior_art.set_prior_art_state(project, "on")
     assert written and before.state == "off" and after.state == "on"
     assert after.limit == 7
-    raw = _raw(project)
-    assert raw["worker_model"] == "opus"
+    assert _raw(project)["worker_model"] == "opus"
 
 
 def test_c1_a_malformed_block_is_refused_unchanged(kyo, project) -> None:
