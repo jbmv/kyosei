@@ -178,19 +178,48 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+function scalar(value: unknown): boolean {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+/**
+ * A list or mapping as indented lines, the way the file itself writes one: `- ` before a
+ * list's entry and `key: ` before a mapping's. It is for reading and is not parsed back.
+ */
+function outline(value: unknown, indent: string): string[] {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [`${indent}[]`];
+    return value.flatMap((entry) => {
+      if (scalar(entry)) return [`${indent}- ${String(entry)}`];
+      const [first, ...rest] = outline(entry, `${indent}  `);
+      return [`${indent}- ${first!.trimStart()}`, ...rest];
+    });
+  }
+  const entries = Object.entries(record(value));
+  if (entries.length === 0) return [`${indent}{}`];
+  return entries.flatMap(([key, entry]) => {
+    if (scalar(entry)) return [`${indent}${key}: ${String(entry)}`];
+    if ((Array.isArray(entry) && entry.length === 0) || (!Array.isArray(entry) && Object.keys(record(entry)).length === 0)) {
+      return [`${indent}${key}: ${Array.isArray(entry) ? "[]" : "{}"}`];
+    }
+    return [`${indent}${key}:`, ...outline(entry, `${indent}  `)];
+  });
+}
+
 /** A value as the text a row draws, and whether that text runs over more than a line. */
 export function valueText(value: unknown): { text: string; block: boolean } | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") return { text: value, block: value.includes("\n") };
   if (typeof value === "number" || typeof value === "boolean") return { text: String(value), block: false };
-  if (Array.isArray(value) && value.every((entry) => ["string", "number", "boolean"].includes(typeof entry))) {
-    const joined = value.map(String).join(" ");
+  // One line only for a list of single words, such as an argument list: entries that hold a
+  // space are commands, and joined by spaces they could not be told apart.
+  if (Array.isArray(value) && value.every((entry) => typeof entry === "string" && !/\s/.test(entry))) {
+    const joined = value.join(" ");
     if (joined.length <= 80) return { text: joined, block: false };
   }
-  return { text: JSON.stringify(value, null, 2), block: true };
+  return { text: outline(value, "").join("\n"), block: true };
 }
 
-/** The first line of a comment, which a collapsed comment shows; null when there is none. */
 export function firstLine(comment: string[]): string | null {
   return comment.length ? comment[0] : null;
 }

@@ -126,7 +126,9 @@ test("the machine's sections hold its settings, its onboard items and the device
 
 test("values: a list of words is one line, a nested value a block, and nothing set is null", () => {
   assert.deepEqual(valueText(["claude", "--chrome"]), { text: "claude --chrome", block: false });
-  assert.equal(valueText([{ run: "make venv" }])!.block, true);
+  assert.deepEqual(valueText([{ run: "make venv", note: "first" }]), { text: "- run: make venv\n  note: first", block: true });
+  assert.deepEqual(valueText(["make test", "npm run check"]), { text: "- make test\n- npm run check", block: true });
+  assert.deepEqual(valueText({ jbmv: {}, level: "problem", code: ["a", "b"] }), { text: "jbmv: {}\nlevel: problem\ncode:\n  - a\n  - b", block: true });
   assert.deepEqual(valueText(true), { text: "true", block: false });
   assert.equal(valueText(null), null);
   assert.equal(firstLine([]), null);
