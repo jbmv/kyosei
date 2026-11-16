@@ -134,6 +134,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## cli
 
+- **2026-11-16** — `KYO-958` (bug) — Config writes: a failed log append reads as a 412, no lock shared with the terminal, 403 after the log
 - **2026-11-15** — `KYO-957` (investigation) — Review of the config write routes before merge (KYO-956)
 - **2026-11-15** — `KYO-956` (task) — Config write routes and the config device permission
 - **2026-11-15** — `KYO-955` (task) — Writers for serve_idle_message and an agent type's model and effort
