@@ -659,8 +659,12 @@ asked whether it can still open the store, and the previous bytes are restored i
 Every attempt, written or refused, is one line of `$KYOSEI_HOME/config-log.jsonl`: the time,
 the device (`cli` for these commands), the project, the file, the key, the previous and new
 values, the outcome and the reason. The file is created private to the account and refused
-inside a git repository, and it is opened before the write, so a change that cannot be logged
-is not made. `kyo config --log` prints it, the `last_change` of each setting in `kyo config`
+inside a git repository, and it is opened before the write, so a change whose log cannot be
+opened is not made. A row that cannot be appended after the file was written is reported as
+an error that names the file, which keeps the new value (KYO-958). Each writer holds an
+advisory lock (`flock`) on the log from before it compares the file until its rename and row
+are done, so a writer at the terminal and a route of `kyo serve` that start from the same
+bytes cannot both succeed; the second waits and is then refused as changed. `kyo config --log` prints it, the `last_change` of each setting in `kyo config`
 reports the latest written row for it, and the next `kyo brief` states each change since the
 previous brief in one line, `config: <key> changed from <old> to <new> by <device> at
 <time>`, which asks nothing.
