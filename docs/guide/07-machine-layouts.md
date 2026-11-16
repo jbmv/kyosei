@@ -51,7 +51,9 @@ serves every project in `projects.json` to a viewer.
   terminal (`terminal`), read a project's files (`files`) and change the editable settings
   (`config`). Sending and the terminal also
   need `serve_send: true` in `~/kyosei/settings.yml`, and are off until you add it.
-- No viewer changes a record. Notes are the one thing the server writes to a store.
+- No viewer changes a record. For a device with a token the server files your
+  notes in the store and, where the token holds `config`, changes an editable setting in the
+  store's `kyosei/config.yml`.
 
 The reference lists
 [which routes need a device token](../reference/topics/serve-and-desktop.md#which-routes-need-a-device-token).

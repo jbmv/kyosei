@@ -176,4 +176,8 @@ store remote, no worktree setup until there is code) is written under `onboardin
 your reason and no fix, so the next agent does not ask you again. It changes nothing; the
 orchestrator offers each fix. `kyo onboard --check --all` runs it across every project on the machine.
 
+`kyo config` prints every setting of the project with its value, and says of each whether
+it is only shown, changed by a command, or changed by asking the orchestrator, with the
+reason. `kyo config --machine` does the same for the machine's settings.
+
 Next: [Dispatching work](05-dispatching.md).

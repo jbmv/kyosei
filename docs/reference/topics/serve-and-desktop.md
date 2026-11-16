@@ -1335,7 +1335,9 @@ A note is filed and its tags are moved by the same code as `kyo notes`, so an ev
 ledger lines are written as there, and a write holds the same lock: SQLite's write lock, then
 the export directory's. A write that cannot get it within the store's timeout is refused
 `store-locked` (503), and repeating the request clears it. These are the only writes `kyo
-serve` makes to a store; every other route opens it read-only.
+serve` makes to a store's records; every other route opens the store read-only. The config
+write routes change `kyosei/config.yml`, a file of the store, and no record (see "Changing a
+setting from a device").
 
 **Sending notes.** `send-notes` builds one plain-text message and holds it through the path
 above, so a message sent during a turn waits for the turn and the send checks all apply

@@ -618,8 +618,8 @@ and runs no orchestrator; it only views and talks to them.
   (`terminal`), read a project's files (`files`) and change the editable settings of a project
   and of the machine (`config`: a worker model, a timeout ceiling, prior-art search, the docs
   coverage level, an agent type's model and effort, turning `read_transcripts` off, and the
-  idle message). Notes are the one thing the server writes to a store, and no viewer changes
-  a record.
+  idle message). Notes and those settings of `kyosei/config.yml` are what the server writes to
+  a store, and no viewer changes a record.
 - **Tokens and sending are not part of setup.** No token exists until the operator runs
   `kyo devices issue <name> --permission <p>` on the machine, and the send and terminal
   routes also refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.

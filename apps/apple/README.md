@@ -10,7 +10,7 @@ in
 
 The app draws a session's conversation as rendered markdown and sends prompts to it through
 the server, which types them into the session's pane. Beside the conversation it shows the
-project's records and files, and a terminal on the pane. To a session run in a terminal it
+project's records, files and configuration, and a terminal on the pane. To a session run in a terminal it
 adds the following.
 
 - **Anchors.** A paragraph of a prompt can be anchored to a place: a sentence or a selection
@@ -791,8 +791,9 @@ refusal and the values of the raw file. The logic is in `web/src/config.ts`, tes
 `web/test/config.test.ts`, and the scenarios of the check build drive the view against a real
 server: H reads (`check/test_scenario_h.py`), I writes, refuses and meets a 412
 (`check/test_scenario_i.py`) and J places requests (`check/test_scenario_j.py`), with the check
-build's device given the `config` permission in the run's own `KYOSEI_HOME`. Whether the three classes of row read clearly together is the
-maintainer's look and has not been made.
+build's device given the `config` permission in the run's own `KYOSEI_HOME`. The maintainer
+changed a setting and placed a request from a signed build on 2026-11-16 and found both as
+described (KYO-959).
 
 ### Files outside the served roots
 
@@ -841,7 +842,8 @@ no live session is shown a Start orchestrator button, which needs the token to h
 permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
 the `terminal` permission; without it the drawer shows the pane's text and the server's reason. While it is open the
 terminal covers the chat pane (KYO-753), which keeps its scroll place beneath.
-Files and file links need it to hold the `files` permission.
+Files and file links need it to hold the `files` permission. Config reads with a token of any
+permission, and its controls need the token to hold the `config` permission.
 
 `package.sh` builds `Kyosei.app` under `.build/package`. It signs with `KYOSEI_SIGN_IDENTITY`,
 and notarizes with `KYOSEI_NOTARY_KEY`, `KYOSEI_NOTARY_KEY_ID` and `KYOSEI_NOTARY_ISSUER`.
