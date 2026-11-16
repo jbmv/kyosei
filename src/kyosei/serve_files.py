@@ -619,22 +619,23 @@ def replace_config_text(
         held = config_splice.etag_of(data) if data is not None else if_match.strip()
         try:
             return write(held)
-        except Exception:
+        except Exception as exc:
             # The writer re-checks the digest when it reads and before the rename, and has
-            # logged what it refused; a file another writer changed in between is the same
-            # refusal as one changed before, with the file's current value.
+            # logged what it refused. Only that refusal, which it marks, is the 412: a file
+            # another writer changed in between is the same refusal as one changed before,
+            # with the file's current value. Every other error is passed on (KYO-958).
+            if not config_splice.was_changed(exc):
+                raise
             try:
                 now = target.read_bytes()
             except OSError:
-                now = None
-            if now is not None and config_splice.etag_of(now) != held:
-                raise stale(
-                    now,
-                    f"{shown} changed while the change was being made: read the document "
-                    "again and repeat the change with the current etag",
-                    log=False,
-                ) from None
-            raise
+                raise exc from None
+            raise stale(
+                now,
+                f"{shown} changed while the change was being made: read the document "
+                "again and repeat the change with the current etag",
+                log=False,
+            ) from None
 
 
 def _write_atomically(path: Path, data: bytes, *, create: bool, private: bool = False) -> None:

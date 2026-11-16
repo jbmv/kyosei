@@ -789,11 +789,12 @@ inside `serve_files.replace_config_text`, the one place the server writes a conf
 file. The routes add these refusals:
 
 - 401 without a valid token, and 403 `no-config-permission` for a token that lacks the
-  permission, naming the grant command;
+  permission, naming the grant command; the 403 is answered before the log is opened and
+  before the project is looked up;
 - 428 `if-match-required` without an `If-Match` header;
 - 409 `server-stale` while `/v1/version` reports `stale: true`, naming `kyo serve --restart`;
 - 412 `changed` when the file's etag is not the one given, with `current: {value, etag}` for
-  the key, so that a client can show what changed;
+  the key, so that a client can show what changed; no other failure is answered 412;
 - 403 `by-request` for `read_transcripts: true`: turning it on opens every session read
   route to the project's tokens, so it is changed by a request to the session or at the
   machine, and a device may only turn it off;
@@ -809,8 +810,13 @@ the file's digest after the write.
 
 Every attempt that names a device, a refused one included, is a row of
 `$KYOSEI_HOME/config-log.jsonl` with the device's id and name, as the writers' rows name `cli`.
-The log is opened before anything else is done, and a route whose log cannot be opened
-refuses with 500 `log-unwritable` and writes nothing. The Config view reads the last row of
+The log is opened before a file is read, after the permission is checked, and a route whose
+log cannot be opened refuses with 500 `log-unwritable` and writes nothing. The log's
+descriptor also carries an advisory lock (`flock`) that each writer, the command line's and
+the routes', holds from before it compares the file until its rename and row are done, so
+two writers starting from the same bytes cannot both succeed; a writer that finds it held
+waits. A row that cannot be appended after the file was written is reported as that, naming
+the file, which is left with the new value. The Config view reads the last row of
 each setting as `last_change`.
 
 ### Sending input: the send routes (KYO-699)
