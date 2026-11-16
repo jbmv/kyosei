@@ -629,7 +629,9 @@ def replace_config_text(
             try:
                 now = target.read_bytes()
             except OSError:
-                raise exc from None
+                now = None
+            if now is None:
+                raise  # nothing to show of the file, so the writer's own error stands
             raise stale(
                 now,
                 f"{shown} changed while the change was being made: read the document "

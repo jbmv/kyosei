@@ -666,17 +666,17 @@ def apply_change(
         "previous": None,
         "new": None if change.remove else change.value,
     }
+    digest_refused = False
     try:
         try:
             if not path.is_file():
                 raise KyoseiError(f"{path} does not exist, so there is nothing to change in it")
             data = path.read_bytes()
             if expected_etag is not None and etag_of(data) != expected_etag:
-                raise _changed(
-                    KyoseiError(
-                        f"{path} changed since it was read (its digest is {etag_of(data)}, "
-                        f"not {expected_etag}); read it again and repeat the change"
-                    )
+                digest_refused = True
+                raise KyoseiError(
+                    f"{path} changed since it was read (its digest is {etag_of(data)}, not "
+                    f"{expected_etag}); read it again and repeat the change"
                 )
             try:
                 text = data.decode("utf-8")
@@ -692,6 +692,8 @@ def apply_change(
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
             _logged(exc)
+            if digest_refused:
+                _changed(exc)  # a marked refusal is the route's 412, and no other is
             raise
         if candidate == text:
             return Applied(path, change.key, row["previous"], row["new"], False, etag_of(data))
@@ -769,17 +771,17 @@ def apply_edit(
         "previous": None,
         "new": None,
     }
+    digest_refused = False
     try:
         try:
             if not path.is_file():
                 raise KyoseiError(f"{path} does not exist, so there is nothing to change in it")
             data = path.read_bytes()
             if expected_etag is not None and etag_of(data) != expected_etag:
-                raise _changed(
-                    KyoseiError(
-                        f"{path} changed since it was read (its digest is {etag_of(data)}, "
-                        f"not {expected_etag}); read it again and repeat the change"
-                    )
+                digest_refused = True
+                raise KyoseiError(
+                    f"{path} changed since it was read (its digest is {etag_of(data)}, not "
+                    f"{expected_etag}); read it again and repeat the change"
                 )
             try:
                 text = data.decode("utf-8")
@@ -790,6 +792,8 @@ def apply_edit(
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
             _logged(exc)
+            if digest_refused:
+                _changed(exc)  # a marked refusal is the route's 412, and no other is
             raise
         if candidate == text:
             return Applied(path, key, previous, new, False, etag_of(data))
