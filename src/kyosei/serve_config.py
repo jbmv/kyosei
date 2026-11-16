@@ -169,6 +169,17 @@ def _stale_refusal(version: dict) -> str:
     )
 
 
+def _unresolved_file(environ: dict[str, str], route: str, key: str) -> Path:
+    """The file a route would write, named without resolving the project."""
+    if route == "settings":
+        from . import home_settings
+
+        return home_settings.settings_path(environ)
+    if route == "config":
+        return Path("config.yml")
+    return Path(".claude") / "agents" / f"{key}.md"
+
+
 def write(
     server,
     authorization: str | None,
@@ -187,6 +198,20 @@ def write(
     environ = server.environ
     device, no_permission = _device_for_config(environ, authorization)
     name = project or "machine"
+    if no_permission is not None:
+        # KYO-958 F5: refused before the log is opened or the project is looked up, so that
+        # neither can answer a token that may not write at all. The row is still written
+        # where the log can be; the file is named as the route would, not looked up.
+        config_splice.log_refusal(
+            environ,
+            project=name,
+            file=_unresolved_file(environ, route, key),
+            key=key,
+            reason=str(no_permission),
+            device=device.name,
+            device_id=device.id,
+        )
+        raise Refusal(403, str(no_permission), reason=no_permission.extra["reason"])
     try:
         os.close(config_splice.open_log(environ))
     except KyoseiError as exc:
@@ -221,17 +246,6 @@ def write(
             **extra,
         )
 
-    if no_permission is not None:
-        config_splice.log_refusal(
-            environ,
-            project=name,
-            file=file,
-            key=key,
-            reason=str(no_permission),
-            device=device.name,
-            device_id=device.id,
-        )
-        raise Refusal(403, str(no_permission), reason=no_permission.extra["reason"])
     version = version_of()
     if version.get("stale"):
         raise refuse(409, _stale_refusal(version), "server-stale")

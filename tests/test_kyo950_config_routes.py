@@ -739,3 +739,164 @@ def test_a_settings_file_that_is_not_utf8_is_refused_and_removing_it_clears_it(
         home_settings.load()
     path.unlink()
     assert home_settings.load().source == "default"
+
+
+# ------------------------------------------------------------------ KYO-958
+
+
+def test_a_row_that_cannot_be_appended_after_the_write_is_not_a_412(
+    writer: Device, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2: the file was changed by the server's own write, and the answer says so."""
+    path = config_file(project)
+    real = config_splice._append
+
+    def full_disk(descriptor, row):
+        if row.get("outcome") == config_splice.OUTCOME_WRITTEN:
+            raise OSError(28, "No space left on device")
+        return real(descriptor, row)
+
+    monkeypatch.setattr(config_splice, "_append", full_disk)
+    before = path.read_bytes()
+    status, refused = writer.post(
+        f"{BASE}/config/worker_model", {"value": "opus"}, if_match=etag(path)
+    )
+    assert status != 412 and refused.get("reason") != "changed"
+    assert "was written" in refused["error"] and str(path) in refused["error"]
+    assert path.read_bytes() != before and "opus" in path.read_text()
+    assert rows() == []  # no row, and no false "refused" row either
+
+
+def test_a_terminal_writer_also_reports_the_unlogged_write(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = config_file(project)
+    monkeypatch.setattr(
+        config_splice,
+        "_append",
+        lambda descriptor, row: (_ for _ in ()).throw(OSError(28, "No space left on device")),
+    )
+    with pytest.raises(KyoseiError, match="was written"):
+        config_splice.apply_change(
+            path=path,
+            change=config_splice.Change(key="worker_model", value="opus"),
+            validate=lambda text: None,
+            environ=__import__("os").environ,
+            project="proj",
+        )
+    assert "opus" in path.read_text()
+
+
+def test_replace_config_text_answers_412_only_for_the_digest_refusal(tmp_path: Path) -> None:
+    from kyosei import serve_files
+    from kyosei.serve_send import Refusal
+
+    target = tmp_path / "config.yml"
+    target.write_text("a: 1\n")
+    held = config_splice.etag_of(target.read_bytes())
+
+    def other_error(_held: str):
+        target.write_text("a: 2\n")  # the digest differs afterwards, as after a rename
+        raise KyoseiError("some other failure")
+
+    def call(write):
+        return serve_files.replace_config_text(
+            target,
+            "config.yml",
+            write,
+            if_match=held,
+            current_value=lambda data: None,
+            refused=lambda why: None,
+        )
+
+    with pytest.raises(KyoseiError, match="some other failure"):
+        call(other_error)
+
+    target.write_text("a: 1\n")
+
+    def digest_refusal(_held: str):
+        target.write_text("a: 3\n")
+        raise config_splice._changed(KyoseiError("changed"))
+
+    with pytest.raises(Refusal) as caught:
+        call(digest_refusal)
+    assert caught.value.status == 412
+
+
+def test_a_terminal_writer_and_a_route_writer_cannot_both_succeed_from_the_same_bytes(
+    writer: Device, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """c3: the terminal's write is held between its comparison and its rename while the
+    route's request arrives; the lock on the log makes the route wait, and it then finds
+    the file changed."""
+    import threading
+
+    from kyosei import export
+
+    path = config_file(project)
+    start = etag(path)
+    reached, release = threading.Event(), threading.Event()
+    real = export.atomic_write_text
+    held_once = []
+
+    def paused(target, text, *args, **kwargs):
+        if not held_once:
+            held_once.append(1)
+            reached.set()
+            assert release.wait(20)
+        return real(target, text, *args, **kwargs)
+
+    monkeypatch.setattr(export, "atomic_write_text", paused)
+    outcome: dict = {}
+
+    def terminal() -> None:
+        outcome["terminal"] = invoke(
+            ["--root", str(project), "config", "set", "worker_model", "from-terminal"]
+        )
+
+    thread = threading.Thread(target=terminal)
+    thread.start()
+    assert reached.wait(20)
+    route: dict = {}
+
+    def request() -> None:
+        route["answer"] = writer.post(
+            f"{BASE}/config/worker_model", {"value": "from-route"}, if_match=start
+        )
+
+    requester = threading.Thread(target=request)
+    requester.start()
+    requester.join(1.0)
+    assert requester.is_alive(), "the route did not wait for the terminal writer's lock"
+    release.set()
+    thread.join(20)
+    requester.join(20)
+    assert outcome["terminal"].code == 0, outcome["terminal"]
+    status, refused = route["answer"]
+    assert status == 412 and refused["reason"] == "changed"
+    assert "from-terminal" in path.read_text() and "from-route" not in path.read_text()
+
+
+def test_a_token_without_config_is_403_when_the_log_cannot_be_opened(
+    writer: Device, project: Path
+) -> None:
+    config_splice.log_path(__import__("os").environ).mkdir(parents=True)
+    stranger = Device(writer.server, "tablet", [device_tokens.PERMISSION_SEND])
+    status, refused = stranger.post(
+        f"{BASE}/config/worker_model", {"value": "opus"}, if_match=etag(config_file(project))
+    )
+    assert status == 403 and refused["reason"] == "no-config-permission"
+    # The remedy it names (a log that can be opened) leaves the refusal a row.
+    config_splice.log_path(__import__("os").environ).rmdir()
+    stranger.post(f"{BASE}/config/worker_model", {"value": "opus"}, if_match="x")
+    assert [row["outcome"] for row in rows()] == ["refused"]
+    assert rows()[0]["device"] == "tablet"
+
+
+def test_a_token_without_config_is_403_for_an_unknown_project(writer: Device) -> None:
+    stranger = Device(writer.server, "tablet", [device_tokens.PERMISSION_SEND])
+    status, refused = stranger.post(
+        "/v1/projects/nowhere/config/worker_model", {"value": "opus"}, if_match="x"
+    )
+    assert status == 403 and refused["reason"] == "no-config-permission"
+    assert rows()[0]["project"] == "nowhere"

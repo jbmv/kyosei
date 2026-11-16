@@ -35,6 +35,7 @@ and the session-start brief, which states each change since the previous brief.
 from __future__ import annotations
 
 import copy
+import fcntl
 import hashlib
 import json
 import os
@@ -477,6 +478,45 @@ def was_logged(exc: BaseException) -> bool:
     return bool(getattr(exc, "logged", False))
 
 
+def _changed(exc: KyoseiError) -> KyoseiError:
+    """``exc``, marked as the digest refusal: the file is not the bytes the writer was asked
+    to hold it to. A route answers 412 for this mark and for no other error (KYO-958)."""
+    exc.changed = True  # type: ignore[attr-defined]
+    return exc
+
+
+def was_changed(exc: BaseException) -> bool:
+    return bool(getattr(exc, "changed", False))
+
+
+def _lock(descriptor: int) -> None:
+    """Take the exclusive advisory lock of the log's descriptor, waiting for it.
+
+    KYO-958. Every writer of a configuration file opens the one log, so a lock on that file
+    is shared by the terminal and the routes without a lock file of its own. Each writer
+    takes it before it reads the file to compare and holds it until the rename and the row
+    are done; closing the descriptor releases it. A writer that cannot have it yet waits.
+    """
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+
+def _append_written(descriptor: int, row: dict, path: Path) -> None:
+    """The ``written`` row, after the rename. The file is changed whatever happens here, so a
+    failure is reported as that and the previous bytes are not restored."""
+    try:
+        _append(descriptor, row)
+    except OSError as exc:
+        # Marked as logged: no row exists, and a "refused" row written for this attempt
+        # later would say the file was not changed.
+        raise _logged(
+            KyoseiError(
+                f"{path} was written, and the row of the change could not be appended to "
+                f"the configuration log ({exc}); the file holds the new value, so read it "
+                "before repeating the change"
+            )
+        ) from exc
+
+
 def _append(descriptor: int, row: dict) -> None:
     os.write(descriptor, (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
 
@@ -614,6 +654,7 @@ def apply_change(
     from .export import atomic_write_text
 
     descriptor = open_log(environ)
+    _lock(descriptor)
     row: dict = {
         "at": now(),
         "device": device,
@@ -625,12 +666,14 @@ def apply_change(
         "previous": None,
         "new": None if change.remove else change.value,
     }
+    digest_refused = False
     try:
         try:
             if not path.is_file():
                 raise KyoseiError(f"{path} does not exist, so there is nothing to change in it")
             data = path.read_bytes()
             if expected_etag is not None and etag_of(data) != expected_etag:
+                digest_refused = True
                 raise KyoseiError(
                     f"{path} changed since it was read (its digest is {etag_of(data)}, not "
                     f"{expected_etag}); read it again and repeat the change"
@@ -649,6 +692,8 @@ def apply_change(
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
             _logged(exc)
+            if digest_refused:
+                _changed(exc)  # a marked refusal is the route's 412, and no other is
             raise
         if candidate == text:
             return Applied(path, change.key, row["previous"], row["new"], False, etag_of(data))
@@ -658,7 +703,7 @@ def apply_change(
                 "repeat the change"
             )
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": reason})
-            raise _logged(KyoseiError(reason))
+            raise _logged(_changed(KyoseiError(reason)))
         atomic_write_text(path, candidate)
         if not present and not change.remove:
             problem = _probe_refusal(probe_root, environ) if probe_root is not None else None
@@ -682,7 +727,7 @@ def apply_change(
                 )
                 _append(descriptor, {**row, "outcome": OUTCOME_FAILED, "reason": reason})
                 raise _logged(KyoseiError(reason))
-        _append(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None})
+        _append_written(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None}, path)
         return Applied(
             path, change.key, row["previous"], row["new"], True, etag_of(candidate.encode())
         )
@@ -714,6 +759,7 @@ def apply_edit(
     from .export import atomic_write_text
 
     descriptor = open_log(environ)
+    _lock(descriptor)
     row: dict = {
         "at": now(),
         "device": device,
@@ -725,12 +771,14 @@ def apply_edit(
         "previous": None,
         "new": None,
     }
+    digest_refused = False
     try:
         try:
             if not path.is_file():
                 raise KyoseiError(f"{path} does not exist, so there is nothing to change in it")
             data = path.read_bytes()
             if expected_etag is not None and etag_of(data) != expected_etag:
+                digest_refused = True
                 raise KyoseiError(
                     f"{path} changed since it was read (its digest is {etag_of(data)}, not "
                     f"{expected_etag}); read it again and repeat the change"
@@ -744,6 +792,8 @@ def apply_edit(
         except KyoseiError as exc:
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": str(exc)})
             _logged(exc)
+            if digest_refused:
+                _changed(exc)  # a marked refusal is the route's 412, and no other is
             raise
         if candidate == text:
             return Applied(path, key, previous, new, False, etag_of(data))
@@ -753,9 +803,9 @@ def apply_edit(
                 "repeat the change"
             )
             _append(descriptor, {**row, "outcome": OUTCOME_REFUSED, "reason": reason})
-            raise _logged(KyoseiError(reason))
+            raise _logged(_changed(KyoseiError(reason)))
         atomic_write_text(path, candidate)
-        _append(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None})
+        _append_written(descriptor, {**row, "outcome": OUTCOME_WRITTEN, "reason": None}, path)
         return Applied(path, key, previous, new, True, etag_of(candidate.encode()))
     finally:
         os.close(descriptor)
