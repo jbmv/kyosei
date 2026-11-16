@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-16** — `KYO-959` (task) — Mac app: the Config view's controls and the request to the session
 - **2026-11-15** — `KYO-953` (task) — Mac app: the Config view, reading only
 - **2026-11-11** — `KYO-468` (bug) — setTypeOfService EINVAL uncaught in the new app: its kyo serve client uses undici fetch, which the old code avoided in this Electron
 - **2026-11-11** — `KYO-449` (task) — Desktop app: check the PATH kyo against KYO_ACCEPTS and show the four compatibility states
