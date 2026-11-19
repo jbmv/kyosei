@@ -95,6 +95,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
+| `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967) |
 | `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
 | `web/src/agents.ts` | how a subagent is named under the composer and in the side panel |
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
