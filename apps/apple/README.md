@@ -841,7 +841,9 @@ permission reads, and the app sends it on every session read. With no token, or 
 server refuses, the chat says that a token is needed and how to issue one. Sending needs the
 token to hold the `send` permission. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
-permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
+permission. The chat then draws no turn of an ended session, which History reads, and the
+button stands under the words 'This project has no live session.' near the centre of the view
+(KYO-969); the turns received are kept out of the page and drawn again if the session runs. The terminal drawer is a terminal on the session's pane, and needs the token to hold
 the `terminal` permission; without it the drawer shows the pane's text and the server's reason. While it is open the
 terminal covers the chat pane (KYO-753), which keeps its scroll place beneath.
 Files and file links need it to hold the `files` permission. Config reads with a token of any

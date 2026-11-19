@@ -233,6 +233,22 @@ function drawEmptyChat(): void {
   document.getElementById("empty-chat")!.hidden = !waiting;
 }
 
+/**
+ * KYO-969: with no live session in the project the chat holds no turn, and the start panel
+ * stands alone near the centre of the view; an ended session's text is read in History. The
+ * drawn objects are not dropped: they are kept out of the page, in a fragment, so that a
+ * session that runs again with the id it had is drawn as it was, and `elements` still names them.
+ */
+const parkedChat = document.createDocumentFragment();
+let chatParked = false;
+
+function parkChat(park: boolean): void {
+  if (park === chatParked) return;
+  chatParked = park;
+  if (park) parkedChat.append(...Array.from(chat.childNodes));
+  else chat.append(...Array.from(parkedChat.childNodes));
+}
+
 /** What the last press of Start orchestrator came to, until a session is live again. */
 let startFrame: StartFrame | null = null;
 
@@ -241,6 +257,8 @@ function drawStart(): void {
   const live = menu ? menu.sessions.sessions.some((row) => row.live) : null;
   // A later session that ends is offered a fresh button, not the last press's words.
   if (live) startFrame = null;
+  parkChat(live === false);
+  document.body.classList.toggle("no-live", live === false);
   const view = startView(live, startFrame);
   document.getElementById("start")!.hidden = !view.shown;
   document.getElementById("start-text")!.textContent = view.text;
@@ -1755,6 +1773,7 @@ const kyo = {
     drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();
+    parkedChat.replaceChildren();
     elements.clear();
     drawChatLinksSoon();
     rendered.clear();
@@ -1945,6 +1964,8 @@ const kyo = {
 
   apply(batch: Batch): void {
     // A session's first read lands at its end, as before; after that, output is not followed.
+    // A batch is placed among what is drawn; it is parked again, when no session is live, below.
+    parkChat(false);
     const loading = batch.reset || !turnsLoaded;
     const follow = loading && atBottom();
     countingNew = !loading;
@@ -2015,6 +2036,7 @@ const kyo = {
     turnsLoaded = true;
     drawEmptyChat();
     drawWorking();
+    drawStart();
     log(`items ${elements.size}`);
   },
 
