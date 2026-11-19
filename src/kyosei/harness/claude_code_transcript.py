@@ -1575,6 +1575,10 @@ class Delivery:
     #: What the task used, on a notification whose row records it. A background command's
     #: notification records none.
     usage: TaskUsage | None = None
+    #: A notification for an agent that stopped while work of its own still ran (KYO-962):
+    #: its status is ``completed``, the agent goes on, and the same task id notifies again
+    #: when it finishes. It does not end the agent.
+    interim: bool = False
 
 
 @dataclass(frozen=True)
@@ -1883,6 +1887,13 @@ def _task_usage(raw: object) -> TaskUsage | None:
     return TaskUsage(*known) if any(f is not None for f in known) else None
 
 
+#: How Claude Code 2.1.328 marks an agent's notification that does not end it (KYO-962): the
+#: summary ``Agent "X" is waiting on its own background work``, and a note ending "the result
+#: below may be interim". The final notification of the same task says ``finished``.
+_INTERIM_SUMMARY = re.compile(r"\bis waiting on its own background work\s*$")
+_INTERIM_NOTE = re.compile(r"\bmay be interim\b")
+
+
 def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
     """The message another party delivered in this record, or None."""
     usage = None
@@ -1907,6 +1918,7 @@ def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
         return _peer_delivery(uuid, stamp, origin, delivered)
     if kind == _TASK_NOTIFICATION:
         summary = _element(delivered, "summary")
+        note = _element(delivered, "note") or ""
         return Delivery(
             uuid,
             stamp,
@@ -1917,6 +1929,7 @@ def _delivery(record: dict, uuid: str, stamp: str) -> Delivery | None:
             status=_element(delivered, "status"),
             summary=summary,
             usage=usage,
+            interim=bool(_INTERIM_NOTE.search(note) or _INTERIM_SUMMARY.search(summary or "")),
         )
     return Delivery(uuid, stamp, kind, delivered)
 

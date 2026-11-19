@@ -627,6 +627,8 @@ IDLE_SCREEN = _IDLE
 
 #: The reason on the log row of a held message sent to a working screen (KYO-722).
 DURING_TURN = "during-turn"
+#: Why a held message waits while the terminal shows a subagent (KYO-961).
+SUBAGENT_VIEW_REASON = "subagent-view"
 
 
 def _not_idle(screen: Any, *, during_turn: bool = False) -> HeldOutcome | None:
@@ -640,6 +642,12 @@ def _not_idle(screen: Any, *, during_turn: bool = False) -> HeldOutcome | None:
         return _waiting("no-pane", "the pane could not be read")
     if screen.state == _WORKING and not during_turn:
         return _waiting()
+    if screen.state == session_layer.SUBAGENT_VIEW:
+        return _waiting(
+            SUBAGENT_VIEW_REASON,
+            f"{session_layer.showing_subagent(screen.agent)}; the message is delivered once the "
+            f"terminal shows the main session again (to show it, {session_layer.BACK_TO_MAIN})",
+        )
     if screen.state not in (_IDLE, _WORKING):
         return _waiting(
             "screen-not-ready",

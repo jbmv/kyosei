@@ -1158,3 +1158,26 @@ def test_a_held_prompts_own_marks_are_filed_unmoved_by_the_line(
     assert mark["text"] == "why this way?"
     (anchor,) = mark["anchors"]
     assert anchor["start"] == 0 and anchor["end"] == 12 and "stale" not in anchor
+
+
+def test_a_held_message_waits_while_the_terminal_shows_a_subagent_and_then_goes(
+    bed: Bed, on: str
+) -> None:
+    # KYO-961.c2, c3, c4: no keys while the terminal shows a subagent, a wait that says so in
+    # words the page shows after "Waiting:", and delivery with no further act once the
+    # terminal shows the main session, idle.
+    from .test_session_layer import subagent_view
+
+    hold(bed, on)
+    bed.screen_file.write_text(subagent_view(), encoding="utf-8")
+    found = waits_with(bed, on, serve_send.SUBAGENT_VIEW_REASON)
+    looks(bed)
+    assert keys_sent(bed) == [] and found["retrying"] is True
+    detail = found["detail"]
+    assert "showing the subagent “Synthetic sleeper” rather than the main session" in detail
+    assert "delivered once the terminal shows the main session again" in detail
+    assert "subagent-view" not in detail and "unrecognised" not in detail
+
+    bed.show(IDLE)
+    wait_until(lambda: held_now(bed, on) is None)
+    assert keys_sent(bed)

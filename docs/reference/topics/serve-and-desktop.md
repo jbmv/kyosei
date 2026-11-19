@@ -318,8 +318,10 @@ session, so a killed session reads `state: "running"` and `live: false`. `has_pa
 whether that process is in a tmux pane on `-L default` or `-L kyosei`; `pane_why` says why
 when it is not. `work_running` is true when a turn is running or background shells or
 subagents are. It is `null` when there is no pane to read, and the row's other fields say
-why. `background` is `{"running", "shells", "agents": [{"type", "description"}]}`, or
-`null` with no screen. An ended session is listed without being opened, so the list reads
+why. `background` is `{"running", "shells", "agents": [{"type", "description"}], "nested"}`,
+or `null` with no screen. `agents` are the session's own agents, and `nested` counts the
+agents those agents started, which the terminal draws under them and which are not counted
+among the session's. An ended session is listed without being opened, so the list reads
 a pane only for a session marked running, once each per request.
 
 **Turns.** `{"ok", "session_id", "cursor", "reset", "readable", "why", "facts", "turns",
@@ -339,7 +341,7 @@ tool call: call_id, uuid, at, name, input, result
 subagent:  agent_id, tool_call_uuid, description, agent_type, model, effort
 command output: uuid, at, command, args, text
 delivery:  uuid, at, kind, text, sender, sender_id, handback, task_id, call_id, status,
-           summary, usage
+           summary, usage, interim
            usage: total_tokens, tool_uses, duration_ms
 ```
 
@@ -384,7 +386,10 @@ summary. `sender`, `sender_id` and `handback` describe a peer, and `task_id`, `c
 `call_id` of the tool call it answers), `status` and `summary` describe a notification; each is `null`, or false for `handback`,
 where it does not apply. `usage` is what a notification's row records the task as having used:
 a subagent's notification records it and a background command's does not, so it is `null`
-there, and a figure the row leaves out is `null` within it.
+there, and a figure the row leaves out is `null` within it. `interim` is true for the
+notification Claude Code sends when an agent stops while work of its own still runs: its
+status is `completed`, but the agent goes on, and a later notification with the same
+`task_id` ends it.
 
 A person's message can hold images. `images` lists them without their bytes, and
 `GET .../sessions/<id>/images/<turn>/<index>` returns one, where `<turn>` is the turn's
@@ -520,11 +525,17 @@ or is not in a repository, `root` is `null`, the figures are zero and `why` says
 classification, and carries no text of the screen itself:
 
 ```
-screen: state, question, options, input_text, background
+screen: state, question, options, input_text, background, agent
         state: "idle" | "working" | "permission-prompt" | "ask-user-question"
-               | "usage-panel" | "trust-dialog" | "unrecognised"
+               | "usage-panel" | "trust-dialog" | "subagent-view" | "unrecognised"
         options: number, label, selected, description
 ```
+
+`input_text` is the input box's text as far as the terminal draws it: a box holding more
+rows than Claude Code gives it is scrolled, and only its last rows are drawn. `subagent-view`
+is a terminal showing one of the session's subagents instead of the main session, whose
+input box writes to that agent; `agent` is the agent's label as the terminal draws it, and
+is empty on every other state. Nothing is sent to that screen.
 
 `terminal` is `{"text", "working_line"}`. `text` is the screen as the terminal draws it, with
 its styling removed. `working_line` is the words of the terminal's working line while a turn
@@ -899,8 +910,9 @@ timer").
 A success is `{"ok": true, "session_id", "action", "at", "device", "segments", "automatic"}`.
 A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` code:
 `send-disabled` (also carrying `setting`), `no-token`, `unknown-token`, `revoked-token`,
-`no-send-permission`, `bad-request`, `message-is-a-command`, `no-pane`, `screen-not-ready`,
-`send-failed` (keys may have reached the pane), `not-submitted` (the message was typed and the
+`no-send-permission`, `bad-request`, `message-is-a-command`, `no-pane`, `screen-not-ready`
+(including a terminal showing a subagent, whose `error` says so and how to show the main
+session again), `send-failed` (keys may have reached the pane), `not-submitted` (the message was typed and the
 screen did not show it submitted), `settings-unreadable`, `tokens-unreadable` and
 `send-log-unusable`.
 
@@ -1095,7 +1107,9 @@ is connected; the thread ends when nothing is held. A look costs one pane lookup
 capture. The message is delivered on the second of two looks that find the screen idle, and
 the screen is read once more immediately before the keys are sent. It stays held, with a
 `reason` and a sentence in `detail`, when delivery would be wrong: `screen-not-ready` (a
-prompt, question, panel or unrecognised screen, which is left to you), `input-box-in-use`
+prompt, question, panel or unrecognised screen, which is left to you), `subagent-view` (the
+terminal shows a subagent, and the message is delivered once it shows the main session
+again), `input-box-in-use`
 (text in the terminal's own input box, which delivery would erase), `no-pane`, `send-disabled`,
 `revoked-token`, `no-send-permission`, `held-device-unknown`, `tokens-unreadable`,
 `settings-unreadable`, `send-log-unusable`, `pane-unreadable`. These are looked at again on

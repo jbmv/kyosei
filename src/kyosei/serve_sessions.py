@@ -356,6 +356,7 @@ def _delivery_json(delivery: Any) -> dict:
         "status": delivery.status,
         "summary": delivery.summary,
         "usage": _task_usage_json(delivery.usage),
+        "interim": delivery.interim,
     }
 
 
@@ -401,6 +402,7 @@ def _background_json(work: Any) -> dict | None:
         "running": work.running,
         "shells": work.shells,
         "agents": [{"type": kind, "description": what} for kind, what in work.agents],
+        "nested": work.nested,
     }
 
 
@@ -429,6 +431,7 @@ def _screen_json(screen: Any) -> dict | None:
         ],
         "input_text": screen.input_text,
         "background": _background_json(screen.background),
+        "agent": screen.agent,
     }
 
 

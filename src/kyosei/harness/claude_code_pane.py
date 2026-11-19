@@ -17,7 +17,14 @@ writes to one, and only :func:`send_message`, :func:`send_slash_command` and
 WHAT IS ON THE SCREEN. The bottom of a captured pane is the input box (two ``─`` rules with a
 ``❯`` line between them) and a footer. When the box is present the session is idle or, if
 the footer holds ``esc to interrupt`` or a working row stands directly above the box,
-working. When it is absent an overlay holds the
+working. Measured on 2.1.328 (KYO-810): a box holding more rows than Claude Code gives it is
+scrolled, its upper rule reading ``─── ↑ N more ───`` and its ``❯`` row no longer drawn,
+and, while the cursor is above the last row, its lower rule reading ``─── ↓ N more ───``;
+such a box is read as holding text, with ``N`` counted in :attr:`Screen.input_hidden`. A
+box whose upper rule carries a label at its right end is a subagent's: the terminal is
+showing that agent rather than the main session (KYO-961), its placeholder names the agent
+(``Message @general-purpose…``), and the screen is :data:`SUBAGENT_VIEW`, which no key is
+sent to, since what is typed there goes to the agent. When the box is absent an overlay holds the
 screen: a permission prompt (``Do you want ...?``, numbered options read from the screen,
 ``Esc to cancel``), an ``AskUserQuestion`` prompt (``Enter to select``), the ``/usage`` panel
 (``Usage by model:``), the trust dialog, or something not catalogued. Reply text above the
@@ -30,7 +37,12 @@ BACKGROUND WORK (KYO-688.c7, measured). The footer reports it: ``· 2 shells`` c
 session's background commands, including those a subagent started, and each running
 subagent has a ``◯ <type>  <description>`` row beneath the footer. Those rows are gone
 once the subagent has stopped; ``/tasks to see subagents`` then remains in the footer while
-the finished subagents can still be listed, and is not a sign of work. The transcript cannot
+the finished subagents can still be listed, and is not a sign of work. In 2.1.328 the rows
+are a list headed by ``main`` and drawn as a tree (KYO-962): an agent's own agents are
+drawn under it with ``├``/``└`` while the terminal shows it and are otherwise folded into a
+``(+N)``, and an agent waiting on that work reads ``waiting on … · <description> · since
+<time>``. Those nested agents are counted in :attr:`BackgroundWork.nested` and are not
+agents of the session. The transcript cannot
 replace this: a background command's completion is a ``task-notification`` row
 written when it ends, a subagent's own shells are not in the parent's transcript at all,
 and an agent's notification can fire more than once. ``status`` in the process registry is
@@ -56,8 +68,9 @@ or a prompt that only a running turn raises, is a submitted message. A box that 
 text gets ``Enter`` once more, which is what a person looking at it would press, and
 :class:`NotSubmitted` is raised when the box holds it after that too, or when the screen
 shows something that cannot be read as either. The text is then left where it is. The
-cause of the one observed failure was not reproduced (see the record), so this checks the
-outcome and assumes nothing about the cause.
+failures logged from 2026-11-17 were all scrolled boxes that this reader did not yet know,
+so that Enter was never pressed (KYO-810); the check of the outcome stays, since it assumes
+nothing about the cause.
 """
 
 from __future__ import annotations
@@ -79,11 +92,24 @@ PERMISSION_PROMPT = "permission-prompt"
 ASK_USER_QUESTION = "ask-user-question"
 USAGE_PANEL = "usage-panel"
 TRUST_DIALOG = "trust-dialog"
+#: The terminal shows one of the session's subagents, and its input box writes to that agent.
+SUBAGENT_VIEW = "subagent-view"
 UNRECOGNISED = "unrecognised"
 
 #: The words of the trust dialog's "yes" option; ``cmd_controller`` reads the same screen.
 _TRUST_TEXT = "Yes, I trust this folder"
 _RULE = re.compile(r"^[─▔]{20,}$")
+#: The rule above the input box when it carries words (KYO-810, KYO-961; measured on 2.1.328).
+#: ``─── ↑ 22 more ───…`` while the box holds more rows than it shows and the first of them
+#: are scrolled out above it, and ``…─── <label> ─`` while the terminal shows a subagent, whose
+#: label is drawn at the rule's right end; a subagent's scrolled box has both. It is matched
+#: at the first column and only as the top of the lowest box, so a rule quoted in a reply,
+#: which is indented, or the history search's ``─── History 3/9 ───…``, is not read as it.
+_TOP_RULE = re.compile(r"^(?:─── ↑ (?P<above>\d+) more )?─{3,}(?: (?P<label>\S(?:.*\S)?) ─)?$")
+#: The rule under the input box when rows below the cursor are scrolled out: ``─── ↓ 9 more ───…``.
+_BOTTOM_RULE = re.compile(r"^(?:─── ↓ (?P<below>\d+) more )?─{3,}$")
+#: The placeholder of a subagent's input box, naming the agent: ``Message @general-purpose…``.
+_SUBAGENT_PLACEHOLDER = re.compile(r"^❯\s+Message @(\S+?)…\s*$")
 _SGR = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 #: What ``capture-pane -e`` carries besides colours: an OSC 8 hyperlink around a link's text.
 _OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -91,7 +117,22 @@ _BULLET_COLOUR = re.compile(r"(\x1b\[[0-9;:]*m)*⏺")
 _OPTION = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$")
 _QUESTION = re.compile(r"^\s*Do you want to .+\?\s*$")
 _SHELLS = re.compile(r"·\s*(\d+)\s+shells?\b")
-_AGENT_ROW = re.compile(r"^\s*◯\s+(\S+)\s{2,}(.+?)(?:\s{2,}\S.*)?$")
+#: A footer row of background work (see this module's header): the list's cursor when it has
+#: focus, a tree branch for an agent's own agent, the mark, the agent's type, ``(+N)`` for
+#: agents of its own folded under it, then its words and, after a gap, its time and tokens.
+_AGENT_ROW = re.compile(
+    r"^(?:❯\s)?\s*(?P<branch>[├└]\s+)?[◯⏺●]\s+(?P<type>\S+)(?:\s\(\+(?P<folded>\d+)\))?"
+    r"\s{2,}(?P<words>.+?)(?:\s{2,}\S.*)?$"
+)
+#: The words of an agent's row once its own turn has ended and its background work has not:
+#: ``waiting on 1 shell, 1 subagent · <description> · since 10:42 AM``.
+_WAITING_ROW = re.compile(r"^waiting on .+? · (?P<description>.+?) · since .+$")
+#: The mark of a finished agent's row, drawn in the green of a finished agent's bullet.
+_FINISHED_MARK = re.compile(r"\x1b\[38;5;114m[⏺●]")
+#: The label of a subagent's rule, drawn on a background colour: ``\x1b[48;5;37m Outer sleeper``.
+_LABEL_ON_COLOUR = re.compile(r"─(?:\x1b\[[0-9;:]*m)*\x1b\[48;5;\d+m(?:\x1b\[[0-9;:]*m)* \S")
+#: The footer list's ``main`` row while the terminal shows an agent instead (KYO-961).
+_MAIN_NOT_SHOWN = re.compile(r"^(?:❯\s)?\s*◯\s+main\s*$")
 #: The spinner row of a turn, always at the left margin; a reply's own lines are indented.
 _SPINNER_ROW = re.compile(r"^[·✢✳✶✻✽*]\s")
 #: A spinner row of a turn still running. A finished turn's row keeps the glyph and has no
@@ -122,8 +163,10 @@ _SAME_REPLY_PREFIX = 200
 
 _CODE_FENCE = re.compile(r"^```.*$", re.M)
 
-#: How many times the input box is cleared before giving up. Each round removes a line.
+#: How many rounds of clearing the input box are made before giving up.
 _CLEAR_ATTEMPTS = 64
+#: The most ``C-u`` presses one round of clearing sends.
+_CLEAR_PRESSES_PER_ROUND = 400
 _CLEAR_PAUSE_SECONDS = 0.05
 _PASTE_PAUSE_SECONDS = 0.2
 
@@ -172,7 +215,12 @@ class BackgroundWork:
     """What the footer says is still running (see this module's header)."""
 
     shells: int
+    #: The session's own agents, as ``(type, description)``, one for each row at the top of
+    #: the footer's list other than ``main``.
     agents: tuple[tuple[str, str], ...]
+    #: Agents that one of those agents started, drawn under it as a tree (``├``, ``└``) or
+    #: folded into its ``(+N)``. They are not agents of the session itself (KYO-962).
+    nested: int = 0
 
     @property
     def running(self) -> bool:
@@ -189,8 +237,15 @@ class Screen:
     state: str
     options: tuple[PromptOption, ...] = ()
     question: str = ""
+    #: The input box's text as far as it is drawn. A box scrolled by Claude Code shows only
+    #: some of its rows, and ``input_hidden`` counts the rest.
     input_text: str = ""
     background: BackgroundWork = NO_BACKGROUND_WORK
+    #: Rows of the input box's text scrolled out of view, above and below it (KYO-810).
+    input_hidden: int = 0
+    #: On :data:`SUBAGENT_VIEW`, the agent the terminal shows, by the label on the rule above
+    #: its input box, which is the description it was started with (KYO-961).
+    agent: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,16 +253,52 @@ class _InputBox:
     first: int
     rule_below: int
     text: str
+    hidden: int = 0
+    #: The label on the rule above the box; set only while the terminal shows a subagent.
+    label: str = ""
+
+
+def _box_rule(line: str) -> bool:
+    """Whether a line can be one of the input box's two rules."""
+    if _RULE.match(line.strip()):
+        return True
+    line = line.rstrip()
+    return _width(line) >= 20 and bool(_TOP_RULE.match(line) or _BOTTOM_RULE.match(line))
 
 
 def _input_box(lines: list[str], raw_lines: list[str]) -> _InputBox | None:
-    rules = [i for i, line in enumerate(lines) if _RULE.match(line.strip())]
+    """The lowest input box on the screen: two rules with the box's rows between them.
+
+    The rows start with ``❯``, or, when the rule above says rows are scrolled out above
+    (KYO-810), with the indent of a continuation row, since the ``❯`` row is not drawn. A
+    rule that carries words is accepted only at the first column and as wide as the other.
+    """
+    rules = [i for i, line in enumerate(lines) if _box_rule(line)]
     for top, bottom in zip(reversed(rules[:-1]), reversed(rules[1:]), strict=False):
         body = lines[top + 1 : bottom]
-        if body and body[0].startswith("❯"):
+        if not body:
+            continue
+        upper, lower = lines[top].rstrip(), lines[bottom].rstrip()
+        plain_top, plain_bottom = bool(_RULE.match(upper.strip())), bool(_RULE.match(lower.strip()))
+        above_rule = None if plain_top else _TOP_RULE.match(upper)
+        below_rule = None if plain_bottom else _BOTTOM_RULE.match(lower)
+        if (not plain_top and above_rule is None) or (not plain_bottom and below_rule is None):
+            continue
+        if not (plain_top and plain_bottom) and _width(upper) != _width(lower):
+            continue
+        above = int(above_rule.group("above") or 0) if above_rule else 0
+        below = int(below_rule.group("below") or 0) if below_rule else 0
+        label = (above_rule.group("label") or "") if above_rule else ""
+        if above:
+            if any(line.strip() and not line.startswith("  ") for line in body):
+                continue
+            text = "\n".join(line.strip() for line in body).strip()
+        elif body[0].startswith("❯"):
             typed = [line[1:].strip() if i == 0 else line.strip() for i, line in enumerate(body)]
-            text = "\n".join(typed).strip()
-            return _InputBox(top + 1, bottom, "" if _is_placeholder(raw_lines[top + 1]) else text)
+            text = "" if _is_placeholder(raw_lines[top + 1]) else "\n".join(typed).strip()
+        else:
+            continue
+        return _InputBox(top + 1, bottom, text, above + below, label)
     return None
 
 
@@ -216,17 +307,37 @@ def _is_placeholder(raw_line: str) -> bool:
     return re.search(r"❯[\s\xa0]*\x1b\[2m", raw_line) is not None
 
 
-def _background(footer: list[str]) -> BackgroundWork:
+def _agent_description(words: str) -> str:
+    waiting = _WAITING_ROW.match(words)
+    return (waiting.group("description") if waiting else words).rstrip()
+
+
+def _background(footer: list[str], raw_footer: list[str]) -> BackgroundWork:
+    """The footer's background work. Measured on 2.1.328 (KYO-962): the list's first row is
+    ``main``, marked ``⏺`` while the terminal shows the main session and ``◯`` while it shows
+    an agent, whose own row is then the one marked ``⏺``; an agent's own agents are drawn
+    under it as a tree while it is shown, and are otherwise folded into a ``(+N)`` after
+    its type. The row of an agent that has finished stays while the terminal shows it, with
+    its mark drawn green, and is not counted. ``●`` is accepted as a mark for ``⏺``, as some
+    fonts draw it."""
     shells = 0
     agents: list[tuple[str, str]] = []
-    for line in footer:
+    nested = 0
+    for index, line in enumerate(footer):
         count = _SHELLS.search(line)
         if count:
             shells = int(count.group(1))
         row = _AGENT_ROW.match(line)
-        if row:
-            agents.append((row.group(1), row.group(2).rstrip()))
-    return BackgroundWork(shells, tuple(agents))
+        if row is None:
+            continue
+        if row.group("branch"):
+            nested += 1
+            continue
+        if index < len(raw_footer) and _FINISHED_MARK.search(raw_footer[index]):
+            continue
+        nested += int(row.group("folded") or 0)
+        agents.append((row.group("type"), _agent_description(row.group("words"))))
+    return BackgroundWork(shells, tuple(agents), nested)
 
 
 def _options_under(lines: list[str], start: int) -> tuple[PromptOption, ...]:
@@ -267,10 +378,17 @@ def classify(raw: str, *, log_unrecognised_screen: Callable[[str], None] | None 
     box = _input_box(lines, raw_lines)
     if box is not None:
         footer = lines[box.rule_below + 1 :]
-        background = _background(footer)
+        background = _background(footer, raw_lines[box.rule_below + 1 :])
+        if box.label:
+            if _shows_subagent(lines[box.first], footer, raw_lines[box.first - 1]):
+                return Screen(
+                    SUBAGENT_VIEW, input_text=box.text, background=background,
+                    input_hidden=box.hidden, agent=box.label,
+                )
+            return _unrecognised(plain, log_unrecognised_screen)
         hint = any("esc to interrupt" in line for line in footer)
         state = WORKING if hint or _working_row_above(lines, box) else IDLE
-        return Screen(state, input_text=box.text, background=background)
+        return Screen(state, input_text=box.text, background=background, input_hidden=box.hidden)
     if _TRUST_TEXT in " ".join(plain.split()):
         return Screen(TRUST_DIALOG)
     tail = [line for line in lines if line.strip()][-4:]
@@ -288,9 +406,30 @@ def classify(raw: str, *, log_unrecognised_screen: Callable[[str], None] | None 
                 )
     if "Usage by model:" in plain and "Total cost:" in plain:
         return Screen(USAGE_PANEL)
-    if log_unrecognised_screen is not None:
-        log_unrecognised_screen(plain)
+    return _unrecognised(plain, log_unrecognised_screen)
+
+
+def _unrecognised(plain: str, log: Callable[[str], None] | None) -> Screen:
+    if log is not None:
+        log(plain)
     return Screen(UNRECOGNISED)
+
+
+def _shows_subagent(first_row: str, footer: list[str], raw_rule: str) -> bool:
+    """Whether a box under a labelled rule is a subagent's (KYO-961, measured on 2.1.328).
+
+    Three signs are drawn with the label, and any one is taken: the empty box's placeholder
+    names the agent (``Message @general-purpose…``), the footer's list marks ``main`` as not
+    shown, and the label is drawn on a background colour. A tall box can push the list off
+    the screen and typed text replaces the placeholder, and a capture without its escape
+    sequences has no colour. A labelled rule with none of them is a form not catalogued,
+    and is left unrecognised.
+    """
+    return (
+        bool(_SUBAGENT_PLACEHOLDER.match(first_row.strip()))
+        or any(_MAIN_NOT_SHOWN.match(line) for line in footer)
+        or bool(_LABEL_ON_COLOUR.search(raw_rule))
+    )
 
 
 @dataclass(frozen=True)
@@ -688,6 +827,23 @@ def capture(tmux: _Tmux, pane_id: str) -> str:
     return tmux.run("capture-pane", "-p", "-e", "-t", pane_id).stdout
 
 
+def showing_subagent(agent: str) -> str:
+    """Why nothing is typed into a pane showing a subagent (KYO-961), as a clause.
+
+    It is the one source of the words: a held message waiting on such a screen states it
+    with when it will be delivered, and a send refused for it states it with what to do.
+    """
+    shown = f"the subagent “{agent}”" if agent else "one of its subagents"
+    return (
+        f"the session's terminal is showing {shown} rather than the main session, and a "
+        "message typed there would go to that agent"
+    )
+
+
+#: How the terminal is brought back to the main session, measured on 2.1.328.
+BACK_TO_MAIN = "choose main in the list under the terminal's input box"
+
+
 def _ready_screen(
     tmux: _Tmux,
     pane_id: str,
@@ -696,6 +852,11 @@ def _ready_screen(
     log_unrecognised_screen: Callable[[str], None] | None,
 ) -> Screen:
     screen = classify(capture(tmux, pane_id), log_unrecognised_screen=log_unrecognised_screen)
+    if screen.state == SUBAGENT_VIEW:
+        raise PaneNotReady(
+            f"nothing was sent: {showing_subagent(screen.agent)}. To send it to the session, "
+            f"{BACK_TO_MAIN}, then send it again"
+        )
     if screen.state not in allow:
         raise PaneNotReady(
             f"pane {pane_id} is showing {screen.state}, and this is sent only to "
@@ -713,7 +874,12 @@ def clear_input(tmux: _Tmux, pane_id: str, *, sleep: Callable[[float], None] = t
             raise PaneNotReady(f"pane {pane_id} left the input box while it was being cleared")
         if not screen.input_text:
             return
-        tmux.run("send-keys", "-t", pane_id, "C-e", "C-u")
+        # ``C-u`` empties one drawn row of a wrapped line, and a second removes the line
+        # break before it, so a round sends two for each row the box holds, drawn or
+        # scrolled out of view (KYO-810); a ``C-u`` on an empty box does nothing.
+        rows = screen.input_text.count("\n") + 1 + screen.input_hidden
+        presses = min(2 * rows, _CLEAR_PRESSES_PER_ROUND)
+        tmux.run("send-keys", "-t", pane_id, "C-e", *(["C-u"] * presses))
         sleep(_CLEAR_PAUSE_SECONDS)
     raise PaneNotReady(f"the input box of pane {pane_id} would not clear; nothing was sent to it")
 
@@ -741,6 +907,7 @@ def _reading(step: str, started: float, screen: Screen) -> dict:
         "state": screen.state,
         "input_chars": len(screen.input_text),
         "input_end": screen.input_text[-40:],
+        "input_hidden": screen.input_hidden,
     }
 
 
@@ -759,20 +926,23 @@ def _settle(
     """Wait until the box shows text and two readings a poll apart agree; whether it did.
 
     Keys sent faster than the screen is drawn are still being taken when the last of them
-    is sent, and an Enter that overtook them would be pressed on an empty box.
+    is sent, and an Enter that overtook them would be pressed on an empty box. A box that
+    Claude Code has scrolled is compared by the rows it draws and the count of those it
+    does not (KYO-810).
     """
-    previous: str | None = None
+    previous: tuple[str, int] | None = None
     for _ in range(round(_SETTLE_SECONDS / _SUBMIT_POLL_SECONDS)):
         screen = classify(capture(tmux, pane_id))
         if trace is not None:
             trace.append(_reading("settle", started, screen))
         if screen.state not in (IDLE, WORKING):
             return False
-        if screen.input_text and screen.input_text == previous:
+        drawn = (screen.input_text, screen.input_hidden)
+        if screen.input_text and drawn == previous:
             return True
-        previous = screen.input_text
+        previous = drawn
         sleep(_SUBMIT_POLL_SECONDS)
-    return bool(previous)
+    return bool(previous and previous[0])
 
 
 def _submitted(

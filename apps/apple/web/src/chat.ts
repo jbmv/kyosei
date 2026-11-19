@@ -88,6 +88,8 @@ interface Delivery {
   sender_id: string | null; handback: boolean; task_id: string | null; call_id: string | null;
   status: string | null; summary: string | null;
   usage?: { total_tokens: number | null; duration_ms: number | null } | null;
+  /** KYO-962: a notification that does not end the agent it names. */
+  interim?: boolean;
 }
 interface Subagent {
   agent_id: string; description: string; agent_type: string; tool_call_uuid: string;
@@ -927,8 +929,12 @@ function drawQuestionStates(): void {
 
 interface Background {
   running: boolean; shells: number; agents: { type: string; description: string }[];
+  /** KYO-962: agents those agents started, drawn under them in the terminal's footer. */
+  nested?: number;
 }
-interface ScreenFrame { screen?: { state: string; background?: Background | null } | null }
+interface ScreenFrame {
+  screen?: { state: string; background?: Background | null; agent?: string } | null;
+}
 
 const working = document.getElementById("working")!;
 const workingText = document.getElementById("working-text")!;
@@ -936,6 +942,8 @@ const calls = new Map<string, ToolCall>();
 /** The ids of the calls drawn from `pending_tool_calls`, which the transcript does not hold yet. */
 const pendingCalls = new Set<string>();
 let screenState: string | null = null;
+/** KYO-961: the subagent the terminal shows, by its label, while the state is `subagent-view`. */
+let screenAgent = "";
 let background: Background | null = null;
 let workingLine: string | null = null;
 let latestAt = "";
@@ -966,7 +974,10 @@ function backgroundWords(): string {
   if (!background?.running) return "";
   const parts: string[] = [];
   const agents = background.agents.length;
-  if (agents) parts.push(`${agents} agent${agents === 1 ? "" : "s"}`);
+  // KYO-962: an agent's own agents are its work, said beside it and not counted as the session's.
+  const nested = background.nested ?? 0;
+  const own = nested ? ` (and ${nested} ${agents === 1 ? "it" : "they"} started)` : "";
+  if (agents) parts.push(`${agents} agent${agents === 1 ? "" : "s"}${own}`);
   if (background.shells) parts.push(`${background.shells} shell${background.shells === 1 ? "" : "s"}`);
   return parts.length ? `${parts.join(", ")} in the background` : "working in the background";
 }
@@ -981,6 +992,10 @@ function workingWords(): string {
   if (screenState === "permission-prompt") return "Waiting for permission in the terminal";
   if (screenState === "ask-user-question") return "Waiting for your answer in the terminal";
   let words = "";
+  // KYO-961: the terminal shows a subagent, and nothing is typed into it until it shows the session.
+  if (screenState === "subagent-view") {
+    words = `The terminal is showing ${screenAgent ? `the subagent “${screenAgent}”` : "a subagent"}`;
+  }
   if (screenState === "working") {
     const call = runningCall();
     words = call
@@ -1383,8 +1398,9 @@ function tokenWords(total: number): string {
 function agentMeta(
   agent: Subagent, running: boolean,
 ): { parts: string[]; lines: HTMLElement[] | null; since: string | null } {
-  const usage = deliveries.find((delivery) =>
-    delivery.task_id === agent.agent_id && delivery.usage)?.usage;
+  // The notification that ended the agent, not an interim one before it (KYO-962).
+  const usage = deliveries.findLast((delivery) =>
+    delivery.task_id === agent.agent_id && delivery.usage && !delivery.interim)?.usage;
   const dispatch = agentDispatches.get(agent.agent_id);
   const tokens = running
     ? (agentUsage.has(agent.agent_id) ? tokenWords(agentUsage.get(agent.agent_id)!) : null)
@@ -1506,8 +1522,11 @@ function requestAgent(agent: string): void {
 }
 
 function agentFinished(agent: Subagent): boolean {
+  // KYO-962: an agent that stopped with work of its own still running is notified as completed,
+  // marked interim, and goes on; the notification that ends it comes later with the same id.
   return deliveries.some((delivery) =>
-    delivery.task_id === agent.agent_id || (delivery.handback && delivery.sender_id === agent.agent_id));
+    (delivery.task_id === agent.agent_id && !delivery.interim)
+    || (delivery.handback && delivery.sender_id === agent.agent_id));
 }
 
 // The terminal drawer (KYO-721) is an emulator on the session's pane. The app carries the
@@ -2424,6 +2443,7 @@ const kyo = {
     const state = frame.screen?.state ?? null;
     const changed = state !== screenState;
     screenState = state;
+    screenAgent = frame.screen?.agent ?? "";
     background = frame.screen?.background ?? null;
     if (changed) keepingPlace(arrange);
     document.getElementById("interrupt")!.hidden = state !== "working" || sessionEnded;

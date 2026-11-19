@@ -799,3 +799,23 @@ def test_the_send_module_reaches_only_the_session_layers_three_methods() -> None
         ".send_message",
         ".send_slash_command",
     ]
+
+
+def test_a_message_to_a_terminal_showing_a_subagent_is_refused_in_plain_words(
+    bed: Bed, on: str
+) -> None:
+    # KYO-961.c2, c3: nothing reaches the pane, and the refusal says what the terminal shows
+    # and how to bring the session back, naming no state code.
+    from .test_session_layer import subagent_view
+
+    bed.screen_file.write_text(subagent_view(), encoding="utf-8")
+    status, refused = post(bed, SEND, MESSAGE, on)
+    assert status == 409 and refused["reason"] == "screen-not-ready"
+    assert keys_sent(bed) == []
+    words = refused["error"]
+    assert "showing the subagent “Synthetic sleeper” rather than the main session" in words
+    assert "choose main in the list" in words
+    assert "subagent-view" not in words and "unrecognised" not in words
+    bed.show(IDLE)
+    assert post(bed, SEND, MESSAGE, on)[0] == 200
+    assert keys_sent(bed)
