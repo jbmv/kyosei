@@ -163,7 +163,7 @@ class Composer:
 
     def new_scratchpad(self) -> None:
         before = len(self.boxes())
-        self.page.eval("document.getElementById('new-prompt').click();")
+        self.page.eval("document.getElementById('new-scratch').click();")
         self.page.wait(
             "a new scratchpad with the caret in it",
             "const boxes = window.kyo.composer.boxes();"
