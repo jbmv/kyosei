@@ -17,7 +17,7 @@ const status = `(() => {
   const working = document.getElementById("working");
   return {
     inComposer: ["working", "interrupt", "running-agents-list"].every((id) => document.getElementById(id).closest("#composer")),
-    inChat: Boolean(document.querySelector("#page #working, #composer-top #interrupt")),
+    inChat: Boolean(document.querySelector("#page #working")),
     text: document.getElementById("working-text").textContent,
     shown: !working.hidden,
     idle: working.classList.contains("idle"),

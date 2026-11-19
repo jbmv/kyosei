@@ -141,7 +141,7 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
   const opened = await open();
   // Two boxes anchored to the same words, and the first also to a list item.
   // The first is a scratchpad, which + adds above the prompt (KYO-903); the second is the prompt.
-  await opened.run(`document.getElementById("new-prompt").click()`);
+  await opened.run(`document.getElementById("new-scratch").click()`);
   await opened.run(`window.kyo.composer.select(0, 0)`);
   await opened.type("one");
   await anchor(opened, "#chat .reply p");

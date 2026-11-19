@@ -245,11 +245,12 @@ those lines is indented. On a line that can fold the panel also holds Fold, or U
 folded one, which acts as Command-Option-[ and Command-Option-] do at the caret. The panel
 stays open after each of these, so that a second press acts again.
 
-The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
-adds one, with the caret in its text. A scratchpad's head shows the first line of its text that
+The boxes above it are scratchpads, for notes kept while a prompt is not ready. A line reading
+'Create scratchpad…', under the scratchpads and alone when there are none, adds one, with the caret
+in its text, on a press or on Return when it has the focus (KYO-971). A scratchpad's head shows the first line of its text that
 holds words (KYO-917), which is edited in the text and cannot be edited in the head. One
 scratchpad is open at a time and the others are collapsed to their heads (KYO-936): putting
-the caret in one, or adding one with +, opens it and collapses the rest, a press on a
+the caret in one, or adding one with that line, opens it and collapses the rest, a press on a
 collapsed head opens that one with the caret in it, and a press on the open head collapses
 it. It has no Send. Its button moves its whole text, the first line included, with its
 anchors, attachments, tags and folds into the prompt, a file still uploading included
@@ -327,7 +328,7 @@ scratchpads and the prompt (KYO-925). The section in use is the one the focus la
 and the prompt when the page opens; it changes when the focus enters another section, and not
 when the focus leaves the composer. It grows as its content needs, to all that the other two sections' summaries leave of the
 column, and scrolls within itself beyond that (KYO-925, KYO-935). The scratchpads in use stop
-when the task list's top stands a small padding below the bar that holds the + button; the
+when the task list's top reaches the pane's top, which the column has no bar above (KYO-971); the
 task list and the prompt in use stop at the same place, so that the other two sections' lines
 remain whole and on screen. Each other section is drawn as a summary of about one
 line: the task list as the first three of the person's unchecked items, one line each, and an italic

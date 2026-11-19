@@ -4674,7 +4674,7 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
   });
 }
 
-/** The + button: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
+/** The 'Create scratchpad…' line: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
 function newPrompt(): void {
   // The move before it can no longer be undone: putting the boxes back would drop this one.
   lastMove = null;
@@ -5385,10 +5385,15 @@ if (savedWidth !== null) setComposerWidth(savedWidth);
 loadingDraft = true;
 showTexts([]);
 loadingDraft = false;
-const newPromptButton = document.getElementById("new-prompt")!;
+const newPromptButton = document.getElementById("new-scratch")!;
 // The click leaves the focus where it is until the new prompt takes it.
 newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());
 newPromptButton.addEventListener("click", newPrompt);
+newPromptButton.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.metaKey || event.isComposing) return;
+  event.preventDefault();
+  newPrompt();
+});
 // Cmd-Return sends the prompt being typed in, or the only one there is.
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.metaKey) return;

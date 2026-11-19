@@ -299,9 +299,11 @@ body.terminal-open #jump-bottom { display: none; }
   cursor: col-resize;
 }
 
-#composer-top { flex: none; height: 46px; display: flex; align-items: center; }
-#new-prompt { width: 30px; height: 26px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
-#new-prompt:hover { background: var(--line); color: var(--text); }
+/* KYO-971: the line that makes a scratchpad is drawn as an empty scratchpad's placeholder is,
+   in the muted colour of the prompt's own text, and is the pressable one of the column's rows. */
+#new-scratch { flex: none; margin-bottom: 10px; padding: 0 0 0 54px; color: var(--muted); font: inherit; line-height: 1.4; cursor: text; }
+#new-scratch:hover { color: var(--text); }
+#new-scratch:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
 /* Bare text beside the add button: the red says it is pressable, and the underline says it is under the pointer. */
 /* KYO-883: grey until the pointer is on it, then red; the only red at rest is "Waiting for you…". */
 #interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 500; }
@@ -319,9 +321,9 @@ body.terminal-open #jump-bottom { display: none; }
 .box { flex: none; }
 /* KYO-925.c9, KYO-935: no section in use has a share of its own. It grows as its content
    needs, pushing the sections above it up, and scrolls within itself once the column's top, a
-   small padding below the bar that holds the + button, is reached; the summaries of the
+   top, which is the pane's, is reached; the summaries of the
    others keep their places and are never squeezed (they are `flex: none` below). */
-#boxes { border-top: 8px solid transparent; }
+#boxes { border-top: 0; }
 #boxes:not([data-in-use="agenda"]) > #agenda,
 #boxes:not([data-in-use="prompt"]) > .box.main,
 #boxes:not([data-in-use="scratch"]) > #scratches { flex: none; }
