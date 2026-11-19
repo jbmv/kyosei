@@ -732,3 +732,32 @@ private func object(_ json: String) throws -> [String: Any] {
     let second = ProjectsFrame.json(project: "a", projects: rows, problem: nil, live: live)
     #expect(first == second)
 }
+
+@Test func theProjectsFrameSaysWhichLiveSessionsWaitForThePerson() throws {
+    // The rows are decoded from the server's own words (KYO-970): a pane that shows the session
+    // doing nothing, with nothing in the background, waits; working or background work does not.
+    let rows = try JSONDecoder().decode(
+        [SessionRow].self,
+        from: Data(
+            """
+            [
+              {"session_id": "idle", "live": true, "has_pane": true, "screen_state": "idle",
+               "background": {"running": false, "shells": 0, "agents": []}},
+              {"session_id": "asks", "live": true, "has_pane": true, "screen_state": "ask-user-question",
+               "background": null},
+              {"session_id": "works", "live": true, "has_pane": true, "screen_state": "working"},
+              {"session_id": "behind", "live": true, "has_pane": true, "screen_state": "idle",
+               "background": {"running": true, "shells": 1, "agents": []}},
+              {"session_id": "unread", "live": true, "has_pane": false, "screen_state": null},
+              {"session_id": "ended", "live": false, "has_pane": false, "screen_state": "idle"}
+            ]
+            """.utf8))
+    let frame = try object(
+        ProjectsFrame.json(
+            project: "alpha", projects: [ProjectRow(name: "alpha", can_open: true)], problem: nil,
+            live: ["alpha": rows]))
+    let live = try #require((frame["live"] as? [String: Any])?["alpha"] as? [[String: Any]])
+    #expect(
+        live.map { [$0["session_id"] as? String ?? "", ($0["waiting"] as? Bool) == true ? "waits" : "no"] }
+            == [["idle", "waits"], ["asks", "waits"], ["works", "no"], ["behind", "no"], ["unread", "no"]])
+}

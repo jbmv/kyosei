@@ -1012,8 +1012,9 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .view-item:hover { color: var(--text); }
 .view-item[aria-current="page"] { color: var(--link); font-weight: 600; }
 .view-item .icon { width: 15px; height: 15px; vertical-align: 0; }
-/* KYO-922: the session waits on the person and nothing runs; amber in every view, Chat's own included. */
-#view-items .view-item.waiting { color: var(--amber); }
+/* KYO-922, KYO-970: the session waits on the person and nothing runs; the project's name is amber
+   in every view, and so is the link of any other project whose session waits. */
+#project-button.waiting #project-name, .session-link.waiting { color: var(--amber); }
 
 .top-part { display: flex; align-items: center; min-width: 0; }
 #top-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

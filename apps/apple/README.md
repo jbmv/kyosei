@@ -546,8 +546,12 @@ chat stays drawn beneath the others and keeps following its session, so returnin
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
 
-The Chat item is amber, in every view and Chat's own included, while the followed session
-waits on the person and no subagent or background shell runs (KYO-922). The page counts the
+The project's name in the views bar is amber, in every view, while the followed session
+waits on the person and no subagent or background shell runs (KYO-922, KYO-970); the Chat item
+no longer changes colour. A project in the bar's list of the other projects' sessions is amber
+when its own live session waits: the server's session list states each row's `screen_state` and
+`background`, `SessionRow.waiting` in `ServeClient.swift` reads them as the page does, and the
+projects frame carries the result as `waiting`. The page counts the
 session as waiting when it is live, its pane has been read, and either nothing runs or the
 terminal shows a question or a permission prompt. The same wait makes the line under the
 composer red and has the app keep its Dock icon bouncing while another app is in front, until

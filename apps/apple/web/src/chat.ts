@@ -5482,11 +5482,20 @@ const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () 
 ];
 let currentView = "chat";
 
+/**
+ * KYO-970: the session waits on the person, shown on the project's name in the bar, which is
+ * the window's own project, and not on the Chat item: with several projects served, the name
+ * says which one needs the person. The other projects' links say it of their own sessions
+ * (`drawProjects`).
+ */
+const WAITING_TITLE = "The session is waiting for you";
 function drawChatItem(): void {
   const item = document.querySelector<HTMLElement>('#view-items [data-view-item="chat"]');
-  if (!item) return;
-  item.classList.toggle("waiting", chatWaiting);
-  item.title = chatWaiting ? "The session is waiting for you" : "";
+  item?.classList.remove("waiting");
+  if (item) item.title = "";
+  const name = document.getElementById("project-button")!;
+  name.classList.toggle("waiting", chatWaiting);
+  name.title = chatWaiting ? WAITING_TITLE : "Switch project";
 }
 
 /** Where the transcript was when another view replaced it. */
@@ -5700,6 +5709,11 @@ function drawProjects(): void {
       item.textContent = link.project;
       item.title = link.title
         ? `${link.project}: ${link.title}` : `${link.project}'s live session`;
+      // KYO-970: a project whose session waits on the person is amber in the list. The window's
+      // own is read from the page's own screen, which is fresher than the list.
+      const waiting = link.current ? chatWaiting : link.waiting;
+      item.classList.toggle("waiting", waiting);
+      if (waiting) item.title = `${WAITING_TITLE}: ${item.title}`;
       item.addEventListener("click", () => {
         // A link follows the session, which is read in the chat.
         showView("chat");
