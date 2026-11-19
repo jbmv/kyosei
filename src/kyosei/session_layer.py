@@ -75,6 +75,11 @@ Typed = pane.Typed
 Pasted = pane.Pasted
 PaneNotReady = pane.PaneNotReady
 NotSubmitted = pane.NotSubmitted
+#: The screen state of a terminal showing a subagent, which receives no keys (KYO-961), and
+#: the words that say so.
+SUBAGENT_VIEW = pane.SUBAGENT_VIEW
+showing_subagent = pane.showing_subagent
+BACK_TO_MAIN = pane.BACK_TO_MAIN
 
 
 @dataclass

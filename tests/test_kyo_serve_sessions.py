@@ -794,7 +794,7 @@ def test_turns_return_deliveries_as_their_own_objects_in_time_order(bed: Bed) ->
     assert not {d["uuid"] for d in deliveries} & {t["id"] for t in document["turns"]}
     assert set(deliveries[0]) == {
         "uuid", "at", "kind", "text", "sender", "sender_id", "handback", "task_id",
-        "call_id", "status", "summary", "usage",
+        "call_id", "status", "summary", "usage", "interim",
     }  # fmt: skip
     handback = next(d for d in deliveries if d["handback"])
     assert handback["sender"] == "kyosei-worker" and "written for this test" in handback["text"]
@@ -1520,7 +1520,9 @@ def test_the_screen_route_returns_the_layers_classification(
     document = json_body(bed.get(f"{SESSIONS}/{OLD}/screen"))
     assert document["session_id"] == OLD and document["screen"]["state"] == state
     assert document["pane"]["present"] is True and document["pane"]["pane_id"] == "%1"
-    assert set(document["screen"]) == {"state", "question", "options", "input_text", "background"}
+    assert set(document["screen"]) == {
+        "state", "question", "options", "input_text", "background", "agent",
+    }  # fmt: skip
     # A classification only: no text of the screen is carried.
     assert "text" not in document["screen"] and "raw" not in document["screen"]
 

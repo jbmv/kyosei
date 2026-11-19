@@ -343,3 +343,59 @@ test("a running subagent's row says how long it has run, counting up while the l
   assert.ok(seconds(later.rows[0].facts) >= seconds(first.rows[0].facts) + 1,
     `${later.rows[0].facts} after ${first.rows[0].facts}`);
 });
+
+// KYO-962: a background agent that has agents of its own. The terminal's footer reports it with
+// a `(+1)`, and the session's transcript has an interim notification for it, marked by the server.
+const outerAgent = `window.kyo.apply({
+  tool_calls: [{ call_id: "c9", uuid: "u9", at: new Date(Date.now() - 30000).toISOString(), name: "Agent", input: {}, result: null }],
+  subagents: [{ agent_id: "a9", description: "Outer work", agent_type: "general-purpose", tool_call_uuid: "u9" }],
+  deliveries: [{ uuid: "d9", at: "${AGENT_AT}", kind: "task-notification", text: "not yet", sender: null,
+    sender_id: null, handback: false, task_id: "a9", call_id: "c9", status: "completed",
+    summary: "Agent \\"Outer work\\" is waiting on its own background work", interim: true,
+    usage: { total_tokens: 4000, duration_ms: 13000 } }],
+})`;
+
+test("a background agent with agents of its own is shown on the line and listed as running (KYO-962)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
+  await page.run(outerAgent);
+  await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 2,
+    agents: [{ type: "general-purpose", description: "Outer work" }], nested: 1 } } })`);
+  const now = await page.run<Status>(status);
+  assert.equal(now.text, "1 agent (and 1 it started), 2 shells in the background");
+  await page.run(`document.getElementById("working-text").click()`);
+  let list = await page.run<Listed>(listed);
+  assert.deepEqual(list.rows.map((row) => [row.name, row.running]), [["Outer work", true]]);
+  // The notification that ends it lists it as finished, with its own figures.
+  await page.run(`window.kyo.apply({ deliveries: [{ uuid: "d10", at: "${AGENT_AT}", kind: "task-notification",
+    text: "done", sender: null, sender_id: null, handback: false, task_id: "a9", call_id: null,
+    status: "completed", summary: "Agent \\"Outer work\\" finished", interim: false,
+    usage: { total_tokens: 41000, duration_ms: 250000 } }] })`);
+  list = await page.run<Listed>(listed);
+  assert.deepEqual(list.rows.map((row) => [row.name, row.running]), [["Outer work", false]]);
+  assert.equal(list.rows[0].facts, "general-purpose  ·  41k tokens  ·  4m 10s");
+});
+
+test("a terminal showing a subagent is said to, and a prompt held for it says why it waits (KYO-961)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
+  await page.run(`window.kyo.screen({ screen: { state: "subagent-view", agent: "Outer work" } })`);
+  const now = await page.run<Status>(status);
+  assert.equal(now.text, "The terminal is showing the subagent “Outer work”");
+  assert.equal(now.idle, false);
+  const detail = "the session's terminal is showing the subagent “Outer work” rather than the main "
+    + "session, and a message typed there would go to that agent; the message is delivered once "
+    + "the terminal shows the main session again (to show it, choose main in the list under the "
+    + "terminal's input box)";
+  const held = await page.run<string>(`(() => {
+    window.kyo.held(${JSON.stringify({
+      outcome: "held", id: "m1",
+      held: { id: "m1", state: "held", retrying: true, reason: "subagent-view", detail },
+    })});
+    return document.getElementById("held-text").textContent;
+  })()`);
+  assert.equal(held, `Waiting: ${detail}`);
+  assert.doesNotMatch(held, /unrecognised|subagent-view/);
+});

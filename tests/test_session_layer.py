@@ -686,7 +686,8 @@ def test_a_message_is_cleared_then_sent_in_segments_in_order() -> None:
         sleep=_no_sleep,
     )
     commands = [c for c, _ in tmux.commands]
-    assert commands[0] == ("send-keys", "-t", "%3", "C-e", "C-u")
+    # One row of left-over text: a C-u for the row and one for a line break (KYO-810).
+    assert commands[0] == ("send-keys", "-t", "%3", "C-e", "C-u", "C-u")
     assert ("send-keys", "-t", "%3", "-l", "--", "- first") in commands
     assert commands[commands.index(("send-keys", "-t", "%3", "-l", "--", "- first")) + 1] == (
         "send-keys",
@@ -791,13 +792,19 @@ def test_a_screen_that_replaces_the_box_is_reported_and_not_answered() -> None:
 SCRIPTED_PANE = r"""
 import os, sys, termios, tty
 ignored, out = int(sys.argv[1]), sys.argv[2]
+shown = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 tty.setraw(0)
 text = ""
 def draw():
-    lines = text.split("\n")
-    body = "\r\n".join(("❯ " if i == 0 else "  ") + line for i, line in enumerate(lines))
+    rows = [("❯ " if i == 0 else "  ") + line for i, line in enumerate(text.split("\n"))]
     rule = "─" * 80 + "\r\n"
-    sys.stdout.write("\x1b[2J\x1b[H" + rule + body + "\r\n" + rule + "  footer\r\n")
+    top = rule
+    if shown and len(rows) > shown:
+        # Claude Code's scrolled box (KYO-810): the rows that do not fit go out above it.
+        hidden, rows = len(rows) - shown, rows[len(rows) - shown :]
+        top = f"─── ↑ {hidden} more ".ljust(80, "─") + "\r\n"
+    body = "\r\n".join(rows)
+    sys.stdout.write("\x1b[2J\x1b[H" + top + body + "\r\n" + rule + "  footer\r\n")
     sys.stdout.flush()
 draw()
 pending = b""
@@ -839,7 +846,7 @@ UNSUBMITTED_SHAPE = (
 class ScriptedPane:
     """A private tmux server whose one pane runs :data:`SCRIPTED_PANE`."""
 
-    def __init__(self, directory: Path, *, enters_ignored: int) -> None:
+    def __init__(self, directory: Path, *, enters_ignored: int, rows_shown: int = 0) -> None:
         binary = shutil.which("tmux")
         assert binary is not None
         env = {k: v for k, v in os.environ.items() if not k.startswith("TMUX")}
@@ -851,6 +858,7 @@ class ScriptedPane:
         program.write_text(SCRIPTED_PANE, encoding="utf-8")
         command = shlex.join(
             [sys.executable, str(program), str(enters_ignored), str(self.submitted)]
+            + [str(rows_shown)]
         )
         started = self.tmux.run("new-session", "-d", "-s", "box", "-x", "100", "-y", "30", command)
         assert started.returncode == 0, started.stderr
@@ -876,10 +884,10 @@ def scripted_pane(tmp_path: Path):
         pytest.skip("tmux is not installed")
     opened: list[ScriptedPane] = []
 
-    def start(enters_ignored: int) -> ScriptedPane:
+    def start(enters_ignored: int, rows_shown: int = 0) -> ScriptedPane:
         # A socket's path is short, and pytest's directories are not.
         directory = Path(tempfile.mkdtemp(prefix="kyo-pane-", dir="/tmp"))
-        opened.append(ScriptedPane(directory, enters_ignored=enters_ignored))
+        opened.append(ScriptedPane(directory, enters_ignored=enters_ignored, rows_shown=rows_shown))
         return opened[-1]
 
     yield start
@@ -2078,3 +2086,314 @@ def test_ahead_counts_against_origins_branch_when_no_upstream_is_configured(
     run_git(repo, "add", "more.txt")
     run_git(repo, "commit", "-q", "-m", "second")
     assert changes(repo).ahead == 1
+
+
+# ------------------------------------------ KYO-810, KYO-961, KYO-962: screens of 2.1.328
+#
+# Synthetic screens in the forms measured on Claude Code 2.1.328 in a throwaway session on
+# a private tmux socket (2026-11-19), with words written for the test. ``WIDE`` is the
+# width of their rules.
+
+WIDE = 80
+PLAIN_RULE = "─" * WIDE
+
+
+def _rule(left: str = "", right: str = "") -> str:
+    """A rule with words at its left end (``↑ 3 more``) or its right end (a subagent's label)."""
+    head = f"─── {left} " if left else ""
+    tail = f" {right} ─" if right else ""
+    return head + "─" * (WIDE - len(head) - len(tail)) + tail
+
+
+FOOTER = "  ⏵⏵ auto mode on (shift+tab to cycle)\n"
+CONVERSATION = "⏺ A reply written for the test.\n\n✻ Baked for 3s\n\n"
+
+
+def scrolled_box(rows: list[str], above: int, below: int = 0) -> str:
+    """Claude Code's input box holding more rows than it draws (KYO-810)."""
+    top = _rule(f"↑ {above} more") if above else PLAIN_RULE
+    bottom = _rule(f"↓ {below} more") if below else PLAIN_RULE
+    return CONVERSATION + top + "\n" + "\n".join(rows) + "\n" + bottom + "\n\n" + FOOTER
+
+
+def test_a_box_scrolled_out_above_is_an_input_box_holding_text() -> None:
+    # The form of every failed send of 2026-11-17 to 2026-11-19: the `❯` row is not drawn.
+    found = pane.classify(scrolled_box(["  the fourth line of a", "  long message"], above=3))
+    assert found.state == pane.IDLE
+    assert found.input_text == "the fourth line of a\nlong message"
+    assert found.input_hidden == 3
+
+
+def test_a_box_scrolled_both_ways_counts_both() -> None:
+    found = pane.classify(scrolled_box(["  a middle row", "  another"], above=13, below=9))
+    assert (found.state, found.input_hidden) == (pane.IDLE, 22)
+
+
+def test_a_box_scrolled_below_only_starts_with_its_prompt_row() -> None:
+    found = pane.classify(scrolled_box(["❯ the first line", "  the second"], above=0, below=22))
+    assert (found.state, found.input_text, found.input_hidden) == (
+        pane.IDLE, "the first line\nthe second", 22,
+    )
+
+
+def test_a_scrolled_box_under_a_working_row_is_working() -> None:
+    raw = scrolled_box(["  typed during the turn"], above=2).replace(
+        "✻ Baked for 3s", "✻ Baking… (4s · ↓ 1.2k tokens)"
+    )
+    assert pane.classify(raw).state == pane.WORKING
+
+
+def test_a_scroll_rule_quoted_in_a_reply_is_not_the_box() -> None:
+    quoted = "⏺ The box read:\n  " + _rule("↑ 3 more") + "\n  a row\n\n"
+    idle = CONVERSATION + PLAIN_RULE + "\n❯ \n" + PLAIN_RULE + "\n" + FOOTER
+    found = pane.classify(quoted + idle)
+    assert (found.state, found.input_text, found.input_hidden) == (pane.IDLE, "", 0)
+
+
+def test_a_history_search_rule_is_left_unrecognised() -> None:
+    # Not catalogued by this work; it carries words at its left end that are not a scroll count.
+    raw = CONVERSATION + _rule("History 3/9") + "\n❯ /model\n" + PLAIN_RULE + "\n" + FOOTER
+    assert pane.classify(raw).state == pane.UNRECOGNISED
+
+
+class ScrollingTmux(FakeTmux):
+    """A fake whose box, once the message is typed, is drawn scrolled as Claude Code draws it."""
+
+    def run(self, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
+        done = super().run(*args, input=input)
+        if args[0] == "capture-pane" and self.holds_text:
+            return subprocess.CompletedProcess(
+                args, 0, scrolled_box(["  the last rows", "  of the message"], above=12), ""
+            )
+        return done
+
+
+def test_a_message_taller_than_the_box_is_submitted() -> None:
+    # KYO-810.c2. Before this, the scrolled box read as unrecognised and Enter was never pressed.
+    tmux = ScrollingTmux([EMPTY_BOX])
+    pane.send_message(tmux, "%3", [pane.Typed("a message\nof many lines")], sleep=_no_sleep)
+    assert tmux.enters() == 1
+
+
+def test_a_scrolled_box_is_cleared_in_one_round() -> None:
+    # Measured: fourteen wrapped lines took 42 rounds of one C-u; one round now sends enough.
+    rows = ["  a row of left-over text"] * 7
+    tmux = FakeTmux([scrolled_box(rows, above=22), EMPTY_BOX])
+    pane.clear_input(tmux, "%3", sleep=_no_sleep)
+    (keys,) = [c for c, _ in tmux.commands]
+    assert keys[:4] == ("send-keys", "-t", "%3", "C-e")
+    assert keys.count("C-u") == 2 * (7 + 22)
+
+
+def test_the_trace_records_the_rows_scrolled_out_of_view() -> None:
+    tmux = ScrollingTmux([EMPTY_BOX], enters_ignored=99)
+    with pytest.raises(pane.NotSubmitted) as raised:
+        pane.send_message(tmux, "%3", [pane.Typed("a message")], sleep=_no_sleep)
+    assert raised.value.trace[0]["input_hidden"] == 12
+
+
+def test_a_message_taller_than_the_box_is_submitted_to_a_tmux_pane(scripted_pane) -> None:
+    # KYO-810.c2 against a real tmux pane whose box shows four rows and scrolls the rest out
+    # above it, drawing the rule as Claude Code 2.1.328 does. Fails before the fix: the
+    # settle step reads the screen as unrecognised and Enter is never pressed.
+    box = scripted_pane(0, rows_shown=4)
+    message = "\n".join(f"line {n} of a message taller than the box" for n in range(1, 13))
+    pane.send_message(box.tmux, box.pane_id, [pane.Typed(message)])
+    assert box.messages() == [message]
+
+
+# --- KYO-961: the terminal showing a subagent
+
+LABEL = "Synthetic sleeper"
+
+
+def subagent_view(
+    box: str = "❯\xa0\x1b[2mMessage @general-purpose…\x1b[0m",
+    *,
+    footer_rows: str = "  ◯ main\n  ⏺ general-purpose    waiting on 1 shell · "
+    f"{LABEL} · since 10:42 AM\n  └ ◯ general-purpose  waiting on 1 shell · Inner · since "
+    "10:42 AM\n",
+    top: str | None = None,
+) -> str:
+    rule = _rule(right=LABEL) if top is None else top
+    footer = "  ⏵⏵ auto mode on · 1 shell · esc to stop · ↓ to manage\n\n" + footer_rows
+    return CONVERSATION + rule + "\n" + box + "\n" + PLAIN_RULE + "\n" + footer
+
+
+def test_a_subagents_view_is_a_state_of_its_own_with_the_agent_named() -> None:
+    found = pane.classify(subagent_view())
+    assert found.state == pane.SUBAGENT_VIEW
+    assert found.agent == LABEL
+
+
+def test_a_subagents_view_with_text_typed_is_known_by_its_footer() -> None:
+    found = pane.classify(subagent_view("❯ something typed"))
+    assert (found.state, found.input_text) == (pane.SUBAGENT_VIEW, "something typed")
+
+
+def test_a_subagents_scrolled_view_is_known_by_its_labels_colour() -> None:
+    # A tall box can push the footer's list off the screen; the label is drawn on a colour.
+    top = _rule("↑ 1 more", LABEL).replace(
+        f" {LABEL} ", f"\x1b[38;5;16m\x1b[48;5;37m {LABEL} \x1b[38;5;37m\x1b[49m"
+    )
+    raw = subagent_view("  a row typed\n  and another", footer_rows="", top=top)
+    found = pane.classify(raw)
+    assert (found.state, found.agent, found.input_hidden) == (pane.SUBAGENT_VIEW, LABEL, 1)
+
+
+def test_a_labelled_rule_with_no_other_sign_is_left_unrecognised() -> None:
+    logged: list[str] = []
+    raw = subagent_view("❯ typed", footer_rows="")
+    assert pane.classify(raw, log_unrecognised_screen=logged.append).state == pane.UNRECOGNISED
+    assert len(logged) == 1
+
+
+def test_a_labelled_rule_quoted_in_a_reply_is_not_the_box() -> None:
+    quoted = "⏺ It showed:\n  " + _rule(right=LABEL) + "\n  ❯ Message @general-purpose…\n\n"
+    idle = PLAIN_RULE + "\n❯ \n" + PLAIN_RULE + "\n" + FOOTER
+    assert pane.classify(quoted + idle).state == pane.IDLE
+
+
+def test_every_logged_form_of_the_view_reads_as_one(tmp_path: Path) -> None:
+    # The footer of the view has been seen with one, two and three agents under the shown one.
+    for children in (["└"], ["├", "└"], ["├", "├", "└"]):
+        rows = "  ◯ main\n  ⏺ kyosei-designer    Writing a test row      9m 9s · ↓ 60.6k tokens\n"
+        child = "◯ general-purpose  Child work      1m 2s · ↓ 1k tokens"
+        rows += "".join(f"  {c} {child}\n" for c in children)
+        found = pane.classify(subagent_view(footer_rows=rows))
+        assert found.state == pane.SUBAGENT_VIEW
+        assert found.background.agents == (("kyosei-designer", "Writing a test row"),)
+        assert found.background.nested == len(children)
+
+
+def test_no_message_command_or_interrupt_is_typed_into_a_subagents_view() -> None:
+    # KYO-961.c2: the pane receives no keys at all, and the refusal says why in plain words.
+    for send in (
+        lambda t: pane.send_message(t, "%3", [pane.Typed("for the session")], sleep=_no_sleep),
+        lambda t: pane.send_slash_command(t, "%3", "/usage", sleep=_no_sleep),
+        lambda t: pane.send_interrupt(t, "%3"),
+    ):
+        tmux = FakeTmux([subagent_view()])
+        with pytest.raises(pane.PaneNotReady) as refused:
+            send(tmux)
+        assert tmux.commands == []
+        words = str(refused.value)
+        assert f"showing the subagent “{LABEL}”" in words and "main session" in words
+        assert "subagent-view" not in words and "unrecognised" not in words
+
+
+def test_a_box_that_turns_into_a_subagents_view_while_clearing_is_not_typed_into() -> None:
+    tmux = FakeTmux([FULL_BOX, subagent_view("❯ leftover text")])
+    with pytest.raises(pane.PaneNotReady):
+        pane.send_message(tmux, "%3", [pane.Typed("x")], sleep=_no_sleep)
+    assert not any("-l" in c for c, _ in tmux.commands)
+
+
+# --- KYO-962: background work drawn as a tree
+
+MAIN_VIEW_FOOTER = (
+    "  ⏵⏵ auto mode on · 2 shells, 1 monitor · ↓ to manage\n\n"
+    "  ⏺ main\n"
+    "  ◯ general-purpose (+1)  waiting on 1 shell, 1 monitor, 1 subagent · Outer work · "
+    "since 10:42 AM\n"
+)
+
+
+def main_view(footer: str = MAIN_VIEW_FOOTER) -> str:
+    return CONVERSATION + PLAIN_RULE + "\n❯ \n" + PLAIN_RULE + "\n" + footer
+
+
+def test_an_agent_with_agents_of_its_own_is_the_sessions_background_work() -> None:
+    # KYO-962.c2: before this the `(+1)` row was not matched, and the session read as having
+    # shells in the background and no agent.
+    work = pane.classify(main_view()).background
+    assert work.agents == (("general-purpose", "Outer work"),)
+    assert work.nested == 1 and work.shells == 2 and work.running
+
+
+def test_the_lists_cursor_and_a_round_mark_do_not_hide_a_row() -> None:
+    footer = MAIN_VIEW_FOOTER.replace("  ⏺ main", "❯ ⏺ main").replace("  ◯ general", "  ● general")
+    work = pane.classify(main_view(footer)).background
+    assert work.agents == (("general-purpose", "Outer work"),) and work.nested == 1
+
+
+def test_a_nested_row_is_not_an_agent_of_the_session() -> None:
+    work = pane.classify(subagent_view()).background
+    assert work.agents == (("general-purpose", LABEL),)
+    assert work.nested == 1
+
+
+def test_a_finished_agent_still_shown_is_not_running() -> None:
+    # Measured: the shown agent's row stays when it finishes, its mark drawn green.
+    rows = (
+        "  \x1b[38;5;246m◯ main\x1b[39m\n"
+        "  \x1b[1m\x1b[38;5;114m⏺ \x1b[39mgeneral-purpose\x1b[0m  \x1b[1mDone work\x1b[0m"
+        "        \x1b[1m4m 14s · ↓ 41.8k tokens\x1b[0m\n"
+    )
+    found = pane.classify(subagent_view(footer_rows=rows).replace(" · 1 shell ·", " ·"))
+    assert found.state == pane.SUBAGENT_VIEW
+    assert found.background.agents == () and not found.background.running
+
+
+def test_the_row_form_of_2_1_319_still_reads() -> None:
+    work = pane.classify(screen("background-shells.txt")).background
+    assert work.agents == (("general-purpose", "Run sleep and reply finished"),)
+    assert work.nested == 0
+
+
+# --- KYO-962: a notification that does not end its agent
+
+
+def _notification(position: int, summary: str, note: str | None) -> str:
+    noted = f"<note>{note}</note>\n" if note else ""
+    content = (
+        f"<task-notification>\n<task-id>agentA</task-id>\n<status>completed</status>\n"
+        f"<summary>{summary}</summary>\n{noted}<result>A result.</result>\n</task-notification>"
+    )
+    return json.dumps({
+        "isSidechain": False, "sessionId": "66666666-6666-4666-8666-666666666666",
+        "cwd": "/work", "version": "2.1.328", "parentUuid": None, "uuid": row_id(position),
+        "timestamp": f"2026-11-19T10:4{position}:00.000Z", "type": "user",
+        "origin": {"kind": "task-notification", "producer": "session-task", "runId": "r"},
+        "message": {"role": "user", "content": content},
+    })
+
+
+def test_an_agent_waiting_on_its_own_work_is_notified_as_interim(tmp_path: Path) -> None:
+    path = tmp_path / "session.jsonl"
+    rows = [
+        _notification(1, 'Agent "Outer work" is waiting on its own background work',
+                      "This agent stopped with background work of its own still running. "
+                      "The result below may be interim."),
+        _notification(2, 'Agent "Outer work" finished', "The same task-id may notify again."),
+    ]
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    reader = transcript.SessionTranscript(path)
+    reader.read()
+    found = [(d.task_id, d.interim) for d in reader.deliveries]
+    assert found == [("agentA", True), ("agentA", False)]
+
+
+def test_a_new_sessions_80_by_24_pane_with_the_banner_scrolls_a_moderate_prompt() -> None:
+    # The tenth failed send of KYO-810 (2026-11-19): a session started detached has tmux's
+    # 80x24 until a client attaches, the start banner takes the top of the screen, and the
+    # box gets seven rows, so a prompt of a few paragraphs scrolls. Blank rows of the prompt
+    # are drawn empty inside the box.
+    banner = (
+        "\n ▐▛███▛█   Claude Code v2.1.328\n▝▜██████▀  Model words · Plan words\n"
+        " ▝▝   ▝▝   /work/project · /rc\n\n⚠ A notice written for the test\n\n"
+        "  /remote-control is active · Continue here, in the app\n  https://example.invalid/x\n\n\n\n"
+        + " " * 57 + "ctrl+g to edit in Vim\n"
+    )
+    rows = [
+        "  the end of a first paragraph.", "",
+        "  a second paragraph that runs on for a while and wraps at the", "  width of the pane",
+        "  and a third row of it", "  https://example.invalid/a-link", "",
+    ]
+    raw = banner + _rule("↑ 9 more") + "\n" + "\n".join(rows) + "\n" + PLAIN_RULE + "\n\n" + FOOTER
+    assert len(raw.rstrip("\n").split("\n")) == 24
+    assert max(len(line) for line in raw.split("\n")) == WIDE
+    found = pane.classify(raw)
+    assert (found.state, found.input_hidden) == (pane.IDLE, 9)
+    assert found.input_text.startswith("the end of a first paragraph.")
+    assert found.input_text.endswith("https://example.invalid/a-link")
