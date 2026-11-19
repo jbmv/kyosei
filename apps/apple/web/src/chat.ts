@@ -2697,12 +2697,13 @@ function showMark(editor: EditorView, id: number): void {
       }
       chip.append(item.pending ? `${item.name} (uploading)` : item.name);
     } else if (item.kind === "anchor" && !anchorOpens(item.session, menu?.current)) {
-      // KYO-763: an anchor carried here from another session has no place in this chat. It
-      // is still sent as its line of words, and its chip takes no press.
-      const place = boxButton("mark-anchor gone", item.words, () => {});
-      place.disabled = true;
+      // KYO-763: an anchor carried here from another session has no place in this chat, and
+      // one made in the History reader names a past session (KYO-972). Either is sent as its
+      // line of words, and its chip opens History at the place, which reads any session.
+      const place = boxButton("mark-anchor", item.words, () => revealInHistory(item));
       place.prepend(icon("anchor"));
       chip.title = anchorGoneNote(sessionRuns(item.session));
+      // The dashed border says the place is not in this chat.
       chip.classList.add("gone");
       chip.append(place);
     } else if (item.kind === "anchor") {
@@ -2912,9 +2913,9 @@ function caretAt(x: number, y: number): { node: Node; offset: number } | null {
  */
 function spanAt(
   holder: HTMLElement, key: string, target: HTMLElement, pointer: { x: number; y: number }, own: boolean,
+  source = sources.get(key)!,
 ): Omit<AnchorItem, "kind" | "key" | "session"> | null {
   if (target.closest(".thinking")) return null;
-  const source = sources.get(key)!;
   const points = (index: number) => Array.from(source.slice(0, index)).length;
   const span = (from: number, to: number, words: string, exact = false) =>
     ({ start: points(from), end: points(to), words: firstWords(words, ANCHOR_WORDS), exact });
@@ -3036,25 +3037,50 @@ function ownSelection(): boolean {
     && now.compareBoundaryPoints(Range.END_TO_END, pressedSelection) === 0;
 }
 
-chat.addEventListener("contextmenu", (event) => {
+/**
+ * A prompt or reply under a place in the page, and the session and source text an anchor to
+ * it names: the chat's, of the session followed, or the History reader's, of the session it
+ * reads (KYO-972). Null elsewhere, and where the session or the source is not known.
+ */
+function anchorHolder(target: Element): { holder: HTMLElement; key: string; session: string; source: string } | null {
+  const inChat = target.closest<HTMLElement>("#chat > [data-key]");
+  if (inChat && chat.contains(inChat)) {
+    const key = inChat.dataset.key;
+    const session = menu?.current;
+    const source = key ? sources.get(key) : undefined;
+    return key && session && source !== undefined ? { holder: inChat, key, session, source } : null;
+  }
+  const inReader = target.closest<HTMLElement>("#history-reader > [data-hkey]");
+  if (inReader && historyReader.contains(inReader)) {
+    const key = inReader.dataset.hkey;
+    const session = readerSession;
+    const source = key ? readerSources.get(key) : undefined;
+    return key && session && source !== undefined ? { holder: inReader, key, session, source } : null;
+  }
+  return null;
+}
+
+/** The menu a right-click on a prompt or reply opens, in the chat or the History reader. */
+function anchorMenuAt(event: MouseEvent): void {
   const target = event.target as HTMLElement;
   // An image keeps WebKit's own menu, where the app adds Quick Look (KYO-883).
   if (target instanceof HTMLImageElement) return;
-  const holder = target.closest<HTMLElement>("#chat > [data-key]");
-  const key = holder?.dataset.key;
-  const session = menu?.current;
-  if (!holder || !key || !sources.has(key) || !session) return;
+  const found = anchorHolder(target);
+  if (!found) return;
+  const { holder, key, session, source } = found;
   const own = ownSelection();
-  const span = spanAt(holder, key, target, { x: event.clientX, y: event.clientY }, own);
+  const span = spanAt(holder, key, target, { x: event.clientX, y: event.clientY }, own, source);
   // KYO-968: Copy takes the person's selection; with none, the words of the span Anchor would mark.
   const copy = own ? window.getSelection()!.toString()
-    : span ? Array.from(sources.get(key)!).slice(span.start, span.end).join("") : "";
+    : span ? Array.from(source).slice(span.start, span.end).join("") : "";
   // The word the click itself selected goes, or the next click would find it as the person's.
   if (!own) window.getSelection()?.removeAllRanges();
   if (!span) return;
   event.preventDefault();
   showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span }, copy);
-});
+}
+
+chat.addEventListener("contextmenu", anchorMenuAt);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") anchorMenu.remove();
@@ -3113,21 +3139,22 @@ function endAnchorMode(): void {
 function anchorPlaceAt(
   target: Element, point: { x: number; y: number }, own: boolean,
 ): { item: AnchorItem | Place; range: Range | null; elements: Element[] } | null {
-  const holder = target.closest<HTMLElement>("#chat > [data-key]");
-  if (holder && chat.contains(holder)) {
-    const key = holder.dataset.key;
-    const session = menu?.current;
-    if (!key || !sources.has(key) || !session) return null;
+  // A prompt or reply of the chat, or of the session the History reader holds (KYO-972).
+  if (target.closest("#chat > [data-key], #history-reader > [data-hkey]")) {
+    const found = anchorHolder(target);
+    if (!found) return null;
+    const { holder, key, session, source } = found;
     // Between a reply's blocks a right-click takes the whole reply; a press in the mode
     // takes words, so that space is not a place to anchor.
     if (!own && key.startsWith("r:") && !target.closest("[data-source-line]")) return null;
-    const span = spanAt(holder, key, target as HTMLElement, point, own);
+    const span = spanAt(holder, key, target as HTMLElement, point, own, source);
     if (!span) return null;
     const item: AnchorItem = { kind: "anchor", key, session, ...span };
-    const range = wordsRange(item);
+    const scope = chat.contains(holder) ? chatScope : readerScope;
+    const range = wordsRange(item, scope);
     // Where the words are not drawn as they are written, the blocks they lie in are lit,
     // as a sent anchor's are: never more than the press would take.
-    return { item, range, elements: range ? [] : anchoredBlocks(item) };
+    return { item, range, elements: range ? [] : anchoredBlocks(item, scope) };
   }
   if (recordArticle.contains(target)) {
     // A press outside the record's parts, on its metadata or summary, takes the whole record.
@@ -3238,10 +3265,17 @@ function anchorsHeld(): AnchorItem[] {
     .filter((item): item is AnchorItem => item.kind === "anchor");
 }
 
+/**
+ * Where an anchor's prompt or reply is drawn and what it was drawn from: the chat's, or the
+ * History reader's (KYO-972), each by the chat's keys.
+ */
+interface AnchorScope { holders: Map<string, HTMLElement>; sources: Map<string, string> }
+const chatScope: AnchorScope = { holders: elements, sources };
+
 /** The blocks of a drawn prompt or reply that an anchor's range covers. */
-function anchoredBlocks(item: AnchorItem): HTMLElement[] {
-  const holder = elements.get(item.key);
-  const source = sources.get(item.key);
+function anchoredBlocks(item: AnchorItem, scope: AnchorScope = chatScope): HTMLElement[] {
+  const holder = scope.holders.get(item.key);
+  const source = scope.sources.get(item.key);
   if (!holder || source === undefined) return [];
   if (item.key.startsWith("t:")) return [holder];
   const lineAt = (point: number) => Array.from(source).slice(0, point).join("").split("\n").length - 1;
@@ -3283,13 +3317,13 @@ function sentItems(): { mark: SentMark; item: AnchorItem }[] {
  * not marked in their stead. An anchor to the whole of its blocks has no such place unless
  * its words are drawn as written, and is shown by the bar beside them.
  */
-function wordsRange(item: AnchorItem): Range | null {
-  const source = sources.get(item.key);
+function wordsRange(item: AnchorItem, scope: AnchorScope = chatScope): Range | null {
+  const source = scope.sources.get(item.key);
   if (!item.exact || source === undefined) return null;
   const units = (point: number) => Array.from(source).slice(0, point).join("").length;
   const start = units(item.start);
   const end = units(item.end);
-  const blocks = anchoredBlocks(item);
+  const blocks = anchoredBlocks(item, scope);
   for (const block of blocks) {
     const part = sourceOf(block, source);
     const from = start - part.base;
@@ -3386,7 +3420,7 @@ function revealPlace(place: Place): void {
  * and an anchor to whole blocks puts a quiet bar beside them.
  */
 function paintAnchors(): void {
-  for (const block of Array.from(chat.querySelectorAll(".anchored, .anchored-sent"))) {
+  for (const block of Array.from(document.querySelectorAll("#chat .anchored, #chat .anchored-sent, #history-reader .anchored"))) {
     block.classList.remove("anchored", "anchored-sent");
   }
   paintStalePlaces();
@@ -3400,9 +3434,14 @@ function paintAnchors(): void {
     return { mark, range, blocks };
   });
   for (const item of anchorsHeld()) {
-    const range = wordsRange(item);
-    if (range) ranges.push(range);
-    else for (const block of anchoredBlocks(item)) block.classList.add("anchored");
+    // KYO-972: an anchor is shown where its session is drawn, the chat and the History reader.
+    // The chat holds no other session's keys, so it is given every anchor, as it was before.
+    const scopes = [chatScope, ...(readerSession && (item.session || menu?.current) === readerSession ? [readerScope] : [])];
+    for (const scope of scopes) {
+      const range = wordsRange(item, scope);
+      if (range) ranges.push(range);
+      else for (const block of anchoredBlocks(item, scope)) block.classList.add("anchored");
+    }
   }
   showRanges("anchored", ranges);
   showRanges("anchored-sent", sentRanges);
@@ -8546,6 +8585,11 @@ let readerPlaces: History<ReaderPlace> = fresh<ReaderPlace>();
 /** The session the reader holds, and its messages by the chat's keys. */
 let readerSession: string | null = null;
 const readerElements = new Map<string, HTMLElement>();
+/** The text each of the reader's prompts and replies was drawn from, which an anchor measures (KYO-972). */
+const readerSources = new Map<string, string>();
+const readerScope: AnchorScope = { holders: readerElements, sources: readerSources };
+/** An anchor whose chip opened History, shown once its session is drawn (KYO-972). */
+let readerAnchor: AnchorItem | null = null;
 let readerTurns: Turn[] = [];
 let readerAsk = 0;
 const sameReaderPlace = (a: ReaderPlace, b: ReaderPlace) => a.session === b.session && a.message === b.message;
@@ -8571,6 +8615,7 @@ function showReaderPlace(): void {
   if (readerSession !== place.session) {
     readerSession = place.session;
     readerElements.clear();
+    readerSources.clear();
     readerTurns = [];
     historyReader.replaceChildren(historyNote("Reading the session…"));
     document.getElementById("history-outline")!.replaceChildren();
@@ -8585,6 +8630,34 @@ function showReaderPlace(): void {
   }
   document.getElementById("history-count")!.textContent = sessionTitle(place.session);
   revealInReader(place);
+  revealReaderAnchor();
+}
+
+/**
+ * KYO-972: a composer chip's press for an anchor to a session the chat does not follow. The
+ * session opens in the History reader at the prompt or reply, and the anchored words are
+ * shown there once it is drawn, as a chip in the chat shows its own.
+ */
+function revealInHistory(item: AnchorItem): void {
+  readerAnchor = item;
+  readerPlaces = visitPlace(readerPlaces, { session: item.session, message: item.key.slice(2), key: item.key }, sameReaderPlace);
+  // Entering the view shows the place; in the view already, it is shown here.
+  if (currentView !== "history") showView("history");
+  else showReaderPlace();
+}
+
+/** Shows the anchor a chip opened History for, if the reader now holds its session drawn. */
+function revealReaderAnchor(): void {
+  const item = readerAnchor;
+  if (!item || item.session !== readerSession || !readerElements.has(item.key)) return;
+  readerAnchor = null;
+  const blocks = anchoredBlocks(item, readerScope);
+  const words = wordsRange(item, readerScope)?.startContainer.parentElement;
+  (words ?? blocks[0])?.scrollIntoView({ block: "center" });
+  for (const block of blocks) {
+    block.classList.add("revealed");
+    window.setTimeout(() => block.classList.remove("revealed"), 1600);
+  }
 }
 
 /** The reader's element for a message, by the chat's key or, for a reply, its record uuid. */
@@ -8610,6 +8683,7 @@ function revealInReader(place: Pick<ReaderPlace, "message" | "key">): void {
 /** The session's prompts and replies, oldest first, drawn as the chat draws them. */
 function drawReader(turns: Turn[], replies: Reply[]): void {
   readerElements.clear();
+  readerSources.clear();
   readerTurns = turns;
   const items = [
     ...turns.filter((turn) => turn.text?.trim() || turn.images?.length).map((turn) => ({ at: turn.at, key: `t:${turn.id}`, uuid: turn.id, person: true,
@@ -8623,6 +8697,8 @@ function drawReader(turns: Turn[], replies: Reply[]): void {
     element.dataset.hkey = item.key;
     element.dataset.uuid = item.uuid;
     readerElements.set(item.key, element);
+    // What an anchor on it measures, as the chat keeps it for its own (KYO-972).
+    readerSources.set(item.key, item.text ?? "");
     const row = document.createElement("div");
     row.className = `outline-row ${item.person ? "person" : "assistant"}`;
     row.dataset.key = item.key;
@@ -8636,7 +8712,13 @@ function drawReader(turns: Turn[], replies: Reply[]): void {
   if (!items.length) historyReader.append(historyNote("This session holds no prompt or reply."));
   document.getElementById("history-outline")!.replaceChildren(...outline);
   drawAttachments();
+  // The composer's anchors to this session are shown in it, as the chat shows its own.
+  paintAnchors();
 }
+
+// KYO-972: a right-click on a prompt or reply of the reader offers Anchor and Copy, as the
+// chat's does, and the anchor names the session the reader holds.
+historyReader.addEventListener("contextmenu", anchorMenuAt);
 
 function sideRow(name: string, place: string, onPress: () => void): HTMLElement {
   const row = document.createElement("div");
@@ -8813,6 +8895,7 @@ const historyFrames = {
       if (place.message) revealInReader(place);
       else historyPane.scrollTop = 0;
     }
+    revealReaderAnchor();
   },
 
   historyMarks(frame: { ask: number; session: string; status?: number; document?: unknown }): void {
