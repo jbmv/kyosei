@@ -688,9 +688,7 @@ function addCopyButtons(holder: HTMLElement): void {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const text = (code.textContent ?? "").replace(/\n$/, "");
-      const native = (window as any).webkit?.messageHandlers?.copy;
-      if (native) native.postMessage({ text });
-      else void navigator.clipboard?.writeText(text);
+      copyText(text);
       button.replaceChildren(icon("check"));
       window.setTimeout(() => button.replaceChildren(icon("copy")), 1400);
     });
@@ -2960,7 +2958,11 @@ function addAnchor(editor: EditorView, line: number | null, item: AnchorItem | P
   editor.focus();
 }
 
-function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
+/**
+ * The menu a right-click in the chat opens: Anchor, then Copy where `copy` is the text it puts
+ * on the pasteboard (KYO-968), then the paragraphs the anchor may go to instead.
+ */
+function showAnchorMenu(x: number, y: number, item: AnchorItem | Place, copy?: string): void {
   const all = editors();
   const editor = lastEditor && all.includes(lastEditor) ? lastEditor : all[all.length - 1];
   const entry = (label: string, line: number | null, className = "") => {
@@ -2980,6 +2982,10 @@ function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
   heading.textContent = "Anchor to";
   anchorMenu.replaceChildren(
     entry("Anchor", null, "anchor-new"),
+    ...(copy ? [boxButton("anchor-copy", "Copy", () => {
+      anchorMenu.remove();
+      copyText(copy);
+    })] : []),
     ...(lines.length ? [heading] : []),
     ...lines.map(({ text, line }) => entry(firstWords(text, 3), line)),
   );
@@ -3018,11 +3024,14 @@ chat.addEventListener("contextmenu", (event) => {
   if (!holder || !key || !sources.has(key) || !session) return;
   const own = ownSelection();
   const span = spanAt(holder, key, target, { x: event.clientX, y: event.clientY }, own);
+  // KYO-968: Copy takes the person's selection; with none, the words of the span Anchor would mark.
+  const copy = own ? window.getSelection()!.toString()
+    : span ? Array.from(sources.get(key)!).slice(span.start, span.end).join("") : "";
   // The word the click itself selected goes, or the next click would find it as the person's.
   if (!own) window.getSelection()?.removeAllRanges();
   if (!span) return;
   event.preventDefault();
-  showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span });
+  showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span }, copy);
 });
 
 document.addEventListener("keydown", (event) => {
