@@ -850,7 +850,15 @@ permission. The chat then draws no turn of an ended session, which History reads
 button stands under the words 'This project has no live session.' near the centre of the view
 (KYO-969); the turns received are kept out of the page and drawn again if the session runs. The terminal drawer is a terminal on the session's pane, and needs the token to hold
 the `terminal` permission; without it the drawer shows the pane's text and the server's reason. While it is open the
-terminal covers the chat pane (KYO-753), which keeps its scroll place beneath.
+terminal covers the chat pane (KYO-753), which keeps its scroll place beneath. With no live
+session the drawer shows the project's orchestrator session, found by its tmux name
+(KYO-964): a session that Claude Code holds on its question whether to trust the folder has
+run no hook, so the server lists no session for it, and the question is answered there. When
+a start answers that the session waits on that question, the Start panel offers Open the
+terminal. Once Claude Code has begun, the chat follows the session and the drawer turns to its
+pane. The chat follows the session in the pane when its id changes (`/clear`, `/resume`), and
+while the session it shows is not live it asks for the project's sessions every three seconds
+and follows one that starts later, however it was started (KYO-966).
 Files and file links need it to hold the `files` permission. Config reads with a token of any
 permission, and its controls need the token to hold the `config` permission.
 
@@ -1052,6 +1060,19 @@ reply, a tag through the panel a gutter's context menu opens, and a file by a pa
 carries it, each as the page's own tests place them, since no `mouse` request reaches the
 page's menus and panels without tracking a native menu. The scenarios of the proposal that remain
 are planned and not built.
+
+`check/test_session_start.py` and `check/test_scenario_k.py` are a new session's start
+(KYO-964, KYO-965, KYO-966). The scripted session is started with Claude Code's trust question
+on its screen (`--trust-prompt`, described in its header under THE START), and so records
+nothing until it is answered. The first file runs against the test server alone: the
+orchestrator's terminal reaches the question by the project's session name and types only
+what it is sent, a first prompt of 794 characters is delivered in a pane of tmux's default
+80x24, where it scrolls the input box, and `/resume` changes the id of the session in the pane
+and is announced on the old session's stream. Scenario K makes the same steps in the check
+build: the Start panel offers the terminal, Return typed there answers the question and the
+chat follows the session, the first prompt is delivered from the composer, the chat and the
+terminal follow `/resume`, and a session started through the Start route by another device,
+after the followed one has ended, is followed within seconds.
 
 `check/test_scenario_b.py` and `check/test_scenario_c.py` are the lifecycle scenarios
 (KYO-948), with the project switcher's reading and driving in `check/lifecycle.py`. They start

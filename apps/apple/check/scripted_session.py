@@ -61,11 +61,28 @@ anything else. The rules, each measured of Claude Code and each with a test in
 4. A record's timestamp is the time of its event and not of its write, so the two differ
    wherever a record is held (``written_after``, and every question).
 
+THE START (KYO-964, KYO-965, KYO-966). With ``--trust-prompt`` the session opens on Claude
+Code's workspace-trust dialog, whose "Yes, I trust this folder" is what ``kyo orchestrator``
+and the server's reader recognise, and until it is answered it writes no process record,
+runs no hook and has no transcript, so the project records no session: the state the
+orchestrator's terminal exists for. ``1`` or Return answers yes and the session begins as
+it does without the flag; ``2`` or Escape answers no and it exits. Whether Claude Code writes
+its process record before the dialog is answered was not measured. The input box is drawn
+as 2.1.328 draws it (KYO-810): the text wrapped by word, at most a third of the pane's rows
+less two (seven in a pane of 24, as one capture of 2.1.328 at 80x24 showed), and, when it
+holds more, its first rows scrolled out above under the rule ``─── ↑ N more ───`` with the
+``❯`` row not drawn. How many rows Claude Code gives the box in a pane of another size was not
+measured. ``/resume`` makes the session another one in the same process and pane, as
+choosing a session in Claude Code's ``/resume`` picker does: a new session id and transcript
+beside the old one, the process record naming the new id, and ``SessionStart`` run with
+``"source": "resume"``. The picker is not drawn, the transcript begins empty, and whether
+Claude Code runs ``SessionEnd`` for the session left was not measured, so it is not run.
+
 WHAT IT DOES NOT REPRODUCE. A paste is put in the box as text; Claude Code folds one of four
 lines or more into a placeholder. A prompt submitted while a turn runs is recorded when the
 turn ends and then answered; where Claude Code puts such a prompt in the transcript was not
 measured for this program. There is no permission prompt, no subagent and no slash command
-other than ``/exit``. The model's own behaviour is the script.
+other than ``/exit`` and ``/resume``. The model's own behaviour is the script.
 
 THE LOG (``--log``) is one JSON line for each thing the session did, with the wall clock at
 that moment: every write to the transcript with the timestamps of the records in it, every
@@ -106,6 +123,15 @@ PROMPT_GROUND = "\x1b[48;5;237m"
 GROUND_OFF = "\x1b[49m"
 BOLD = "\x1b[1m"
 BOLD_OFF = "\x1b[0m"
+
+
+#: The trust dialog's option, as ``kyosei.cmd_controller.TRUST_PROMPT_TEXT`` matches it.
+TRUST_YES = "Yes, I trust this folder"
+
+
+def box_rows(rows: int) -> int:
+    """How many rows of text the input box shows in a pane of ``rows`` (see THE START)."""
+    return max(1, (rows - 2) // 3)
 
 
 class ScriptError(ValueError):
@@ -292,6 +318,8 @@ class Session:
         self.playing: Iterator[float] | None = None
         self.due = 0.0
         self.running = True
+        #: Whether the trust dialog holds the screen; nothing is recorded while it does.
+        self.trusting = bool(getattr(arguments, "trust_prompt", False))
 
     # ------------------------------------------------------------------ records and hooks
 
@@ -423,6 +451,25 @@ class Session:
         except OSError:
             columns, rows = 80, 24
         rule = f"\x1b[38;5;244m{'─' * columns}{RESET}"
+        if self.trusting:
+            lines = [
+                rule,
+                f" {BOLD}Accessing workspace:{BOLD_OFF}",
+                "",
+                f" {self.cwd}",
+                "",
+                " Quick safety check: Is this a project you created or one you trust? (Like your",
+                " own code, a well-known open source project, or work from your team).",
+                "",
+                f" {GREY}❯{RESET} 1. {TRUST_YES}",
+                "   2. No, exit",
+                "",
+                f" {GREY}Enter to confirm · Esc to cancel{RESET}",
+            ]
+            shown = lines[-rows:]
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(shown))
+            sys.stdout.flush()
+            return
         lines = [
             f"{SALMON} ▐▛███▛█{RESET}   {BOLD}Claude Code{BOLD_OFF} {GREY}v{VERSION}{RESET}",
             f"{SALMON}▝▜██████▀{RESET}  {GREY}Scripted · check harness{RESET}",
@@ -442,12 +489,17 @@ class Session:
         else:
             if self.mode == "working":
                 lines += ["", f"{SALMON}✻{RESET} {GREY}{self.working_row()}{RESET}", ""]
-            typed = self.text.split("\n")
-            lines.append(rule)
+            typed = wrap(self.text, columns - 2, "❯ ", "  ")
+            hidden = max(0, len(typed) - box_rows(rows))
+            if hidden:
+                above = f"─── ↑ {hidden} more "
+                lines.append(f"\x1b[38;5;244m{above}{'─' * (columns - len(above))}{RESET}")
+            else:
+                lines.append(rule)
             lines += [
                 f"{GREY}❯ {RESET}{line}" if index == 0 else f"  {line}"
                 for index, line in enumerate(typed)
-            ]
+            ][hidden:]
             lines.append(rule)
             footer = "  ⏵⏵ auto mode on"
             if self.shells:
@@ -732,7 +784,23 @@ class Session:
 
     # ------------------------------------------------------------------------- the keys
 
+    def answer_trust(self, data: str) -> None:
+        """The trust dialog's keys: yes begins the session, no ends the process."""
+        for key in data:
+            if key in ("1", "\r"):
+                self.trusting = False
+                self.log("trusted")
+                self.begin()
+                return
+            if key in ("2", "\x1b"):
+                self.log("not-trusted")
+                self.running = False
+                return
+
     def keys(self, data: str) -> None:
+        if self.trusting:
+            self.answer_trust(data)
+            return
         index = 0
         while index < len(data) and self.running:
             rest = data[index:]
@@ -802,6 +870,8 @@ class Session:
         self.text = ""
         if text.strip() == "/exit":
             self.running = False
+        elif text.strip() == "/resume" and self.mode != "working":
+            self.resume()
         elif self.mode == "working":
             self.queued.append(text)
             self.log("queued", text=text)
@@ -814,17 +884,42 @@ class Session:
         elif self.mode == "working":
             self.interrupt()
 
+    def resume(self) -> None:
+        """``/resume``: the process becomes another session, beside the one it was."""
+        previous = self.session_id
+        self.session_id = str(uuid.uuid4())
+        self.transcript = self.transcript.with_name(f"{self.session_id}.jsonl")
+        self.transcript.touch()
+        self.last_uuid = None
+        self.history = []
+        self.register("idle")
+        self.log(
+            "resumed", session_id=self.session_id, previous=previous,
+            transcript=str(self.transcript),
+        )  # fmt: skip
+        self.show("idle")
+        self.hook("sessions", "SessionStart", source="resume")
+
     # ------------------------------------------------------------------------- the loop
 
-    def run(self) -> None:
+    def begin(self) -> None:
+        """What Claude Code does once it has begun: the process record, the transcript, the
+        idle screen and the ``SessionStart`` hook."""
         self.transcript.touch()
         self.register("idle")
         self.log(
             "started", session_id=self.session_id, pid=self.pid, transcript=str(self.transcript)
         )
-        sys.stdout.write("\x1b[?2004h")  # bracketed paste, which the server's paste relies on
         self.show("idle")
         self.hook("sessions", "SessionStart", source="startup")
+
+    def run(self) -> None:
+        sys.stdout.write("\x1b[?2004h")  # bracketed paste, which the server's paste relies on
+        if self.trusting:
+            self.log("trust-prompt", cwd=self.cwd)
+            self.show("trust-prompt")
+        else:
+            self.begin()
         pending = b""
         while self.running:
             now = time.monotonic()
@@ -852,7 +947,8 @@ class Session:
             elif self.mode == "working" and not ready and self.working_words is None:
                 self.draw()  # the row's seconds
         self.log("ended")
-        self.hook("sessions", "SessionEnd", reason="prompt_input_exit")
+        if not self.trusting:  # a session never begun has nothing to end
+            self.hook("sessions", "SessionEnd", reason="prompt_input_exit")
 
 
 class _Interrupted(Exception):
@@ -865,6 +961,10 @@ def main() -> int:
     parser.add_argument("--config", required=True, help="the run's Claude config directory")
     parser.add_argument("--kyosei-home", required=True, help="the run's KYOSEI_HOME")
     parser.add_argument("--log", help="where the session logs what it did")
+    parser.add_argument(
+        "--trust-prompt", action="store_true",
+        help="open on the workspace-trust dialog, as Claude Code does in a new folder",
+    )  # fmt: skip
     arguments = parser.parse_args()
     document = json.loads(Path(arguments.script).read_text("utf-8")) if arguments.script else {}
     turns, named = check_script(document)
