@@ -14,6 +14,7 @@ import {
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
 import { highlight, render } from "./pipeline";
+import { emphasis, type Piece } from "./emphasis";
 import { chipPieces } from "./chipwords";
 import { TAG_RULE, tagCharRefused, tagName, tagProblem } from "./tags";
 import {
@@ -584,6 +585,26 @@ function drawAnswers(turn: Turn): HTMLElement[] | null {
   return drawn;
 }
 
+/**
+ * KYO-967: the nodes of a prompt line's emphasis. The markers stay in the text, in a span drawn
+ * at no width, so that the drawn text, a selection of it and an anchor's measure of it are what
+ * was typed; only the look changes.
+ */
+function drawEmphasis(pieces: Piece[]): Node[] {
+  const mark = (text: string) => Object.assign(document.createElement("span"), { className: "md-mark", textContent: text });
+  return pieces.map((piece): Node => {
+    if (piece.kind === "text") return document.createTextNode(piece.text);
+    if (piece.kind === "code") {
+      const code = document.createElement("code");
+      code.append(mark("`"), piece.text.slice(1, -1), mark("`"));
+      return code;
+    }
+    const wrap = document.createElement(piece.kind === "strong" ? "strong" : "em");
+    wrap.append(mark(piece.marker), ...drawEmphasis(piece.body), mark(piece.marker));
+    return wrap;
+  });
+}
+
 function drawTurn(turn: Turn, session?: string): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
@@ -605,7 +626,10 @@ function drawTurn(turn: Turn, session?: string): HTMLElement {
   // around it stays as it was sent, which is what an anchor on this prompt measures against.
   let plain: string[] = [];
   const flush = (last: boolean) => {
-    if (plain.length) element.append(document.createTextNode(plain.join("\n") + (last ? "" : "\n")));
+    plain.forEach((text, index) => {
+      element.append(...drawEmphasis(emphasis(text)));
+      if (index < plain.length - 1 || !last) element.append(document.createTextNode("\n"));
+    });
     plain = [];
   };
   for (const [index, line] of (turn.text ?? "").split("\n").entries()) {
