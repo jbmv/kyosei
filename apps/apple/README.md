@@ -209,8 +209,9 @@ is kept by the box as its id and thumbnail, and its file stays under the session
 attached in; the server finds the file there when the prompt is sent from a later session
 (KYO-920). An anchor made
 in a session other than the one shown is sent as its line of words, which the server reads
-from the session the anchor names. Its chip in the composer is drawn dimmed with a dashed
-outline and takes no press, because the chat on screen has no place for it to open. The choice
+from the session the anchor names. Its chip in the composer is drawn with a dashed outline,
+since the chat on screen has no place for it, and a press on it opens that session in the
+History reader at the anchored passage (KYO-972). The choice
 of draft is `DraftPlace` in `SessionFeed.swift`, and the page's part is in `web/src/projects.ts`.
 
 ### The prompt and the scratchpads
@@ -726,6 +727,14 @@ leaves a Results button in the top bar that returns to the list. The side bar li
 results opened most recently as the server keeps them, so that every device shows the same
 list. Command-Shift-F opens the view. It needs a device token of any permission and a project
 that has opted in to reading transcripts. The logic is in `web/src/searchhistory.ts`, and the
+view itself is drawn in `web/src/chat.ts`.
+
+A prompt or reply in the reader is anchored as one in the chat is (KYO-972): a right-click
+offers Anchor and Copy, and anchor mode takes a press on it. The anchor names the session the
+reader holds, so a prompt written in a new session can refer to a passage of an earlier one.
+The server sends it as the line for another session's turn, `on your reply <uuid> in session
+<id> "..."`, and the receiving session finds the passage with `kyo transcripts search` on the
+quoted words. The composer's chip for such an anchor opens History at the passage.
 
 
 ### Config
