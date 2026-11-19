@@ -8,6 +8,16 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-19** — `KYO-972` (task) — History: a passage of a past session can be anchored
+- **2026-11-19** — `KYO-971` (task) — Right pane: no top bar; a 'Create scratchpad…' line under the scratchpads
+- **2026-11-19** — `KYO-969` (task) — Chat: a project with no live session shows the start panel alone, centred
+- **2026-11-19** — `KYO-968` (task) — Chat: the right-click menu offers Copy below Anchor
+- **2026-11-19** — `KYO-967` (task) — Chat: the person's own prompts show inline markdown emphasis
+- **2026-11-19** — `KYO-966` (bug) — After /resume in the terminal the app loses the session's terminal until the project is switched
+- **2026-11-19** — `KYO-965` (bug) — The first prompt to a new project's session is not delivered from the app
+- **2026-11-19** — `KYO-963` (bug) — The attach command Kyosei prints fails in zsh, which expands `=PREFIX`
+- **2026-11-19** — `KYO-962` (bug) — A background agent with subagents of its own is not shown as background work
+- **2026-11-19** — `KYO-961` (bug) — A prompt sent while the terminal shows a subagent meets a warning that does not say so
 - **2026-11-16** — `KYO-959` (task) — Mac app: the Config view's controls and the request to the session
 - **2026-11-15** — `KYO-953` (task) — Mac app: the Config view, reading only
 - **2026-11-11** — `KYO-468` (bug) — setTypeOfService EINVAL uncaught in the new app: its kyo serve client uses undici fetch, which the old code avoided in this Electron
@@ -660,6 +670,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-19** — `KYO-810` (bug) — A prompt sent from the laptop was typed into the session's pane but not submitted
 - **2026-11-16** — `KYO-951` (plan) — Config view in the Mac app (proposal KYO-950)
 - **2026-11-15** — `KYO-950` (proposal) — Mac app: a config menu for project and machine settings
 - **2026-11-15** — `KYO-948` (task) — Mac app check harness: the lifecycle scenarios
