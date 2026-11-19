@@ -80,6 +80,12 @@ inside a server that was already running from the desktop login can read it,
 because the server spawns the session. Such a session still has a bare PATH, so
 the login shell builds your PATH before claude starts.
 
+A new session's window is created at 160 columns by 50 rows (KYO-965). A detached session
+otherwise keeps tmux's `default-size`, 80x24 unless configured, until a client first
+attaches; at that size Claude Code's input box shows seven rows, and the chat reads a reply
+in progress from a screen 80 columns wide. A terminal that attaches later sizes the window as
+before.
+
 On macOS, run this once in a terminal on the machine itself:
 
 ```sh

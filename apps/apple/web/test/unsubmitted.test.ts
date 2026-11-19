@@ -40,6 +40,30 @@ test("a prompt typed and not submitted is said to be, with what to do", async (t
   assert.deepEqual([shown.sendNow, shown.edit], [false, true]);
 });
 
+test("the message is the failed session's: another session or project does not show it", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await page.reload();
+  const notSubmitted = {
+    outcome: "held", id: "m1",
+    held: { id: "m1", state: "held", retrying: false, reason: "not-submitted", detail },
+  };
+  const shown = await page.run<Box[]>(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.held(${JSON.stringify(notSubmitted)});
+    const failed = ${box};
+    // KYO-965: the app turns to another session of the project, one that is not live and so
+    // sends no ready event of its own.
+    window.kyo.clear();
+    const other = ${box};
+    window.kyo.held(${JSON.stringify(notSubmitted)});
+    window.kyo.project({ project: "q", scope: "server/q" });
+    return [failed, other, ${box}];
+  })()`);
+  assert.equal(shown[0].hidden, false);
+  assert.deepEqual([shown[1].hidden, shown[1].text], [true, ""]);
+  assert.deepEqual([shown[2].hidden, shown[2].text], [true, ""]);
+});
+
 test("a page opened later is told the same from the stream's first event", async (t) => {
   if (!page) return t.skip("no Chrome here");
   await page.reload();

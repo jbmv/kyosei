@@ -1788,6 +1788,8 @@ const kyo = {
     endAnchorMode();
     turnsLoaded = false;
     dropSentPreview();
+    // KYO-965: a held message is the session's, and the session read next states its own.
+    showHeld(null);
     unseen = 0;
     // Another session's state is no change of this one's, so it does not bounce the Dock.
     waitingSeen = null;

@@ -151,6 +151,16 @@ TRUST_STABLE_READS = 4
 #: How long one tmux command is given.
 TMUX_TIMEOUT_SECONDS = 10
 
+#: The size a new session's window is created at (KYO-965). A detached session otherwise
+#: takes tmux's ``default-size``, 80x24 unless configured, and keeps it until a client first
+#: attaches. At 80x24, with Claude Code's start banner on screen, Claude Code 2.1.328 gave the
+#: input box seven rows, so a first prompt of 794 characters scrolled the box, and the chat
+#: read the reply in progress from a screen 80 columns wide. Sessions that had been attached
+#: from the app measured 158x63. A client that attaches later sizes the window as before;
+#: the app's terminal, attached with ``ignore-size``, does so only when it is the one client.
+START_COLUMNS = 160
+START_ROWS = 50
+
 #: ``list-panes`` fields; the path is last because it may hold anything.
 PANE_FORMAT = (
     "#{session_name}\t#{pane_dead}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}"
@@ -558,7 +568,8 @@ def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> di
         )  # fmt: skip
     else:
         done = tmux.run(
-            "new-session", "-d", "-s", session, "-c", str(project.root), *program,
+            "new-session", "-d", "-s", session, "-c", str(project.root),
+            "-x", str(START_COLUMNS), "-y", str(START_ROWS), *program,
             ";", "set-option", "-w", "-t", f"={session}:", "remain-on-exit", "off",
             ";", "set-option", "-t", f"={session}:", COMMAND_OPTION, spelled,
         )  # fmt: skip

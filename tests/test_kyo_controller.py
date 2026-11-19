@@ -153,6 +153,17 @@ def test_start_creates_a_detached_session_named_for_the_project_running_claude(
     assert int(pane_pid) == data["pid"]
 
 
+def test_kyo965_a_new_session_is_created_at_the_start_size_and_not_tmuxs_default(
+    env, registered: Path
+) -> None:
+    """A detached session keeps the size it is made at until a client attaches."""
+    assert invoke(["controller", "start", "proj"]).code == 0
+    size = tmux(env["socket"], "display-message", "-p", "-t", "=TST:",
+                "#{window_width}x#{window_height}")  # fmt: skip
+    assert size.stdout.strip() == f"{cmd_controller.START_COLUMNS}x{cmd_controller.START_ROWS}"
+    assert tmux(env["socket"], "show-options", "-gv", "default-size").stdout.strip() == "80x24"
+
+
 def test_the_real_program_is_a_login_zsh_that_execs_claude() -> None:
     assert cmd_controller.LOGIN_SHELL == ("/bin/zsh", "-lc")
     assert cmd_controller.controller_program(["claude", "--remote-control", "KYO"]) == [
