@@ -95,6 +95,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
+| `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967) |
 | `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
 | `web/src/agents.ts` | how a subagent is named under the composer and in the side panel |
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
@@ -245,11 +246,12 @@ those lines is indented. On a line that can fold the panel also holds Fold, or U
 folded one, which acts as Command-Option-[ and Command-Option-] do at the caret. The panel
 stays open after each of these, so that a second press acts again.
 
-The boxes above it are scratchpads, for notes kept while a prompt is not ready. The + button
-adds one, with the caret in its text. A scratchpad's head shows the first line of its text that
+The boxes above it are scratchpads, for notes kept while a prompt is not ready. A line reading
+'Create scratchpad…', under the scratchpads and alone when there are none, adds one, with the caret
+in its text, on a press or on Return when it has the focus (KYO-971). A scratchpad's head shows the first line of its text that
 holds words (KYO-917), which is edited in the text and cannot be edited in the head. One
 scratchpad is open at a time and the others are collapsed to their heads (KYO-936): putting
-the caret in one, or adding one with +, opens it and collapses the rest, a press on a
+the caret in one, or adding one with that line, opens it and collapses the rest, a press on a
 collapsed head opens that one with the caret in it, and a press on the open head collapses
 it. It has no Send. Its button moves its whole text, the first line included, with its
 anchors, attachments, tags and folds into the prompt, a file still uploading included
@@ -327,7 +329,7 @@ scratchpads and the prompt (KYO-925). The section in use is the one the focus la
 and the prompt when the page opens; it changes when the focus enters another section, and not
 when the focus leaves the composer. It grows as its content needs, to all that the other two sections' summaries leave of the
 column, and scrolls within itself beyond that (KYO-925, KYO-935). The scratchpads in use stop
-when the task list's top stands a small padding below the bar that holds the + button; the
+when the task list's top reaches the pane's top, which the column has no bar above (KYO-971); the
 task list and the prompt in use stop at the same place, so that the other two sections' lines
 remain whole and on screen. Each other section is drawn as a summary of about one
 line: the task list as the first three of the person's unchecked items, one line each, and an italic
@@ -545,8 +547,12 @@ chat stays drawn beneath the others and keeps following its session, so returnin
 reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the elements of
 `web/static/chat.html` marked with its `data-view`.
 
-The Chat item is amber, in every view and Chat's own included, while the followed session
-waits on the person and no subagent or background shell runs (KYO-922). The page counts the
+The project's name in the views bar is amber, in every view, while the followed session
+waits on the person and no subagent or background shell runs (KYO-922, KYO-970); the Chat item
+no longer changes colour. A project in the bar's list of the other projects' sessions is amber
+when its own live session waits: the server's session list states each row's `screen_state` and
+`background`, `SessionRow.waiting` in `ServeClient.swift` reads them as the page does, and the
+projects frame carries the result as `waiting`. The page counts the
 session as waiting when it is live, its pane has been read, and either nothing runs or the
 terminal shows a question or a permission prompt. The same wait makes the line under the
 composer red and has the app keep its Dock icon bouncing while another app is in front, until
@@ -840,7 +846,9 @@ permission reads, and the app sends it on every session read. With no token, or 
 server refuses, the chat says that a token is needed and how to issue one. Sending needs the
 token to hold the `send` permission. A project with
 no live session is shown a Start orchestrator button, which needs the token to hold the `start`
-permission. The terminal drawer is a terminal on the session's pane, and needs the token to hold
+permission. The chat then draws no turn of an ended session, which History reads, and the
+button stands under the words 'This project has no live session.' near the centre of the view
+(KYO-969); the turns received are kept out of the page and drawn again if the session runs. The terminal drawer is a terminal on the session's pane, and needs the token to hold
 the `terminal` permission; without it the drawer shows the pane's text and the server's reason. While it is open the
 terminal covers the chat pane (KYO-753), which keeps its scroll place beneath.
 Files and file links need it to hold the `files` permission. Config reads with a token of any

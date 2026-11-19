@@ -96,7 +96,7 @@ test("+ adds a scratchpad with the caret in its text, headed by its first line, 
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
-    await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    await page.run(`(() => { ${START} document.getElementById("new-scratch").click(); })()`);
     // An empty scratchpad is headed "Scratchpad", and the caret is in its text.
     assert.equal((await page.run<{ words: string }>(HEAD)).words, "Scratchpad");
     assert.deepEqual((await page.run<{ kind: string; focused: boolean }[]>(`window.kyo.composer.boxes()`))
@@ -212,7 +212,7 @@ test("one scratchpad is open at a time: the caret put in one, or + adding one, o
     assert.equal(await page.run(`${saved} ?? null`), null);
     // + adds one, open, with the caret in it.
     await page.run(`window.kyo.composer.select(0, 0)`);
-    await page.run(`document.getElementById("new-prompt").click()`);
+    await page.run(`document.getElementById("new-scratch").click()`);
     assert.deepEqual(await page.run(OPEN), [false, false, false, true]);
     assert.equal(await page.run(FOCUSED), 3);
     // The caret in the prompt leaves the open one open, for when the scratchpads are gone back
@@ -554,7 +554,7 @@ test("Tab and Shift-Tab indent and outdent the caret's line or the selected line
   try {
     await page.reload();
     const read = `(() => { const a = window.kyo.composer.boxes().find((box) => box.focused); return a ? [a.text, a.from, a.to, a.kind === "scratch"] : null; })()`;
-    await page.run(`(() => { ${START} document.getElementById("new-prompt").click();
+    await page.run(`(() => { ${START} document.getElementById("new-scratch").click();
       window.kyo.composer.select(0, 0); })()`);
     await page.type("plain");
     await page.press("Tab");  // not a list item: indented all the same, and the caret stays
@@ -699,7 +699,7 @@ test("Create prompt on a scratchpad of one line moves that line, which headed it
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
-    await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    await page.run(`(() => { ${START} document.getElementById("new-scratch").click(); })()`);
     await page.type("Create prompt test");  // the caret is in the text after +
     assert.equal((await page.run<{ words: string }>(HEAD)).words, "Create prompt test");
     await page.run(`document.querySelector(".box-create").click()`);
@@ -730,13 +730,13 @@ test("a scratchpad that holds no words and no marks leaves when the caret is put
 
     // Another scratchpad's caret takes an abandoned one too: + adds an empty scratchpad, and
     // the caret put in another scratchpad removes it.
-    await page.run(`document.getElementById("new-prompt").click()`);
+    await page.run(`document.getElementById("new-scratch").click()`);
     assert.equal((await page.run<string[]>(IDS)).length, 4);
     await page.run(into(0));
     assert.deepEqual(await page.run(IDS), ["words", "marked", "p"]);
 
     // The reminder list's fields take it as well.
-    await page.run(`document.getElementById("new-prompt").click()`);
+    await page.run(`document.getElementById("new-scratch").click()`);
     assert.equal((await page.run<string[]>(IDS)).length, 4);
     await page.run(`window.kyo.agenda({ state: "shown", session_id: "s", items: [], etag: null })`);
     await page.run(`document.getElementById("agenda-summary").click()`);
@@ -748,7 +748,7 @@ test("an empty scratchpad stays while the caret is in it and while the focus is 
   const page = await openPage(); if (!page) return t.skip("no Chrome here");
   try {
     await page.reload();
-    await page.run(`(() => { ${START} document.getElementById("new-prompt").click(); })()`);
+    await page.run(`(() => { ${START} document.getElementById("new-scratch").click(); })()`);
     assert.deepEqual((await page.run<string[]>(IDS)).length, 2);
     // Its text emptied while the caret is in it: it stays.
     await page.type("x");
@@ -799,7 +799,7 @@ test("Command-Z after a move still restores the scratchpad it emptied when an em
     await openPads(page, []);
     // An empty scratchpad added last holds the caret; Create prompt on the first moves it into
     // the prompt and puts the caret there, which takes the empty one away in the same redraw.
-    await page.run(`document.getElementById("new-prompt").click()`);
+    await page.run(`document.getElementById("new-scratch").click()`);
     const before = await page.run(HELD);
     await page.run(`document.querySelectorAll("#boxes .box.scratch .box-create")[0].click()`);
     assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.map((box) => box[0]), ["scratch", "scratch", "prompt"]);
@@ -810,5 +810,61 @@ test("Command-Z after a move still restores the scratchpad it emptied when an em
     assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.length, before ? 5 : 0);
     await redo(page);
     assert.deepEqual((await page.run<{ boxes: unknown[][] }>(HELD)).boxes.map((box) => box[0]), ["scratch", "scratch", "prompt"]);
+  } finally { await page.close(); }
+});
+
+// KYO-971.c1: the right pane has no top bar and no + button, and its first element starts at its top.
+test("the right pane has no top bar and its first element starts at the pane's top (KYO-971.c1)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START} })()`);
+    const seen = await page.run<{ bar: boolean; plus: boolean; top: number; first: number }>(`(() => {
+      const first = [...document.getElementById("composer").children].find((e) => e.getBoundingClientRect().height > 0);
+      return { bar: Boolean(document.getElementById("composer-top")), plus: Boolean(document.getElementById("new-prompt")),
+        top: Math.round(document.getElementById("composer").getBoundingClientRect().top),
+        first: Math.round(first.getBoundingClientRect().top) };
+    })()`);
+    assert.equal(seen.bar, false);
+    assert.equal(seen.plus, false);
+    assert.equal(seen.first, seen.top);
+  } finally { await page.close(); }
+});
+
+// KYO-971.c2: one line under the scratchpads, alone when there are none, makes a scratchpad.
+test("'Create scratchpad…' stands under the scratchpads and opens a new one with the caret in it, by click or Return (KYO-971.c2)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => { ${START} })()`);
+    const place = `(() => { const l = document.getElementById("new-scratch"); const s = document.getElementById("scratches");
+      const m = document.querySelector("#boxes > .box.main"); return { text: l.textContent, color: getComputedStyle(l).color,
+        count: s.querySelectorAll(":scope > .box").length, top: Math.round(l.getBoundingClientRect().top),
+        scratchesBottom: Math.round(s.getBoundingClientRect().bottom), mainTop: Math.round(m.getBoundingClientRect().top),
+        shown: l.getBoundingClientRect().height > 0, focusable: l.tabIndex === 0,
+        caretInScratch: Boolean(document.activeElement?.closest("#scratches .box.scratch")) }; })()`;
+    const alone = await page.run<any>(place);
+    assert.equal(alone.text, "Create scratchpad…");
+    assert.equal(alone.count, 0);
+    assert.equal(alone.shown, true);
+    assert.equal(alone.focusable, true);
+    assert.ok(alone.top < alone.mainTop, JSON.stringify(alone));
+    // It has the colour of an empty box's placeholder.
+    await page.run(`document.getElementById("new-scratch").click()`);
+    const color = await page.run<string>(`getComputedStyle(document.querySelector("#scratches .cm-placeholder") ?? document.getElementById("new-scratch")).color`);
+    const after = await page.run<any>(place);
+    assert.equal(after.count, 1);
+    assert.equal(after.caretInScratch, true);
+    assert.ok(after.top >= after.scratchesBottom - 1, JSON.stringify(after));
+    assert.equal(after.color, alone.color);
+    assert.equal(color, alone.color);
+    // An empty scratchpad is an abandoned one, which a later one takes away, so this one has words.
+    await page.type("notes");
+    // Return on the focused line does the same.
+    await page.run(`document.getElementById("new-scratch").focus()`);
+    await page.press("Enter");
+    const again = await page.run<any>(place);
+    assert.equal(again.count, 2);
+    assert.equal(again.caretInScratch, true);
   } finally { await page.close(); }
 });

@@ -7,7 +7,12 @@
 export interface ProjectRow { name: string; can_open: boolean; problem: string | null }
 
 /** A session a process is running on, from the project's own list. */
-export interface LiveSession { session_id: string; title: string | null; has_pane: boolean }
+export interface LiveSession {
+  session_id: string; title: string | null; has_pane: boolean;
+  /** Whether the session waits on the person with nothing running (KYO-970), as the server's
+   *  session list says it: a pane read, not working, and no background work. */
+  waiting?: boolean;
+}
 
 /** What the app says of the server's projects, sent again whenever any of it changes. */
 export interface ProjectsFrame {
@@ -61,6 +66,8 @@ export interface SessionLink {
   title: string | null;
   /** Whether the project is the window's own, which the bar marks. */
   current: boolean;
+  /** Whether the session the link follows waits on the person (KYO-970). */
+  waiting: boolean;
 }
 
 /** A link for each project with a live orchestrator session, in the server's order. */
@@ -70,7 +77,7 @@ export function sessionLinks(frame: ProjectsFrame | null): SessionLink[] {
     return session
       ? [{
         project: row.name, session: session.session_id, title: session.title,
-        current: row.name === frame!.project,
+        current: row.name === frame!.project, waiting: session.waiting === true,
       }]
       : [];
   });

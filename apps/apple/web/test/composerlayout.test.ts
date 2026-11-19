@@ -284,7 +284,7 @@ test("the scratchpads in use fill what the list's summary and the prompt's leave
       const edges = await page.run<{ bar: number; padding: number; scrollable: boolean; summary: number; promptTop: number }>(`(() => {
         const column = document.getElementById("boxes");
         const scratches = document.getElementById("scratches");
-        return { bar: Math.round(document.getElementById("composer-top").getBoundingClientRect().bottom),
+        return { bar: Math.round(document.getElementById("composer").getBoundingClientRect().top),
           padding: parseFloat(getComputedStyle(column).borderTopWidth),
           scrollable: scratches.scrollHeight > scratches.clientHeight + 1,
           summary: Math.round(document.getElementById("agenda-summary").getBoundingClientRect().height),
@@ -301,7 +301,7 @@ test("the scratchpads in use fill what the list's summary and the prompt's leave
       assert.ok(each.seen.scratches.height > each.seen.column * 0.7, JSON.stringify(each.seen));
       // The list stands a small fixed padding below the bar, drawn whole.
       assert.equal(each.seen.agenda.top - each.bar, each.padding);
-      assert.ok(each.padding > 0 && each.padding <= 16, String(each.padding));
+      assert.equal(each.padding, 0);
       assert.ok(each.seen.agenda.height > 0 && each.seen.peek.every((line) => line.shown), JSON.stringify(each));
       // The scratchpads scroll within themselves, and the prompt's summary is whole.
       assert.equal(each.scrollable, true);
@@ -332,7 +332,7 @@ test("the prompt and the list in use fill what the other two summaries leave (KY
     })()`);
     const edges = `(() => {
       const scrolls = (id) => { const e = document.querySelector(id); return e.scrollHeight > e.clientHeight + 1; };
-      return { bar: Math.round(document.getElementById("composer-top").getBoundingClientRect().bottom),
+      return { bar: Math.round(document.getElementById("composer").getBoundingClientRect().top),
         padding: parseFloat(getComputedStyle(document.getElementById("boxes")).borderTopWidth),
         promptScrolls: (() => { const b = document.querySelector("#boxes > .box.main .box-body"); return b.scrollHeight > b.clientHeight + 1; })(),
         agendaScrolls: scrolls("#agenda") };

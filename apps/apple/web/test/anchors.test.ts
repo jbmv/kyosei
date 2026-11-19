@@ -141,7 +141,7 @@ test("a removed anchor leaves the chat at once, and another box's anchor on the 
   const opened = await open();
   // Two boxes anchored to the same words, and the first also to a list item.
   // The first is a scratchpad, which + adds above the prompt (KYO-903); the second is the prompt.
-  await opened.run(`document.getElementById("new-prompt").click()`);
+  await opened.run(`document.getElementById("new-scratch").click()`);
   await opened.run(`window.kyo.composer.select(0, 0)`);
   await opened.type("one");
   await anchor(opened, "#chat .reply p");
@@ -333,7 +333,7 @@ async function typedPrompt(opened: Page): Promise<void> {
     }));
     document.querySelector(${JSON.stringify(entry)}).click();
   })()`);
-  await rightClick("#chat .reply p", "#anchor-menu button:not(.anchor-new)");
+  await rightClick("#chat .reply p", "#anchor-menu button:not(.anchor-new):not(.anchor-copy)");
   // A tag on the first paragraph, from the panel its ghost + opens.
   await opened.run(`(() => {
     const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
@@ -435,4 +435,52 @@ test("a file pasted or dropped is attached to its paragraph as an undo step, and
   })()`);
   await opened.run(`window.kyo.dropPaths({ paths: ["/Users/someone/other.md"], x: ${chat.x}, y: ${chat.y} })`);
   assert.equal((await shown(opened)).boxes[0].text, "first/Users/someone/notes.md\nsecond");
+});
+
+/** Right-clicks a chat element, with the words of its first text node from `from` to `to` selected when given. */
+const menuAt = (opened: Page, selector: string, select?: [number, number]) => opened.run<{ entries: string[]; copies: string[] }>(`(() => {
+  const target = document.querySelector(${JSON.stringify(selector)});
+  const box = target.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, clientX: box.left + 30, clientY: box.top + box.height / 2 };
+  window.posted.length = 0;
+  getSelection().removeAllRanges();
+  target.dispatchEvent(new MouseEvent("mousedown", { ...at, button: 2 }));
+  if (${JSON.stringify(select ?? null)}) {
+    const [from, to] = ${JSON.stringify(select ?? [0, 0])};
+    const text = document.createTreeWalker(target, NodeFilter.SHOW_TEXT).nextNode();
+    const range = document.createRange(); range.setStart(text, from); range.setEnd(text, to);
+    getSelection().removeAllRanges(); getSelection().addRange(range);
+    target.dispatchEvent(new MouseEvent("mousedown", { ...at, button: 2 }));
+  }
+  target.dispatchEvent(new MouseEvent("contextmenu", at));
+  const entries = [...document.querySelectorAll("#anchor-menu > *")].map((e) => e.className.replace(/ ?(anchor-new|anchor-copy)/, "") || e.textContent);
+  const order = [...document.querySelectorAll("#anchor-menu > *")].map((e) => e.classList.contains("anchor-new") ? "Anchor"
+    : e.classList.contains("anchor-copy") ? "Copy" : e.className === "anchor-heading" ? "Anchor to" : "line");
+  document.querySelector("#anchor-menu .anchor-copy")?.click();
+  return { entries: order, copies: window.posted.filter((m) => m.name === "copy").map((m) => m.body.text) };
+})()`);
+
+test("the chat's right-click menu has Copy directly below Anchor and above the Anchor to list (KYO-968.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  await opened.type("one");
+  await opened.press("Enter");
+  await opened.type("two");
+  const seen = await menuAt(opened, "#chat .reply p");
+  assert.deepEqual(seen.entries.slice(0, 3), ["Anchor", "Copy", "Anchor to"]);
+  assert.ok(seen.entries.slice(3).every((entry) => entry === "line"), seen.entries.join());
+});
+
+test("Copy puts the selection on the pasteboard, or with none the span's text (KYO-968.c2)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await open();
+  // With words selected: those words, through the app's copy message.
+  let seen = await menuAt(opened, "#chat .reply p", [6, 15]);
+  assert.deepEqual(seen.copies, ["paragraph"]);
+  // With none: the text of the span an anchor would mark, which here is the sentence under the pointer.
+  seen = await menuAt(opened, "#chat .reply p");
+  assert.deepEqual(seen.copies, [FIRST]);
+  // A prompt's span is as typed.
+  seen = await menuAt(opened, "#chat .turn");
+  assert.deepEqual(seen.copies, ["A prompt of several words."]);
 });

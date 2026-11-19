@@ -55,15 +55,36 @@ public struct SessionRow: Decodable, Sendable {
     public let cwd: String?
     /// The title the session's transcript holds, or none.
     public let title: String?
+    /// What the session's pane shows it doing (`working`, `idle`, a question), or nil when no
+    /// pane was read. The server states it in each row of the session list.
+    public let screen_state: String?
+    /// Whether anything runs in the background, from the pane, or nil when none was read.
+    public let background: Background?
+
+    public struct Background: Decodable, Equatable, Sendable {
+        public let running: Bool
+
+        public init(running: Bool) { self.running = running }
+    }
 
     public init(
-        session_id: String, live: Bool, has_pane: Bool, cwd: String? = nil, title: String? = nil
+        session_id: String, live: Bool, has_pane: Bool, cwd: String? = nil, title: String? = nil,
+        screen_state: String? = nil, background: Background? = nil
     ) {
         self.session_id = session_id
         self.live = live
         self.has_pane = has_pane
         self.cwd = cwd
         self.title = title
+        self.screen_state = screen_state
+        self.background = background
+    }
+
+    /// The live session waits on the person with nothing running (KYO-970): its pane was read
+    /// and shows it doing nothing, and no subagent or background shell is running. It is the
+    /// state the page draws as "Waiting for you…" for the session it follows.
+    public var waiting: Bool {
+        live && screen_state != nil && screen_state != "working" && background?.running != true
     }
 }
 
@@ -104,7 +125,7 @@ public enum ProjectsFrame {
                 rows.filter(\.live).map { row -> [String: Any] in
                     [
                         "session_id": row.session_id, "title": row.title ?? NSNull(),
-                        "has_pane": row.has_pane,
+                        "has_pane": row.has_pane, "waiting": row.waiting,
                     ]
                 }
             },

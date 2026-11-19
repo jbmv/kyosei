@@ -87,3 +87,62 @@ test("the views bar links the other projects' live sessions, not the window's ow
     await page.close();
   }
 });
+
+// KYO-970: the project's name in the views bar, not the Chat item, is amber while the session waits.
+test("the project's name is amber when its session waits for the person, and the Chat item is not (KYO-970.c1, c2)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`(() => {
+      window.kyo.project({ project: "p", scope: "server/p" });
+      window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+        { session_id: "S1", title: "t", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null } ] } });
+    })()`);
+    const read = () => page.run<{ name: string; colour: string; button: string; title: string; chat: string; chatTitle: string; chatClass: string; amber: string }>(`(() => {
+      const probe = Object.assign(document.createElement("i"), { style: "color: var(--amber)" }); document.body.append(probe);
+      const chat = document.querySelector('#view-items [data-view-item="chat"]');
+      const out = { name: document.getElementById("project-name").textContent,
+        colour: getComputedStyle(document.getElementById("project-name")).color,
+        button: document.getElementById("project-button").className, title: document.getElementById("project-button").title,
+        chat: getComputedStyle(chat).color, chatTitle: chat.title, chatClass: chat.className, amber: getComputedStyle(probe).color };
+      probe.remove(); return out;
+    })()`);
+    let seen = await read();
+    assert.equal(seen.name, "p");
+    assert.notEqual(seen.colour, seen.amber);
+    await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
+    seen = await read();
+    assert.equal(seen.colour, seen.amber);
+    assert.match(seen.button, /waiting/);
+    assert.equal(seen.title, "The session is waiting for you");
+    assert.notEqual(seen.chat, seen.amber);
+    assert.doesNotMatch(seen.chatClass, /waiting/);
+    assert.equal(seen.chatTitle, "");
+    // Working again takes the colour off.
+    await page.run(`window.kyo.screen({ screen: { state: "working" } })`);
+    seen = await read();
+    assert.notEqual(seen.colour, seen.amber);
+    assert.equal(seen.title, "Switch project");
+  } finally { await page.close(); }
+});
+
+test("in the project list each project whose live session waits is amber (KYO-970.c3)", async (t) => {
+  const page = await openPage(); if (!page) return t.skip("no Chrome here");
+  try {
+    await page.reload();
+    await page.run(`window.kyo.project({ project: "p", scope: "server/p" })`);
+    await page.run(`window.kyo.projects({ project: "p", problem: null,
+      projects: ["p", "q", "r"].map((name) => ({ name, can_open: true, problem: null })),
+      live: { p: [{ session_id: "P1", title: null, has_pane: true }],
+        q: [{ session_id: "Q1", title: null, has_pane: true, waiting: true }],
+        r: [{ session_id: "R1", title: null, has_pane: true, waiting: false }] } })`);
+    const seen = await page.run<{ name: string; amber: boolean; title: string }[]>(`(() => {
+      const probe = Object.assign(document.createElement("i"), { style: "color: var(--amber)" }); document.body.append(probe);
+      const amber = getComputedStyle(probe).color; probe.remove();
+      return [...document.querySelectorAll("#session-links .session-link")].map((l) => ({
+        name: l.textContent, amber: getComputedStyle(l).color === amber, title: l.title }));
+    })()`);
+    assert.deepEqual(seen.map((link) => [link.name, link.amber]), [["p", false], ["q", true], ["r", false]]);
+    assert.match(seen[1].title, /waiting for you/);
+  } finally { await page.close(); }
+});

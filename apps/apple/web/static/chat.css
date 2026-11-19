@@ -97,6 +97,12 @@ a { color: var(--link); }
   overflow-wrap: anywhere;
 }
 
+/* KYO-967: inline emphasis in the person's prompt. The markers stay in the text, drawn at no
+   width, so that a selection, a copy and an anchor's measure of the prompt are what was typed. */
+.turn strong { font-weight: 650; }
+.turn code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1em 0.3em; border-radius: 4px; background: color-mix(in srgb, var(--text) 10%, transparent); }
+.md-mark { font-size: 0; }
+
 /* KYO-930: a message kyo serve sent (the idle timer's), drawn on the other side from the person's
    prompts, without their fill, and labelled by its data-source. */
 .turn.turn-automatic {
@@ -299,9 +305,11 @@ body.terminal-open #jump-bottom { display: none; }
   cursor: col-resize;
 }
 
-#composer-top { flex: none; height: 46px; display: flex; align-items: center; }
-#new-prompt { width: 30px; height: 26px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
-#new-prompt:hover { background: var(--line); color: var(--text); }
+/* KYO-971: the line that makes a scratchpad is drawn as an empty scratchpad's placeholder is,
+   in the muted colour of the prompt's own text, and is the pressable one of the column's rows. */
+#new-scratch { flex: none; margin-bottom: 10px; padding: 0 0 0 54px; color: var(--muted); font: inherit; line-height: 1.4; cursor: text; }
+#new-scratch:hover { color: var(--text); }
+#new-scratch:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
 /* Bare text beside the add button: the red says it is pressable, and the underline says it is under the pointer. */
 /* KYO-883: grey until the pointer is on it, then red; the only red at rest is "Waiting for you…". */
 #interrupt { flex: none; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 500; }
@@ -319,9 +327,9 @@ body.terminal-open #jump-bottom { display: none; }
 .box { flex: none; }
 /* KYO-925.c9, KYO-935: no section in use has a share of its own. It grows as its content
    needs, pushing the sections above it up, and scrolls within itself once the column's top, a
-   small padding below the bar that holds the + button, is reached; the summaries of the
+   top, which is the pane's, is reached; the summaries of the
    others keep their places and are never squeezed (they are `flex: none` below). */
-#boxes { border-top: 8px solid transparent; }
+#boxes { border-top: 0; }
 #boxes:not([data-in-use="agenda"]) > #agenda,
 #boxes:not([data-in-use="prompt"]) > .box.main,
 #boxes:not([data-in-use="scratch"]) > #scratches { flex: none; }
@@ -783,6 +791,12 @@ body.terminal-open #terminal { display: flex; }
 /* KYO-719: shown when the project has no live session. */
 #start { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
 #start[hidden] { display: none; }
+/* KYO-969: with no live session the panel stands alone, near the centre of the view, the words
+   above the button. The chat holds no turn then (web/src/chat.ts, `parkChat`). */
+body.no-live main { min-height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; padding-bottom: 12vh; }
+body.no-live #start { align-items: center; margin-top: 0; text-align: center; font-size: 15px; }
+body.no-live #start-text { max-width: 520px; }
+body.no-live #jump-bottom { display: none; }
 #start-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 #start-button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); color: var(--text); font-size: 13px; }
 #start-button:disabled { opacity: 0.5; }
@@ -998,8 +1012,9 @@ body.pick-project #views-divider, body.pick-project #view-items { display: none;
 .view-item:hover { color: var(--text); }
 .view-item[aria-current="page"] { color: var(--link); font-weight: 600; }
 .view-item .icon { width: 15px; height: 15px; vertical-align: 0; }
-/* KYO-922: the session waits on the person and nothing runs; amber in every view, Chat's own included. */
-#view-items .view-item.waiting { color: var(--amber); }
+/* KYO-922, KYO-970: the session waits on the person and nothing runs; the project's name is amber
+   in every view, and so is the link of any other project whose session waits. */
+#project-button.waiting #project-name, .session-link.waiting { color: var(--amber); }
 
 .top-part { display: flex; align-items: center; min-width: 0; }
 #top-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

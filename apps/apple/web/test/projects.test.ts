@@ -88,8 +88,8 @@ test("the bar links each project with a live orchestrator, and marks the window'
     },
   }));
   assert.deepEqual(links, [
-    { project: "alpha", session: "a1", title: "Alpha work", current: false },
-    { project: "gamma", session: "g1", title: null, current: true },
+    { project: "alpha", session: "a1", title: "Alpha work", current: false, waiting: false },
+    { project: "gamma", session: "g1", title: null, current: true, waiting: false },
   ]);
 });
 

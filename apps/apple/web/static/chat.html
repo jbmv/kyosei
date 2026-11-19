@@ -197,9 +197,6 @@
 
     <div id="band"></div>
     <aside id="composer">
-      <div id="composer-top">
-        <button id="new-prompt" title="New scratchpad" aria-label="New scratchpad">+</button>
-      </div>
       <!-- The composer's three sections, the session's reminder list, the scratchpads and the
            prompt: the one in use takes up to two thirds of the column, and each other one is
            drawn as its summary (KYO-925). The prompt's box is added as the last child. -->
@@ -214,6 +211,8 @@
           <div id="agenda-note" hidden></div>
         </section>
         <div id="scratches" aria-label="Scratchpads"></div>
+        <!-- KYO-971: the one line that makes a scratchpad, under the others or alone. -->
+        <div id="new-scratch" role="button" tabindex="0">Create scratchpad…</div>
       </div>
       <div id="held" hidden>
         <span id="held-text"></span>

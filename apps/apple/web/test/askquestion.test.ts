@@ -115,8 +115,11 @@ test("an unanswered question of an ended session is not marked as waiting", asyn
     window.kyo.screen({ screen: { state: "ask-user-question" } }); })()`);
   await page.run(call(null));
   assert.equal((await page.run<Card>(card)).waiting, true);
+  // The window follows an ended session while another of the project runs, so the chat is drawn
+  // (with no live session in the project it draws no turn, KYO-969).
   await page.run(`window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
-    { session_id: "S1", title: "t", live: false, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null } ] } })`);
+    { session_id: "S1", title: "t", live: false, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null },
+    { session_id: "S2", title: "u", live: true, first_seen: "2026-01-02T00:00:00Z", remote_control_url: null } ] } })`);
   const now = await page.run<Card>(card);
   assert.deepEqual([now.waiting, now.button, now.state], [false, false, ""]);
 });

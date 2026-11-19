@@ -17,7 +17,7 @@ const status = `(() => {
   const working = document.getElementById("working");
   return {
     inComposer: ["working", "interrupt", "running-agents-list"].every((id) => document.getElementById(id).closest("#composer")),
-    inChat: Boolean(document.querySelector("#page #working, #composer-top #interrupt")),
+    inChat: Boolean(document.querySelector("#page #working")),
     text: document.getElementById("working-text").textContent,
     shown: !working.hidden,
     idle: working.classList.contains("idle"),
@@ -195,19 +195,21 @@ test("a question or a permission prompt in the terminal is a wait on the person:
   }
 });
 
-interface ChatItem { waiting: boolean; colour: string; amber: string; current: boolean }
+interface ChatItem { waiting: boolean; colour: string; amber: string; current: boolean; chatWaiting: boolean }
+// KYO-970: the wait is shown on the project's name in the bar, and no longer on the Chat item.
 const chatItem = `(() => {
   const item = document.querySelector('#view-items [data-view-item="chat"]');
+  const name = document.getElementById("project-name");
   const probe = document.createElement("span");
   probe.style.color = "var(--amber)";
   document.body.append(probe);
   const amber = getComputedStyle(probe).color;
   probe.remove();
-  return { waiting: item.classList.contains("waiting"), colour: getComputedStyle(item).color, amber,
-    current: item.getAttribute("aria-current") === "page" };
+  return { waiting: document.getElementById("project-button").classList.contains("waiting"), colour: getComputedStyle(name).color, amber,
+    current: item.getAttribute("aria-current") === "page", chatWaiting: item.classList.contains("waiting") };
 })()`;
 
-test("the Chat item of the bar is amber while the live session waits on the person and nothing runs, in every view (KYO-922)", async (t) => {
+test("the project's name in the bar is amber while the live session waits on the person and nothing runs, in every view (KYO-922, KYO-970)", async (t) => {
   if (!page) return t.skip("no Chrome on this machine");
   await page.reload();
   await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
@@ -218,14 +220,14 @@ test("the Chat item of the bar is amber while the live session waits on the pers
   item = await page.run<ChatItem>(chatItem);
   assert.equal(item.waiting, false);
   assert.notEqual(item.colour, item.amber);
-  // Waiting with Chat shown: amber, though it is the current view.
+  // Waiting with Chat shown: the name is amber and the Chat item is not.
   await page.run(`window.kyo.screen({ screen: { state: "idle" } })`);
   item = await page.run<ChatItem>(chatItem);
-  assert.deepEqual([item.waiting, item.current, item.colour], [true, true, item.amber]);
+  assert.deepEqual([item.waiting, item.current, item.colour, item.chatWaiting], [true, true, item.amber, false]);
   // From another view too, and the bar drawn again keeps it.
   await page.run(`document.querySelector('#view-items [data-view-item="records"]').click()`);
   item = await page.run<ChatItem>(chatItem);
-  assert.deepEqual([item.waiting, item.current, item.colour], [true, false, item.amber]);
+  assert.deepEqual([item.waiting, item.current, item.colour, item.chatWaiting], [true, false, item.amber, false]);
   // A question in the terminal is a wait on the person.
   await page.run(`window.kyo.screen({ screen: { state: "ask-user-question" } })`);
   assert.equal((await page.run<ChatItem>(chatItem)).waiting, true);

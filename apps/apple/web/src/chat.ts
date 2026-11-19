@@ -14,6 +14,7 @@ import {
   rootShown, servedRoots, serverPath, sizeWords, stands, treeRows, wholePath,
 } from "./files";
 import { highlight, render } from "./pipeline";
+import { emphasis, type Piece } from "./emphasis";
 import { chipPieces } from "./chipwords";
 import { TAG_RULE, tagCharRefused, tagName, tagProblem } from "./tags";
 import {
@@ -232,6 +233,22 @@ function drawEmptyChat(): void {
   document.getElementById("empty-chat")!.hidden = !waiting;
 }
 
+/**
+ * KYO-969: with no live session in the project the chat holds no turn, and the start panel
+ * stands alone near the centre of the view; an ended session's text is read in History. The
+ * drawn objects are not dropped: they are kept out of the page, in a fragment, so that a
+ * session that runs again with the id it had is drawn as it was, and `elements` still names them.
+ */
+const parkedChat = document.createDocumentFragment();
+let chatParked = false;
+
+function parkChat(park: boolean): void {
+  if (park === chatParked) return;
+  chatParked = park;
+  if (park) parkedChat.append(...Array.from(chat.childNodes));
+  else chat.append(...Array.from(parkedChat.childNodes));
+}
+
 /** What the last press of Start orchestrator came to, until a session is live again. */
 let startFrame: StartFrame | null = null;
 
@@ -240,6 +257,8 @@ function drawStart(): void {
   const live = menu ? menu.sessions.sessions.some((row) => row.live) : null;
   // A later session that ends is offered a fresh button, not the last press's words.
   if (live) startFrame = null;
+  parkChat(live === false);
+  document.body.classList.toggle("no-live", live === false);
   const view = startView(live, startFrame);
   document.getElementById("start")!.hidden = !view.shown;
   document.getElementById("start-text")!.textContent = view.text;
@@ -584,6 +603,26 @@ function drawAnswers(turn: Turn): HTMLElement[] | null {
   return drawn;
 }
 
+/**
+ * KYO-967: the nodes of a prompt line's emphasis. The markers stay in the text, in a span drawn
+ * at no width, so that the drawn text, a selection of it and an anchor's measure of it are what
+ * was typed; only the look changes.
+ */
+function drawEmphasis(pieces: Piece[]): Node[] {
+  const mark = (text: string) => Object.assign(document.createElement("span"), { className: "md-mark", textContent: text });
+  return pieces.map((piece): Node => {
+    if (piece.kind === "text") return document.createTextNode(piece.text);
+    if (piece.kind === "code") {
+      const code = document.createElement("code");
+      code.append(mark("`"), piece.text.slice(1, -1), mark("`"));
+      return code;
+    }
+    const wrap = document.createElement(piece.kind === "strong" ? "strong" : "em");
+    wrap.append(mark(piece.marker), ...drawEmphasis(piece.body), mark(piece.marker));
+    return wrap;
+  });
+}
+
 function drawTurn(turn: Turn, session?: string): HTMLElement {
   const element = document.createElement("div");
   element.className = "turn";
@@ -605,7 +644,10 @@ function drawTurn(turn: Turn, session?: string): HTMLElement {
   // around it stays as it was sent, which is what an anchor on this prompt measures against.
   let plain: string[] = [];
   const flush = (last: boolean) => {
-    if (plain.length) element.append(document.createTextNode(plain.join("\n") + (last ? "" : "\n")));
+    plain.forEach((text, index) => {
+      element.append(...drawEmphasis(emphasis(text)));
+      if (index < plain.length - 1 || !last) element.append(document.createTextNode("\n"));
+    });
     plain = [];
   };
   for (const [index, line] of (turn.text ?? "").split("\n").entries()) {
@@ -664,9 +706,7 @@ function addCopyButtons(holder: HTMLElement): void {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const text = (code.textContent ?? "").replace(/\n$/, "");
-      const native = (window as any).webkit?.messageHandlers?.copy;
-      if (native) native.postMessage({ text });
-      else void navigator.clipboard?.writeText(text);
+      copyText(text);
       button.replaceChildren(icon("check"));
       window.setTimeout(() => button.replaceChildren(icon("copy")), 1400);
     });
@@ -1733,6 +1773,7 @@ const kyo = {
     drawEmptyChat();
     lastMainActivity = "";
     chat.replaceChildren();
+    parkedChat.replaceChildren();
     elements.clear();
     drawChatLinksSoon();
     rendered.clear();
@@ -1923,6 +1964,8 @@ const kyo = {
 
   apply(batch: Batch): void {
     // A session's first read lands at its end, as before; after that, output is not followed.
+    // A batch is placed among what is drawn; it is parked again, when no session is live, below.
+    parkChat(false);
     const loading = batch.reset || !turnsLoaded;
     const follow = loading && atBottom();
     countingNew = !loading;
@@ -1993,6 +2036,7 @@ const kyo = {
     turnsLoaded = true;
     drawEmptyChat();
     drawWorking();
+    drawStart();
     log(`items ${elements.size}`);
   },
 
@@ -2936,7 +2980,11 @@ function addAnchor(editor: EditorView, line: number | null, item: AnchorItem | P
   editor.focus();
 }
 
-function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
+/**
+ * The menu a right-click in the chat opens: Anchor, then Copy where `copy` is the text it puts
+ * on the pasteboard (KYO-968), then the paragraphs the anchor may go to instead.
+ */
+function showAnchorMenu(x: number, y: number, item: AnchorItem | Place, copy?: string): void {
   const all = editors();
   const editor = lastEditor && all.includes(lastEditor) ? lastEditor : all[all.length - 1];
   const entry = (label: string, line: number | null, className = "") => {
@@ -2956,6 +3004,10 @@ function showAnchorMenu(x: number, y: number, item: AnchorItem | Place): void {
   heading.textContent = "Anchor to";
   anchorMenu.replaceChildren(
     entry("Anchor", null, "anchor-new"),
+    ...(copy ? [boxButton("anchor-copy", "Copy", () => {
+      anchorMenu.remove();
+      copyText(copy);
+    })] : []),
     ...(lines.length ? [heading] : []),
     ...lines.map(({ text, line }) => entry(firstWords(text, 3), line)),
   );
@@ -2994,11 +3046,14 @@ chat.addEventListener("contextmenu", (event) => {
   if (!holder || !key || !sources.has(key) || !session) return;
   const own = ownSelection();
   const span = spanAt(holder, key, target, { x: event.clientX, y: event.clientY }, own);
+  // KYO-968: Copy takes the person's selection; with none, the words of the span Anchor would mark.
+  const copy = own ? window.getSelection()!.toString()
+    : span ? Array.from(sources.get(key)!).slice(span.start, span.end).join("") : "";
   // The word the click itself selected goes, or the next click would find it as the person's.
   if (!own) window.getSelection()?.removeAllRanges();
   if (!span) return;
   event.preventDefault();
-  showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span });
+  showAnchorMenu(event.clientX, event.clientY, { kind: "anchor", key, session, ...span }, copy);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -4674,7 +4729,7 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
   });
 }
 
-/** The + button: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
+/** The 'Create scratchpad…' line: a new scratchpad above the prompt, with the caret in its text (KYO-903, KYO-917). */
 function newPrompt(): void {
   // The move before it can no longer be undone: putting the boxes back would drop this one.
   lastMove = null;
@@ -5385,10 +5440,15 @@ if (savedWidth !== null) setComposerWidth(savedWidth);
 loadingDraft = true;
 showTexts([]);
 loadingDraft = false;
-const newPromptButton = document.getElementById("new-prompt")!;
+const newPromptButton = document.getElementById("new-scratch")!;
 // The click leaves the focus where it is until the new prompt takes it.
 newPromptButton.addEventListener("mousedown", (event) => event.preventDefault());
 newPromptButton.addEventListener("click", newPrompt);
+newPromptButton.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.metaKey || event.isComposing) return;
+  event.preventDefault();
+  newPrompt();
+});
 // Cmd-Return sends the prompt being typed in, or the only one there is.
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !event.metaKey) return;
@@ -5422,11 +5482,20 @@ const VIEWS: { id: string; name: string; icon: keyof typeof ICONS; entered?: () 
 ];
 let currentView = "chat";
 
+/**
+ * KYO-970: the session waits on the person, shown on the project's name in the bar, which is
+ * the window's own project, and not on the Chat item: with several projects served, the name
+ * says which one needs the person. The other projects' links say it of their own sessions
+ * (`drawProjects`).
+ */
+const WAITING_TITLE = "The session is waiting for you";
 function drawChatItem(): void {
   const item = document.querySelector<HTMLElement>('#view-items [data-view-item="chat"]');
-  if (!item) return;
-  item.classList.toggle("waiting", chatWaiting);
-  item.title = chatWaiting ? "The session is waiting for you" : "";
+  item?.classList.remove("waiting");
+  if (item) item.title = "";
+  const name = document.getElementById("project-button")!;
+  name.classList.toggle("waiting", chatWaiting);
+  name.title = chatWaiting ? WAITING_TITLE : "Switch project";
 }
 
 /** Where the transcript was when another view replaced it. */
@@ -5640,6 +5709,11 @@ function drawProjects(): void {
       item.textContent = link.project;
       item.title = link.title
         ? `${link.project}: ${link.title}` : `${link.project}'s live session`;
+      // KYO-970: a project whose session waits on the person is amber in the list. The window's
+      // own is read from the page's own screen, which is fresher than the list.
+      const waiting = link.current ? chatWaiting : link.waiting;
+      item.classList.toggle("waiting", waiting);
+      if (waiting) item.title = `${WAITING_TITLE}: ${item.title}`;
       item.addEventListener("click", () => {
         // A link follows the session, which is read in the chat.
         showView("chat");

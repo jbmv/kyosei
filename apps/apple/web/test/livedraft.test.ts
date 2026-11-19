@@ -199,7 +199,7 @@ test("every box is saved with an id, which it keeps while it is edited", async (
   if (!laptop) return t.skip("no Chrome on this machine");
   const [here] = await open([{ id: "a", text: "First" }]);
   // The + button adds a scratchpad above the prompt, with the caret in its text (KYO-917).
-  await here.page.run(`document.getElementById("new-prompt").click()`);
+  await here.page.run(`document.getElementById("new-scratch").click()`);
   await here.page.type("Notes");
   await wait(here, PAUSE);
   await save(here);
