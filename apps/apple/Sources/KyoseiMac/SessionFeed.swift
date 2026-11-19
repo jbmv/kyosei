@@ -641,6 +641,14 @@ final class SessionFeed {
     /// what makes the newest copy win when another device saved to the session last.
     private func followedSession(_ session: String, live: Bool) {
         guard session == current else { return }
+        if !live, currentLive {
+            // KYO-966: the session ended while its stream was followed, and the stream of an
+            // ended session stays open, so the project is read again from the top, where a
+            // row that is not live waits for a session that starts later.
+            currentLive = false
+            task?.cancel()
+            task = Task { await run() }
+        }
         let place: DraftPlace = live ? .session(session) : .project
         // A draft that could not be read is asked for again here.
         if draftPlace == nil || draftPlace == (live ? .project : .session(session)) {
@@ -2055,7 +2063,10 @@ final class SessionFeed {
                     becomeLive()
                     send("screen", #"{"screen": null}"#)
                     send("terminal", #"{"terminal": null}"#)
-                    try await Task.sleep(for: .seconds(3600))
+                    // KYO-966: a session that starts later, however it was started, is followed
+                    // within seconds. One live when this row was chosen was passed over.
+                    let passed = Set(sessions.filter(\.live).map(\.session_id))
+                    selected = try await laterLiveSession(passing: passed) ?? selected
                     continue
                 }
                 // The chat is live once the stream says so, not when the turns have been read.
@@ -2071,6 +2082,22 @@ final class SessionFeed {
                 print("[feed] \(error)")
             }
             try? await Task.sleep(for: retry.next())
+        }
+    }
+
+    /// How often a project whose followed session is not live asks for its sessions again.
+    private static let laterSessionPoll = Duration.seconds(3)
+
+    /// Waits until the project lists a live session that is not in `passed`, and returns its
+    /// id. It returns nil when the read fails, so that the caller reads the project again.
+    private func laterLiveSession(passing passed: Set<String>) async throws -> String? {
+        while true {
+            try await Task.sleep(for: Self.laterSessionPoll)
+            try Task.checkCancellation()
+            guard let rows = try? await client.sessions(project: project) else { return nil }
+            try Task.checkCancellation()
+            let later = rows.filter { $0.live && !passed.contains($0.session_id) }
+            if let row = later.first(where: \.has_pane) ?? later.first { return row.session_id }
         }
     }
 
@@ -2122,7 +2149,17 @@ final class SessionFeed {
                     if event.data.contains("delivered"), let session = current {
                         loadMarks(session: session, after: .seconds(2))
                     }
-                case "reset", "session":
+                case "session":
+                    // The pane now runs another session (`/clear`, `/resume`): that one is
+                    // followed, chosen or not (KYO-966).
+                    let object =
+                        try? JSONSerialization.jsonObject(with: Data(event.data.utf8))
+                        as? [String: Any]
+                    if let next = object?["session_id"] as? String, !next.isEmpty {
+                        selected = next
+                    }
+                    return
+                case "reset":
                     return  // Read the session again from the top.
                 default:
                     break
