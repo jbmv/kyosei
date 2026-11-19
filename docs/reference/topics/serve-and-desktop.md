@@ -15,10 +15,12 @@ appears in `$KYOSEI_HOME/projects.json` (its name or its prefix), or by its
 directory.
 
 `kyo orchestrator attach <project>` puts your terminal in that session (KYO-474). It
-replaces itself with `tmux -L kyosei attach -t =<prefix>` — the dedicated server, and
+replaces itself with `tmux -L kyosei attach -t '=<prefix>'` — the dedicated server, and
 the exact name, so you never have to remember either — and with no server or no session
 it says which, naming `kyo orchestrator start` (or, over SSH with no server,
-`kyo orchestrator --install --apply`). From another machine:
+`kyo orchestrator --install --apply`). Where Kyosei prints that line for you to type,
+the target is in single quotes, because zsh replaces an unquoted word that begins with
+`=` by the path of a command of that name (KYO-963). From another machine:
 
 ```sh
 ssh -t devbox "zsh -lc 'kyo orchestrator attach KYO'"
@@ -77,6 +79,12 @@ login keychain, where claude keeps its credentials. A session created over SSH
 inside a server that was already running from the desktop login can read it,
 because the server spawns the session. Such a session still has a bare PATH, so
 the login shell builds your PATH before claude starts.
+
+A new session's window is created at 160 columns by 50 rows (KYO-965). A detached session
+otherwise keeps tmux's `default-size`, 80x24 unless configured, until a client first
+attaches; at that size Claude Code's input box shows seven rows, and the chat reads a reply
+in progress from a screen 80 columns wide. A terminal that attaches later sizes the window as
+before.
 
 On macOS, run this once in a terminal on the machine itself:
 
@@ -268,7 +276,7 @@ governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/c
 | `sessions/<id>/send`, `slash`, `interrupt`; the draft, held-message and task-list routes; `attachments` | `send` |
 | `notes`, `tags`, `sessions/<id>/marks` and the routes that send notes | `notes`, and `send` where the notes are sent to a session |
 | `orchestrator/start` | `start` |
-| `sessions/<id>/terminal` and the routes beneath it | `terminal` |
+| `sessions/<id>/terminal`, `orchestrator/terminal` and the routes beneath them | `terminal` |
 | `files/...` | `files` |
 | `config/<key>`, `agent-types/<type>` and `settings/<key>`, each a POST | `config` |
 
@@ -1625,9 +1633,10 @@ kyo devices issue my-ipad --permission start --permission send --permission note
 does not start a process. `kyo devices grant <name> --permission start` adds it to a token
 already issued. The route does not ask for the `serve_send` setting, which governs keys sent to a session.
 
-Nothing else is served under `orchestrator/`. No route stops a session, attaches to one or
-lists them, and the `orchestrator` command is refused by name on the command route. A session
-ends with `/exit` in its terminal, or with `kyo orchestrator stop <name>` on the machine.
+The one other route under `orchestrator/` is the orchestrator session's terminal (KYO-964),
+described with the terminal routes below. No route stops a session or lists them, and the
+`orchestrator` command is refused by name on the command route. A session ends with `/exit`
+in its terminal, or with `kyo orchestrator stop <name>` on the machine.
 
 The session is created on the tmux server `kyo orchestrator start` uses (`tmux -L kyosei`),
 and its program is a login shell, so it has your login `PATH` whatever the server's own is. A
@@ -1640,7 +1649,7 @@ A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` co
 `no-token`, `unknown-token`, `revoked-token`, `no-start-permission`, `bad-request`,
 `already-running` (409: the project's session is running, and no second one is started),
 `start-failed` (502: tmux, the orchestrator command or the project's prefix; the sentence
-says which), `not-served` (404: any other path under `orchestrator/`), `tokens-unreadable` and
+says which), `not-served` (404: any other path under `orchestrator/` but its terminal), `tokens-unreadable` and
 `send-log-unusable`.
 
 Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `orchestrator-start`:
@@ -1710,6 +1719,24 @@ A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` co
 `bad-request`, `no-pane` (409), `no-connection` (409), `input-too-large` (413),
 `terminal-failed` (502: tmux did not attach or did not take the keys; the sentence says
 which), `settings-unreadable`, `tokens-unreadable` and `send-log-unusable`.
+
+**The orchestrator session's terminal** (KYO-964). A claude stopped on Claude Code's
+workspace-trust prompt has run no hook, so the project records no session and the routes
+above have no session id to name. The same three routes under `orchestrator/` attach to the
+project's orchestrator session by its tmux name, the project's prefix, on the server
+`kyo orchestrator` uses:
+
+```
+GET  /v1/projects/<name>/orchestrator/terminal[?cols=N&rows=N]   Server-Sent Events
+POST /v1/projects/<name>/orchestrator/terminal/input    body: {"connection", "data"}
+POST /v1/projects/<name>/orchestrator/terminal/resize   body: {"connection", "cols", "rows"}
+```
+
+They take the same token, setting and opt-in, carry the same events with `session_id` null in
+`ready`, and are refused with `no-orchestrator-session` (409) when no such tmux session is
+running; starting it is the remedy. As on the session routes, Kyosei types nothing into the
+pane but what the client sends, so the trust prompt is answered by the person. The connection's
+log line has the action `orchestrator-terminal` and no session id.
 
 Each connection is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `terminal` when it
 opens: its time, project, session, device, and its outcome (`opened`, `refused`, `failed`)

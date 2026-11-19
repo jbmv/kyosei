@@ -19,6 +19,8 @@ export interface StartView {
   /** Whether the button can be pressed. */
   enabled: boolean;
   text: string;
+  /** Whether the panel offers the terminal, where the trust prompt is answered (KYO-964). */
+  terminal: boolean;
 }
 
 const word = (value: unknown): string | null =>
@@ -29,20 +31,25 @@ const word = (value: unknown): string | null =>
  * and whose last press came to `frame`.
  */
 export function startView(live: boolean | null, frame: StartFrame | null): StartView {
-  if (live !== false) return { shown: false, enabled: false, text: "" };
-  if (!frame) return { shown: true, enabled: true, text: "This project has no live session." };
+  const off = { terminal: false };
+  if (live !== false) return { shown: false, enabled: false, text: "", ...off };
+  if (!frame) {
+    return { shown: true, enabled: true, text: "This project has no live session.", ...off };
+  }
   if (frame.phase === "starting") {
-    return { shown: true, enabled: false, text: "Starting the orchestrator session." };
+    return { shown: true, enabled: false, text: "Starting the orchestrator session.", ...off };
   }
   if (frame.phase === "failed") {
-    return { shown: true, enabled: true, text: frame.text ?? "The session was not started." };
+    return {
+      shown: true, enabled: true, text: frame.text ?? "The session was not started.", ...off,
+    };
   }
   const reply = frame.reply ?? {};
   if (frame.status !== 200) {
     // The server's sentence names the remedy, so it is shown as it was sent.
     const refusal = word(reply.error)
       ?? `The server did not start a session (HTTP ${frame.status ?? "status unknown"}).`;
-    return { shown: true, enabled: true, text: refusal };
+    return { shown: true, enabled: true, text: refusal, ...off };
   }
   const session = word(reply.session) ?? "the session";
   if (reply.waiting_for_trust === true || reply.state === "waiting-for-trust") {
@@ -52,14 +59,17 @@ export function startView(live: boolean | null, frame: StartFrame | null): Start
       shown: true,
       enabled: false,
       text: `Started ${session}, and Claude Code is asking whether to trust ${folder}. `
-        + "The session waits until a person answers in its terminal"
-        + (attach ? `, which \`${attach}\` opens on the server's machine` : "")
+        + "The session waits until a person answers in its terminal, which Open the terminal "
+        + "shows here"
+        + (attach ? ` and \`${attach}\` opens on the server's machine` : "")
         + ". It is shown here after that.",
+      terminal: true,
     };
   }
   return {
     shown: true,
     enabled: false,
     text: `Started ${session}. It is shown here once Claude Code has begun.`,
+    ...off,
   };
 }

@@ -265,6 +265,8 @@ function drawStart(): void {
   document.getElementById("start")!.hidden = !view.shown;
   document.getElementById("start-text")!.textContent = view.text;
   (document.getElementById("start-button") as HTMLButtonElement).disabled = !view.enabled;
+  // KYO-964: the trust prompt is answered in the terminal, on the orchestrator's session.
+  document.getElementById("start-terminal")!.hidden = !view.terminal;
 }
 const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
 const ACTIVITY_RED_MS = 45 * 60 * 1000;
@@ -1786,6 +1788,8 @@ const kyo = {
     endAnchorMode();
     turnsLoaded = false;
     dropSentPreview();
+    // KYO-965: a held message is the session's, and the session read next states its own.
+    showHeld(null);
     unseen = 0;
     // Another session's state is no change of this one's, so it does not bounce the Dock.
     waitingSeen = null;
@@ -5523,6 +5527,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.getElementById("start-button")!.addEventListener("click", () => post("start", {}));
+document.getElementById("start-terminal")!.addEventListener("click", () => openTerminal());
 
 // ------------------------------------------------------------------- the views (KYO-732)
 

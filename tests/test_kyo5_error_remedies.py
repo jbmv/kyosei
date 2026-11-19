@@ -1277,6 +1277,9 @@ ERROR_CLASS_NAMES = frozenset(
         # KYO-719: `start`'s refusal of a session already running, a class of its own so
         # that kyo serve's start route answers it as a conflict.
         "AlreadyRunning",
+        # KYO-964: the orchestrator terminal's refusal of a project with no session to show,
+        # a class of its own so that kyo serve's terminal route answers it as a conflict.
+        "NoOrchestratorSession",
         "SessionNotFound",
         # KYO-187: `kyo check-branch`/`check-clean`/`check-push`, and `kyo doctor`/
         # `docs check`. Those five refusals carry the command's own `--json` envelope,
@@ -5377,6 +5380,13 @@ RECORDED: dict[str, str] = {
         "tests/test_kyo_serve_orchestrator.py::"
         "test_a_project_with_no_usable_prefix_is_refused_and_setting_one_clears_it, "
         "which restores the prefix and starts"
+    ),
+    # KYO-964: the orchestrator terminal's project, when its config names no session.
+    "cmd_controller.py:orchestrator_pane#0": (
+        "a hand edit of the project's config.yml, setting `project_prefix`; reached only "
+        "through kyo serve's orchestrator terminal, which this walk has no server for. Proved "
+        "by tests/test_kyo_serve_terminal.py::"
+        "test_kyo964_a_project_with_no_usable_prefix_is_refused_and_setting_one_clears_it"
     ),
     "cmd_controller.py:install#0": (
         "running the printed `launchctl bootstrap` line from a terminal in the desktop "

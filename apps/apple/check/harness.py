@@ -273,8 +273,13 @@ class Run:
             check=False,
         )
 
-    def use_script(self, script: dict[str, Any] | None = None) -> None:
+    def use_script(
+        self, script: dict[str, Any] | None = None, *, trust_prompt: bool = False
+    ) -> None:
         """Make the scripted session what the server's Start route starts, playing ``script``.
+
+        With ``trust_prompt`` the session opens on Claude Code's workspace-trust dialog and
+        records nothing until it is answered (``scripted_session.py``, THE START).
 
         Written to the run's own ``settings.yml``: ``serve_send``, so that the server types a
         prompt into the session, and ``orchestrator_command``, the program a start runs. The
@@ -296,6 +301,7 @@ class Run:
             str(self.kyosei_home),
             "--log",
             str(self.session_log),
+            *(["--trust-prompt"] if trust_prompt else []),
         ]
         (self.kyosei_home / "settings.yml").write_text(
             f"serve_send: true\norchestrator_command: {json.dumps(command)}\n", encoding="utf-8"

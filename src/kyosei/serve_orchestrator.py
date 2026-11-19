@@ -6,10 +6,11 @@ orchestrator start <project> --json`` prints, ``waiting-for-trust`` and its fold
 It exists so that a device with no SSH path to the machine can start a session.
 
 THE ONE PROCESS ``kyo serve`` STARTS. Every other route reads, writes a file or a note, or
-sends keys to a session that already runs. This one is therefore alone under
-``orchestrator/``: no route stops a session (``/exit`` in its terminal ends one) or runs
-another ``kyo orchestrator`` subcommand, and the command itself stays on
-:data:`kyosei.serve.NOT_SERVED`.
+sends keys to a session that already runs. No route stops a session (``/exit`` in its
+terminal ends one) or runs another ``kyo orchestrator`` subcommand, and the command itself
+stays on :data:`kyosei.serve.NOT_SERVED`. The one other route under ``orchestrator/`` is the
+orchestrator session's terminal (KYO-964), which starts nothing and is
+:mod:`kyosei.serve_terminal`'s.
 
 WHAT STANDS IN FRONT OF A START, in order, each refused by a sentence naming its remedy:
 
@@ -68,10 +69,11 @@ def not_served(action: str) -> Refusal:
     """The refusal for any other path under :data:`ROUTE`."""
     return Refusal(
         404,
-        f"kyo serve starts an orchestrator session and does nothing else to one (KYO-718), so "
-        f"`{ROUTE}/{action}` is not a route; POST to `{ROUTE}/{START}` to start one, end one "
-        "with /exit in its terminal, and run every other `kyo orchestrator` subcommand in a "
-        "terminal on the machine or over SSH",
+        f"kyo serve starts an orchestrator session and shows its terminal, and does nothing "
+        f"else to one (KYO-718, KYO-964), so `{ROUTE}/{action}` is not a route; POST to "
+        f"`{ROUTE}/{START}` to start one, GET `{ROUTE}/terminal` to answer what its screen "
+        "asks, end one with /exit in its terminal, and run every other `kyo orchestrator` "
+        "subcommand in a terminal on the machine or over SSH",
         reason="not-served",
     )
 

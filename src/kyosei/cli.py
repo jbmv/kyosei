@@ -2543,7 +2543,7 @@ def build_parser() -> KyoseiParser:
         choices=("start", "stop", "attach", "list"),
         help="start PROJECT's session (orchestrator_command from $KYOSEI_HOME/settings.yml, "
         "default claude, through a login shell, in the project directory, detached), stop "
-        "it, attach this terminal to it (`tmux -L kyosei attach -t =PREFIX`; over SSH, "
+        "it, attach this terminal to it (`tmux -L kyosei attach -t '=PREFIX'`; over SSH, "
         "`ssh -t HOST \"zsh -lc 'kyo orchestrator attach PREFIX'\"`), or list every "
         "registered project's session, whether claude is alive in it and the command it "
         "was started with",

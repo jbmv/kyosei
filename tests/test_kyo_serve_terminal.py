@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 
 import kyosei
-from kyosei import device_tokens, serve_terminal
+from kyosei import cmd_controller, cmd_sessions, device_tokens, serve_terminal
 
 from .conftest import invoke
 from .test_kyo_serve import body_json
@@ -51,6 +51,8 @@ TMUX = shutil.which("tmux")
 pytestmark = pytest.mark.skipif(TMUX is None, reason="tmux is not installed")
 
 TERMINAL = f"{SESSIONS}/{OLD}/terminal"
+#: KYO-964: the orchestrator session's terminal, reached by its tmux name.
+ORCHESTRATOR_TERMINAL = SESSIONS.rsplit("/", 1)[0] + "/orchestrator/terminal"
 INPUT = f"{TERMINAL}/input"
 RESIZE = f"{TERMINAL}/resize"
 SCRUBBED = {k: v for k, v in os.environ.items() if not k.startswith("TMUX")}
@@ -154,9 +156,11 @@ def pane(bed: Bed):
 class Terminal(Stream):
     """One open terminal stream."""
 
-    def __init__(self, bed: Bed, token: str | None, query: str = "") -> None:
+    def __init__(
+        self, bed: Bed, token: str | None, query: str = "", *, path: str = TERMINAL
+    ) -> None:
         self.conn = http.client.HTTPConnection("127.0.0.1", bed.client.port, timeout=15)
-        self.conn.putrequest("GET", f"{TERMINAL}{query}", skip_host=True)
+        self.conn.putrequest("GET", f"{path}{query}", skip_host=True)
         self.conn.putheader("Host", f"127.0.0.1:{bed.client.port}")
         if token is not None:
             self.conn.putheader("Authorization", f"Bearer {token}")
@@ -182,8 +186,8 @@ class Terminal(Stream):
 def opened(bed: Bed):
     streams: list[Terminal] = []
 
-    def _open(token: str | None, query: str = "") -> Terminal:
-        made = Terminal(bed, token, query)
+    def _open(token: str | None, query: str = "", *, path: str = TERMINAL) -> Terminal:
+        made = Terminal(bed, token, query, path=path)
         streams.append(made)
         return made
 
@@ -648,3 +652,154 @@ def test_the_terminal_module_reaches_the_pane_only_through_its_own_client() -> N
         if isinstance(node, ast.JoinedStr) and "send-keys" in ast.unparse(node)
     ]
     assert built == ["f'send-keys -H -t {pane} {keys}'"]
+
+
+# ------------------------------------------- KYO-964: the orchestrator session's terminal
+
+
+class Orchestrator:
+    """The served project's orchestrator session on a private tmux server, as ``kyo
+    orchestrator start`` names it (the prefix, ``TST``), with no session recorded for it."""
+
+    def __init__(self, bed: Bed, directory: Path) -> None:
+        self.bed = bed
+        self.socket = directory / "sock"
+        self.typed = directory / "typed.bin"
+        # Only the private socket the server is pointed at answers; `-L default` and `-L
+        # kyosei`, which the session layer asks, do not, so no session has a pane either.
+        bin_dir = directory / "bin"
+        bin_dir.mkdir()
+        wrapper = bin_dir / "tmux"
+        wrapper.write_text(
+            f'#!/bin/sh\nif [ "$1" = "-S" ]; then exec "{TMUX}" "$@"; fi\nexit 1\n',
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        environ = bed.server.environ
+        environ[cmd_controller.SOCKET_ENV] = str(self.socket)
+        environ["PATH"] = f"{bin_dir}:{environ.get('PATH', '')}"
+        # Claude Code waiting on the trust prompt has run no hook: nothing is recorded.
+        assert cmd_sessions.write_sessions(cmd_sessions.sessions_path(bed.project), []) is None
+
+    def tmux(self, *args: str) -> str:
+        done = subprocess.run(
+            [TMUX, "-S", str(self.socket), "-f", "/dev/null", *args],
+            capture_output=True, text=True, check=False, timeout=10,
+            env={**SCRUBBED, "TERM": "xterm-256color"},
+        )  # fmt: skip
+        return done.stdout.strip()
+
+    def start(self) -> None:
+        """A pane showing the trust prompt's option, which keeps every byte it is given."""
+        self.typed.write_bytes(b"")
+        program = (
+            f"stty raw -echo; printf '%s\\r\\n' '{cmd_controller.TRUST_PROMPT_TEXT}'; "
+            f"exec cat >> '{self.typed}'"
+        )
+        self.tmux("new-session", "-d", "-s", "TST", "-x", "90", "-y", "20", "sh", "-c", program)
+        wait_until(lambda: cmd_controller.TRUST_PROMPT_TEXT in self.screen())
+
+    def screen(self) -> str:
+        return self.tmux("capture-pane", "-p", "-t", "=TST:")
+
+
+@pytest.fixture
+def orchestrator(bed: Bed):
+    directory = Path(tempfile.mkdtemp(prefix="kyo.", dir="/tmp"))
+    made = Orchestrator(bed, directory)
+    yield made
+    made.tmux("kill-server")
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_kyo964_c1_with_no_session_row_the_terminal_attaches_by_the_projects_session_name(
+    bed: Bed, orchestrator: Orchestrator, token: str, opened, store_home: Path
+) -> None:
+    # No tmux session of that name: refused by name, with the start that is the remedy.
+    refused = opened(token, path=ORCHESTRATOR_TERMINAL)
+    assert refused.status == 409, refused.refusal
+    assert refused.refusal["reason"] == "no-orchestrator-session"
+    assert "no orchestrator session TST" in refused.refusal["error"]
+    assert "`kyo orchestrator start proj`" in refused.refusal["error"]
+    # The project records no session, so the session routes have none to show.
+    assert bed.get(SESSIONS)[0] == 200 and json.loads(bed.get(SESSIONS)[2])["sessions"] == []
+
+    orchestrator.start()
+    stream = opened(token, path=ORCHESTRATOR_TERMINAL)
+    assert stream.status == 200, stream.refusal
+    assert stream.block() == ["retry: 1000", ": kyo serve terminal"]
+    made = stream.event("ready")
+    assert made["session_id"] is None and made["pane"]["tmux_session"] == "TST"
+    painted = base64.b64decode(stream.event("screen")["data"])
+    assert cmd_controller.TRUST_PROMPT_TEXT.encode() in painted
+    rows = log_rows(store_home)
+    assert [(row["action"], row["outcome"], row["reason"]) for row in rows] == [
+        ("orchestrator-terminal", "refused", "no-orchestrator-session"),
+        ("orchestrator-terminal", "opened", None),
+    ]
+    assert rows[1]["session_id"] == "" and rows[1]["device"]["name"] == "mac"
+
+
+def test_kyo964_c2_the_trust_screen_receives_only_what_the_person_types(
+    bed: Bed, orchestrator: Orchestrator, token: str, opened, store_home: Path
+) -> None:
+    """KYO-568 stands: opening, sizing and holding the stream type nothing into the pane."""
+    orchestrator.start()
+    stream = opened(token, path=ORCHESTRATOR_TERMINAL, query="?cols=70&rows=12")
+    assert stream.status == 200, stream.refusal
+    stream.block()
+    connection = stream.event("ready")["connection"]
+    stream.event("screen")
+    resize = f"{ORCHESTRATOR_TERMINAL}/resize"
+    assert post(bed, resize, {"connection": connection, "cols": 80, "rows": 20}, token)[0] == 200
+    time.sleep(1.0)
+    assert orchestrator.typed.read_bytes() == b""
+    # The connection is the orchestrator's: the session routes do not take it.
+    status, refused = post(bed, INPUT, {"connection": connection, "data": "x"}, token)
+    assert status == 409 and refused["reason"] == "no-connection"
+    # What the person types, and only that, reaches the prompt.
+    status, sent = post(
+        bed, f"{ORCHESTRATOR_TERMINAL}/input", {"connection": connection, "data": "\r"}, token
+    )
+    assert status == 200 and sent == {"ok": True, "session_id": None, "bytes": 1}
+    wait_until(lambda: orchestrator.typed.read_bytes() == b"\r")
+    time.sleep(0.5)
+    assert orchestrator.typed.read_bytes() == b"\r"
+    stream.close()
+    wait_until(lambda: len(log_rows(store_home)) >= 3)
+    actions = [(row["action"], row["outcome"]) for row in log_rows(store_home)]
+    assert actions[0] == ("orchestrator-terminal", "opened")
+    assert ("terminal-input", "refused") in actions and actions[-1] == (
+        "orchestrator-terminal", "closed",
+    )  # fmt: skip
+
+
+def test_kyo964_the_orchestrator_terminal_answers_its_own_methods_only(
+    bed: Bed, orchestrator: Orchestrator, token: str
+) -> None:
+    status, headers, _ = bed.client.request(
+        ORCHESTRATOR_TERMINAL, method="POST", body=b"{}",
+        headers={"Content-Type": "application/json"},
+    )  # fmt: skip
+    assert status == 405 and headers["Allow"] == "GET"
+    status, headers, _ = bed.get(f"{ORCHESTRATOR_TERMINAL}/input")
+    assert status == 405 and headers["Allow"] == "POST"
+    assert bed.get(f"{ORCHESTRATOR_TERMINAL}/keys")[0] == 404
+
+
+def test_kyo964_a_project_with_no_usable_prefix_is_refused_and_setting_one_clears_it(
+    bed: Bed, orchestrator: Orchestrator, token: str, opened
+) -> None:
+    orchestrator.start()
+    config = bed.project / "kyosei" / "config.yml"
+    original = config.read_text(encoding="utf-8")
+    assert "project_prefix: TST" in original
+    config.write_text(original.replace("project_prefix: TST", "project_prefix: tst"))
+    refused = opened(token, path=ORCHESTRATOR_TERMINAL)
+    assert refused.status == 409 and "`project_prefix`" in refused.refusal["error"]
+    # The remedy: a prefix that names the session, and the same request opens it.
+    config.write_text(original, encoding="utf-8")
+    stream = opened(token, path=ORCHESTRATOR_TERMINAL)
+    assert stream.status == 200, stream.refusal
+    assert stream.block() == ["retry: 1000", ": kyo serve terminal"]
+    assert stream.event("ready")["pane"]["tmux_session"] == "TST"

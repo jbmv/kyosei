@@ -798,8 +798,10 @@ body.no-live #start { align-items: center; margin-top: 0; text-align: center; fo
 body.no-live #start-text { max-width: 520px; }
 body.no-live #jump-bottom { display: none; }
 #start-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-#start-button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); color: var(--text); font-size: 13px; }
+#start-buttons { display: flex; gap: 8px; }
+#start-button, #start-terminal { padding: 5px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--background); color: var(--text); font-size: 13px; }
 #start-button:disabled { opacity: 0.5; }
+#start-terminal[hidden] { display: none; }
 
 .pulse {
   width: 9px;

@@ -76,6 +76,18 @@ is written when it ends. The log is opened first, so a connection that could not
 is not made. What is typed is not logged, since it can be a password; a refused input or
 resize is, with the action ``terminal-input`` or ``terminal-resize``.
 
+THE ORCHESTRATOR'S TERMINAL (KYO-964). Under ``/v1/projects/{project}/orchestrator/`` the same
+three routes, ``terminal``, ``terminal/input`` and ``terminal/resize``, attach to the project's
+orchestrator session by its tmux name, the project's prefix, on the server ``kyo orchestrator``
+uses (:func:`kyosei.cmd_controller.orchestrator_pane`). A claude stopped on Claude Code's
+workspace-trust prompt has run no hook, so the project records no session and the session
+routes have no pane to look up; this is where the person answers that prompt. The guards are
+the same, except that no recorded session is asked for: the machine's ``serve_send``, a device
+with the ``terminal`` permission and the project's opt-in to reading transcripts. With no such
+tmux session the stream is refused with the reason ``no-orchestrator-session``. As on the
+session routes, nothing is typed but what the person types (KYO-568); the row's action is
+``orchestrator-terminal`` and it has no session id.
+
 This module sends keys to the pane it was opened on and to no other, through its own control
 client. ``tests/test_kyo_serve_terminal.py`` pins what it reaches.
 """
@@ -94,7 +106,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from . import device_tokens, serve_send
+from . import cmd_controller, device_tokens, serve_send
 from .errors import KyoseiError
 from .serve import API_PREFIX, Refusal
 from .serve_events import KEEPALIVE, frame
@@ -109,6 +121,8 @@ RESIZE = "resize"
 LOG_ACTION = "terminal"
 LOG_INPUT = "terminal-input"
 LOG_RESIZE = "terminal-resize"
+#: The row's action for a connection to a project's orchestrator session (KYO-964).
+LOG_ORCHESTRATOR = "orchestrator-terminal"
 
 OPENING = b"retry: 1000\n: kyo serve terminal\n\n"
 
@@ -457,11 +471,14 @@ class _Control:
 class Connection:
     """One open terminal stream: its device, its control client and its queue of events."""
 
-    def __init__(self, project: str, session_id: str, device: dict) -> None:
+    def __init__(self, project: str, session_id: str, device: dict, action: str) -> None:
         self.id = secrets.token_hex(8)
         self.project = project
+        #: The session's id, or the empty string for the orchestrator's terminal (KYO-964).
         self.session_id = session_id
         self.device = device
+        #: The log row's action: :data:`LOG_ACTION`, or :data:`LOG_ORCHESTRATOR`.
+        self.action = action
         self.queue: queue.Queue[bytes | None] = queue.Queue(maxsize=QUEUE_LIMIT)
         self.overflowed = False
         self.control: _Control | None = None
@@ -479,9 +496,14 @@ class Connection:
 def _failed(session_id: str, why: str) -> Refusal:
     return Refusal(
         502,
-        f"the terminal of session {session_id} could not be opened: {why}",
+        f"the terminal of {_named(session_id)} could not be opened: {why}",
         reason="terminal-failed",
     )
+
+
+def _named(session_id: str) -> str:
+    """How a message names a connection's session; the empty id is the orchestrator's."""
+    return f"session {session_id}" if session_id else "the orchestrator session"
 
 
 def _size(document: dict, where: str) -> tuple[int, int]:
@@ -537,9 +559,15 @@ class Terminals:
         session_id: str,
         authorization: str | None,
         size: Callable[[], tuple[int, int] | None],
+        *,
+        orchestrator: bool = False,
     ) -> Connection:
-        """Open and log one connection; returns it with its first screen queued, or raises."""
-        attempt = serve_send._Attempt(LOG_ACTION, project_name, session_id)
+        """Open and log one connection; returns it with its first screen queued, or raises.
+
+        With ``orchestrator`` the connection is to the project's orchestrator session by its
+        tmux name, and ``session_id`` is the empty string (KYO-964)."""
+        action = LOG_ORCHESTRATOR if orchestrator else LOG_ACTION
+        attempt = serve_send._Attempt(action, project_name, session_id)
         try:
             descriptor = serve_send._open_log(self._environ)
         except Refusal as refusal:
@@ -552,7 +580,9 @@ class Terminals:
         connection: Connection | None = None
         try:
             try:
-                connection = self._opened(root_of, session_id, authorization, size, attempt)
+                connection = self._opened(
+                    root_of, session_id, authorization, size, attempt, orchestrator
+                )
             except Refusal as refusal:
                 attempt.status = refusal.status
                 attempt.reason = refusal.extra.get("reason", "session-route")
@@ -585,6 +615,7 @@ class Terminals:
         authorization: str | None,
         size: Callable[[], tuple[int, int] | None],
         attempt: serve_send._Attempt,
+        orchestrator: bool,
     ) -> Connection:
         """Everything that stands in front of a connection, then the connection."""
         environ = self._environ
@@ -594,51 +625,47 @@ class Terminals:
         attempt.device = {"id": device.id, "name": device.name}
         serve_send._require_permission(device, permission)
         wanted = size()
-        project = ProjectSessions(root_of(), environ)
-        project.require(session_id)
-        live = project.open_live(session_id)
-        ref = live.pane
-        if ref is None:
-            raise Refusal(
-                409,
-                f"session {session_id} has no pane to show ({live.pane_lookup.why}); it must be "
-                "running in tmux on this machine",
-                reason="no-pane",
+        root = root_of()
+        project = ProjectSessions(root, environ)
+        if orchestrator:
+            binary, socket_args, env, tmux_session, pane_id = self._orchestrator_pane(root)
+        else:
+            binary, socket_args, env, tmux_session, pane_id = self._session_pane(
+                project, session_id
             )
-        if not _PANE_ID.match(ref.pane_id):
-            raise _failed(session_id, f"tmux named its pane {ref.pane_id!r}")
-        connection = Connection(attempt.project, session_id, attempt.device)
+        if not _PANE_ID.match(pane_id):
+            raise _failed(session_id, f"tmux named its pane {pane_id!r}")
+        connection = Connection(attempt.project, session_id, attempt.device, attempt.action)
         try:
-            client = live.tmux()
             control = _Control(
                 [
-                    client.binary,
-                    *client.socket_args,
+                    binary,
+                    *socket_args,
                     "-C",
                     "attach-session",
                     "-f",
                     "ignore-size",
                     "-t",
-                    f"={ref.session_name}",
+                    f"={tmux_session}",
                 ],
-                client.env,
-                ref.pane_id,
+                env,
+                pane_id,
                 connection.put,
             )
-        except (KyoseiError, OSError) as exc:
+        except OSError as exc:
             raise _failed(session_id, str(exc)) from exc
         connection.control = control
         connection.put(
             _event(
                 "ready",
                 {
-                    "session_id": session_id,
+                    "session_id": session_id or None,
                     "connection": connection.id,
                     "device": connection.device,
                     "pane": {
-                        "pane_id": ref.pane_id,
-                        "socket": " ".join(ref.socket_args),
-                        "tmux_session": ref.session_name,
+                        "pane_id": pane_id,
+                        "socket": " ".join(socket_args),
+                        "tmux_session": tmux_session,
                     },
                 },
             )
@@ -655,6 +682,39 @@ class Terminals:
         with self._lock:
             self._open[connection.id] = connection
         return connection
+
+    @staticmethod
+    def _session_pane(
+        project: ProjectSessions, session_id: str
+    ) -> tuple[str, tuple[str, ...], dict[str, str], str, str]:
+        """The server and pane of a session the project records, or a refusal."""
+        project.require(session_id)
+        live = project.open_live(session_id)
+        ref = live.pane
+        if ref is None:
+            raise Refusal(
+                409,
+                f"session {session_id} has no pane to show ({live.pane_lookup.why}); it must be "
+                "running in tmux on this machine",
+                reason="no-pane",
+            )
+        try:
+            client = live.tmux()
+        except KyoseiError as exc:
+            raise _failed(session_id, str(exc)) from exc
+        return client.binary, tuple(client.socket_args), client.env, ref.session_name, ref.pane_id
+
+    def _orchestrator_pane(
+        self, root: str
+    ) -> tuple[str, tuple[str, ...], dict[str, str], str, str]:
+        """The server and pane of the project's orchestrator session, or a refusal (KYO-964)."""
+        try:
+            found = cmd_controller.orchestrator_pane(root, self._environ)
+        except cmd_controller.NoOrchestratorSession as exc:
+            raise Refusal(409, str(exc), reason="no-orchestrator-session") from exc
+        except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+            raise _failed("", str(exc)) from exc
+        return found.binary, found.socket_args, found.env, found.session, found.pane_id
 
     # ------------------------------------------------------------------------ streaming
 
@@ -743,7 +803,7 @@ class Terminals:
         if not self._drop(connection):
             return
         attempt = serve_send._Attempt(
-            LOG_ACTION,
+            connection.action,
             connection.project,
             connection.session_id,
             device=connection.device,
@@ -800,11 +860,13 @@ class Terminals:
             or connection.session_id != session_id
             or connection.device["id"] != device.id
         ):
+            stream = f"orchestrator/{ROUTE}" if not session_id else f"sessions/{{id}}/{ROUTE}"
             raise Refusal(
                 409,
-                f"no open terminal connection of device {device.name} to session {session_id} "
-                f"has that id; open the stream with GET {API_PREFIX}/projects/{{project}}/"
-                f"sessions/{{id}}/{ROUTE} and use the `connection` its `ready` event gives",
+                f"no open terminal connection of device {device.name} to "
+                f"{_named(session_id)} has that id; open the stream with GET "
+                f"{API_PREFIX}/projects/{{project}}/{stream} and use the `connection` its "
+                "`ready` event gives",
                 reason="no-connection",
             )
         return connection
@@ -873,11 +935,11 @@ class Terminals:
                     said = b" ".join(lines).decode("utf-8", "replace")
                     raise Refusal(
                         502,
-                        f"typing into session {connection.session_id} did not finish after "
+                        f"typing into {_named(connection.session_id)} did not finish after "
                         f"{start} of {len(raw)} bytes: {said}",
                         reason="terminal-failed",
                     )
-        return {"ok": True, "session_id": connection.session_id, "bytes": len(raw)}
+        return {"ok": True, "session_id": connection.session_id or None, "bytes": len(raw)}
 
     def resize(
         self,
@@ -900,7 +962,7 @@ class Terminals:
             said = b" ".join(lines).decode("utf-8", "replace")
             raise Refusal(
                 502,
-                f"the size of session {connection.session_id}'s terminal was not stated: {said}",
+                f"the size of {_named(connection.session_id)}'s terminal was not stated: {said}",
                 reason="terminal-failed",
             )
-        return {"ok": True, "session_id": connection.session_id, "cols": cols, "rows": rows}
+        return {"ok": True, "session_id": connection.session_id or None, "cols": cols, "rows": rows}
