@@ -206,9 +206,12 @@ export function anchorOpens(session: string, followed: string | null | undefined
   return !session || session === followed;
 }
 
-/** What a chip says of an anchor that cannot be opened; `live` is whether its session runs. */
+/**
+ * What a chip says of an anchor that the chat cannot open; `live` is whether its session runs.
+ * Its press opens the place in History, which reads any session of the project (KYO-972).
+ */
 export function anchorGoneNote(live: boolean): string {
   return live
-    ? "Made in another session. It is sent with its words, and cannot be opened from this chat."
-    : "Made in a session that has ended. It is sent with its words, and can no longer be opened.";
+    ? "Made in another session. It is sent with its words; press to open it in History."
+    : "Made in a session that has ended. It is sent with its words; press to open it in History.";
 }

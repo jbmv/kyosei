@@ -1,7 +1,9 @@
 // Run with `npm test`. Anchor mode (KYO-823): from a paragraph's + panel, the next press on a
 // place in the chat anchors it to that paragraph, as a right-click on a word would, without
 // the Anchor to menu. A hover shows what a press would take and dims what it could not, a
-// press there does nothing, and Escape ends the mode. A machine with no Chrome skips these.
+// press there does nothing, and Escape ends the mode. The History reader's passages are
+// anchored as the chat's are, by right-click and in the mode, and name the session they are
+// in (KYO-972). A machine with no Chrome skips these.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { openPage, type Page } from "./chrome.ts";
@@ -199,6 +201,143 @@ test("in Records a press on the record's metadata anchors the whole record", asy
   assert.ok(point, "the record's page has metadata outside its parts");
   await press(opened, point!);
   assert.deepEqual((await state(opened)).anchors, ["anchor: KYO-9 A record to anchor"]);
+});
+
+// ---- the History reader (KYO-972): a past session's passage is anchored as the chat's are,
+// and the anchor names that session.
+
+const PAST = "A reply of the past session. It has a second sentence.";
+
+/** The chat follows S1, a box is typed in, and History's reader holds S0, which has ended. */
+async function openReader(): Promise<Page> {
+  const opened = page!;
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "Fresh", live: true, first_seen: "2026-01-02T00:00:00Z", remote_control_url: null, prompts: 0 },
+      { session_id: "S0", title: "Earlier", live: false, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null, prompts: 1 },
+    ] } });
+    window.kyo.apply({ reset: true, turns: [], replies: [] });
+    window.kyo.composer.select(0, 0);
+  })()`);
+  await opened.type("my paragraph");
+  await opened.run(`document.querySelector('#view-items [data-view-item="history"]').click()`);
+  await readSession(opened, "S0");
+  return opened;
+}
+
+/** Opens a session from History's side bar and answers the reader's request for it. */
+const readSession = async (opened: Page, session: string) => {
+  await opened.run(`document.querySelector('#history-sessions [data-session="${session}"]').click()`);
+  await answerTurns(opened, session);
+};
+
+/** The reader's last request for a session, answered: S0 holds a prompt and a reply, S1 nothing. */
+const answerTurns = (opened: Page, session: string) => opened.run(`(() => {
+  const ask = window.posted.filter((p) => p.name === "history" && p.body.want === "turns").pop().body.ask;
+  window.kyo.historyTurns({ ask, session: ${JSON.stringify(session)}, status: 200, document: ${JSON.stringify(
+    session === "S0"
+      ? { turns: [{ id: "u0", at: "2026-01-01T00:00:00Z", text: "An old prompt." }],
+          replies: [{ message_id: "m0", uuid: "x0", at: "2026-01-01T00:00:01Z", text: PAST }] }
+      : { turns: [], replies: [] })} });
+})()`);
+
+/** The anchor the composer's prompt would be sent with, as the Send posts it. */
+const sentAnchors = async (opened: Page) => {
+  await opened.run(`window.posted.length = 0; document.querySelector("#boxes .box.main .box-send").click()`);
+  return opened.run<Record<string, unknown>[]>(
+    `window.posted.filter((m) => m.name === "send").at(-1).body.marks.flatMap((mark) => mark.anchors)`);
+};
+
+test("in the History reader a right-click offers Anchor and Copy, and Anchor names the past session (KYO-972.c1, c2)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await openReader();
+  const seen = await opened.run<{ entries: string[]; copies: string[] }>(`(() => {
+    const target = document.querySelector("#history-reader .reply p");
+    const box = target.getBoundingClientRect();
+    const at = { bubbles: true, cancelable: true, clientX: box.left + 30, clientY: box.top + box.height / 2 };
+    target.dispatchEvent(new MouseEvent("mousedown", { ...at, button: 2 }));
+    target.dispatchEvent(new MouseEvent("contextmenu", at));
+    const entries = [...document.querySelectorAll("#anchor-menu > *")].map((e) => e.classList.contains("anchor-new") ? "Anchor"
+      : e.classList.contains("anchor-copy") ? "Copy" : e.className === "anchor-heading" ? "Anchor to" : "line");
+    window.posted.length = 0;
+    document.querySelector("#anchor-menu .anchor-copy").click();
+    const copies = window.posted.filter((m) => m.name === "copy").map((m) => m.body.text);
+    target.dispatchEvent(new MouseEvent("mousedown", { ...at, button: 2 }));
+    target.dispatchEvent(new MouseEvent("contextmenu", at));
+    document.querySelector("#anchor-menu .anchor-new").click();
+    return { entries, copies };
+  })()`);
+  assert.deepEqual(seen.entries, ["Anchor", "Copy"], "the chat's two entries; the box has one paragraph, so no Anchor to list");
+  assert.deepEqual(seen.copies, ["A reply of the past session."]);
+  const held = await state(opened);
+  assert.deepEqual(held.anchors, ["anchor: A reply of the past session. (session ended)"]);
+  // The reader shows the anchored words, as the chat shows its own.
+  const lit = await opened.run<string[]>(`[...(CSS.highlights.get("anchored") ?? [])].map((range) => range.toString())`);
+  assert.deepEqual(lit, ["A reply of the past session."]);
+  assert.deepEqual(await sentAnchors(opened), [
+    { kind: "turn", session: "S0", start: 0, end: 28, message: "m0" },
+  ], "the anchor is sent with the reader's session, not the chat's");
+});
+
+test("anchor mode takes a press on a passage of the History reader (KYO-972.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await openReader();
+  await opened.run(`(() => {
+    const line = document.querySelector("#boxes .cm-line").getBoundingClientRect();
+    document.querySelector("#boxes .cm-content").dispatchEvent(new MouseEvent("mousemove",
+      { bubbles: true, clientX: line.left + 10, clientY: line.top + line.height / 2 }));
+    document.querySelector("#boxes .mark.ghost").click();
+    document.querySelector(".mark-panel .mark-anchor-mode").click();
+  })()`);
+  const point = (await opened.run<{ x: number; y: number }>(pointAt("#history-reader .reply", "second")))!;
+  await move(opened, point);
+  await wait(50);
+  assert.deepEqual((await state(opened)).preview, ["It has a second sentence."], "the hover shows what a press takes");
+  await press(opened, point);
+  const after = await state(opened);
+  assert.equal(after.mode, false);
+  assert.deepEqual(after.anchors, ["anchor: It has a second sentence. (session ended)"]);
+  assert.deepEqual(await sentAnchors(opened), [
+    { kind: "turn", session: "S0", start: 29, end: 54, message: "m0" },
+  ]);
+});
+
+test("the chip of an anchor to a past session opens History at the passage (KYO-972.c3)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const opened = await openReader();
+  await opened.run(`(() => {
+    const target = document.querySelector("#history-reader .reply p");
+    const box = target.getBoundingClientRect();
+    target.dispatchEvent(new MouseEvent("contextmenu",
+      { bubbles: true, cancelable: true, clientX: box.left + 30, clientY: box.top + box.height / 2 }));
+    document.querySelector("#anchor-menu .anchor-new").click();
+  })()`);
+  // The reader turns to another session, and the window to the chat.
+  await readSession(opened, "S1");
+  await opened.run(`document.querySelector('#view-items [data-view-item="chat"]').click()`);
+  const chip = await opened.run<{ disabled: boolean; title: string }>(`(() => {
+    document.querySelector("#boxes .mark.held").click();
+    const button = document.querySelector(".mark-panel .mark-item .mark-anchor");
+    window.posted.length = 0;
+    button.click();
+    return { disabled: button.disabled, title: button.closest(".mark-item").title };
+  })()`);
+  assert.equal(chip.disabled, false, "the chip takes a press");
+  assert.match(chip.title, /open it in History/);
+  const asked = await opened.run<{ view: boolean; wants: unknown[] }>(`({
+    view: !document.getElementById("view-history").hidden,
+    wants: window.posted.filter((p) => p.name === "history" && p.body.want === "turns").map((p) => p.body.session),
+  })`);
+  assert.deepEqual(asked, { view: true, wants: ["S0"] }, "History opens and reads the anchor's session");
+  await answerTurns(opened, "S0");
+  const shown = await opened.run<{ reader: boolean; lit: string | null; revealed: string[] }>(`({
+    reader: !document.getElementById("history-reader").hidden,
+    lit: document.querySelector("#history-reader .history-flash")?.dataset.hkey ?? null,
+    revealed: [...document.querySelectorAll("#history-reader .revealed")].map((e) => e.textContent),
+  })`);
+  assert.deepEqual(shown, { reader: true, lit: "r:m0", revealed: [PAST] });
 });
 
 test("after a paragraph's last sentence, what is lit is what a press anchors, not the whole reply", async (t) => {

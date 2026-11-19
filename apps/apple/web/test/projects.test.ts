@@ -222,7 +222,7 @@ test("an anchor opens only in the session it was made in", () => {
   assert.equal(anchorOpens("", "session-b"), true);
 });
 
-test("an anchor that cannot be opened says whether its session has ended", () => {
-  assert.match(anchorGoneNote(false), /session that has ended.*sent with its words.*no longer be opened/);
-  assert.match(anchorGoneNote(true), /another session.*sent with its words/);
+test("an anchor the chat cannot open says whether its session has ended, and that History opens it", () => {
+  assert.match(anchorGoneNote(false), /session that has ended.*sent with its words.*open it in History/);
+  assert.match(anchorGoneNote(true), /another session.*sent with its words.*open it in History/);
 });

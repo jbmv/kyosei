@@ -362,6 +362,15 @@ Search your reply for the sentence and read the `at` words within it. A selectio
 more is quoted alone. A trailing `(heading)`, `(list item)`, `(table cell)` or `(code block)`
 names the block, and a heading's line means the section under it.
 
+A line with `in session <id>` before the words, such as `on your reply <uuid> in session <id>
+"..."` or `on my prompt <uuid> in session <id> "..."`, names a passage of another session of
+this project, which you never saw: the operator anchored it in an earlier session or in the
+Mac app's History view (KYO-763, KYO-972). Run `kyo transcripts search "<quoted words>" --json`
+and take the result whose `session_id` is that id: it is the prompt or reply the line names,
+and its excerpt shows the words around the passage. For a reply written over several records,
+the result's `message` is the record of its first text block and may differ from the line's
+uuid.
+
 ### An `on record ...` or `on file ...` line names a record element or lines of a file (KYO-737)
 
 `on record KYO-717.c4 "first words..."` is anchored to that record or element; run `kyo show`
