@@ -47,7 +47,9 @@ ATTACH (KYO-474). ``kyo controller attach <project>`` is the one verb that knows
 rules above -- the socket, and the exact ``=<prefix>`` target -- so a person on another
 machine types ``ssh -t HOST "zsh -lc 'kyo controller attach KYO'"`` and the desktop
 app's terminal tab runs the same words. It replaces itself with ``tmux <socket args>
-attach -t =<prefix>`` in the same scrubbed environment ``start`` uses. Attaching over
+attach -t =<prefix>`` in the same scrubbed environment ``start`` uses. The line printed
+for a person to paste quotes the target (``-t '=KYO'``), because zsh expands a bare
+word that begins with ``=`` (KYO-963); the exec has no shell and passes it bare. Attaching over
 SSH does not change claude's credentials: the session was spawned by the
 launchd-owned server, and the SSH client only views it (KYO-458.m1). A client that
 goes away -- a closed terminal, a dropped connection -- detaches and ends nothing.
@@ -495,7 +497,21 @@ def remote_control_name(command: list[str]) -> str | None:
 
 
 def attach_command(tmux: Tmux, prefix: str) -> str:
-    return f"{tmux.spelled} attach -t ={prefix}"
+    """The line a person pastes to attach: :func:`attach_argv`'s words, quoted for a shell.
+
+    The target is single-quoted although ``shlex.quote`` leaves ``=`` bare: zsh, the
+    default shell on macOS, replaces a word that begins with ``=`` by the path of the
+    command of that name (its ``EQUALS`` option), so an unquoted ``=KYO`` fails with
+    ``zsh: KYO not found`` before tmux runs (KYO-963). bash and sh take the quoted word
+    as the same ``=KYO``."""
+    return f"{tmux.spelled} attach -t {quoted_target(prefix)}"
+
+
+def quoted_target(session: str) -> str:
+    """``=<session>``, quoted so that no shell expands it (KYO-963)."""
+    target = f"={session}"
+    quoted = shlex.quote(target)
+    return quoted if quoted.startswith("'") else f"'{target}'"
 
 
 def attach_argv(tmux: Tmux, prefix: str) -> list[str]:

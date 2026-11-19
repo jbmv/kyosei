@@ -226,7 +226,7 @@ def test_start_refuses_a_session_already_running_and_its_remedy_clears_it(
     again = invoke(["controller", "start", "proj"])
     assert again.code == 1
     assert "already running" in again.err and "`kyo orchestrator stop proj`" in again.err
-    assert "attach -t =TST" in again.err
+    assert "attach -t '=TST'" in again.err
     # The remedy: stop it, then start succeeds.
     assert invoke(["controller", "stop", "proj"]).code == 0
     assert invoke(["controller", "start", "proj"]).code == 0
@@ -582,8 +582,60 @@ def test_attach_execs_tmux_attach_with_an_exact_target_on_the_controller_socket(
     assert invoke(["controller", "attach", "proj"]).code == 0
     assert execs.calls[-1][1] == argv
     started = invoke(["controller", "start", "proj"])
-    assert "attach -t =TST" in started.err
-    assert cmd_controller.attach_command(resolved, "TST").split()[1:] == argv[1:]
+    assert "attach -t '=TST'" in started.err
+    assert shlex.split(cmd_controller.attach_command(resolved, "TST"))[1:] == argv[1:]
+
+
+STUB_TMUX = """#!/bin/sh
+for arg in "$@"; do printf '%s\\n' "$arg"; done > "$(dirname "$0")/tmux.args"
+"""
+
+
+@pytest.mark.parametrize("shell", ["zsh", "bash"])
+@pytest.mark.parametrize("socket", [None, "/tmp/kyc sock/s"])
+def test_kyo963_the_printed_attach_line_runs_unchanged_in_zsh_and_bash(
+    tmp_path: Path, shell: str, socket: str | None
+) -> None:
+    """KYO-963.c1: zsh replaces a bare word beginning with ``=`` by a command's path, so
+    ``-t =KYO`` failed with ``zsh: KYO not found`` before tmux ran. The printed line,
+    pasted into either shell with a stub tmux first on PATH, hands tmux ``=KYO``."""
+    found = shutil.which(shell)
+    if found is None:
+        pytest.skip(f"{shell} is not installed")
+    stub = tmp_path / "tmux"
+    stub.write_text(STUB_TMUX)
+    stub.chmod(0o755)
+    environ = {"PATH": f"{tmp_path}{os.pathsep}/usr/bin:/bin"}
+    if socket is not None:
+        environ[cmd_controller.SOCKET_ENV] = socket
+    line = cmd_controller.attach_command(cmd_controller.resolve_tmux(environ), "KYO")
+    # zsh -f reads no startup file, so EQUALS is at its default, which is on.
+    argv = [found, "-f", "-c", line] if shell == "zsh" else [found, "--norc", "-c", line]
+    done = subprocess.run(argv, env=environ, capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    sent = (tmp_path / "tmux.args").read_text().splitlines()
+    assert sent == [*cmd_controller.socket_args(environ), "attach", "-t", "=KYO"]
+
+
+def test_kyo963_the_bare_target_is_what_zsh_expands() -> None:
+    """The case the quoting exists for, so the test above would see its removal."""
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    done = subprocess.run(
+        [zsh, "-f", "-c", "echo -t =KYO963NOSUCHCOMMAND"],
+        capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    assert done.returncode != 0 and "not found" in done.stderr
+
+
+def test_kyo963_c3_attach_argv_still_passes_the_target_bare() -> None:
+    """``attach_argv`` execs with no shell between, so its target is not quoted."""
+    tmux = cmd_controller.Tmux("/bin/tmux", ("-L", "kyosei"), {})
+    assert cmd_controller.attach_argv(tmux, "KYO") == [
+        "/bin/tmux", "-L", "kyosei", "attach", "-t", "=KYO",
+    ]  # fmt: skip
+    assert cmd_controller.attach_command(tmux, "KYO") == "tmux -L kyosei attach -t '=KYO'"
 
 
 def test_attach_really_replaces_itself_with_a_client_that_only_detaches(

@@ -15,10 +15,12 @@ appears in `$KYOSEI_HOME/projects.json` (its name or its prefix), or by its
 directory.
 
 `kyo orchestrator attach <project>` puts your terminal in that session (KYO-474). It
-replaces itself with `tmux -L kyosei attach -t =<prefix>` — the dedicated server, and
+replaces itself with `tmux -L kyosei attach -t '=<prefix>'` — the dedicated server, and
 the exact name, so you never have to remember either — and with no server or no session
 it says which, naming `kyo orchestrator start` (or, over SSH with no server,
-`kyo orchestrator --install --apply`). From another machine:
+`kyo orchestrator --install --apply`). Where Kyosei prints that line for you to type,
+the target is in single quotes, because zsh replaces an unquoted word that begins with
+`=` by the path of a command of that name (KYO-963). From another machine:
 
 ```sh
 ssh -t devbox "zsh -lc 'kyo orchestrator attach KYO'"

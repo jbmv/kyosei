@@ -36,12 +36,12 @@ test("waiting-for-trust is said in words, with the folder and where to answer", 
     status: 200,
     reply: {
       state: "waiting-for-trust", waiting_for_trust: true, trust_folder: "/work/proj",
-      session: "KYO", attach: "tmux -L kyosei attach -t =KYO",
+      session: "KYO", attach: "tmux -L kyosei attach -t '=KYO'",
     },
   });
   assert.equal(view.enabled, false);
   assert.match(view.text, /asking whether to trust \/work\/proj/);
-  assert.match(view.text, /`tmux -L kyosei attach -t =KYO`/);
+  assert.match(view.text, /`tmux -L kyosei attach -t '=KYO'`/);
   assert.doesNotMatch(view.text, /waiting-for-trust/);
 });
 

@@ -1240,7 +1240,7 @@ Usage: `kyo orchestrator [-h] [--root ROOT] [--actor ACTOR] [--json] [--full] [-
 
 ### Positional arguments
 
-- `[{start,stop,attach,list}]` — optional. start PROJECT's session (orchestrator_command from $KYOSEI_HOME/settings.yml, default claude, through a login shell, in the project directory, detached), stop it, attach this terminal to it (`tmux -L kyosei attach -t =PREFIX`; over SSH, `ssh -t HOST "zsh -lc 'kyo orchestrator attach PREFIX'"`), or list every registered project's session, whether claude is alive in it and the command it was started with
+- `[{start,stop,attach,list}]` — optional. start PROJECT's session (orchestrator_command from $KYOSEI_HOME/settings.yml, default claude, through a login shell, in the project directory, detached), stop it, attach this terminal to it (`tmux -L kyosei attach -t '=PREFIX'`; over SSH, `ssh -t HOST "zsh -lc 'kyo orchestrator attach PREFIX'"`), or list every registered project's session, whether claude is alive in it and the command it was started with
 - `[PROJECT]` — optional. for start, stop and attach: a project in the machine's registry, by name or prefix, or the path of a project directory
 
 ### Options
