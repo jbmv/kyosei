@@ -284,6 +284,9 @@ async function chatMarks(opened: Page, live: boolean): Promise<Marks> {
     window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
       { session_id: "S1", title: "t", live: ${live}, first_seen: "2026-01-01T00:00:00Z",
         ended_at: ${live ? "null" : '"2026-01-02T00:00:00Z"'}, remote_control_url: null },
+      // Another session of the project runs, so an ended one's chat is drawn: with no live
+      // session in the project the chat holds no turn (KYO-969).
+      { session_id: "S2", title: "u", live: true, first_seen: "2026-01-03T00:00:00Z", remote_control_url: null },
     ] } });
     window.kyo.apply({ reset: true,
       turns: [{ id: "u1", at: "2026-01-01T00:00:00Z", text: "Open a record, with care." }],
