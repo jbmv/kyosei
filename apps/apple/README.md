@@ -58,6 +58,7 @@ how the app draws each and where its code is.
 - apps/apple/web/src/pipeline.ts
 - apps/apple/web/src/marks.ts
 - apps/apple/web/src/tags.ts
+- apps/apple/web/src/emphasis.ts
 - apps/apple/web/src/chipwords.ts
 - apps/apple/web/src/sending.ts
 - apps/apple/web/src/agents.ts
