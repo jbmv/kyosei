@@ -98,8 +98,11 @@ its own.
 THE START ROUTE (KYO-719, decision KYO-718). ``orchestrator/start`` (POST) starts the
 project's orchestrator session as ``kyo orchestrator start`` does, and is the one process
 this server starts. It needs a device token holding the ``start`` permission and is logged;
-:mod:`kyosei.serve_orchestrator` holds that. Nothing else is served under ``orchestrator/``,
-and the ``orchestrator`` command stays on :data:`NOT_SERVED`.
+:mod:`kyosei.serve_orchestrator` holds that. The one other route under ``orchestrator/`` is
+``orchestrator/terminal`` with its ``input`` and ``resize`` (KYO-964): the terminal routes
+above, on the orchestrator session found by its tmux name, which is how a claude waiting on
+the trust prompt, and so recorded as no session, is reached. :mod:`kyosei.serve_terminal`
+holds them. The ``orchestrator`` command stays on :data:`NOT_SERVED`.
 
 THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
 directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
@@ -886,6 +889,16 @@ class ServeHandler(BaseHTTPRequestHandler):
             if rest[2] not in _PATH_ROUTES and len(rest) > 3:
                 raise _no_route(method, split.path)
             allowed = FILE_ROUTES[rest[2]]
+        elif (
+            len(rest) in (4, 5)
+            and rest[0] == "projects"
+            and rest[2] == ORCHESTRATOR_ROUTE
+            and rest[3] == SESSION_TERMINAL_ROUTE
+        ):
+            # KYO-964: the orchestrator session's terminal, by its tmux name.
+            if len(rest) == 5 and rest[4] not in SESSION_TERMINAL_ACTIONS:
+                raise _no_route(method, split.path)
+            allowed = ("GET",) if len(rest) == 4 else ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == ORCHESTRATOR_ROUTE:
             if rest[3:] != [ORCHESTRATOR_START]:
                 from . import serve_orchestrator
@@ -990,6 +1003,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._config_write(rest[1], rest[2], rest[3], split.query)
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
+        if rest[2] == ORCHESTRATOR_ROUTE and rest[3] == SESSION_TERMINAL_ROUTE:
+            return self._session_terminal(rest[1], "", rest[4:], split.query, orchestrator=True)
         if rest[2] == ORCHESTRATOR_ROUTE:
             return self._orchestrator_start(rest[1], split.query)
         if rest[2] == PROJECT_FILES_ROUTE:
@@ -1459,9 +1474,12 @@ class ServeHandler(BaseHTTPRequestHandler):
         return status, _json_bytes(document)
 
     def _session_terminal(
-        self, name: str, session_id: str, rest: list[str], query: str
+        self, name: str, session_id: str, rest: list[str], query: str, *, orchestrator: bool = False
     ) -> tuple | None:
-        """The terminal stream and its two POST routes. :mod:`kyosei.serve_terminal` decides."""
+        """The terminal stream and its two POST routes. :mod:`kyosei.serve_terminal` decides.
+
+        With ``orchestrator`` they are the project's orchestrator session's, reached by its
+        tmux name, and ``session_id`` is the empty string (KYO-964)."""
         from . import serve_terminal
 
         terminals = self.server.terminals
@@ -1481,6 +1499,7 @@ class ServeHandler(BaseHTTPRequestHandler):
             session_id,
             authorization,
             lambda: serve_terminal.size_from_query(_query_pairs(query)),
+            orchestrator=orchestrator,
         )
         reason = "client-left"
         try:

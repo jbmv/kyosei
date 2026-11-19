@@ -621,6 +621,64 @@ def start_registered(root: str | Path, environ: dict[str, str]) -> dict:
     return action_document("start", project, start(project, resolve_tmux(environ), environ))
 
 
+class NoOrchestratorSession(KyoseiError):
+    """:func:`orchestrator_pane`'s refusal when the project has no live session to show, so
+    that ``kyo serve``'s terminal route can answer it as a conflict and not as a failure."""
+
+
+@dataclass(frozen=True)
+class OrchestratorPane:
+    """Where a registered project's orchestrator session runs, for a viewer to attach to."""
+
+    binary: str
+    socket_args: tuple[str, ...]
+    env: dict[str, str]
+    #: The tmux session's name, which is the project's prefix.
+    session: str
+    pane_id: str
+
+
+def orchestrator_pane(root: str | Path, environ: dict[str, str]) -> OrchestratorPane:
+    """The pane of the orchestrator session of the registered project at ``root`` (KYO-964).
+
+    ``kyo serve``'s orchestrator terminal attaches here by the session's name, which is how a
+    session waiting on Claude Code's trust prompt is reached: that claude has run no hook, so
+    the project records no session whose pane the session terminal could look up. The server
+    is resolved from ``environ`` as :func:`start_registered` resolves it. Nothing here types
+    into the pane; it is read with ``list-panes`` only.
+    """
+    project = _project_at(root, registered=True)
+    if project is None:
+        raise NoOrchestratorSession(
+            f"the project at {root} has no orchestrator session to show, because its "
+            "config.yml gives no usable project_prefix, which names the session; set "
+            "`project_prefix` there to 2 to 16 capital letters and digits beginning with a "
+            "letter"
+        )
+    tmux = resolve_tmux(environ)
+    session = project.prefix
+    missing = (
+        f"no orchestrator session {session} is running on {tmux.spelled}, so there is no "
+        "terminal to show; start it with Start orchestrator in the app, or with `kyo "
+        f"orchestrator start {project.name}` on the server's machine"
+    )
+    if not server_running(tmux):
+        raise NoOrchestratorSession(missing)
+    done = tmux.run(
+        "list-panes", "-s", "-t", f"={session}", "-F", "#{session_name}\t#{pane_dead}\t#{pane_id}"
+    )
+    if done.returncode != 0:
+        problem = done.stderr.strip()
+        if _NO_SERVER.search(problem) or _NO_TARGET.search(problem) or "can't find" in problem:
+            raise NoOrchestratorSession(missing)
+        raise KyoseiError(f"could not list the panes of {session} on {tmux.spelled}: {problem}")
+    for line in done.stdout.splitlines():
+        name, dead, pane_id = [*line.split("\t"), "", ""][:3]
+        if name == session and dead != "1" and pane_id:
+            return OrchestratorPane(tmux.binary, tmux.socket_args, tmux.env, session, pane_id)
+    raise NoOrchestratorSession(missing)
+
+
 def stop(project: ControllerProject, tmux: Tmux) -> dict:
     session = project.prefix
     existing = session_panes(tmux, session)

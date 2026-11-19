@@ -12,7 +12,7 @@ test("nothing is offered before a session list arrives, or while a session is li
 
 test("a project with no live session is offered the button", () => {
   assert.deepEqual(startView(false, null), {
-    shown: true, enabled: true, text: "This project has no live session.",
+    shown: true, enabled: true, text: "This project has no live session.", terminal: false,
   });
 });
 
@@ -28,6 +28,7 @@ test("a started session is named, and the button stays off until it appears", ()
   });
   assert.equal(view.enabled, false);
   assert.equal(view.text, "Started KYO. It is shown here once Claude Code has begun.");
+  assert.equal(view.terminal, false);
 });
 
 test("waiting-for-trust is said in words, with the folder and where to answer", () => {
@@ -43,6 +44,25 @@ test("waiting-for-trust is said in words, with the folder and where to answer", 
   assert.match(view.text, /asking whether to trust \/work\/proj/);
   assert.match(view.text, /`tmux -L kyosei attach -t '=KYO'`/);
   assert.doesNotMatch(view.text, /waiting-for-trust/);
+  // KYO-964: the prompt is answered in the app's own terminal, which the panel offers.
+  assert.equal(view.terminal, true);
+  assert.match(view.text, /Open the terminal shows here/);
+});
+
+test("the terminal is offered only while the trust prompt waits", () => {
+  for (const frame of [
+    null,
+    { phase: "starting" as const },
+    { phase: "failed" as const, text: "No." },
+    { phase: "answered" as const, status: 409, reply: { error: "already running" } },
+  ]) {
+    assert.equal(startView(false, frame).terminal, false);
+  }
+  const waiting = startView(false, {
+    phase: "answered", status: 200, reply: { state: "waiting-for-trust", session: "KYO" },
+  });
+  assert.equal(waiting.terminal, true);
+  assert.doesNotMatch(waiting.text, /server's machine/);
 });
 
 test("a refusal is the server's own sentence, and the button can be pressed again", () => {
@@ -51,7 +71,7 @@ test("a refusal is the server's own sentence, and the button can be pressed agai
   const view = startView(false, {
     phase: "answered", status: 403, reply: { ok: false, error, reason: "no-start-permission" },
   });
-  assert.deepEqual(view, { shown: true, enabled: true, text: error });
+  assert.deepEqual(view, { shown: true, enabled: true, text: error, terminal: false });
 });
 
 test("a reply that is not the server's still says something", () => {
@@ -62,5 +82,7 @@ test("a reply that is not the server's still says something", () => {
 
 test("a press that reached no server says why", () => {
   const view = startView(false, { phase: "failed", text: "The server could not be reached." });
-  assert.deepEqual(view, { shown: true, enabled: true, text: "The server could not be reached." });
+  assert.deepEqual(view, {
+    shown: true, enabled: true, text: "The server could not be reached.", terminal: false,
+  });
 });

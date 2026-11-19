@@ -265,6 +265,8 @@ function drawStart(): void {
   document.getElementById("start")!.hidden = !view.shown;
   document.getElementById("start-text")!.textContent = view.text;
   (document.getElementById("start-button") as HTMLButtonElement).disabled = !view.enabled;
+  // KYO-964: the trust prompt is answered in the terminal, on the orchestrator's session.
+  document.getElementById("start-terminal")!.hidden = !view.terminal;
 }
 const ACTIVITY_AMBER_MS = 30 * 60 * 1000;
 const ACTIVITY_RED_MS = 45 * 60 * 1000;
@@ -5484,6 +5486,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.getElementById("start-button")!.addEventListener("click", () => post("start", {}));
+document.getElementById("start-terminal")!.addEventListener("click", () => openTerminal());
 
 // ------------------------------------------------------------------- the views (KYO-732)
 

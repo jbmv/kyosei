@@ -169,6 +169,10 @@ final class SessionFeed {
     private var terminalSize: (cols: Int, rows: Int)?
     /// The session whose terminal was last asked for, so that it is asked for once.
     private var terminalSession: String?
+    /// Whether the open stream is the orchestrator session's, reached by its tmux name, for a
+    /// project with no live session (KYO-964): a claude waiting on the trust prompt has run no
+    /// hook, so the server lists no session whose pane the session route could name.
+    private var terminalOrchestrator = false
     private var terminalTask: Task<Void, Never>?
     /// Read when the drawer opens, since reading it starts a process and a key must not.
     private var terminalToken: String?
@@ -1138,27 +1142,35 @@ final class SessionFeed {
         typed = ""
     }
 
-    /// Follows the current session's terminal while the drawer is open. A session with no
-    /// live process has none, and the page then shows the pane's last text.
+    /// Follows the current session's terminal while the drawer is open. With no live session
+    /// the drawer shows the project's orchestrator session, found by its tmux name, where the
+    /// trust prompt of a session that has not begun is answered (KYO-964); the server refuses,
+    /// naming the remedy, when the project has none.
     private func openTerminal() {
         closeTerminal()
         guard terminalOpen else { return }
         terminalSession = current
-        guard let session = current, currentLive else {
-            terminalFrame("refused", #"{"error": "This session has no terminal to show."}"#)
-            return
-        }
         guard let token = terminalToken else {
             terminalFrame("refused", #"{"error": \#(quoted(Self.terminalTokenHelp))}"#)
             return
         }
-        terminalTask = Task { await followTerminal(session: session, token: token) }
+        terminalOrchestrator = !(current != nil && currentLive)
+        let path = terminalPath("terminal")
+        terminalTask = Task { await followTerminal(path: path, token: token) }
     }
 
-    private func followTerminal(session: String, token: String) async {
+    /// A terminal route of the open stream: the current session's, or the orchestrator's.
+    private func terminalPath(_ route: String) -> String {
+        if !terminalOrchestrator, let session = terminalSession {
+            return sessionPath(session, route)
+        }
+        return "v1/projects/\(project)/orchestrator/\(route)"
+    }
+
+    private func followTerminal(path: String, token: String) async {
         while !Task.isCancelled {
             var components = URLComponents(
-                url: client.base.appending(path: sessionPath(session, "terminal")),
+                url: client.base.appending(path: path),
                 resolvingAgainstBaseURL: false)!
             if let size = terminalSize {
                 components.queryItems = [
@@ -1240,14 +1252,13 @@ final class SessionFeed {
     }
 
     private func terminalPost(_ route: String, _ body: [String: Any]) async -> String? {
-        guard let session = terminalSession, let connection = terminalConnection,
-            let token = terminalToken
+        guard let connection = terminalConnection, let token = terminalToken
         else { return "The terminal is not connected." }
         var body = body
         body["connection"] = connection
         guard let data = try? JSONSerialization.data(withJSONObject: body),
             let reply = try? await client.authorised(
-                "POST", sessionPath(session, "terminal/\(route)"), token: token, body: data)
+                "POST", terminalPath("terminal/\(route)"), token: token, body: data)
         else { return "The server could not be reached." }
         return reply.status == 200 ? nil : refusal(reply.data)
     }
@@ -1316,7 +1327,12 @@ final class SessionFeed {
                 #"{"phase": "answered", "status": \#(reply.status), "reply": \#(document)}"#)
             // A session already running may not be listed yet, so it is watched for as well.
             let running = object?["reason"] as? String == "already-running"
-            if reply.status == 200 || running { followStartedSession() }
+            if reply.status == 200 || running {
+                followStartedSession()
+                // A drawer open on the orchestrator's terminal was refused while there was no
+                // session to show, and now there is one, waiting on the trust prompt or not.
+                if terminalOpen, terminalOrchestrator { openTerminal() }
+            }
         }
     }
 
