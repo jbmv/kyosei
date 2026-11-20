@@ -388,6 +388,8 @@ def _facts_json(facts: Any) -> dict | None:
         "limits": facts.limits,
         "cache": facts.cache,
         "weekly_at_start": facts.weekly_at_start,
+        # KYO-974: null unless the session is known to be logged out of Claude Code.
+        "logged_out": facts.logged_out,
     }
 
 
@@ -1275,6 +1277,8 @@ class _Sampler:
                 and session_layer.read_weekly_at_start(live.session_id, live.environ)
                 != held.get("weekly_at_start")
             )
+            # KYO-974: a login ends or is renewed with no row of this session's transcript.
+            or (self._facts is not None and live.logged_out() != held.get("logged_out"))
         ):
             now_facts = _facts_json(live.facts())
             if now_facts != self._facts:

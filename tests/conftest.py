@@ -251,6 +251,22 @@ def no_developers_kyo_on_path(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "path_program", lambda *_a, **_k: None)
 
 
+@pytest.fixture(autouse=True)
+def no_developers_claude_auth(monkeypatch) -> None:
+    """Stop the session layer from asking the developer's own `claude` about its login (KYO-974).
+
+    On :func:`no_developers_kyo_on_path`'s reasoning: a served session's facts ask
+    ``claude auth status``, and a `claude` on the developer's ``PATH`` would answer for a
+    test's temporary configuration directory, write its own files there, and make the facts
+    depend on the machine. The resolver is replaced; a test that wants a `claude` writes a
+    fake one and points the resolver at it.
+    """
+    from kyosei.harness import claude_code_auth
+
+    claude_code_auth.forget()
+    monkeypatch.setattr(claude_code_auth, "find_claude", lambda *_a, **_k: None)
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """An initialised in-repo project rooted at ``tmp_path/proj``, prefix ``TST``.
