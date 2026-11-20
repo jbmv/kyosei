@@ -306,7 +306,9 @@ def _refusing() -> Iterator[None]:
         raise Refusal(422, str(exc), reason="store-refused") from exc
     except sqlite3.OperationalError as exc:
         if is_lock_contention(exc):
-            raise Refusal(503, lock_contention_message(None), reason="store-locked") from exc
+            raise Refusal(
+                503, lock_contention_message(None), reason="store-locked"
+            ) from exc
         raise
 
 
@@ -335,7 +337,9 @@ def _actor(device: device_tokens.Device) -> str:
 
 
 def _device(server: Any, authorization: str | None) -> device_tokens.Device:
-    return serve_send.require_device(server.environ, authorization, device_tokens.PERMISSION_NOTES)
+    return serve_send.require_device(
+        server.environ, authorization, device_tokens.PERMISSION_NOTES
+    )
 
 
 def _authorized_body(
@@ -712,7 +716,9 @@ def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
         text: str | None = files.text(name, session, path)
     except Refusal as exc:
         if seen is None or not _is_absence(exc):
-            raise Refusal(exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra) from exc
+            raise Refusal(
+                exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra
+            ) from exc
         # KYO-977: the person saw the file, which is gone since; filed as they saw it.
         text = None
     lines = None if text is None else file_lines(text)
@@ -824,7 +830,9 @@ def _file_place(ctx: commands.Context, files: _Files, anchor: dict) -> dict:
     return place
 
 
-def _file_line(ctx: commands.Context, files: _Files, anchor: dict, session_id: str) -> str:
+def _file_line(
+    ctx: commands.Context, files: _Files, anchor: dict, session_id: str
+) -> str:
     """The line for an anchor read from a served file (module docstring): at the lines its
     text is at now, and without words when it is stale."""
     name, text, found = _file_state(ctx, files, anchor)
@@ -1337,7 +1345,9 @@ def _marks(document: dict, line_count: int) -> list[dict]:
     return marks
 
 
-def _with_marks(segments: list[dict[str, str]], insertions: dict[int, str]) -> list[dict[str, str]]:
+def _with_marks(
+    segments: list[dict[str, str]], insertions: dict[int, str]
+) -> list[dict[str, str]]:
     """The segments with typed text inserted at these offsets of their joined text."""
     pieces: list[tuple[str, str]] = []
     position = 0
@@ -1473,11 +1483,9 @@ def send_prompt(
 
 def _filed_already(ctx: commands.Context, message_id: str) -> bool:
     """Whether a prompt's notes are in the store: they carry its id as their sent message."""
-    row = (
-        ctx.store()
-        .conn.execute("SELECT 1 FROM person_notes WHERE sent_message = ? LIMIT 1", (message_id,))
-        .fetchone()
-    )
+    row = ctx.store().conn.execute(
+        "SELECT 1 FROM person_notes WHERE sent_message = ? LIMIT 1", (message_id,)
+    ).fetchone()
     return row is not None
 
 
