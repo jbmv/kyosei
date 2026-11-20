@@ -76,3 +76,34 @@ export function typedText(pieces: Piece[]): string {
     : piece.kind === "code" ? piece.text
     : `${piece.marker}${typedText(piece.body)}${piece.marker}`).join("");
 }
+
+/** An emphasised run of a line, by offsets into that line: its markers are the first and last `marker` characters. */
+export interface Run {
+  kind: "em" | "strong" | "code";
+  from: number;
+  to: number;
+  /** The length of each marker: 1 or 2 for emphasis, 1 for the backticks of code. */
+  marker: number;
+}
+
+/**
+ * The runs `emphasis` reads in a line, with their offsets, outermost first and nested runs
+ * after the run that holds them (KYO-975). A box draws from these, so that it and a sent prompt
+ * read the same runs from the same function.
+ */
+export function emphasisRuns(line: string): Run[] {
+  const runs: Run[] = [];
+  const walk = (pieces: Piece[], offset: number): void => {
+    for (const piece of pieces) {
+      const length = typedText([piece]).length;
+      if (piece.kind === "code") runs.push({ kind: "code", from: offset, to: offset + length, marker: 1 });
+      else if (piece.kind !== "text") {
+        runs.push({ kind: piece.kind, from: offset, to: offset + length, marker: piece.marker.length });
+        walk(piece.body, offset + piece.marker.length);
+      }
+      offset += length;
+    }
+  };
+  walk(emphasis(line), 0);
+  return runs;
+}

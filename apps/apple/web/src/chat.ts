@@ -51,7 +51,7 @@ import {
   type FoldedLine, type LineMarks, createEditor, foldedLines, lineOfId, marksOf as lineMarks, placeItem, refreshMarks,
   removeEffect, removeItem, showLanding,
 } from "./editor";
-import { indentLines, lineFold, outdentLines, shiftSection, toggleFold } from "./editor";
+import { boldText, indentLines, italicText, lineFold, outdentLines, regularText, shiftSection, toggleFold } from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -1932,6 +1932,26 @@ const kyo = {
   outdent(): void {
     const editor = focusedEditor();
     if (editor) outdentLines(editor);
+  },
+
+  /**
+   * Bold, Italic and Regular in the menu on a box's words (KYO-975), which do to the focused
+   * box's selection what Command-B and Command-I do, and Regular removes the emphasis markers.
+   * Without a selection they act on the word at the caret. No box focused: nothing.
+   */
+  bold(): void {
+    const editor = focusedEditor();
+    if (editor) boldText(editor);
+  },
+
+  italic(): void {
+    const editor = focusedEditor();
+    if (editor) italicText(editor);
+  },
+
+  regular(): void {
+    const editor = focusedEditor();
+    if (editor) regularText(editor);
   },
 
   /**
@@ -6860,20 +6880,46 @@ navIcons("records", {
 });
 
 // KYO-737: a right-click on a citable element of the open record, or a selection within
-// one, offers Anchor as the chat does. The anchor is to the element, by its id.
+// one, offers Anchor as the chat does. The anchor is to the element, by its id. KYO-973: on
+// any other part of the open record's page it is to the whole record, worded by the record's
+// id and the first words of its title.
 recordArticle.addEventListener("contextmenu", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const element = target?.closest<HTMLElement>("[data-record-ref]");
   const id = element?.dataset.recordRef;
   const own = ownSelection();
   if (!own) window.getSelection()?.removeAllRanges();
-  if (!element || !id) return;
   event.preventDefault();
+  if (!element || !id) {
+    if (openRecordId) showRecordAnchor(event, openRecordId, recordArticle.querySelector("h1")?.textContent ?? "");
+    return;
+  }
   const text = element.classList.contains("record-head")
     ? recordArticle.querySelector("h1")?.textContent ?? ""
     : element.querySelector(".rec-text")?.textContent ?? "";
   const words = text.trim() ? `${id} ${firstWords(text, ANCHOR_WORDS)}` : id;
   showAnchorMenu(event.clientX, event.clientY, { kind: "record", id, words });
+});
+
+/** Anchor to a whole record, as its id and the first words of its title. */
+function showRecordAnchor(event: MouseEvent, id: string, title: string): void {
+  const words = title.trim() ? `${id} ${firstWords(title, ANCHOR_WORDS)}` : id;
+  showAnchorMenu(event.clientX, event.clientY, { kind: "record", id, words });
+}
+
+/**
+ * KYO-973: a right-click on a record's row in a list offers Anchor to the whole record; on
+ * anything else in the Records view WebKit's menu is not shown, except in a text field, where
+ * the system's menu is the one typing needs.
+ */
+document.addEventListener("contextmenu", (event) => {
+  if (event.defaultPrevented || currentView !== "records") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || !target.closest("#view-records, #records-side") || inTextField(target)) return;
+  event.preventDefault();
+  const row = target.closest<HTMLElement>(".rec-row[data-open]");
+  if (!row?.dataset.open) return;
+  showRecordAnchor(event, row.dataset.open, row.querySelector(".rec-title")?.textContent ?? "");
 });
 
 // A record is opened by a row of a list, a link on a record's page, or a kyosei:// link in
@@ -7089,8 +7135,20 @@ function showPathMenu(x: number, y: number, path: string): void {
   document.body.append(pathMenu);
   pathMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - pathMenu.offsetWidth - 8))}px`;
   pathMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - pathMenu.offsetHeight - 8))}px`;
-  // Reveal in Finder is offered once the app says the file is on this machine.
-  menuPlace = localPath(path, sameMachine, pathMappings);
+  offerReveal(pathMenu, path);
+}
+
+/** The menu that Reveal in Finder is added to when the app says its path is on this machine. */
+let revealMenu: HTMLElement = pathMenu;
+
+/**
+ * Reveal in Finder is offered in `menu` once the app says `path`, a path on the server's
+ * machine, is a file or folder on this one (KYO-883, KYO-973). A path that is not an absolute
+ * one, which is what a per-session root's file has, is not asked about and gets no item.
+ */
+function offerReveal(menu: HTMLElement, path: string): void {
+  revealMenu = menu;
+  menuPlace = /^[/~]/.test(path) ? localPath(path, sameMachine, pathMappings) : null;
   if (menuPlace) post("files", { want: "exists", path: menuPlace });
 }
 
@@ -8219,10 +8277,11 @@ const fileFrames = {
 
   /** Whether a path is a file on this machine, which the open menu then offers to reveal. */
   filesExists(frame: { path: string; exists: boolean }): void {
-    if (!frame.exists || frame.path !== menuPlace || !pathMenu.isConnected) return;
-    if (pathMenu.querySelector(".path-reveal")) return;
-    pathMenu.append(boxButton("path-reveal", "Reveal in Finder", () => {
-      pathMenu.remove();
+    if (!frame.exists || frame.path !== menuPlace || !revealMenu.isConnected) return;
+    if (revealMenu.querySelector(".path-reveal")) return;
+    const menu = revealMenu;
+    menu.append(boxButton("path-reveal", "Reveal in Finder", () => {
+      menu.remove();
       post("files", { want: "reveal", path: frame.path });
     }));
   },
@@ -8408,7 +8467,9 @@ function filePlaceAt(
 }
 
 // KYO-737: a selection in the open file, or a right-click on a block of it, offers Anchor as
-// the chat does.
+// the chat does. KYO-973: Reveal in Finder for the open file is below it, and is the menu's
+// own, with Copy path, where the click is on nothing that can be anchored. WebKit's menu is
+// not shown anywhere on the page.
 fileArticle.addEventListener("contextmenu", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const file = openFile;
@@ -8416,13 +8477,57 @@ fileArticle.addEventListener("contextmenu", (event) => {
   const place = file && target
     ? filePlaceAt(file, target, { x: event.clientX, y: event.clientY }, own) : null;
   if (!own) window.getSelection()?.removeAllRanges();
-  if (!file || !place) return;
+  if (!file) return;
   event.preventDefault();
+  const path = serverPath(fileRoots, file.root, file.path);
+  if (!place) {
+    showPathMenu(event.clientX, event.clientY, path ?? file.path);
+    return;
+  }
   const session = isPerSession(fileRoots, file.root) ? filesSession : null;
   showAnchorMenu(event.clientX, event.clientY, {
     kind: "path", root: file.root, path: file.path, ...place, ...(session ? { session } : {}),
   });
+  if (path) offerReveal(anchorMenu, path);
 });
+
+/** Whether a right-click is in a field where the system's menu is needed for typing. */
+function inTextField(target: Element | null): boolean {
+  return !!target?.closest("input, textarea, select, [contenteditable='true'], .cm-content");
+}
+
+/**
+ * KYO-973: a right-click in the Files view on a row of the tree or of a list, or on a location,
+ * offers that path's menu, Copy path and Reveal in Finder, which is the one the open file's
+ * path in the top bar offers. Anything else in the view shows no menu of WebKit's, except in
+ * the search field, where the system's menu is the one a text field needs.
+ */
+function filesMenuAt(event: MouseEvent): void {
+  if (event.defaultPrevented || currentView !== "files") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || !target.closest("#view-files, #files-side") || inTextField(target)) return;
+  event.preventDefault();
+  const found = target.closest<HTMLElement>("[data-found-root]");
+  const mention = target.closest<HTMLElement>("[data-mention]");
+  const place = target.closest<HTMLElement>("[data-root]");
+  const row = target.closest<HTMLElement>(".tree-row[data-file], .tree-row[data-dir]");
+  let at: { root: string; path: string } | null = null;
+  if (found?.dataset.foundRoot && found.dataset.foundPath) {
+    at = { root: found.dataset.foundRoot, path: found.dataset.foundPath };
+  } else if (mention && mentions[Number(mention.dataset.mention)]) {
+    const item = mentions[Number(mention.dataset.mention)];
+    at = { root: item.root, path: item.path };
+  } else if (row) {
+    const root = shownRoot();
+    if (root) at = { root, path: row.dataset.file ?? row.dataset.dir ?? "" };
+  } else if (place?.dataset.root && place.matches(".location-row")) {
+    at = { root: place.dataset.root, path: "" };
+  }
+  if (!at) return;
+  showPathMenu(event.clientX, event.clientY, serverPath(fileRoots, at.root, at.path) ?? at.path);
+}
+document.addEventListener("contextmenu", filesMenuAt);
+
 drawViews();
 drawProjects();
 drawRecordLists();

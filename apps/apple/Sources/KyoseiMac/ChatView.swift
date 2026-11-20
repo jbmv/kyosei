@@ -389,7 +389,13 @@ final class ChatPage: WKWebView {
             composerMenu = false
             let indent = NSMenuItem(title: "Indent", action: #selector(indentChosen), keyEquivalent: "")
             let outdent = NSMenuItem(title: "Outdent", action: #selector(outdentChosen), keyEquivalent: "")
-            [indent, outdent].forEach { $0.target = self }
+            // KYO-975: Bold, Italic and Regular, which act on the selection, or on the word at
+            // the caret when there is none, and stand above Indent and Outdent.
+            let bold = NSMenuItem(title: "Bold", action: #selector(boldChosen), keyEquivalent: "")
+            let italic = NSMenuItem(title: "Italic", action: #selector(italicChosen), keyEquivalent: "")
+            let regular = NSMenuItem(title: "Regular", action: #selector(regularChosen), keyEquivalent: "")
+            let format = [bold, italic, regular]
+            (format + [indent, outdent]).forEach { $0.target = self }
             // KYO-918: on a box's words the menu is the misspelled word's suggestions with
             // Ignore and Learn, then Indent and Outdent, then Cut, Copy and Paste, and nothing
             // else of WebKit's. The suggestions carry no identifier this code can rely on, so
@@ -440,6 +446,9 @@ final class ChatPage: WKWebView {
                     menu.insertItem(.separator(), at: at)
                     at += 1
                 }
+                for item in format { menu.insertItem(item, at: at); at += 1 }
+                menu.insertItem(.separator(), at: at)
+                at += 1
                 menu.insertItem(indent, at: at)
                 menu.insertItem(outdent, at: at + 1)
                 if menu.items.count > at + 2, !menu.items[at + 2].isSeparatorItem {
@@ -451,6 +460,8 @@ final class ChatPage: WKWebView {
                     group.forEach { menu.addItem($0) }
                     menu.addItem(.separator())
                 }
+                format.forEach { menu.addItem($0) }
+                menu.addItem(.separator())
                 menu.addItem(indent)
                 menu.addItem(outdent)
                 menu.addItem(.separator())
@@ -483,6 +494,18 @@ final class ChatPage: WKWebView {
 
     @objc private func indentChosen() {
         evaluateJavaScript("window.kyo.indent()", completionHandler: nil)
+    }
+
+    @objc private func boldChosen() {
+        evaluateJavaScript("window.kyo.bold()", completionHandler: nil)
+    }
+
+    @objc private func italicChosen() {
+        evaluateJavaScript("window.kyo.italic()", completionHandler: nil)
+    }
+
+    @objc private func regularChosen() {
+        evaluateJavaScript("window.kyo.regular()", completionHandler: nil)
     }
 
     @objc private func outdentChosen() {

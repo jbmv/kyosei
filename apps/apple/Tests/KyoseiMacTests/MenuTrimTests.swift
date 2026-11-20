@@ -7,7 +7,7 @@ import WebKit
 @testable import KyoseiMac
 
 // KYO-918: on a box's words the right-click menu shows a misspelled word's suggestions with
-// Ignore and Learn, Indent and Outdent, and Cut, Copy and Paste. The rows the system adds
+// Ignore and Learn, Bold, Italic and Regular (KYO-975), Indent and Outdent, and Cut, Copy and Paste. The rows the system adds
 // (AutoFill, the Continuity items and Services on macOS 27) are not in the menu's `items`, so
 // a test over a menu built by hand cannot see them. These tests open the real menu: the web
 // view is put in a window, a right mouse press is sent to an editable element holding a
@@ -129,7 +129,7 @@ struct MenuTrimTests {
         return reader
     }
 
-    @Test func aBoxsMenuShowsOnlyTheSuggestionsTheTwoItemsAndTheClipboard() async throws {
+    @Test func aBoxsMenuShowsOnlyTheSuggestionsTheFiveItemsAndTheClipboard() async throws {
         let page = ChatPage(
             frame: NSRect(x: 0, y: 0, width: 600, height: 400),
             configuration: WKWebViewConfiguration())
@@ -138,7 +138,10 @@ struct MenuTrimTests {
 
         let box = try rightClick(page, in: window, at: 40, composer: true)
         let shown = try #require(box.shown, "no menu opened on the right mouse press")
-        let tail = ["Ignore Spelling", "Learn Spelling", "Indent", "Outdent", "Cut", "Copy", "Paste"]
+        let tail = [
+            "Ignore Spelling", "Learn Spelling", "Bold", "Italic", "Regular", "Indent", "Outdent",
+            "Cut", "Copy", "Paste",
+        ]
         #expect(Array(shown.suffix(tail.count)) == tail)
         // Everything above them is a suggestion: the menu's own items and nothing else.
         #expect(shown == box.own)

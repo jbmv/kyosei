@@ -24,6 +24,7 @@ import {
 } from "@codemirror/language";
 import { shiftLines } from "./marks.ts";
 import { INDENT_WIDTH, headingSections, lineShapes, sectionEnd } from "./outline.ts";
+import { emphasisRuns, type Run } from "./emphasis.ts";
 
 // ---------------------------------------------------------------- marks (proposal 5.2)
 
@@ -462,6 +463,162 @@ const outline = ViewPlugin.fromClass(class {
   }
 }, { decorations: (plugin) => plugin.decorations });
 
+// ------------------------------------------------------- live emphasis (KYO-975)
+
+const RUN_CLASS = { em: "md-em", strong: "md-strong", code: "md-code" } as const;
+const runDecorations = {
+  em: Decoration.mark({ class: RUN_CLASS.em }),
+  strong: Decoration.mark({ class: RUN_CLASS.strong }),
+  code: Decoration.mark({ class: RUN_CLASS.code }),
+};
+/** A run's markers, drawn as nothing: the text stays in the document. */
+const hiddenMarker = Decoration.replace({});
+
+/**
+ * `*italic*`, `**bold**` and `code` drawn over the document as a sent prompt draws them
+ * (KYO-967), read by the same function, `emphasisRuns`. The text is never changed by it. A run's
+ * markers are hidden while the box has the focus and no end of the selection is inside the run
+ * or at one of its markers, and shown otherwise, so that they can be edited or deleted. A box
+ * that does not have the focus shows no markers of a run that it only holds the caret in, so a
+ * saved draft opens drawn rather than with a caret at its start.
+ */
+const liveEmphasis = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+
+  constructor(view: EditorView) { this.decorations = this.build(view); }
+
+  update(update: ViewUpdate): void {
+    if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
+      this.decorations = this.build(update.view);
+    }
+  }
+
+  build(view: EditorView): DecorationSet {
+    const { doc, selection } = view.state;
+    const ranges = [];
+    let last = -1;
+    for (const { from, to } of view.visibleRanges) {
+      for (let pos = Math.max(from, last + 1); pos <= to;) {
+        const line = doc.lineAt(pos);
+        last = line.to;
+        pos = line.to + 1;
+        if (!/[*`]/.test(line.text)) continue;
+        for (const run of emphasisRuns(line.text)) {
+          const start = line.from + run.from;
+          const end = line.from + run.to;
+          ranges.push(runDecorations[run.kind].range(start, end));
+          const touched = view.hasFocus && selection.ranges.some((range) => range.from <= end && range.to >= start);
+          if (touched) continue;
+          ranges.push(hiddenMarker.range(start, start + run.marker), hiddenMarker.range(end - run.marker, end));
+        }
+      }
+    }
+    return Decoration.set(ranges, true);
+  }
+}, { decorations: (plugin) => plugin.decorations });
+
+/** The non-blank stretches of the selection, one for each line it touches; the word at an empty caret. */
+function emphasisTargets(view: EditorView): { from: number; to: number }[] {
+  const { state } = view;
+  const spans: { from: number; to: number }[] = [];
+  for (const range of state.selection.ranges) {
+    const covered = range.empty ? state.wordAt(range.head) : range;
+    if (!covered) continue;
+    for (let pos = covered.from; pos <= covered.to;) {
+      const line = state.doc.lineAt(pos);
+      const from = Math.max(covered.from, line.from);
+      const to = Math.min(covered.to, line.to);
+      const text = state.sliceDoc(from, to);
+      const lead = text.length - text.trimStart().length;
+      const core = text.trim().length;
+      if (core) spans.push({ from: from + lead, to: from + lead + core });
+      pos = line.to + 1;
+    }
+  }
+  return spans;
+}
+
+/** The run of `kind` that `span` is exactly, or whose body it is exactly, on its line. */
+function runOf(view: EditorView, span: { from: number; to: number }, kind: Run["kind"]): { run: Run; line: number; inside: boolean } | null {
+  const line = view.state.doc.lineAt(span.from);
+  if (span.to > line.to) return null;
+  for (const run of emphasisRuns(line.text)) {
+    if (run.kind !== kind) continue;
+    if (run.from === span.from - line.from && run.to === span.to - line.from) return { run, line: line.from, inside: false };
+    if (run.from + run.marker === span.from - line.from && run.to - run.marker === span.to - line.from) {
+      return { run, line: line.from, inside: true };
+    }
+  }
+  return null;
+}
+
+/**
+ * Command-B and Command-I: wraps the selection's words in `marker`, one run for each line it
+ * touches, and removes the markers when every such stretch is already exactly such a run, or the
+ * body of one. An empty selection acts on the word at the caret, and does nothing where there is
+ * none. The key is taken in every case, so WebKit does not apply rich-text formatting.
+ */
+function toggleEmphasis(view: EditorView, marker: "*" | "**"): boolean {
+  const kind = marker === "**" ? "strong" : "em";
+  const spans = emphasisTargets(view);
+  if (!spans.length) return true;
+  const found = spans.map((span) => runOf(view, span, kind));
+  const changes: { from: number; to?: number; insert?: string }[] = [];
+  if (found.every(Boolean)) {
+    for (const hit of found) {
+      const { run, line } = hit!;
+      changes.push({ from: line + run.from, to: line + run.from + run.marker }, { from: line + run.to - run.marker, to: line + run.to });
+    }
+  } else {
+    spans.forEach((span, index) => {
+      if (found[index]) return;
+      changes.push({ from: span.from, insert: marker }, { from: span.to, insert: marker });
+    });
+  }
+  const set = view.state.changes(changes);
+  const first = spans[0].from;
+  const last = spans[spans.length - 1].to;
+  view.dispatch({
+    changes: set, userEvent: "input.emphasis", annotations: isolateHistory.of("full"),
+    selection: EditorSelection.range(set.mapPos(first, 1), set.mapPos(last, -1)),
+  });
+  return true;
+}
+
+/**
+ * Regular: removes the markers of every italic and bold run that the selection overlaps by any
+ * of its words, or that holds the caret; code is left as typed. A run only partly selected loses
+ * its markers whole, since a run's markers are one pair.
+ */
+export function regularText(view: EditorView): boolean {
+  const { state } = view;
+  const doomed = new Map<number, number>();
+  for (const range of state.selection.ranges) {
+    for (let pos = state.doc.lineAt(range.from).from; pos <= range.to;) {
+      const line = state.doc.lineAt(pos);
+      pos = line.to + 1;
+      for (const run of emphasisRuns(line.text)) {
+        if (run.kind === "code") continue;
+        const start = line.from + run.from;
+        const end = line.from + run.to;
+        const hit = range.empty ? start <= range.head && range.head <= end : start < range.to && end > range.from;
+        if (!hit) continue;
+        doomed.set(start, start + run.marker);
+        doomed.set(end - run.marker, end);
+      }
+    }
+  }
+  if (!doomed.size) return true;
+  view.dispatch({
+    changes: Array.from(doomed, ([from, to]) => ({ from, to })),
+    userEvent: "delete.emphasis", annotations: isolateHistory.of("full"),
+  });
+  return true;
+}
+
+export const boldText = (view: EditorView) => toggleEmphasis(view, "**");
+export const italicText = (view: EditorView) => toggleEmphasis(view, "*");
+
 // ------------------------------------------------------------------ section lines (KYO-917)
 
 const SECTION_BAR = 2;
@@ -657,6 +814,8 @@ const composerKeys: Extension = [
     { key: "Tab", run: indentLines, shift: outdentLines },
     { key: "Mod-]", run: indentLines },
     { key: "Mod-[", run: outdentLines },
+    { key: "Mod-b", run: boldText },
+    { key: "Mod-i", run: italicText },
     { key: "Enter", run: (view) => newLine(view, false), shift: (view) => newLine(view, true) },
   ]),
   keymap.of(foldKeymap),
@@ -1238,6 +1397,7 @@ export function editorExtensions<T>(options: EditorOptions<T> = {}): Extension[]
     sectionsGutter,
     followPointer,
     outline,
+    liveEmphasis,
     transfers(options),
     ...(options.onFolds ? [foldWatch(options.onFolds)] : []),
     EditorView.lineWrapping,

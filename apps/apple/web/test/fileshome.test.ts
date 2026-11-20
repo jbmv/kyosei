@@ -177,3 +177,121 @@ test("an open folder's chevron in the home's list points down at every depth, a 
   const down = "matrix(0, 1, -1, 0, 0, 0)";
   assert.deepEqual(turned, { docs: `true:${down}`, "docs/deep": `true:${down}`, "docs/shut": "false:none" });
 });
+
+// KYO-973: the Files view's own right-click menu. The server's machine is this one, so a path
+// the server states is a path here, which the app then confirms with `filesExists`.
+async function openHere(roots: unknown[] = [
+  { name: "code", path: "/work/demo", served: true }, { name: "store", path: "/work/store", served: true },
+]): Promise<Page> {
+  const opened = page!;
+  await opened.reload();
+  await opened.run(`(() => {
+    window.kyo.project({ project: "p", scope: "server/p" });
+    window.kyo.files({ project: "p", same_machine: true, mappings: [] });
+    [...document.querySelectorAll(".view-item")].find((item) => item.textContent.includes("Files")).click();
+    window.kyo.filesRoots({ status: 200, document: { ok: true, roots: ${JSON.stringify(roots)} } });
+    window.kyo.filesTree({ root: "code", path: "", session: null, status: 200, document: { ok: true, entries: ${JSON.stringify(ENTRIES)} } });
+  })()`);
+  return opened;
+}
+const click = (selector: string, at = "{ clientX: 120, clientY: 80 }") => `(() => {
+  const target = document.querySelector(${JSON.stringify(selector)});
+  window.posted.length = 0;
+  const shown = !target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, ...${at} }));
+  return { prevented: shown, menu: [...document.querySelectorAll("#path-menu, #anchor-menu")].flatMap((menu) =>
+      [...menu.children].map((item) => item.textContent)),
+    asked: window.posted.filter((p) => p.name === "files").map((p) => p.body) };
+})()`;
+type Shown = { prevented: boolean; menu: string[]; asked: { want: string; path: string }[] };
+
+test("a right-click on a row of the file tree offers Copy path and Reveal in Finder, as the top bar's menu does (KYO-973.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await openHere();
+  for (const [selector, path] of [
+    ['.files-columns .tree-row[data-file="a.py"]', "/work/demo/a.py"],
+    ['.files-columns .tree-row[data-dir="docs"]', "/work/demo/docs"],
+  ]) {
+    const seen = await opened.run<Shown>(click(selector));
+    assert.equal(seen.prevented, true, `WebKit's menu is not shown on ${path}`);
+    assert.deepEqual(seen.menu, [path, "Copy path"], "Reveal in Finder waits for the app to say the path is here");
+    assert.deepEqual(seen.asked, [{ want: "exists", path }]);
+    const revealed = await opened.run<{ menu: string[]; asked: unknown[] }>(`(() => {
+      window.kyo.filesExists({ path: ${JSON.stringify(path)}, exists: true });
+      const menu = [...document.querySelectorAll("#path-menu > *")].map((item) => item.textContent);
+      window.posted.length = 0;
+      [...document.querySelectorAll("#path-menu button")].find((button) => button.textContent === "Reveal in Finder").click();
+      return { menu, asked: window.posted.filter((p) => p.name === "files").map((p) => p.body) };
+    })()`);
+    assert.deepEqual(revealed.menu, [path, "Copy path", "Reveal in Finder"]);
+    assert.deepEqual(revealed.asked, [{ want: "reveal", path }], "the message the top bar's menu posts");
+  }
+  // The drawer's rows of the Locations are the root's folder.
+  const location = await opened.run<Shown>(click('#files-locations .location-row[data-root="store"]'));
+  assert.deepEqual(location.menu, ["/work/store", "Copy path"]);
+});
+
+test("a file with no path on this machine's disk offers no Finder item (KYO-973.c3)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  // A root the server states no path for, as a per-session scratch root is.
+  const opened = await openHere([{ name: "code", served: true }]);
+  const seen = await opened.run<Shown>(click('.files-columns .tree-row[data-file="a.py"]'));
+  assert.deepEqual(seen.menu, ["a.py", "Copy path"]);
+  assert.deepEqual(seen.asked, [], "nothing is asked of the app, so no item can arrive");
+  const late = await opened.run<string[]>(`(() => { window.kyo.filesExists({ path: "a.py", exists: true });
+    return [...document.querySelectorAll("#path-menu > *")].map((item) => item.textContent); })()`);
+  assert.deepEqual(late, ["a.py", "Copy path"]);
+});
+
+test("a right-click on the open file's page offers Reveal in Finder below Anchor on a block, and the path's menu elsewhere (KYO-973.c2)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await openHere();
+  await opened.run(`(() => {
+    document.querySelector('.files-columns .tree-row[data-file="b.md"]').click();
+    window.kyo.filesBlob({ root: "code", path: "b.md", session: null, status: 200, etag: '"e"', media_type: "text/markdown",
+      size: 60, text: "# Title\\n\\nSome words in a paragraph.\\n", data: null, error: null });
+  })()`);
+  const onBlock = await opened.run<Shown>(`(() => {
+    const target = document.querySelector("#file .file-body p");
+    const box = target.getBoundingClientRect();
+    ${click("#file .file-body p", "{ clientX: box.left + 20, clientY: box.top + box.height / 2 }").replace(/^\(\(\) => \{\n  const target = [^\n]*\n/, "")}`);
+  assert.equal(onBlock.prevented, true);
+  assert.equal(onBlock.menu[0], "Anchor");
+  assert.deepEqual(onBlock.asked, [{ want: "exists", path: "/work/demo/b.md" }]);
+  const withReveal = await opened.run<string[]>(`(() => { window.kyo.filesExists({ path: "/work/demo/b.md", exists: true });
+    return [...document.querySelectorAll("#anchor-menu > *")].map((item) => item.className + "|" + item.textContent); })()`);
+  assert.equal(withReveal[0].split("|")[1], "Anchor");
+  assert.equal(withReveal.at(-1), "path-reveal|Reveal in Finder", "Reveal in Finder is last, below Anchor");
+  // On the page's margin, where nothing can be anchored: the path's menu, with Reveal alone of the anchors.
+  await opened.run(`document.getElementById("file").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  const elsewhere = await opened.run<Shown>(click("#file"));
+  assert.equal(elsewhere.prevented, true);
+  assert.deepEqual(elsewhere.menu, ["/work/demo/b.md", "Copy path"]);
+  assert.equal(await opened.run(`document.querySelector("#anchor-menu")?.isConnected ?? false`), false);
+});
+
+test("no right-click in the Files view shows WebKit's menu, except in the search field (KYO-973.c5)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await openFiles();
+  const prevented = await opened.run<Record<string, boolean>>(`(() => {
+    const result = {};
+    const fire = (name, selector) => {
+      const target = document.querySelector(selector);
+      result[name] = !target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    };
+    fire("tree", '.files-columns .tree-row[data-file="a.py"]');
+    fire("home page", "#files-landing");
+    fire("side column", "#files-side");
+    fire("locations", "#files-locations .location-row");
+    fire("head", ".files-head");
+    fire("search field", "#files-landing .files-search");
+    return result;
+  })()`);
+  assert.deepEqual(prevented, {
+    tree: true, "home page": true, "side column": true, locations: true, head: true, "search field": false,
+  });
+  // With a file open, its page too.
+  await opened.run(`(() => { document.querySelector('.files-columns .tree-row[data-file="a.py"]').click();
+    window.kyo.filesBlob({ root: "code", path: "a.py", session: null, status: 200, etag: '"e"', media_type: "text/x-python",
+      size: 5, text: "x = 1\\n", data: null, error: null }); })()`);
+  assert.equal(await opened.run(`!document.querySelector("#file .file-code").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`), true);
+});
