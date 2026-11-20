@@ -753,6 +753,10 @@ def test_ddl_hash_is_pinned_to_the_declared_schema_version() -> None:
         # time, stored words and the index line's commitment. A real DDL change, so a real
         # new hash.
         36: "5a73016b70f77ee746b3bbe94b998aab9e1bd4d2b32f0f24f7afe66b4af3a122",
+        # KYO-977: person_note_anchors gains lines_text, before_text and after_text -- the
+        # text of a served file's anchored lines and their context, as the person saw them.
+        # A real DDL change, so a real new hash.
+        37: "634775a26f8e266ffc743e7f111337e666f893f770cb835fe13dcec2fb37f174",
     }
     assert SCHEMA_VERSION in pinned, (
         f"schema_version {SCHEMA_VERSION} has no pinned DDL hash in "
@@ -2895,14 +2899,22 @@ def test_a_schema_30_note_line_rebuilds_with_no_sent_state(kyo, project: Path) -
 def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
     """KYO-658 was built on schema 31 (KYO-709) and bumped it by one, to 32; KYO-663 was
     built on 32 and bumps it by one, to 33; KYO-661 was built on 33 and bumps it to 34;
-    KYO-882 was built on 34 and bumps it to 35; KYO-900 was built on 35 and bumps it to 36."""
+    KYO-882 was built on 34 and bumps it to 35; KYO-900 was built on 35 and bumps it to 36;
+    KYO-977 was built on 36 and bumps it to 37."""
     from kyosei.schema import (
         CREDIT_FIELD_DEFAULTS,
         EXPORT_FIELD_DEFAULTS,
         TURN_REF_FIELD_DEFAULTS,
     )
 
-    assert SCHEMA_VERSION == 36
+    from kyosei.schema import PERSON_NOTE_ANCHOR_FIELD_DEFAULTS
+
+    assert SCHEMA_VERSION == 37
+    assert PERSON_NOTE_ANCHOR_FIELD_DEFAULTS[37] == {
+        "lines_text": None,
+        "before_text": None,
+        "after_text": None,
+    }
     assert CREDIT_FIELD_DEFAULTS[36] == {"turns": []}
     assert TURN_REF_FIELD_DEFAULTS[35] == {"outcome": None}
     assert EXPORT_FIELD_DEFAULTS[32] == {"turn_refs": []}

@@ -107,11 +107,42 @@ stored. A scratchpad has no commit, and its anchor names the session instead. A 
 uncommitted changes is anchored as it is served, and the commit then says only what the
 changes were made over, which the digest does not depend on.
 
-Such an anchor is ``stale`` when the file as served now does not hold the same text at those
-lines, by the digest. A commit to the file that leaves those lines as they were changes
-nothing. An anchor filed with a commit and no digest (``kyo notes add --anchors-file``) is
-compared with the file's text at its commit in the same way, and keeps the line it always had,
-``on file <path> at <commit> lines <first>-<last> "words..."``.
+THE TEXT IT WAS PLACED ON (KYO-977, decided by KYO-976). The anchor also stores the text of
+its lines and of up to :data:`CONTEXT_LINES` lines before and after them, as the person saw
+them when the anchor was placed. A client gives that text as ``"seen": {"before", "lines",
+"after"}``, each a list of lines, read from the file as its view showed it; without ``seen``
+the server reads it from the file as served now. The digest is of the stored lines. When the
+file as served at send does not hold the seen text and context at the given lines, nothing is
+refused: the anchor is filed with what the person saw, stale from the start, and its
+``digest_check`` is ``given``, since kyo took the client's word for the text. A file that is
+no longer served at all is filed the same way.
+
+An anchor is fresh when the file as served now holds its text with its context at its lines.
+The context is part of the match, so an anchor whose own lines are blank or repeated elsewhere
+in the file is told apart by what surrounds it, and an edit within :data:`CONTEXT_LINES` lines
+of an anchor makes it stale as an edit to its own lines does. Where the anchor ended within
+:data:`CONTEXT_LINES` lines of the file's start or end, that edge is part of its context too.
+A commit to the file that leaves those lines and their context as they were changes nothing.
+
+An anchor whose text and context are not at its lines but are found intact at exactly one
+other place in the same file has MOVED: it is fresh at the new lines, which the marks route
+gives as ``lines``, with the stored lines as ``moved_from`` and no ``chars``, since a
+selection's offsets were counted in a file that has since changed above it. Found intact at
+more than one other place, it is AMBIGUOUS and stale, and the route lists those places as
+``found``: which of two identical passages the person meant is not something the text can
+say. An anchor found moved when its prompt is sent is filed at the new lines, so that the
+line the agent reads and the stored anchor name the same lines.
+
+The marks route gives a stale anchor's reason as ``stale_reason``: ``absent`` for a file no
+longer served at that path, ``changed`` for text that is not found intact at its lines or
+anywhere else, ``ambiguous`` as above, and ``unreadable`` for a file served but not as text
+or too large to read.
+
+An anchor filed before schema 37 holds no text, and is compared as it always was: by the
+digest at its own lines, never followed to others. An anchor filed with a commit and no
+digest (``kyo notes add --anchors-file``) is compared with the file's text at its commit in
+the same way, and keeps the line it always had, ``on file <path> at <commit> lines
+<first>-<last> "words..."``.
 
 A PROMPT WITH MARKS (KYO-709, decided by KYO-708). One composer box is one prompt, and a mark
 beside one of its lines holds that line's anchors and tags. ``segments`` is what ``POST held``
@@ -169,7 +200,9 @@ anchors one span was stored as back into one. Both read routes open the store re
 A record anchor comes back as ``{"kind": "record", "id"}`` and a file's as ``{"kind", "root",
 "path", "lines"}`` with its ``commit`` or ``session`` and its ``chars`` when it has them,
 each with ``"stale": true`` when the element is gone from the store or the lines no longer
-hold the words (KYO-737). Those entries carry a ``kind``; a turn's carry a ``role``.
+hold the words (KYO-737), and a file's with ``stale_reason``, or ``moved_from`` when its text
+was found at other lines (KYO-977, above). Those entries carry a ``kind``; a turn's carry a
+``role``.
 
 THE HELD PATH. A set of notes, or a prompt, is sent only through
 :meth:`kyosei.serve_held.HeldMessages.hold`, so a message during a turn waits for the turn,
@@ -187,6 +220,7 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -226,7 +260,21 @@ _PROMPT_KEYS = frozenset({"segments", "marks"})
 _MARK_KEYS = frozenset({"line", "anchors", "tags", "attachments"})
 
 #: KYO-737: the keys of an anchor to a span of a served file, as a client gives it.
-SERVED_FILE_KEYS = frozenset({"kind", "root", "path", "lines", "chars", "session"})
+SERVED_FILE_KEYS = frozenset({"kind", "root", "path", "lines", "chars", "session", "seen"})
+#: KYO-977: the keys of ``seen``, the text a client showed when the anchor was placed.
+SEEN_KEYS = frozenset({"before", "lines", "after"})
+
+#: KYO-977: how many lines on either side of a file anchor's lines are stored with it and
+#: must still surround it for it to be fresh. Two, because in markdown one line either side
+#: of a block is most often the blank line that separates blocks, which says nothing about
+#: where the block is; two reach the neighbouring block's edge. More would make an edit
+#: further from the anchor stale it, for little gain in telling places apart.
+CONTEXT_LINES = 2
+
+#: KYO-977: what :func:`locate` finds of a file anchor in the file as served now.
+FRESH, MOVED = "fresh", "moved"
+#: ... and the reasons the marks route gives for a stale one.
+ABSENT, CHANGED, AMBIGUOUS, UNREADABLE = "absent", "changed", "ambiguous", "unreadable"
 _PATH_KINDS = (cmd_notes.ANCHOR_DOCUMENT, cmd_notes.ANCHOR_FILE)
 #: What a file's line says of a root that is not the code repository.
 _ROOT_WORDS = {
@@ -391,6 +439,7 @@ class _Files:
         self._allowed = False
         self.paths = serve_files.project_paths(root, server.environ)
         self._texts: dict[tuple[str, str | None, str], str | None] = {}
+        self._refused: dict[tuple[str, str | None, str], Refusal] = {}
         self._commits: dict[str, str | None] = {}
 
     def allow(self) -> None:
@@ -427,9 +476,16 @@ class _Files:
         if key not in self._texts:
             try:
                 self._texts[key] = self.text(name, session, relpath)
-            except Refusal:
+            except Refusal as exc:
                 self._texts[key] = None
+                self._refused[key] = exc
         return self._texts[key]
+
+    def why_not(self, name: str, session: str | None, relpath: str) -> str:
+        """KYO-977: why :meth:`text_now` found no text: the file is not served at that path,
+        or it is served but cannot be read as text."""
+        refusal = self._refused.get((name, session, relpath))
+        return ABSENT if refusal is not None and _is_absence(refusal) else UNREADABLE
 
     def root_of(self, anchor: dict) -> str:
         """The root a stored anchor's path is in: the scratchpad of its session, or the
@@ -449,6 +505,13 @@ class _Files:
             if self.text_now(root.name, None, anchor["target"]) is not None:
                 return root.name
         return roots[0].name
+
+
+def _is_absence(refusal: Refusal) -> bool:
+    """Whether the blob route refused a file because nothing is served at its path: the file
+    is gone, or the scratchpad that held it is."""
+    reason = refusal.extra.get("reason")
+    return (refusal.status == 404 and reason == "not-shown") or reason == "scratch-gone"
 
 
 def _holds_commit(repository: Path, commit: str) -> bool:
@@ -486,8 +549,127 @@ def _line_span(lines: list[str], first: int, last: int) -> tuple[int, int]:
     return start, start + len("\n".join(lines[first - 1 : last]))
 
 
+@dataclass(frozen=True)
+class Located:
+    """KYO-977: where a file anchor's text is in the file as served now (module docstring).
+
+    ``state`` is :data:`FRESH` or :data:`MOVED`, with ``lines`` where the text is now (None
+    for an anchor with no lines), or the reason it is stale: :data:`ABSENT`,
+    :data:`CHANGED`, :data:`AMBIGUOUS` with each place it was found as ``found``, or
+    :data:`UNREADABLE`.
+    """
+
+    state: str
+    lines: tuple[int, int] | None = None
+    found: tuple[tuple[int, int], ...] = ()
+
+    @property
+    def fresh(self) -> bool:
+        return self.state in (FRESH, MOVED)
+
+
+def _encoded(lines: list[str]) -> str:
+    """Lines as a stored column holds them: each followed by a newline, so that no line and
+    one empty line differ."""
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _decoded(text: str | None) -> list[str]:
+    return text.split("\n")[:-1] if text else []
+
+
+def snapshot(lines: list[str], first: int, last: int) -> dict[str, str]:
+    """The text of lines ``first`` to ``last`` of a file and of their context, as stored."""
+    return {
+        "lines_text": _encoded(lines[first - 1 : last]),
+        "before_text": _encoded(lines[max(0, first - 1 - CONTEXT_LINES) : first - 1]),
+        "after_text": _encoded(lines[last : last + CONTEXT_LINES]),
+    }
+
+
+def locate(anchor: dict, lines: list[str]) -> Located:
+    """Where a file anchor that stores its text is in ``lines``, the file as served now.
+
+    Fresh at its own lines when they hold its text with its context; else moved to the one
+    other place that does, ambiguous when more than one does, and changed when none does.
+    A context shorter than :data:`CONTEXT_LINES` lines was cut by the file's start or end,
+    and that edge must still be there.
+    """
+    text = _decoded(anchor["lines_text"])
+    before = _decoded(anchor.get("before_text"))
+    after = _decoded(anchor.get("after_text"))
+    count = len(text)
+
+    def intact(first: int) -> bool:
+        last = first + count - 1
+        if first - 1 < len(before) or last + len(after) > len(lines):
+            return False
+        if len(before) < CONTEXT_LINES and first - 1 != len(before):
+            return False
+        if len(after) < CONTEXT_LINES and last + len(after) != len(lines):
+            return False
+        return (
+            lines[first - 1 : last] == text
+            and lines[first - 1 - len(before) : first - 1] == before
+            and lines[last : last + len(after)] == after
+        )
+
+    stored = anchor["line_start"]
+    if intact(stored):
+        return Located(FRESH, (stored, stored + count - 1))
+    found = tuple(
+        (first, first + count - 1)
+        for first in range(1, len(lines) - count + 2)
+        if first != stored and intact(first)
+    )
+    if len(found) == 1:
+        return Located(MOVED, found[0])
+    if found:
+        return Located(AMBIGUOUS, found=found)
+    return Located(CHANGED)
+
+
+def _seen(raw: dict, first: int, last: int, where: str) -> dict[str, str] | None:
+    """KYO-977: the text a client showed when the anchor was placed, as stored, or None
+    when the client gave none (module docstring)."""
+    if "seen" not in raw:
+        return None
+    seen = raw["seen"]
+    shape = (
+        f"{where}: 'seen' is the text the page showed, "
+        '{"before": [...], "lines": [...], "after": [...]}, each a list of lines without '
+        "their line breaks"
+    )
+    if not isinstance(seen, dict) or set(seen) != SEEN_KEYS:
+        raise UsageError(shape)
+    for key in sorted(SEEN_KEYS):
+        value = seen[key]
+        if not isinstance(value, list) or not all(
+            isinstance(line, str) and "\n" not in line for line in value
+        ):
+            raise UsageError(shape)
+    before, lines, after = seen["before"], seen["lines"], seen["after"]
+    if (
+        len(lines) != last - first + 1
+        or len(before) != min(CONTEXT_LINES, first - 1)
+        or len(after) > CONTEXT_LINES
+    ):
+        raise UsageError(
+            f"{where}: 'seen' holds {len(lines)} lines for lines {first}-{last}, with "
+            f"{len(before)} before and {len(after)} after them; it holds the anchored lines "
+            f"and the {CONTEXT_LINES} lines either side of them, fewer only at the file's "
+            "start or end"
+        )
+    return {
+        "lines_text": _encoded(lines),
+        "before_text": _encoded(before),
+        "after_text": _encoded(after),
+    }
+
+
 def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
-    """A span of a served file as the row to store, read from the file as served now."""
+    """A span of a served file as the row to store: its text as the client saw it when the
+    anchor was placed, or as the file is served now (module docstring)."""
     extra = sorted(set(raw) - SERVED_FILE_KEYS)
     if extra:
         raise UsageError(
@@ -516,29 +698,51 @@ def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
             "none; leave it out"
         )
     first, last = cmd_notes._range(raw, "lines", where)
+    seen = _seen(raw, first, last, where)
     files.allow()
     try:
-        text = files.text(name, session, path)
+        text: str | None = files.text(name, session, path)
     except Refusal as exc:
-        raise Refusal(exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra) from exc
-    lines = file_lines(text)
-    if not 1 <= first <= last <= len(lines):
-        raise UsageError(
-            f"{where}: lines {first}-{last} do not fall within the {len(lines)} lines "
-            f"{path} has now, counted from 1; read the file again and anchor to what it holds"
-        )
+        if seen is None or not _is_absence(exc):
+            raise Refusal(
+                exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra
+            ) from exc
+        # KYO-977: the person saw the file, which is gone since; filed as they saw it.
+        text = None
+    lines = None if text is None else file_lines(text)
+    if seen is None:
+        assert lines is not None
+        if not 1 <= first <= last <= len(lines):
+            raise UsageError(
+                f"{where}: lines {first}-{last} do not fall within the {len(lines)} lines "
+                f"{path} has now, counted from 1; read the file again and anchor to what it "
+                "holds"
+            )
+        seen = snapshot(lines, first, last)
+        found = Located(FRESH, (first, last))
+    else:
+        found = Located(ABSENT) if lines is None else locate(seen | {"line_start": first}, lines)
+        if found.state == MOVED:
+            # Moved between placing and sending: filed where the text is, so that the line
+            # the agent reads and the stored anchor name the same lines.
+            assert found.lines is not None
+            first, last = found.lines
     markdown = serve_tree.media_type(path.rsplit("/", 1)[-1]) == "text/markdown"
     row: dict = {
         "kind": cmd_notes.ANCHOR_DOCUMENT if markdown else cmd_notes.ANCHOR_FILE,
         "target": path,
         "line_start": first,
         "line_end": last,
-        "digest": cmd_notes.lines_digest(lines[first - 1 : last]),
-        "digest_check": cmd_notes.DIGEST_COMPUTED,
+        "digest": cmd_notes.lines_digest(_decoded(seen["lines_text"])),
+        # Kyo read the text in the file, or took the client's word for what it showed.
+        "digest_check": cmd_notes.DIGEST_COMPUTED if found.fresh else cmd_notes.DIGEST_GIVEN,
+        **seen,
     }
-    if "chars" in raw:
+    # A selection's offsets are the file's as the client read it; a moved anchor keeps its
+    # lines alone, and a stale one the offsets as given.
+    if "chars" in raw and found.state != MOVED:
         start, end = cmd_notes._range(raw, "chars", where)
-        low, high = _line_span(lines, first, last)
+        low, high = _line_span(lines, first, last) if lines and found.fresh else (start, end)
         if not low <= start < end <= high:
             raise UsageError(
                 f"{where}: characters {start}-{end} are not a selection inside lines "
@@ -558,59 +762,76 @@ def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
     return row | {"commit_sha": commit}
 
 
-def _file_state(ctx: commands.Context, files: _Files, anchor: dict) -> tuple[str, str | None]:
-    """The root a stored path anchor is in, and the file's text now when its span is fresh.
+def _file_state(
+    ctx: commands.Context, files: _Files, anchor: dict
+) -> tuple[str, str | None, Located]:
+    """The root a stored path anchor is in, the file's text now, and where its span is.
 
-    Fresh means the file as served now holds at the anchor's lines the text it was anchored
-    on: by the digest, or for an anchor filed with a commit alone by the file at that commit
-    (module docstring). The text is None for a stale anchor.
+    An anchor that stores its text is found by :func:`locate` (KYO-977). One that does not
+    is fresh when the file as served now holds at its lines the text it was anchored on: by
+    the digest, or for an anchor filed with a commit alone by the file at that commit
+    (module docstring), and is never followed to other lines.
     """
     name = files.root_of(anchor)
-    text = files.text_now(name, anchor.get("session"), anchor["target"])
+    session = anchor.get("session")
+    text = files.text_now(name, session, anchor["target"])
     if text is None:
-        return name, None
+        return name, None, Located(files.why_not(name, session, anchor["target"]))
     if "line_start" in anchor:
         first, last = anchor["line_start"], anchor["line_end"]
         lines = file_lines(text)
+        if anchor.get("lines_text") is not None:
+            return name, text, locate(anchor, lines)
         if not 1 <= first <= last <= len(lines):
-            return name, None
+            return name, text, Located(CHANGED)
         now = "\n".join(lines[first - 1 : last])
         if _has_lines_digest(anchor):
             fresh = cmd_notes.lines_digest(lines[first - 1 : last]) == anchor["digest"]
         else:
             then = cmd_notes._git_text(ctx, anchor.get("commit_sha") or "", anchor["target"])
             fresh = then is not None and "\n".join(file_lines(then)[first - 1 : last]) == now
-    else:
-        start, end = anchor["char_start"], anchor["char_end"]
-        then = cmd_notes._git_text(ctx, anchor.get("commit_sha") or "", anchor["target"])
-        fresh = then is not None and end <= len(text) and then[start:end] == text[start:end]
-    return name, text if fresh else None
+        return name, text, Located(FRESH, (first, last)) if fresh else Located(CHANGED)
+    start, end = anchor["char_start"], anchor["char_end"]
+    then = cmd_notes._git_text(ctx, anchor.get("commit_sha") or "", anchor["target"])
+    fresh = then is not None and end <= len(text) and then[start:end] == text[start:end]
+    return name, text, Located(FRESH) if fresh else Located(CHANGED)
 
 
 def _file_place(ctx: commands.Context, files: _Files, anchor: dict) -> dict:
     """A stored path anchor as the marks route gives it: its address, its root, and whether
-    it is stale."""
-    name, text = _file_state(ctx, files, anchor)
+    it is stale and why, or where it moved to (module docstring)."""
+    name, _, found = _file_state(ctx, files, anchor)
     place = cmd_notes.path_place(anchor) | {"root": name}
-    return place if text is not None else place | {"stale": True}
+    if found.state == FRESH:
+        return place
+    if found.state == MOVED:
+        assert found.lines is not None
+        place.pop("chars", None)
+        return place | {"lines": list(found.lines), "moved_from": place["lines"]}
+    place |= {"stale": True, "stale_reason": found.state}
+    if found.found:
+        place["found"] = [list(span) for span in found.found]
+    return place
 
 
 def _file_line(
     ctx: commands.Context, files: _Files, anchor: dict, session_id: str
 ) -> str:
-    """The line for an anchor read from a served file (module docstring)."""
-    first, last = anchor["line_start"], anchor["line_end"]
-    name, text = _file_state(ctx, files, anchor)
+    """The line for an anchor read from a served file (module docstring): at the lines its
+    text is at now, and without words when it is stale."""
+    name, text, found = _file_state(ctx, files, anchor)
+    stored = (anchor["line_start"], anchor["line_end"])
+    first, last = found.lines if found.fresh and found.lines else stored
     where = _ROOT_WORDS[name]
     if name == serve_tree.ROOT_SCRATCH and anchor["session"] != session_id:
         where += f" of session {anchor['session']}"
     span = f"line {first}" if first == last else f"lines {first}-{last}"
     line = f"on file {anchor['target']}{where} {span}"
-    if text is None:
+    if text is None or not found.fresh:
         return f"{line} (words unavailable)"
     markdown = anchor["kind"] == cmd_notes.ANCHOR_DOCUMENT
     low, high = _line_span(file_lines(text), first, last)
-    if "char_start" not in anchor:
+    if "char_start" not in anchor or found.state == MOVED:
         # The lines are the place: a block's own words, without the mark that begins it.
         label, start, _ = block_of(text, low) if markdown else ("", low, high)
         quote = _words(text[max(start, low) : high])

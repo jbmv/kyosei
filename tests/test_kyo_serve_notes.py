@@ -1679,7 +1679,11 @@ def test_c2_a_span_of_a_served_file_is_its_path_its_lines_and_its_words(
     assert source["digest_check"] == "computed" and "session" not in source
     assert set(source) <= {
         "kind", "target", "commit_sha", "line_start", "line_end", "digest", "digest_check",
+        # KYO-977: the lines' text and two lines either side, as the file was read.
+        "lines_text", "before_text", "after_text",
     }  # fmt: skip
+    assert source["lines_text"] == "def reformat(text):\n    return text.strip()\n"
+    assert (source["before_text"], source["after_text"]) == ("\n\n", "\nLIMIT = 3\n")
     shown = on_the_cli(bed, "show", note["id"])
     assert shown["note"]["anchors"] == note["anchors"]
 
@@ -1910,9 +1914,10 @@ def test_c3_a_file_anchor_is_stale_when_its_lines_no_longer_hold_the_words_and_n
     assert stale()
     (code / "src" / "tidy.py").write_text(SOURCE, encoding="utf-8")
     assert not stale()
-    # The words moved down a line: they are no longer at those lines.
+    # The words moved down a line with what surrounds them: found at the new lines, so not
+    # stale (KYO-977; tests/test_kyo977_anchor_text.py has the rest of it).
     (code / "src" / "tidy.py").write_text("import sys\n" + SOURCE, encoding="utf-8")
-    assert stale()
+    assert not stale()
     (code / "src" / "tidy.py").unlink()
     assert stale()
 
@@ -1950,7 +1955,9 @@ def test_c3_an_anchor_filed_with_a_commit_alone_is_compared_with_the_file_at_tha
     commit_all(code, "a line added below")
     assert marks_of(bed, with_files)[0]["anchors"] == [place]
     (code / "src" / "tidy.py").write_text("import sys\n" + SOURCE, encoding="utf-8")
-    assert marks_of(bed, with_files)[0]["anchors"] == [place | {"stale": True}]
+    # KYO-977: the reason is said; an anchor holding no text is never followed to new lines.
+    stale = place | {"stale": True, "stale_reason": "changed"}
+    assert marks_of(bed, with_files)[0]["anchors"] == [stale]
 
 
 def test_c2_a_file_in_the_store_repository_names_that_root_by_its_commit(
