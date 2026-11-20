@@ -267,7 +267,7 @@ request it can set headers on.
 
 #### Which routes need a device token
 
-governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/cmd_statusline.py, src/kyosei/harness/claude_code_transcript.py, src/kyosei/harness/claude_code_pane.py
+governs: src/kyosei/serve_sessions.py, src/kyosei/session_layer.py, src/kyosei/cmd_statusline.py, src/kyosei/harness/claude_code_transcript.py, src/kyosei/harness/claude_code_pane.py, src/kyosei/harness/claude_code_auth.py
 
 | Routes | Token |
 |---|---|
@@ -418,13 +418,32 @@ first reply:
 
 ```
 facts:   at, model, effort, git_branch, permission_mode, context, lines, limits, cache,
-         weekly_at_start
+         weekly_at_start, logged_out
 context: tokens, window, percent
 lines:   added, removed
 limits:  five_hour, seven_day, read_at    (each window: used_percentage, resets_at)
 cache:   warm, expires_at, recache_tokens_if_cold, read_at
 weekly_at_start: used_percentage, resets_at    (resets_at as in the limits)
+logged_out: source, reason, at, text
 ```
+
+`logged_out` is `null` unless the session's Claude Code is known to be logged out (KYO-974),
+so that a reading that could be wrong never stops a client from sending. Two readings decide
+it, in this order. The first is `claude auth status --json`, asked at most once a minute for
+the configuration directory the session's transcript is under: `loggedIn: false`, or a
+`loginExpiresAt` that has passed, is `{"source": "auth-status", "reason": "not-logged-in"}` or
+`"sign-in-ended"`, with `at` and `text` `null`; a `loginExpiresAt` more than three days ahead
+is a login that stands, and `logged_out` is then `null` whatever the transcript holds, since a
+refusal recorded before a new login is out of date. Claude Code 2.1.329 says that a sign-in
+can end at any time in the three days before `loginExpiresAt`, so that span, a missing
+`claude`, another configuration directory or another provider settles nothing. The second
+reading is the transcript: a request refused for its login is recorded as a reply Claude Code
+wrote itself, with `error: "authentication_failed"`, and until a reply the model wrote or a
+`/login` that printed `Login successful` follows it, `logged_out` is `{"source":
+"transcript", "reason": "refused", "at": <the refusal's time>, "text": <Claude Code's words,
+such as "Login reached its time limit · Please run /login">}`. The value is read each time
+the facts are built, and a change reaches a session's stream as a `facts` event. A session
+with no reply yet has `facts: null`, and so no `logged_out` either.
 
 `limits` is the subscription's usage limits as `kyo statusline` last saved them. Claude Code
 passes them to its status line command after each reply, and `kyo statusline --install` makes
@@ -563,7 +582,7 @@ the route that holds the message, so neither shows that the session is still bei
 |---|---|
 | `event: ready` | `session_id`, `cursor`, `pane`, `screen`, `terminal`, `reply_in_progress`, `pending_tool_calls`, `facts`, `held`, `agenda`, `draft`: the state when the stream opened; `held` describes the held message without its text, or is `null`, and `agenda` and `draft` are each `{"etag": ...}` |
 | `event: transcript` | `session_id`, `cursor`, and the six lists above, new or changed objects only; and `pending_tool_calls`, in a frame where that list has changed |
-| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, or new usage limits saved by any session change them |
+| `event: facts` | `session_id`, `facts`: the session's facts, whenever a new reply, a change of permission mode, a line changed by the session or a subagent, new usage limits saved by any session, or a change in whether the session is known to be logged out change them |
 | `event: reply` | `session_id`, `text`: the reply being drawn on screen, or `null` when there is none |
 | `event: screen` | `session_id`, `screen`: the classification, whenever it changes |
 | `event: terminal` | `session_id`, `terminal`: the pane's text and working line, whenever either changes |
