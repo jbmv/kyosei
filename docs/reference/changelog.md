@@ -678,6 +678,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## (no scope declared)
 
+- **2026-11-20** — `KYO-712` (task) — Mac app: show an anchor the store reports as stale, at least as a warning
 - **2026-11-19** — `KYO-810` (bug) — A prompt sent from the laptop was typed into the session's pane but not submitted
 - **2026-11-16** — `KYO-951` (plan) — Config view in the Mac app (proposal KYO-950)
 - **2026-11-15** — `KYO-950` (proposal) — Mac app: a config menu for project and machine settings
