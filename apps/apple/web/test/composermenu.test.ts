@@ -9,7 +9,7 @@
 // with no Chrome skips these.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { openPage, SHIFT, type Page } from "./chrome.ts";
+import { META, openPage, SHIFT, type Page } from "./chrome.ts";
 
 let page: Page | null = null;
 before(async () => { page = await openPage(); });
@@ -172,4 +172,232 @@ test("Undo and Redo from the menu take back and put back an anchor, a tag and an
   assert.deepEqual(await told(), { box: false, undo: false, redo: false });
   assert.equal(await page.run(`window.kyo.undo()`), false);
   assert.deepEqual(await held(), [["abc"], placed]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// KYO-975: emphasis drawn live in a box, Command-B and Command-I, and Bold, Italic and Regular.
+
+/** What the focused box shows: each line's visible text, and the classes of its emphasis runs. */
+const drawn = () => page!.run<{ shown: string[]; italic: string[]; bold: string[]; code: string[] }>(`(() => {
+  const words = (selector) => [...document.querySelectorAll("#boxes " + selector)].map((node) => node.textContent);
+  return { shown: [...document.querySelectorAll("#boxes .cm-line")].map((line) => line.textContent),
+    italic: words(".md-em"), bold: words(".md-strong"), code: words(".md-code") };
+})()`);
+const settle = () => page!.run(`new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))`);
+const open = async (text: string, scratch = false) => {
+  await page!.reload();
+  await page!.run(`(() => { ${START}
+    window.kyo.draft({ boxes: [{ id: "a", text: ${JSON.stringify(text)}${scratch ? `, scratch: { heading: "" }` : ""} }], etag: "e" }); })()`);
+};
+
+test("emphasis draws live with the markers hidden, in a prompt box and in a scratchpad (KYO-975.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  for (const scratch of [false, true]) {
+    await open("plain *soft* and **loud** and `code` end", scratch);
+    // The box holds the focus with the caret at the start, outside every run.
+    await page.run(`window.kyo.composer.select(0, 0)`);
+    await settle();
+    const now = await drawn();
+    assert.deepEqual(now.italic.map((words) => words), ["soft"], "the markers are not in the drawn text");
+    assert.deepEqual(now.bold, ["loud"]);
+    assert.deepEqual(now.code, ["code"]);
+    assert.equal(now.shown[0], "plain soft and loud and code end");
+    // The italic and bold computed styles differ from the plain text's.
+    const styles = await page.run<string[]>(`(() => ["#boxes .md-em", "#boxes .md-strong", "#boxes .md-code"]
+      .map((selector) => { const s = getComputedStyle(document.querySelector(selector));
+        return [s.fontStyle, s.fontWeight, s.fontFamily.includes("mono") || s.fontFamily.includes("Menlo")].join("/"); }))()`);
+    assert.equal(styles[0].split("/")[0], "italic");
+    assert.ok(Number(styles[1].split("/")[1]) > 500, `bold weight ${styles[1]}`);
+    assert.ok(styles[2].endsWith("/true"), `code font ${styles[2]}`);
+  }
+  // A marker that opens nothing, and a run across a space, stay as typed, as in a sent prompt.
+  await open("a * b and * c* and **x** done");
+  await page.run(`window.kyo.composer.select(0, 0)`);
+  await settle();
+  const odd = await drawn();
+  assert.deepEqual(odd.bold, ["x"]);
+  assert.deepEqual(odd.italic, []);
+  assert.equal(odd.shown[0], "a * b and * c* and x done");
+});
+
+test("a box and a sent prompt read the same runs, nested ones included (KYO-975.c1)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const lines = ["**bold with *inner* italic**", "*one* and *two*", "`a *b* c`", "**un*closed", "x*y*z"];
+  await open(lines.join("\n"));
+  await page.run(`window.kyo.composer.select(0, ${lines.join("\n").length})`);
+  await settle();
+  const inBox = await drawn();
+  // The same lines as a sent prompt: the chat draws a turn of them with `emphasis`.
+  await page.run(`(() => { window.kyo.menu({ project: "p", current: "S1", changes: null, sessions: { sessions: [
+      { session_id: "S1", title: "t", live: true, first_seen: "2026-01-01T00:00:00Z", remote_control_url: null }] } });
+    window.kyo.apply({ reset: true, turns: [{ id: "u1", at: "2026-01-01T00:00:00Z", text: ${JSON.stringify(lines.join("\n"))} }], replies: [] }); })()`);
+  const sent = await page.run<{ italic: string[]; bold: string[]; code: string[] }>(`(() => {
+    const words = (selector) => [...document.querySelectorAll("#chat .turn " + selector)].map((node) => {
+      const copy = node.cloneNode(true);
+      copy.querySelectorAll(".md-mark").forEach((mark) => mark.remove());
+      return copy.textContent; });
+    return { italic: words("em"), bold: words("strong"), code: words("code") }; })()`);
+  assert.deepEqual(inBox.italic.sort(), sent.italic.sort());
+  assert.deepEqual(inBox.bold, ["bold with inner italic"], "the nested run's markers are not drawn");
+  assert.deepEqual(inBox.bold.sort(), sent.bold.sort());
+  assert.deepEqual(inBox.code.sort(), sent.code.sort());
+  assert.ok(sent.italic.length >= 4 && sent.bold.length === 1, "the lines hold runs to compare");
+});
+
+test("the markers of the run the caret or selection touches are shown, and hide again as it moves (KYO-975.c2)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const text = "aa **bold** bb *it* cc";
+  await open(text);
+  const at = (from: number, to = from) => page!.run(`window.kyo.composer.select(0, ${from}, ${to})`).then(settle).then(drawn);
+  assert.equal((await at(0)).shown[0], "aa bold bb it cc");
+  // Touching the opening marker, inside the words, and touching the closing marker.
+  assert.equal((await at(3)).shown[0], "aa **bold** bb it cc");
+  assert.equal((await at(7)).shown[0], "aa **bold** bb it cc");
+  assert.equal((await at(11)).shown[0], "aa **bold** bb it cc");
+  // One space past it, the markers are hidden again; the other run is untouched until reached.
+  assert.equal((await at(12)).shown[0], "aa bold bb it cc");
+  assert.equal((await at(16)).shown[0], "aa bold bb *it* cc");
+  // A selection that crosses both runs shows both.
+  assert.equal((await at(1, 17)).shown[0], text);
+  // Arrow keys move the caret into a run and out of it.
+  await at(2);
+  assert.equal((await drawn()).shown[0], "aa bold bb it cc");
+  await page.press("ArrowRight");
+  assert.equal((await settle().then(drawn)).shown[0], "aa **bold** bb it cc");
+  // The box that has lost its focus draws the run, whatever its caret holds.
+  await page.run(`document.activeElement.blur()`);
+  assert.equal((await settle().then(drawn)).shown[0], "aa bold bb it cc");
+  // Typed text is typed: the closing marker typed by hand makes a run, hidden on moving away.
+  await open("");
+  await page.run(`window.kyo.composer.select(0, 0)`);
+  await page.type("a *word*");
+  assert.equal((await settle().then(drawn)).shown[0], "a *word*", "the caret is at the closing marker");
+  await page.type(" and more");
+  assert.equal((await settle().then(drawn)).shown[0], "a word and more");
+});
+
+test("the drawing leaves the text, the saved draft, a copy and the marks as typed (KYO-975.c3)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const text = "one *two* **three**\nfour";
+  await open(text);
+  await page.run(`window.kyo.composer.select(0, 20)`);
+  await page.run(`window.kyo.composer.tag(0, 0, "review")`);
+  await page.run(`window.kyo.composer.select(0, 0)`);
+  await settle();
+  assert.equal((await drawn()).shown[0], "one two three", "the run is drawn");
+  assert.deepEqual(await page.run(`window.kyo.composer.boxes().map((box) => box.text)`), [text]);
+  // The saved draft holds the markers and the tag on its line.
+  await page.run(`window.posted.length = 0; window.kyo.composer.select(0, 20, 23)`);
+  await page.type("");
+  const saved = await page.run<{ text: string; marks?: { line: number }[] }[]>(`(async () => {
+    await new Promise((done) => setTimeout(done, 1300));
+    return window.posted.filter((p) => p.name === "saveDraft").flatMap((p) => p.body.boxes); })()`);
+  assert.ok(saved.every((box) => box.text === text), `saved ${JSON.stringify(saved)}`);
+  // A copy of the selection, which crosses the hidden markers, carries them.
+  await page.run(`window.kyo.composer.select(0, 4, 19)`);
+  const copied = await page.run<string>(`(() => { const data = new DataTransfer();
+    document.activeElement.dispatchEvent(new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true }));
+    return data.getData("text/plain"); })()`);
+  assert.equal(copied, "*two* **three**");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)`).then((marks) => (marks as string[]).length), 1, "the tag stays on its line");
+});
+
+test("Command-B and Command-I wrap a selection, unwrap a run, and act on the word at the caret (KYO-975.c4)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const state = () => page!.run<[string, number, number]>(read);
+  await open("alpha beta gamma");
+  await page.run(`window.kyo.composer.select(0, 6, 10)`);
+  await page.press("b", META);
+  assert.deepEqual(await state(), ["alpha **beta** gamma", 8, 12], "bold wraps and keeps the words selected");
+  await page.press("b", META);
+  assert.deepEqual(await state(), ["alpha beta gamma", 6, 10], "bold again removes the markers");
+  await page.press("i", META);
+  assert.deepEqual((await state())[0], "alpha *beta* gamma");
+  await page.press("i", META);
+  assert.deepEqual((await state())[0], "alpha beta gamma");
+  // A selection that is itself a run, markers and all, is unwrapped.
+  await open("alpha **beta** gamma");
+  await page.run(`window.kyo.composer.select(0, 6, 14)`);
+  await page.press("b", META);
+  assert.deepEqual((await state())[0], "alpha beta gamma");
+  // Italic on bold text wraps; italic does not remove bold.
+  await open("alpha **beta** gamma");
+  await page.run(`window.kyo.composer.select(0, 6, 14)`);
+  await page.press("i", META);
+  assert.deepEqual((await state())[0], "alpha ***beta*** gamma");
+  // Spaces at the selection's ends stay outside the markers, a selection over lines wraps each.
+  await open("  one two  \nthree");
+  await page.run(`window.kyo.composer.select(0, 0, 17)`);
+  await page.press("b", META);
+  assert.deepEqual((await state())[0], "  **one two**  \n**three**");
+  // With no selection the word at the caret is the target, and a caret in a space does nothing.
+  await open("alpha beta gamma");
+  await page.run(`window.kyo.composer.select(0, 8)`);
+  await page.press("b", META);
+  assert.deepEqual((await state())[0], "alpha **beta** gamma");
+  await page.press("b", META);
+  assert.deepEqual((await state())[0], "alpha beta gamma");
+  await open("alpha  beta");
+  await page.run(`window.kyo.composer.select(0, 6)`);
+  await page.press("b", META);
+  assert.deepEqual((await state())[0], "alpha  beta", "no word at the caret, nothing is done");
+  // It is one undo step.
+  await open("alpha beta");
+  await page.run(`window.kyo.composer.select(0, 6, 10)`);
+  await page.press("b", META);
+  await page.press("z", META);
+  assert.deepEqual((await state())[0], "alpha beta");
+});
+
+test("Bold, Italic and Regular of the menu act as the keys do, and Regular removes the markers (KYO-975.c5)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const text = () => page!.run<string>(`window.kyo.composer.boxes()[0].text`);
+  await open("alpha beta gamma");
+  await page.run(`window.kyo.composer.select(0, 6, 10)`);
+  await page.run(`window.kyo.bold()`);
+  assert.equal(await text(), "alpha **beta** gamma");
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "alpha beta gamma");
+  await page.run(`window.kyo.italic()`);
+  assert.equal(await text(), "alpha *beta* gamma");
+  // Regular over a selection of several runs removes each run's markers, and not code's.
+  await open("*a* b **c** `d` *e*");
+  await page.run(`window.kyo.composer.select(0, 0, 14)`);
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "a b c `d` *e*");
+  // Nested runs lose both pairs; a partly selected run loses its markers whole.
+  await open("**bold *in* x** tail");
+  await page.run(`window.kyo.composer.select(0, 8, 12)`);
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "bold in x tail");
+  await open("one **two** three");
+  await page.run(`window.kyo.composer.select(0, 6, 8)`);
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "one two three");
+  // A caret in a run, and nothing selected: that run only.
+  await open("*a* *b*");
+  await page.run(`window.kyo.composer.select(0, 5)`);
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "*a* b");
+  // Text with no emphasis is left alone.
+  await open("plain");
+  await page.run(`window.kyo.composer.select(0, 0, 5)`);
+  await page.run(`window.kyo.regular()`);
+  assert.equal(await text(), "plain");
+  // With no box focused the three do nothing.
+  await open("alpha beta");
+  await page.run(`window.kyo.composer.select(0, 0, 5); document.activeElement.blur()`);
+  await page.run(`window.kyo.bold(); window.kyo.italic(); window.kyo.regular()`);
+  assert.equal(await text(), "alpha beta");
+});
+
+test("inline code in a box draws as code with its backticks hidden away from the caret (KYO-975.c6)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  await open("run `make test` now");
+  await page.run(`window.kyo.composer.select(0, 0)`);
+  assert.equal((await settle().then(drawn)).shown[0], "run make test now");
+  await page.run(`window.kyo.composer.select(0, 8)`);
+  const inside = await settle().then(drawn);
+  assert.equal(inside.shown[0], "run `make test` now");
+  assert.deepEqual(inside.code, ["`make test`"]);
 });

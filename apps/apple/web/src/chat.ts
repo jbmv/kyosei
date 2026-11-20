@@ -51,7 +51,7 @@ import {
   type FoldedLine, type LineMarks, createEditor, foldedLines, lineOfId, marksOf as lineMarks, placeItem, refreshMarks,
   removeEffect, removeItem, showLanding,
 } from "./editor";
-import { indentLines, lineFold, outdentLines, shiftSection, toggleFold } from "./editor";
+import { boldText, indentLines, italicText, lineFold, outdentLines, regularText, shiftSection, toggleFold } from "./editor";
 import { findSpans, fold, lastHolding, queryPhrase, scrollBy, step, tally } from "./search";
 import {
   type Found, type Opened, type Role, chatKey, foundOf, groupBySession, openedEntries, plainWords, searchQuery,
@@ -1932,6 +1932,26 @@ const kyo = {
   outdent(): void {
     const editor = focusedEditor();
     if (editor) outdentLines(editor);
+  },
+
+  /**
+   * Bold, Italic and Regular in the menu on a box's words (KYO-975), which do to the focused
+   * box's selection what Command-B and Command-I do, and Regular removes the emphasis markers.
+   * Without a selection they act on the word at the caret. No box focused: nothing.
+   */
+  bold(): void {
+    const editor = focusedEditor();
+    if (editor) boldText(editor);
+  },
+
+  italic(): void {
+    const editor = focusedEditor();
+    if (editor) italicText(editor);
+  },
+
+  regular(): void {
+    const editor = focusedEditor();
+    if (editor) regularText(editor);
   },
 
   /**

@@ -102,6 +102,10 @@ a { color: var(--link); }
 .turn strong { font-weight: 650; }
 .turn code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1em 0.3em; border-radius: 4px; background: color-mix(in srgb, var(--text) 10%, transparent); }
 .md-mark { font-size: 0; }
+/* KYO-975: the same runs drawn live in a box, over its text, which keeps the markers. */
+.cm-content .md-em { font-style: italic; }
+.cm-content .md-strong { font-weight: 650; }
+.cm-content .md-code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 4px; background: color-mix(in srgb, var(--text) 10%, transparent); }
 
 /* KYO-930: a message kyo serve sent (the idle timer's), drawn on the other side from the person's
    prompts, without their fill, and labelled by its data-source. */
