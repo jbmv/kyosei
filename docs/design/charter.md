@@ -533,6 +533,12 @@ governs: src/kyosei/schema.py
   is a field set once, when the message holding it is delivered, with the time, the session and
   the held message; it replaced a `sent` tag, which a person could remove. A note sent after
   filing gets the field from a `notes sent` event, so its own ledger line is not rewritten.
+  An anchor to lines of a file served by `kyo serve` also holds the text of those lines and of
+  up to two lines either side, as the person saw them when the anchor was placed
+  (schema_version 37, KYO-977, decision KYO-976). A digest of the lines could say only whether
+  they had changed; the stored text lets a blank or repeated line be told apart by its context
+  and an anchor whose lines moved be found at its new lines. This is file text, which the
+  repository holds already, so it does not weaken the rule that no transcript text is stored.
 - **credit_turns** (schema_version 36, KYO-900, decision KYO-898): the turns of the person's
   that a credit cites, one row each in transcript order. Until then every credit took its
   words from a file the agent typed, which kyo then checked against the transcript; the

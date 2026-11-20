@@ -1462,10 +1462,10 @@ The anchor also stores the text of its lines and of up to two lines before and a
 text as it showed it when the anchor was placed, as `"seen": {"before": [...], "lines": [...],
 "after": [...]}`, each a list of lines without their line breaks, with two lines of context
 either side or fewer at the file's start or end. Without `seen` the server reads the text from
-the file as served. When the file as served at send no longer holds the seen text at those
+the file as served. When the file as served at send does not hold the seen text at those
 lines, the prompt is still sent: the anchor is filed with the seen text, marked stale from the
 start, its line reads `(words unavailable)`, and its `digest_check` is `given`. A file that is
-no longer served at all is filed in the same way. When the seen text is found intact at exactly
+not served at all at send is filed in the same way. When the seen text is found intact at exactly
 one other place in the file, the anchor is filed at those lines instead, without its selection.
 
 A reply or prompt anchor takes one of two forms, by the length of the person's selection

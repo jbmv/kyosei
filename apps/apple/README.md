@@ -392,7 +392,7 @@ in the chat, and in the History reader while it holds the anchor's session (KYO-
 highlight goes when the anchor does, unless another prompt holds an anchor on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
 cannot be highlighted, so the chip above that paragraph in the sent prompt reads "stale reference"
 and its title says that the document was edited or moved since, and names the paragraph. A
-chip for an anchor to a file reads "stale reference" when the file no longer holds the anchored
+chip for an anchor to a file reads "stale reference" when the file does not hold the anchored
 text and "file deleted or moved" when the file is gone, and its title quotes the first words of
 what was anchored, which the server stores with the anchor (KYO-977). One whose text the server
 found at other lines is not struck; its title names the new lines and a click opens the file
