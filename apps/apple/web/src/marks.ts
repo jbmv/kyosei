@@ -458,7 +458,7 @@ export interface FileLine {
   words: string; selection: string | null;
 }
 
-const FILE_LINE = /^on file (.+?)(?: in the (store repository|scratchpad)(?: of session (\S+))?)? (?:line ([1-9]\d*)|lines ([1-9]\d*)-([1-9]\d*)) (?:"(.*?)"(?: at "(.*)")?(?: \((?:heading|list item|table cell|code block)\))?|\(words unavailable\))$/;
+const FILE_LINE = /^on file (.+?)(?: in the (store repository|scratchpad)(?: of session (\S+))?)? (?:line ([1-9]\d*)|lines ([1-9]\d*)-([1-9]\d*)) (?:"(.*?)"(?: at "(.*)")?(?: \((?:heading|list item|table cell|code block)\))?|was ".*?" \((?:no longer there|file deleted or moved)\)|\(words unavailable\))$/;
 /** The older line of an anchor filed with a commit, which names no root and is not drawn. */
 const AT_COMMIT = / at [0-9a-f]{7,40}$/;
 

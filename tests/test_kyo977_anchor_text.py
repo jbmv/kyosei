@@ -131,8 +131,12 @@ def test_c2_an_edit_between_placing_and_sending_files_the_anchor_stale_from_the_
     write(code, "src/tidy.py", SOURCE.replace("strip", "rstrip"))
     status, sent = post(bed, SEND_PROMPT, one_mark(placed), with_files)
     assert status == 200, sent
-    # Nothing is refused, and the agent is not quoted words the person never saw.
-    assert on_lines(sent) == ["on file src/tidy.py lines 4-5 (words unavailable)"]
+    # Nothing is refused, and the line quotes what the person anchored, which the file no
+    # longer shows there (KYO-983).
+    assert on_lines(sent) == [
+        'on file src/tidy.py lines 4-5 was "def reformat(text): return text.strip()"'
+        " (no longer there)"
+    ]
     bed.show(IDLE)
     wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
     (note,) = filed_by(bed, notes_path, with_files, sent["held"]["id"])
@@ -166,7 +170,10 @@ def test_c2_a_file_deleted_between_placing_and_sending_is_filed_as_absent(
     (code / "src" / "tidy.py").unlink()
     status, sent = post(bed, SEND_PROMPT, one_mark(placed), with_files)
     assert status == 200, sent
-    assert on_lines(sent) == ["on file src/tidy.py lines 4-5 (words unavailable)"]
+    assert on_lines(sent) == [
+        'on file src/tidy.py lines 4-5 was "def reformat(text): return text.strip()"'
+        " (file deleted or moved)"
+    ]
     bed.show(IDLE)
     wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
     place = only_place(bed, with_files)
@@ -450,3 +457,43 @@ def test_c981_text_found_once_at_other_lines_is_moved_although_its_context_chang
     )
     place = only_place(bed, with_files)
     assert place["lines"] == [5, 6] and place["moved_from"] == [4, 5] and "stale" not in place
+
+
+# ---------------------------------------- KYO-983: the stale line quotes what was anchored
+
+
+def _stale_line(monkeypatch, lines_text, text) -> str:
+    """The line for a stale anchor holding ``lines_text``, the file served as ``text``."""
+    from kyosei import serve_notes as sn
+
+    monkeypatch.setattr(sn, "_file_state", lambda *_: ("code", text, sn.Located(sn.CHANGED)))
+    anchor = {
+        "kind": "path",
+        "target": "src/tidy.py",
+        "session": "s",
+        "line_start": 4,
+        "line_end": 5,
+        "lines_text": lines_text,
+    }
+    return sn._file_line(None, None, anchor, "s")
+
+
+def test_983_c3_an_anchor_without_stored_text_or_words_keeps_words_unavailable(
+    monkeypatch,
+) -> None:
+    for text in ("x\n", None):
+        assert _stale_line(monkeypatch, None, text) == (
+            "on file src/tidy.py lines 4-5 (words unavailable)"
+        )
+        # Stored text of a blank line holds no words to quote.
+        assert _stale_line(monkeypatch, "\n", text) == (
+            "on file src/tidy.py lines 4-5 (words unavailable)"
+        )
+
+
+def test_983_c1_c2_a_stale_anchor_with_text_quotes_its_first_words(monkeypatch) -> None:
+    stored = "one two three four five six seven\n"
+    assert _stale_line(monkeypatch, stored, "x\n") == (
+        'on file src/tidy.py lines 4-5 was "one two three four five six..." (no longer there)'
+    )
+    assert _stale_line(monkeypatch, stored, None).endswith("(file deleted or moved)")

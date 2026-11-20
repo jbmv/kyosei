@@ -834,7 +834,8 @@ def _file_line(
     ctx: commands.Context, files: _Files, anchor: dict, session_id: str
 ) -> str:
     """The line for an anchor read from a served file (module docstring): at the lines its
-    text is at now, and without words when it is stale."""
+    text is at now; when it is stale, the first words of what it stored and why they are not
+    there, or no words for an anchor without stored text."""
     name, text, found = _file_state(ctx, files, anchor)
     stored = (anchor["line_start"], anchor["line_end"])
     first, last = found.lines if found.fresh and found.lines else stored
@@ -844,7 +845,12 @@ def _file_line(
     span = f"line {first}" if first == last else f"lines {first}-{last}"
     line = f"on file {anchor['target']}{where} {span}"
     if text is None or not found.fresh:
-        return f"{line} (words unavailable)"
+        # A stale anchor that stores its text says what it was anchored on (KYO-983).
+        was = _words("\n".join(_decoded(anchor.get("lines_text"))))
+        if was == '""':
+            return f"{line} (words unavailable)"
+        gone = "file deleted or moved" if text is None else "no longer there"
+        return f"{line} was {was} ({gone})"
     markdown = anchor["kind"] == cmd_notes.ANCHOR_DOCUMENT
     low, high = _line_span(file_lines(text), first, last)
     if "char_start" not in anchor or found.state == MOVED:
