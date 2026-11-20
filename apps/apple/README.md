@@ -93,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/static/chat.css` | the page's styles |
 | `web/src/config.ts` | the Config view's logic: sections and rows made from the two served documents, the control each editable row has, the reasons a control is disabled, and what a write's answer comes to |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
-| `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
+| `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited, the places in records and files an anchor names, and what a sent anchor's chip says when its place has changed |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
 | `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967) |
