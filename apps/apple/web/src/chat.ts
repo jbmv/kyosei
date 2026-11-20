@@ -116,6 +116,12 @@ interface Facts {
   context: { percent: number | null; tokens: number | null; window: number | null } | null;
   /** The prompt cache as Claude Code last reported it for this session (KYO-715). */
   cache?: { warm: boolean | null; expires_at: string | null; recache_tokens_if_cold: number | null } | null;
+  /**
+   * KYO-974: how the session is known to be logged out of Claude Code, from `claude auth
+   * status` or from a request the transcript records as refused; null when it is not known to
+   * be, which is how a server that predates the field is read too.
+   */
+  logged_out?: { source: string; reason: string | null; at: string | null; text: string | null } | null;
 }
 /** The Records search field. Other search fields share its class for their looks only. */
 const RECORDS_SEARCH = "#records-side .records-search";
@@ -1814,6 +1820,7 @@ const kyo = {
     landedKeys.length = 0;
     terminalColumns = 0;
     facts = null;
+    clearLoggedOut();
     latestAt = "";
     clearLive();
     drawSide();
@@ -1852,6 +1859,7 @@ const kyo = {
 
   facts(frame: { facts?: Facts | null }): void {
     if (frame.facts) facts = frame.facts;
+    clearLoggedOut();
     drawSide();
   },
 
@@ -2070,6 +2078,7 @@ const kyo = {
       toEnd();
     }
     if (batch.facts) facts = batch.facts;
+    clearLoggedOut();
     // The final text has arrived, so the in-progress copy goes at once.
     if (liveText !== null && alreadyLanded(liveText)) clearLive();
     drawSide();
@@ -4945,6 +4954,13 @@ function attemptSend(editor: EditorView): void {
     composerNote.textContent = "A file is still uploading.";
     return;
   }
+  // KYO-974: a session logged out of Claude Code would only refuse the prompt, so it is not
+  // posted, and the cold cache is not asked about. The person logs in in the terminal.
+  if (facts?.logged_out) {
+    coldConfirm = null;
+    showLoggedOut();
+    return;
+  }
   // After the cache has expired the whole context is written again, so Send asks once more.
   const cache = facts?.cache;
   const expired = cache?.expires_at ? new Date(cache.expires_at).getTime() : NaN;
@@ -4965,6 +4981,26 @@ function attemptSend(editor: EditorView): void {
   // A prompt sent while the session works is held, and is shown in the held box instead.
   if (screenState !== "working") showSentPreview(segments.map((segment) => segment.text).join(""));
   post("send", { segments, marks: sentMarks(editor) });
+}
+
+/** KYO-974: the composer's note for a send to a session logged out of Claude Code. */
+const LOGGED_OUT_NOTE = "This session is logged out of Claude Code, so nothing was sent. "
+  + "Log in from the terminal with /login, then send again.";
+
+/** The note, with the way to the terminal that the trust prompt's panel offers too (KYO-964). */
+function showLoggedOut(): void {
+  const words = document.createElement("span");
+  words.textContent = `${LOGGED_OUT_NOTE} `;
+  const open = document.createElement("button");
+  open.className = "question-open logged-out-open";
+  open.textContent = "Open the terminal";
+  open.addEventListener("click", openTerminal);
+  composerNote.replaceChildren(words, open);
+}
+
+/** The note goes once the session is not known to be logged out, or the window has left it. */
+function clearLoggedOut(): void {
+  if (!facts?.logged_out && composerNote.querySelector(".logged-out-open")) composerNote.textContent = "";
 }
 
 /**

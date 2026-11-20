@@ -142,6 +142,15 @@ to it by its first and last record. :func:`measure_span` reads the records betwe
 returns counts and times only: the person's turns, the agent's turns, the active seconds
 (gaps longer than :data:`SPAN_BREAK_SECONDS` are left out, because a long gap is time away)
 and the first and last timestamps. No text from the span leaves the module.
+
+A REFUSED LOGIN (KYO-974). A request refused for the session's login is recorded as a reply
+Claude Code wrote itself: an ``assistant`` row with ``isApiErrorMessage: true``, ``error:
+"authentication_failed"``, the model ``<synthetic>`` and a text such as ``Login reached its
+time limit · Please run /login`` (2.1.327) or ``Please run /login · API Error: 403 ...``
+(2.1.245), both found in this machine's transcripts. The person's prompt before it is
+recorded as their turn. A ``/login`` that worked prints ``Login successful`` (measured on
+2.1.245, 2.1.327 and 2.1.329). :attr:`SessionTranscript.latest_login_refusal` is the latest
+such refusal with neither a reply the model wrote nor a successful ``/login`` after it.
 """
 
 from __future__ import annotations
@@ -1415,6 +1424,12 @@ _CLEAR_COMMAND = "<command-name>/clear</command-name>"
 #: all zeros and says nothing about the session (KYO-691).
 _SYNTHETIC_MODEL = "<synthetic>"
 
+#: A synthetic reply's ``error`` when the request was refused for the session's login
+#: (KYO-974), and what a ``/login`` that worked prints.
+_LOGIN_REFUSED = "authentication_failed"
+_LOGIN_COMMAND = "/login"
+_LOGIN_DONE = "Login successful"
+
 _COMMAND_NAME = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 
 #: A row holding a slash command's output and nothing else. Both forms are measured to 2.1.319:
@@ -1596,6 +1611,15 @@ class ReplyFacts:
     effort: str | None
     git_branch: str | None
     usage: Usage
+
+
+@dataclass(frozen=True)
+class LoginRefusal:
+    """A request the session's login was refused for, as Claude Code recorded it (KYO-974)."""
+
+    at: str
+    #: What Claude Code said, such as ``Login reached its time limit · Please run /login``.
+    text: str
 
 
 @dataclass
@@ -1981,6 +2005,7 @@ class SessionTranscript:
         self._deliveries: dict[str, Delivery] = {}
         self._latest_facts: ReplyFacts | None = None
         self._permission_mode: str | None = None
+        self._login_refusal: LoginRefusal | None = None
 
     @property
     def turns(self) -> list[Turn]:
@@ -2019,6 +2044,13 @@ class SessionTranscript:
         latest reply, so this is kept apart from what that reply recorded.
         """
         return self._permission_mode
+
+    @property
+    def latest_login_refusal(self) -> LoginRefusal | None:
+        """The latest request refused for the session's login, while nothing has followed it
+        that shows the login works again: a reply the model wrote, or ``Login successful``
+        printed by ``/login`` (KYO-974). None otherwise."""
+        return self._login_refusal
 
     def holds_call(self, call_id: str) -> bool:
         """Whether a tool call with this id has been read from the file (KYO-940)."""
@@ -2142,6 +2174,11 @@ class SessionTranscript:
             held = _Message(uuid, stamp, message_id, [], None, message.get("model"), [], False)
             self._messages[message_id] = held
         held.record_uuids.append(uuid)
+        if record.get("isApiErrorMessage") is True and record.get("error") == _LOGIN_REFUSED:
+            said = "".join(block["text"] for block in blocks if is_text_block(block)).strip()
+            self._login_refusal = LoginRefusal(stamp, said)
+        elif message.get("model") not in (None, _SYNTHETIC_MODEL):
+            self._login_refusal = None  # the model answered, so the login stood
         usage = _usage_of(message.get("usage"))
         if usage is not None:
             held.usage = usage
@@ -2188,6 +2225,8 @@ class SessionTranscript:
         if not printed:
             return
         command, args = self._commands.get(record.get("parentUuid"), (None, None))
+        if command == _LOGIN_COMMAND and printed.startswith(_LOGIN_DONE):
+            self._login_refusal = None
         found = CommandOutput(uuid, stamp, command, args, printed)
         self._outputs[uuid] = found
         delta.command_outputs.append(found)

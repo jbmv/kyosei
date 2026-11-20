@@ -30,6 +30,7 @@ import threading
 from collections import OrderedDict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from stat import S_ISREG
 from urllib.parse import urlsplit
@@ -39,6 +40,7 @@ from .cmd_sessions import recorded_transcript_path
 from .cmd_statusline import read_cache, read_limits, read_weekly_at_start
 from .config import READ_TRANSCRIPTS_KEY, Config, store_home, transcripts_opted_in
 from .errors import KyoseiError
+from .harness import claude_code_auth as auth
 from .harness import claude_code_pane as pane
 from .harness import claude_code_transcript as transcript
 from .transcript_archive import archive_dir
@@ -148,6 +150,9 @@ class SessionFacts:
     #: The weekly window's figure first saved for this session, to measure the session's own
     #: use against; None when none was saved (KYO-717).
     weekly_at_start: dict | None = None
+    #: How the session is known to be logged out of Claude Code, read at each build of the
+    #: facts; None when it is not known to be (KYO-974, :meth:`LiveSession.logged_out`).
+    logged_out: dict | None = None
 
 
 def read_line_totals(path: Path) -> transcript.LinesChanged:
@@ -312,7 +317,34 @@ class LiveSession:
             read_limits(self.environ),
             read_cache(self.session_id, self.environ),
             read_weekly_at_start(self.session_id, self.environ),
+            self.logged_out(),
         )
+
+    def logged_out(self, now: datetime | None = None) -> dict | None:
+        """How this session is known to be logged out of Claude Code; None when it is not (KYO-974).
+
+        Two readings, in this order:
+
+        1. ``claude auth status`` for the session's configuration directory
+           (:mod:`kyosei.harness.claude_code_auth`). A login it reports ended is logged out,
+           with ``source: "auth-status"``; one it reports standing is logged in, whatever the
+           transcript says, since a refusal recorded before a new login is out of date.
+        2. Otherwise, the transcript's latest refused request with nothing after it that shows
+           the login works (``source: "transcript"``), with Claude Code's own words.
+
+        Anything else, including a reading that is not known, is None, so that a reading that
+        could be wrong never stops a send (KYO-974.c5).
+        """
+        moment = now or datetime.now(UTC)
+        verdict = auth.judge(auth.read_status(self.environ), self.config_dir, moment)
+        if verdict.state == auth.LOGGED_OUT:
+            return {"source": "auth-status", "reason": verdict.reason, "at": None, "text": None}
+        if verdict.state == auth.LOGGED_IN:
+            return None
+        refused = self.transcript.latest_login_refusal
+        if refused is None:
+            return None
+        return {"source": "transcript", "reason": "refused", "at": refused.at, "text": refused.text}
 
     def lines_changed(self) -> transcript.LinesChanged:
         """The lines this session and its subagents have changed, as of now (KYO-701)."""

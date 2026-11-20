@@ -585,6 +585,131 @@ def test_a_changed_limits_file_is_read_again_without_a_restart(
     assert event["facts"]["limits"]["five_hour"]["used_percentage"] == 61.0
 
 
+# ------------------------------------------- KYO-974: a session logged out of Claude Code
+
+
+LOGIN_REFUSED = "Login reached its time limit · Please run /login"
+LOGIN_COMMAND = (
+    "<command-name>/login</command-name>\n<command-message>login</command-message>\n"
+    "<command-args></command-args>"
+)
+
+
+def _login_rows() -> dict[str, str]:
+    """A prompt, the refusal 2.1.327 recorded for it, and a ``/login`` that worked."""
+
+    def row(number: int, **fields) -> str:
+        made = {
+            "isSidechain": False,
+            "sessionId": "55555555-5555-4555-8555-555555555555",
+            "parentUuid": f"00000000-0000-4000-8000-{number - 1:012d}",
+            "uuid": f"00000000-0000-4000-8000-{number:012d}",
+            "timestamp": f"2026-11-09T13:00:{number - 100:02d}.000Z",
+            **fields,
+        }
+        return json.dumps(made) + "\n"
+
+    zero = dict.fromkeys(
+        ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"],
+        0,
+    )
+    synthetic = {
+        "id": "synthetic-1",
+        "type": "message",
+        "role": "assistant",
+        "model": "<synthetic>",
+        "usage": zero,
+        "content": [{"type": "text", "text": LOGIN_REFUSED}],
+    }
+    stdout = "<local-command-stdout>Login successful</local-command-stdout>"
+    return {
+        "prompt": row(
+            101, type="user", origin={"kind": "human"}, message={"role": "user", "content": "Go."}
+        ),
+        "refused": row(
+            102,
+            type="assistant",
+            error="authentication_failed",
+            isApiErrorMessage=True,
+            message=synthetic,
+        ),
+        "login": row(103, type="system", subtype="local_command", content=LOGIN_COMMAND),
+        "done": row(104, type="system", subtype="local_command", content=stdout),
+    }
+
+
+def test_facts_state_a_session_logged_out_by_a_refused_request(bed: Bed) -> None:
+    rows = _login_rows()
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["logged_out"] is None
+    bed.append([rows["prompt"], rows["refused"]])
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["logged_out"] == {
+        "source": "transcript",
+        "reason": "refused",
+        "at": "2026-11-09T13:00:02.000Z",
+        "text": LOGIN_REFUSED,
+    }
+
+
+def test_the_stream_says_when_a_logged_out_session_is_logged_in_again(bed: Bed, stream) -> None:
+    rows = _login_rows()
+    bed.write_transcript(bed.rows(source=FACTS_FILE) + [rows["prompt"], rows["refused"]])
+    opened = stream()
+    assert opened.event("ready")["facts"]["logged_out"]["source"] == "transcript"
+    bed.append([rows["login"], rows["done"]])
+    assert opened.event("facts")["facts"]["logged_out"] is None
+
+
+def _fake_auth_status(bed: Bed, tmp_path: Path, monkeypatch, **document) -> Path:
+    """A `claude` whose ``auth status`` prints ``document`` for the bed's configuration."""
+    from kyosei.harness import claude_code_auth
+
+    printed = tmp_path / "auth-status.json"
+    shown = {"apiProvider": "firstParty", "configDirectory": str(bed.claude), **document}
+    printed.write_text(json.dumps(shown), encoding="utf-8")
+    fake = tmp_path / "fake-claude"
+    fake.write_text(f'#!/bin/sh\ncat "{printed}"\nexit 1\n', encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setattr(claude_code_auth, "find_claude", lambda _environ: str(fake))
+    return printed
+
+
+NO_LOGIN = {"loggedIn": False, "authMethod": "none", "loginExpiresAt": None}
+
+
+def test_facts_state_an_ended_login_that_claude_auth_status_reports(
+    bed: Bed, tmp_path: Path, monkeypatch
+) -> None:
+    """Before any request has been refused: the login of the session's configuration has ended."""
+    _fake_auth_status(bed, tmp_path, monkeypatch, **NO_LOGIN)
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["logged_out"] == {
+        "source": "auth-status",
+        "reason": "not-logged-in",
+        "at": None,
+        "text": None,
+    }
+
+
+def test_the_stream_says_when_a_login_is_made_with_no_row_of_the_transcript(
+    bed: Bed, tmp_path: Path, monkeypatch, stream
+) -> None:
+    """Logged in from another session or a shell: this session's transcript gains nothing."""
+    from kyosei.harness import claude_code_auth
+
+    printed = _fake_auth_status(bed, tmp_path, monkeypatch, **NO_LOGIN)
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    opened = stream()
+    assert opened.event("ready")["facts"]["logged_out"]["source"] == "auth-status"
+    renewed = {"loggedIn": True, "authMethod": "claude.ai", "loginExpiresAt": "2099-01-01T00:00Z"}
+    printed.write_text(
+        json.dumps({"apiProvider": "firstParty", "configDirectory": str(bed.claude), **renewed}),
+        encoding="utf-8",
+    )
+    claude_code_auth.forget()
+    assert opened.event("facts")["facts"]["logged_out"] is None
+
+
 # ------------------------------------------- KYO-717: the weekly figure first read
 
 
