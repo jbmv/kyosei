@@ -5,7 +5,7 @@ import { agentKind, shortModel } from "./agents";
 import {
   type FilePlace, type Place, blockLines, drawnSpan, fileLine, lineWords, heldLine, lineAt, lineOf, nearest,
   placeAnchor, placeKey, recordLine as placedRecord, samePlace, sentenceAt, sourceIndex,
-  sourceSpan, spanPlace,
+  placeNote, seenLines, sourceSpan, spanPlace,
 } from "./marks";
 import {
   type Answer, type ChatLink, type Entry, type Mapping, type Mention, type RootInfo, type TreeRow, HIGHLIGHT_CHARS,
@@ -531,7 +531,9 @@ function drawPlaceLine(line: string): HTMLElement | null {
     chip.dataset.place = placeKey({ kind: "path", ...file });
     chip.append(icon("page"), `${nameOf(file.path)} ${lineWords(file.lines)}`, ...(words ? [" ", ...drawChipWords(words)] : []));
     chip.addEventListener("click", () => revealPlace({
-      kind: "path", root: file.root, path: file.path, lines: file.lines, words,
+      kind: "path", root: file.root, path: file.path, words,
+      // KYO-977: where the server found the words since, if they moved.
+      lines: (chip.dataset.movedTo?.split("-").map(Number) as [number, number] | undefined) ?? file.lines,
       ...(file.session ? { session: file.session } : {}),
     }));
   }
@@ -3318,6 +3320,12 @@ interface SentMark {
     role?: string; message?: string; uuid?: string; start?: number; end?: number; stale?: boolean;
     /** KYO-737: set on an anchor to a record (`id`) or to a file (`root`, `path`, `lines`). */
     kind?: string; id?: string; root?: string; path?: string; lines?: number[];
+    /**
+     * KYO-977, on a file: why it is stale, the places its text was found when there are
+     * several, its first words as anchored, and the lines it was anchored at when its text
+     * is now at `lines`.
+     */
+    stale_reason?: string; found?: number[][]; anchored?: string; moved_from?: number[];
   }[];
 }
 let sentMarks_: SentMark[] = [];
@@ -3373,16 +3381,29 @@ function wordsRange(item: AnchorItem, scope: AnchorScope = chatScope): Range | n
 
 /**
  * A sent anchor to a record or a file that the server now gives as stale is drawn so: the
- * element is gone from the store, or the file's lines no longer hold the words (KYO-737).
+ * element is gone from the store, or the file's lines no longer hold the words (KYO-737). A
+ * file that is gone says so in place of 'stale reference', and the hover says what changed
+ * and quotes what was anchored (KYO-977). One whose words the server found at other lines is
+ * not stale: its hover names the new lines, and a click opens the file there. A chip is found
+ * by the lines its line names, which are the lines the anchor was stored at.
  */
 function paintStalePlaces(): void {
-  const stale = new Set(sentMarks_.flatMap((mark) => mark.anchors)
-    .filter((anchor) => anchor.kind && anchor.stale).map((anchor) => placeKey(anchor as { kind: string })));
+  const places = new Map<string, SentMark["anchors"][number]>();
+  for (const anchor of sentMarks_.flatMap((mark) => mark.anchors)) {
+    if (!anchor.kind) continue;
+    if (anchor.stale) places.set(placeKey(anchor as { kind: string }), anchor);
+    else if (anchor.moved_from) places.set(placeKey({ ...anchor, kind: anchor.kind, lines: anchor.moved_from }), anchor);
+  }
   for (const chip of Array.from(chat.querySelectorAll<HTMLElement>(".turn-place"))) {
-    const gone = stale.has(chip.dataset.place ?? "");
-    chip.classList.toggle("stale", gone);
-    const line = (chip.title ?? "").replace(/\n\(stale:.*$/s, "");
-    chip.title = gone ? `${line}\n(stale: this place no longer holds what was anchored)` : line;
+    const anchor = places.get(chip.dataset.place ?? "");
+    chip.classList.toggle("stale", Boolean(anchor?.stale));
+    if (anchor?.stale && anchor.stale_reason === "absent") chip.dataset.stale = "absent";
+    else delete chip.dataset.stale;
+    if (!anchor?.stale && anchor?.moved_from && anchor.lines) chip.dataset.movedTo = anchor.lines.join("-");
+    else delete chip.dataset.movedTo;
+    const line = (chip.title ?? "").replace(/\n\((?:stale|stale reference|moved):.*$/s, "");
+    const note = anchor?.kind ? placeNote({ ...anchor, kind: anchor.kind }) : null;
+    chip.title = note ? `${line}\n${note}` : line;
   }
   paintStaleAnchors();
 }
@@ -4776,6 +4797,8 @@ function restoredMarks(marks: SentMarkBody[]): { line: number; items: Item[] }[]
           kind: "path", root: anchor.root, path: anchor.path, lines: anchor.lines,
           ...(anchor.chars ? { chars: anchor.chars } : {}),
           ...(anchor.session ? { session: anchor.session } : {}),
+          // KYO-977: what the page showed when the anchor was placed goes with it again.
+          ...(anchor.seen ? { seen: anchor.seen } : {}),
           words: `${name}:${anchor.lines?.[0]}`,
         });
       } else if (anchor.kind === "turn") {
@@ -8345,9 +8368,18 @@ navIcons("files", {
  * The lines of the open file that a right-click names (KYO-737), in the file's source
  * whatever is drawn. A selection the person made names its own lines and, where its words are
  * found in the source, itself; with none, a rendered markdown file gives the block under the
- * pointer and a source file the line. Null where there is nothing to name.
+ * pointer and a source file the line. Null where there is nothing to name. KYO-977: the place
+ * carries those lines and the lines either side as the file is shown now, which the server
+ * stores and later looks for.
  */
 function filePlaceAt(
+  file: OpenFile, target: Element, pointer: { x: number; y: number }, own: boolean,
+): Pick<FilePlace, "lines" | "chars" | "words" | "seen"> | null {
+  const place = fileSpanAt(file, target, pointer, own);
+  return place && file.text !== null ? { ...place, seen: seenLines(file.text, place.lines) } : place;
+}
+
+function fileSpanAt(
   file: OpenFile, target: Element, pointer: { x: number; y: number }, own: boolean,
 ): Pick<FilePlace, "lines" | "chars" | "words"> | null {
   const text = file.text;

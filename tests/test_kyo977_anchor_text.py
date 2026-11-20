@@ -330,6 +330,8 @@ def test_c5_the_marks_route_tells_a_file_gone_from_a_file_changed(
     (code / "src" / "tidy.py").unlink()
     gone = only_place(bed, with_files)
     assert gone["stale"] is True and gone["stale_reason"] == "absent"
+    # Each says what was anchored, from the stored text, for the chip's hover to quote.
+    assert changed["anchored"] == gone["anchored"] == "def reformat(text): return text.strip()"
 
 
 # ------------------------------------------------------ c7: an anchor filed before this

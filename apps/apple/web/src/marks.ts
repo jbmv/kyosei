@@ -298,9 +298,36 @@ export interface FilePlace {
   /** The session whose scratchpad the file is in, for the root that has one each. */
   session?: string;
   lines: [number, number]; chars?: [number, number]; words: string;
+  /** KYO-977: the lines and their context as the page showed them when the anchor was placed. */
+  seen?: SeenLines;
 }
 
 export type Place = RecordPlace | FilePlace;
+
+/**
+ * The text of a file anchor's lines and of the lines either side, as `kyo serve` stores it
+ * (KYO-977): it says later whether the file still holds what was anchored, and where.
+ */
+export interface SeenLines { before: string[]; lines: string[]; after: string[] }
+
+/** How many lines either side of an anchor's lines are sent with it, as the server takes them. */
+export const CONTEXT_LINES = 2;
+
+/**
+ * Lines `lines[0]` to `lines[1]` of `text`, counted from 1, with up to `CONTEXT_LINES` lines
+ * either side. Lines are counted as the server counts them: the newline that ends the file
+ * begins no line.
+ */
+export function seenLines(text: string, lines: [number, number]): SeenLines {
+  const all = text.split("\n");
+  if (all.length && all[all.length - 1] === "") all.pop();
+  const [first, last] = lines;
+  return {
+    before: all.slice(Math.max(0, first - 1 - CONTEXT_LINES), first - 1),
+    lines: all.slice(first - 1, last),
+    after: all.slice(last, last + CONTEXT_LINES),
+  };
+}
 
 /** A place as `send-prompt` takes it. The words are the server's to read, and are not sent. */
 export function placeAnchor(place: Place): Record<string, unknown> {
@@ -308,6 +335,7 @@ export function placeAnchor(place: Place): Record<string, unknown> {
   return {
     kind: "file", root: place.root, path: place.path, lines: place.lines,
     ...(place.chars ? { chars: place.chars } : {}),
+    ...(place.seen ? { seen: place.seen } : {}),
     ...(place.session ? { session: place.session } : {}),
   };
 }
@@ -318,6 +346,41 @@ export function samePlace(a: Place, b: Place): boolean {
   return a.root === b.root && a.path === b.path && (a.session ?? "") === (b.session ?? "")
     && a.lines[0] === b.lines[0] && a.lines[1] === b.lines[1]
     && (a.chars?.[0] ?? -1) === (b.chars?.[0] ?? -1) && (a.chars?.[1] ?? -1) === (b.chars?.[1] ?? -1);
+}
+
+/** A sent anchor to a record or a file as `GET sessions/<id>/marks` gives its state (KYO-977). */
+export interface PlaceState {
+  kind: string; lines?: number[]; stale?: boolean; stale_reason?: string; found?: number[][];
+  anchored?: string; moved_from?: number[];
+}
+
+/** How many of the anchored words a stale place's hover quotes. */
+const QUOTED_WORDS = 8;
+
+/**
+ * The line a sent anchor's chip adds to its hover when the place has changed, or null when it
+ * has not (KYO-977). A stale place is said in the form a stale reply or prompt anchor is
+ * (KYO-712), `(stale reference: … since "…" was anchored)`, quoting the first words of the
+ * text that was anchored where the server stored it; a moved one names its new lines.
+ */
+export function placeNote(place: PlaceState): string | null {
+  if (!place.stale) {
+    if (!place.moved_from || !place.lines) return null;
+    const [from, to] = [place.moved_from, place.lines].map((lines) => lineWords(lines as [number, number]));
+    return `(moved: the file was edited, and what was anchored at ${from} is now at ${to})`;
+  }
+  if (place.kind === "record") return "(stale reference: the store no longer holds what was anchored)";
+  const words = (place.anchored ?? "").trim().split(/\s+/).filter(Boolean);
+  const quoted = words.length
+    ? `"${words.slice(0, QUOTED_WORDS).join(" ")}${words.length > QUOTED_WORDS ? "…" : ""}"`
+    : "this";
+  const since = `since ${quoted} was anchored`;
+  if (place.stale_reason === "absent") return `(stale reference: the file was deleted or moved ${since})`;
+  if (place.stale_reason === "unreadable") return `(stale reference: the file can no longer be read as text ${since})`;
+  if (place.stale_reason === "ambiguous" && place.found?.length) {
+    return `(stale reference: the file was edited ${since}, and those words are now at ${place.found.length} places in it)`;
+  }
+  return `(stale reference: the file was edited ${since})`;
 }
 
 /** What a place is known by where sent anchors are compared: its id, or its file and lines. */

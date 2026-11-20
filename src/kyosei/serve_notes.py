@@ -136,7 +136,9 @@ line the agent reads and the stored anchor name the same lines.
 The marks route gives a stale anchor's reason as ``stale_reason``: ``absent`` for a file no
 longer served at that path, ``changed`` for text that is not found intact at its lines or
 anywhere else, ``ambiguous`` as above, and ``unreadable`` for a file served but not as text
-or too large to read.
+or too large to read. A stale anchor that stores its text also gives its first
+:data:`SENTENCE_WORDS` words as ``anchored``, so that a client can say what was anchored
+without the file.
 
 An anchor filed before schema 37 holds no text, and is compared as it always was: by the
 digest at its own lines, never followed to others. An anchor filed with a commit and no
@@ -811,6 +813,10 @@ def _file_place(ctx: commands.Context, files: _Files, anchor: dict) -> dict:
     place |= {"stale": True, "stale_reason": found.state}
     if found.found:
         place["found"] = [list(span) for span in found.found]
+    if anchor.get("lines_text") is not None:
+        # The first words of what was anchored, which the file no longer shows there.
+        words = _clean_words("\n".join(_decoded(anchor["lines_text"])))
+        place["anchored"] = " ".join(words[:SENTENCE_WORDS])
     return place
 
 
