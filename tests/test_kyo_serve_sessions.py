@@ -322,6 +322,13 @@ def test_the_list_reports_work_running_from_the_screen(bed: Bed) -> None:
     assert row["work_running"] is True and row["screen_state"] == "working"
 
 
+def test_the_list_reports_a_running_monitor_as_background_work(bed: Bed) -> None:
+    bed.show("monitor-footer.txt")
+    row = next(r for r in json_body(bed.get(SESSIONS))["sessions"] if r["session_id"] == OLD)
+    assert row["work_running"] is True and row["background"]["monitors"] == 1
+    assert row["background"]["running"] is True
+
+
 def test_the_list_reports_background_work_on_an_idle_screen(bed: Bed) -> None:
     bed.show("background-shells.txt")
     row = next(r for r in json_body(bed.get(SESSIONS))["sessions"] if r["session_id"] == OLD)

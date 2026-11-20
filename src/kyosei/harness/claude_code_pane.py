@@ -117,6 +117,9 @@ _BULLET_COLOUR = re.compile(r"(\x1b\[[0-9;:]*m)*⏺")
 _OPTION = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$")
 _QUESTION = re.compile(r"^\s*Do you want to .+\?\s*$")
 _SHELLS = re.compile(r"·\s*(\d+)\s+shells?\b")
+#: ``· 1 monitor`` alone in the footer (measured, KYO-984); ``· 2 shells, 1 monitor`` is the
+#: combined form, which the same test fixture carries from KYO-962, and the plural is assumed.
+_MONITORS = re.compile(r"(?:·|,)\s*(\d+)\s+monitors?\b")
 #: A footer row of background work (see this module's header): the list's cursor when it has
 #: focus, a tree branch for an agent's own agent, the mark, the agent's type, ``(+N)`` for
 #: agents of its own folded under it, then its words and, after a gap, its time and tokens.
@@ -221,10 +224,13 @@ class BackgroundWork:
     #: Agents that one of those agents started, drawn under it as a tree (``├``, ``└``) or
     #: folded into its ``(+N)``. They are not agents of the session itself (KYO-962).
     nested: int = 0
+    #: Monitors the footer counts (``· 1 monitor``); one that is armed resumes the session
+    #: when it fires, so the session is not waiting on the person (KYO-984).
+    monitors: int = 0
 
     @property
     def running(self) -> bool:
-        return self.shells > 0 or bool(self.agents)
+        return self.shells > 0 or self.monitors > 0 or bool(self.agents)
 
 
 NO_BACKGROUND_WORK = BackgroundWork(0, ())
@@ -321,6 +327,7 @@ def _background(footer: list[str], raw_footer: list[str]) -> BackgroundWork:
     its mark drawn green, and is not counted. ``●`` is accepted as a mark for ``⏺``, as some
     fonts draw it."""
     shells = 0
+    monitors = 0
     agents: list[tuple[str, str]] = []
     nested = 0
     for index, line in enumerate(footer):
@@ -328,6 +335,10 @@ def _background(footer: list[str], raw_footer: list[str]) -> BackgroundWork:
         if count:
             shells = int(count.group(1))
         row = _AGENT_ROW.match(line)
+        # An agent row's "waiting on 1 shell, 1 monitor" is that agent's own work, not the footer's.
+        monitor = _MONITORS.search(line) if row is None else None
+        if monitor:
+            monitors = int(monitor.group(1))
         if row is None:
             continue
         if row.group("branch"):
@@ -337,7 +348,7 @@ def _background(footer: list[str], raw_footer: list[str]) -> BackgroundWork:
             continue
         nested += int(row.group("folded") or 0)
         agents.append((row.group("type"), _agent_description(row.group("words"))))
-    return BackgroundWork(shells, tuple(agents), nested)
+    return BackgroundWork(shells, tuple(agents), nested, monitors)
 
 
 def _options_under(lines: list[str], start: int) -> tuple[PromptOption, ...]:
