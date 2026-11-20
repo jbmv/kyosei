@@ -536,8 +536,9 @@ governs: src/kyosei/schema.py
   An anchor to lines of a file served by `kyo serve` also holds the text of those lines and of
   up to two lines either side, as the person saw them when the anchor was placed
   (schema_version 37, KYO-977, decision KYO-976). A digest of the lines could say only whether
-  they had changed; the stored text lets a blank or repeated line be told apart by its context
-  and an anchor whose lines moved be found at its new lines. This is file text, which the
+  they had changed; the stored text lets an anchor whose lines moved be found at its new lines, and a blank or
+  repeated line be told apart by its context; text found once in a file is the anchor
+  whatever surrounds it, so an edit near it does not make it stale (KYO-981, decision KYO-978). This is file text, which the
   repository holds already, so it does not weaken the rule that no transcript text is stored.
 - **credit_turns** (schema_version 36, KYO-900, decision KYO-898): the turns of the person's
   that a credit cites, one row each in transcript order. Until then every credit took its
