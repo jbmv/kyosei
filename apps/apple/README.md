@@ -96,7 +96,7 @@ The files that the later sections do not name, with what each holds:
 | `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
-| `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967) |
+| `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967), and the same runs as offsets into a line, which a box draws from (KYO-975) |
 | `web/src/sending.ts` | the gate through which one press of Send posts a prompt once |
 | `web/src/agents.ts` | how a subagent is named under the composer and in the side panel |
 | `web/src/start.ts` | the Start orchestrator panel: when it is offered and what it says |
@@ -506,7 +506,8 @@ files from the drag and hands them to the page with the point of the drop
 (`window.kyo.dropPaths`), which inserts them, one to a line, where they fell.
 
 The menu on a box's words is rebuilt from WebKit's (KYO-912, KYO-918): a misspelled word's
-suggestions with Ignore and Learn, then Indent and Outdent, then Cut, Copy and Paste. WebKit's
+suggestions with Ignore and Learn, then Bold, Italic and Regular (KYO-975), then Indent and
+Outdent, then Cut, Copy and Paste. WebKit's
 other items, which suit a web page more than a prompt, are left out there. The suggestions
 are taken by their place, as the groups before the first one that holds Look Up, Cut or a
 submenu, because WebKit's names for its items are not documented; if Cut, Copy and Paste are
@@ -516,9 +517,25 @@ Spelling and Grammar (`SpellingCommands` in `App.swift`): the item sends the web
 own action and shows the stored setting as its tick. Correct Spelling Automatically is not
 offered, since the page corrects nothing. On every right-click the page posts a
 `composerMenu` message saying whether it was on a box's words, before WebKit's menu opens, and
-`ChatPage.willOpenMenu` adds the two items when it was. They call `window.kyo.indent` and
-`window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
-nothing when no box has the focus.
+`ChatPage.willOpenMenu` adds the items when it was. Indent and Outdent call `window.kyo.indent`
+and `window.kyo.outdent`, which act on the focused box's selection as Tab and Shift-Tab do and do
+nothing when no box has the focus. Bold, Italic and Regular call `window.kyo.bold`,
+`window.kyo.italic` and `window.kyo.regular`, which act as Command-B and Command-I and the
+removal of markers described below.
+
+Emphasis is drawn in a box over its text, which is never changed by the drawing (KYO-975).
+`liveEmphasis` in `web/src/editor.ts` reads each visible line with `emphasisRuns`, the same
+reading `emphasis` gives a sent prompt, and marks the runs of `*italic*`, `**bold**` and
+`` `code` ``. A run's markers are hidden while no end of the selection is inside the run or at
+one of its markers, and are shown otherwise, so that they can be edited or deleted; a box that
+does not hold the focus hides them all. The text sent, the draft and scratchpad saved, a copy and
+the marks on lines are the text as typed. Command-B and Command-I wrap each non-blank stretch of
+the selection in `**` or `*`, with the stretch's outer spaces left outside, and remove the markers
+when every stretch is already such a run or the body of one; with no selection they act on the
+word at the caret and do nothing where there is none. Regular removes the markers of every
+italic and bold run that the selection overlaps, or that holds the caret, and leaves code as
+typed. The menu offers the three items on every right-click on a box's words, with or without a
+selection.
 
 Below a menu's last item macOS draws rows of its own: AutoFill, the Continuity items and
 Services, as observed on macOS 27. They are items of menus the system keeps and are not
@@ -703,6 +720,16 @@ when one follows the path after a colon. The words asked about are absolute path
 `~/`, and relative paths that hold a slash and an extension; fenced code blocks are left as
 they are. The logic is in `web/src/files.ts`. All of this needs the device token to hold the
 `files` permission. Without it the view shows the server's refusal and no path is a link.
+
+In the Files view the page shows its own menu on a right-click and never WebKit's, except in the
+search field (KYO-973). A row of the tree or of a list, and a location, offers Copy path and
+Reveal in Finder for the path it stands for; the open file's page offers Anchor with Reveal in
+Finder below it where the click is on a block or a selection, and the path's menu elsewhere. The
+Finder item is the one `showPathMenu` adds when the app says the path exists on this machine, and
+a path the server states no absolute place for, as a per-session root's files, gets none.
+In the Records view a right-click on a record's row, or on a part of the open record's page that
+is not a citable element, offers Anchor to the whole record, worded by its id and the first words
+of its title; a citable element is anchored as before, and nothing else shows a menu.
 
 ### History
 
