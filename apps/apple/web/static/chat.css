@@ -896,6 +896,8 @@ body.no-live #jump-bottom { display: none; }
 /* KYO-737: an anchor to a record or a file opens it; one whose place has changed is struck. */
 .turn-place { cursor: pointer; }
 .turn-place.stale { text-decoration: line-through; opacity: 0.7; }
+/* KYO-977: an anchor whose file is gone says so in place of 'stale reference'. */
+.turn-place.stale[data-stale="absent"]::after { content: "file deleted or moved"; }
 /* KYO-712: a sent paragraph whose anchor to a reply or a prompt is stale says so beside the chip's words. */
 .turn-anchor.stale { background: color-mix(in srgb, var(--kind-decision) 20%, transparent); }
 .turn-anchor.stale::after { content: "stale reference"; margin-left: 8px; color: var(--kind-decision); font-style: italic; }

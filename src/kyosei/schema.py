@@ -382,7 +382,21 @@ from .sweep import SWEEP_COVERAGE_UNRECORDED
 #: here says kyo copied the words from the transcript at that turn, which is not what a
 #: quote typed into a file and matched afterwards records. A real DDL change, so a real
 #: new hash.
-SCHEMA_VERSION = 36
+#: Bumped to 37 for KYO-977 (decision KYO-976): ``person_note_anchors.lines_text``,
+#: ``before_text`` and ``after_text``, the text of a served file's anchored lines and of up
+#: to :data:`kyosei.serve_notes.CONTEXT_LINES` lines on either side, as the person saw them
+#: when the anchor was placed. A digest of the lines could say only that the lines had
+#: changed, and it was computed when the prompt was sent rather than when the anchor was
+#: placed; the text says what was anchored, lets an anchor whose own lines are blank or
+#: repeated be told apart by what surrounds it, and lets one whose lines moved be found at
+#: its new lines. This is file text, which the repository holds already, and not
+#: transcript text, which no column of the table holds. A ``_person_notes.jsonl`` line
+#: written at 36 or earlier carries none of the three on its anchors
+#: (:data:`PERSON_NOTE_ANCHOR_FIELD_DEFAULTS` [37]); NULL is what was true of it, since
+#: nothing stored the text, and none is derived at load time from the file or from the
+#: commit, which may hold other text than the person saw. A real DDL change, so a real
+#: new hash.
+SCHEMA_VERSION = 37
 
 #: KYO-101: the last export format whose ``records.status`` values were members of a
 #: fixed vocabulary rather than names from ``kyosei/statuses.yml``. Nothing rewrites a
@@ -1113,6 +1127,12 @@ CREATE TABLE person_notes (
 --   document  `target` is a path, at `commit_sha`, with `line_*` or `char_*`.
 --   file      `target` is a path, at `commit_sha`, with `line_*`.
 --   note      `target` is another note's id.
+-- KYO-977: an anchor to lines of a served file also holds `lines_text`, the text of those
+-- lines as the person saw them when the anchor was placed, and `before_text` and
+-- `after_text`, the lines either side of them (kyosei.serve_notes.CONTEXT_LINES at most).
+-- Each is its lines with a newline after every one, so that no line and one empty line are
+-- told apart. NULL in all three for any other anchor and for one filed before schema 37.
+-- This is file text, which the repository holds; transcript text is in no column here.
 CREATE TABLE person_note_anchors (
     note_id      TEXT NOT NULL REFERENCES person_notes(id),
     seq          INTEGER NOT NULL,
@@ -1127,6 +1147,9 @@ CREATE TABLE person_note_anchors (
     commit_sha   TEXT,
     line_start   INTEGER,
     line_end     INTEGER,
+    lines_text   TEXT,
+    before_text  TEXT,
+    after_text   TEXT,
     PRIMARY KEY (note_id, seq)
 );
 
@@ -2035,6 +2058,10 @@ COLUMN_CONSUMERS: dict[str, dict[str, tuple[str, ...]]] = {
         "commit_sha": ("export.person_note_document", "cmd_notes.anchor_label"),
         "line_start": ("export.person_note_document", "cmd_notes.anchor_label"),
         "line_end": ("export.person_note_document", "cmd_notes.anchor_label"),
+        # KYO-977: what says whether a file anchor is fresh, moved or stale.
+        "lines_text": ("export.person_note_document", "serve_notes.locate"),
+        "before_text": ("export.person_note_document", "serve_notes.locate"),
+        "after_text": ("export.person_note_document", "serve_notes.locate"),
     },
     "person_note_tags": {
         "note_id": ("export.person_note_document", "cmd_notes.find_note_ids"),
@@ -2528,6 +2555,19 @@ PERSON_NOTE_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
     SENT_FIELD_SCHEMA_VERSION: {"sent": None},
 }
 
+#: KYO-977: the version at which an anchor to a served file stores its text and context.
+ANCHOR_TEXT_SCHEMA_VERSION = 37
+
+#: KYO-977: a field of an anchor on a ``_person_notes.jsonl`` line, keyed by absence as
+#: :data:`PERSON_NOTE_FIELD_DEFAULTS` is. An anchor filed before
+#: :data:`ANCHOR_TEXT_SCHEMA_VERSION` holds no text, and None is what its filing recorded;
+#: :mod:`kyosei.serve_notes` then compares it by its digest at its own lines, as before.
+#: A line written since carries the keys only on a file anchor, since an anchor's keys are
+#: the ones its kind uses, so the default is also what every other anchor reads as.
+PERSON_NOTE_ANCHOR_FIELD_DEFAULTS: dict[int, dict[str, object]] = {
+    ANCHOR_TEXT_SCHEMA_VERSION: {"lines_text": None, "before_text": None, "after_text": None},
+}
+
 #: The tag that meant "sent" until the sent state became a field (schema 31).
 LEGACY_SENT_TAG = "sent"
 
@@ -2648,6 +2688,10 @@ def apply_person_note_defaults(row: dict) -> dict:
     for version in sorted(PERSON_NOTE_FIELD_DEFAULTS):
         for field, default in PERSON_NOTE_FIELD_DEFAULTS[version].items():
             row.setdefault(field, default)
+    for anchor in row.get("anchors", []):
+        for version in sorted(PERSON_NOTE_ANCHOR_FIELD_DEFAULTS):
+            for field, default in PERSON_NOTE_ANCHOR_FIELD_DEFAULTS[version].items():
+                anchor.setdefault(field, default)
     return row
 
 

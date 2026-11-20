@@ -134,7 +134,7 @@
     "notes": [],
     "plan": null,
     "reports": [],
-    "schema_version": 36,
+    "schema_version": 37,
     "scope": null,
     "since_note": null,
     "status": "open",

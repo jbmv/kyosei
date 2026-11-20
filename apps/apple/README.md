@@ -93,7 +93,7 @@ The files that the later sections do not name, with what each holds:
 | `web/static/chat.css` | the page's styles |
 | `web/src/config.ts` | the Config view's logic: sections and rows made from the two served documents, the control each editable row has, the reasons a control is disabled, and what a write's answer comes to |
 | `web/src/pipeline.ts` | the markdown renderer adapted from MDHero |
-| `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited |
+| `web/src/marks.ts` | which line of a prompt each anchor or tag belongs to while the text is edited, the places in records and files an anchor names, and what a sent anchor's chip says when its place has changed |
 | `web/src/tags.ts` | the rule a tag must meet, which `web/test/tagfield.test.ts` checks against the server's |
 | `web/src/chipwords.ts` | the words an anchor's chip quotes, drawn as inline markdown |
 | `web/src/emphasis.ts` | the inline emphasis (`*italic*`, `**bold**`, `` `code` ``) read from a line of the person's prompt, with every marker kept in the text (KYO-967), and the same runs as offsets into a line, which a box draws from (KYO-975) |
@@ -391,7 +391,13 @@ What an unsent prompt is anchored to is highlighted
 in the chat, and in the History reader while it holds the anchor's session (KYO-972). The
 highlight goes when the anchor does, unless another prompt holds an anchor on the same words. An anchor of a sent paragraph that the server reports as stale (KYO-712)
 cannot be highlighted, so the chip above that paragraph in the sent prompt reads "stale reference"
-and its title says that the document was edited or moved since, and names the paragraph.
+and its title says that the document was edited or moved since, and names the paragraph. A
+chip for an anchor to a file reads "stale reference" when the file does not hold the anchored
+text and "file deleted or moved" when the file is gone, and its title quotes the first words of
+what was anchored, which the server stores with the anchor (KYO-977). One whose text the server
+found at other lines is not struck; its title names the new lines and a click opens the file
+there. An anchor placed in the Files view sends the anchored lines and two lines either side as
+the view showed them when it was placed. `fileanchors.test.ts` covers these.
 
 The page's tests are in `web/test/` and run with `npm test` in `web/`. Those in
 `anchors.test.ts` need a web view: they build the page, open it in a headless Chrome and feed

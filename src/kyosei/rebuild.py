@@ -1212,7 +1212,8 @@ def _load(
                 conn.execute(
                     "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
                     " char_start, char_end, digest, digest_check, commit_sha, line_start,"
-                    " line_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " line_end, lines_text, before_text, after_text)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         row["id"],
                         position,
@@ -1227,6 +1228,11 @@ def _load(
                         anchor.get("commit_sha"),
                         anchor.get("line_start"),
                         anchor.get("line_end"),
+                        # KYO-977: None on a line written before schema 37, from
+                        # apply_person_note_defaults; such an anchor holds no text.
+                        anchor["lines_text"],
+                        anchor["before_text"],
+                        anchor["after_text"],
                     ),
                 )
             for tag in row["tags"]:

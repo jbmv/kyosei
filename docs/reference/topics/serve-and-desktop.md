@@ -1476,6 +1476,17 @@ repository the path is in. A scratchpad has no commit, and its anchor holds the 
 instead. A file with uncommitted changes is anchored as served, and the digest, not the commit,
 is what records the words.
 
+The anchor also stores the text of its lines and of up to two lines before and after them
+(KYO-977), so that it can later be found again or reported as changed. A client may give that
+text as it showed it when the anchor was placed, as `"seen": {"before": [...], "lines": [...],
+"after": [...]}`, each a list of lines without their line breaks, with two lines of context
+either side or fewer at the file's start or end. Without `seen` the server reads the text from
+the file as served. When the file as served at send does not hold the seen text at those
+lines, the prompt is still sent: the anchor is filed with the seen text, marked stale from the
+start, its line reads `(words unavailable)`, and its `digest_check` is `given`. A file that is
+not served at all at send is filed in the same way. When the seen text is found intact at exactly
+one other place in the file, the anchor is filed at those lines instead, without its selection.
+
 A reply or prompt anchor takes one of two forms, by the length of the person's selection
 (KYO-733). A selection of six words or more is quoted as above. A shorter one says little about
 where it lies, and the uuid does not take an agent to the place, since an agent cannot see the
@@ -1578,11 +1589,20 @@ until the project sets `read_transcripts: true`.
 After a note's turn anchors come its records and files, each with a `kind` where a turn has a
 `role`. A record or element is `{"kind": "record", "id"}`, with `"stale": true` when the store
 does not hold the id. A file is `{"kind", "root", "path", "lines"}` with its `commit` or
-`session` and its `chars` when it has them, and `"stale": true` when the file as served now
-does not hold the same text at those lines, which the digest decides. A later commit that
-leaves the lines as they were does not make it stale; an edit to them does, committed or not,
-and so does a change above them that moves them. An anchor filed with a commit and no digest
-is compared with the file at that commit in the same way.
+`session` and its `chars` when it has them. It is fresh when the file as served now holds the
+stored text at those lines with its two lines of context either side, or, where the context was
+cut by the file's start or end, with that edge still there. A later commit that leaves the
+lines and their context as they were does not make it stale; an edit to them does, committed
+or not. When the text and context are found intact at exactly one other place in the file,
+the anchor has moved and is not stale: `lines` are the new lines, `moved_from` the stored ones,
+and `chars` is left out. Otherwise it carries `"stale": true` and a `stale_reason`: `absent`
+when nothing is served at the path, `changed` when the text and context are found nowhere,
+`ambiguous` when they are found at more than one other place, which are listed as `found`, and
+`unreadable` when the file is served but cannot be read as text. A stale anchor that stores its
+text also carries `anchored`, the first ten words of that text. An anchor filed before the text
+was stored (schema 37) is compared by the digest at its own lines and is never followed to
+other lines, and an anchor filed with a commit and no digest is compared with the file at that
+commit in the same way; either carries a `stale_reason` when stale.
 
 ```json
 {

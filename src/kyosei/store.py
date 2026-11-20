@@ -1149,8 +1149,9 @@ class Store:
         for position, anchor in enumerate(anchors, start=1):
             self.conn.execute(
                 "INSERT INTO person_note_anchors (note_id, seq, kind, target, session, role,"
-                " char_start, char_end, digest, digest_check, commit_sha, line_start, line_end)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " char_start, char_end, digest, digest_check, commit_sha, line_start, line_end,"
+                " lines_text, before_text, after_text)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     note_id,
                     position,
@@ -1165,6 +1166,10 @@ class Store:
                     anchor.get("commit_sha"),
                     anchor.get("line_start"),
                     anchor.get("line_end"),
+                    # KYO-977: a served file's lines and context, as the person saw them.
+                    anchor.get("lines_text"),
+                    anchor.get("before_text"),
+                    anchor.get("after_text"),
                 ),
             )
         for tag in tags:
