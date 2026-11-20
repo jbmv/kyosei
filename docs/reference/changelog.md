@@ -445,6 +445,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## engine
 
+- **2026-11-20** — `KYO-984` (bug) — A running monitor is not counted as background work, so the app says "Waiting for you…"
 - **2026-11-20** — `KYO-983` (task) — A stale file anchor's prompt line quotes what was anchored
 - **2026-11-20** — `KYO-981` (task) — A file anchor's context is matched only when its text is blank or repeated
 - **2026-11-12** — `KYO-882` (task) — A closing reference states whether a discussion produced something or was dropped, in a field
