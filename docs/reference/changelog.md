@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-20** — `KYO-970` (task) — Top bar: the project's name, not the Chat tab, turns amber when its session waits for the person
 - **2026-11-19** — `KYO-972` (task) — History: a passage of a past session can be anchored
 - **2026-11-19** — `KYO-971` (task) — Right pane: no top bar; a 'Create scratchpad…' line under the scratchpads
 - **2026-11-19** — `KYO-969` (task) — Chat: a project with no live session shows the start panel alone, centred
