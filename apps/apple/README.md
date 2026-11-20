@@ -585,7 +585,7 @@ reloads nothing. A view is one entry in `VIEWS` in `web/src/chat.ts` and the ele
 `web/static/chat.html` marked with its `data-view`.
 
 The project's name in the views bar is amber, in every view, while the followed session
-waits on the person and no subagent or background shell runs (KYO-922, KYO-970); the Chat item
+waits on the person and no subagent, background shell or monitor runs (KYO-922, KYO-970, KYO-984); the Chat item
 no longer changes colour. A project in the bar's list of the other projects' sessions is amber
 when its own live session waits: the server's session list states each row's `screen_state` and
 `background`, `SessionRow.waiting` in `ServeClient.swift` reads them as the page does, and the

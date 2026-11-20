@@ -987,6 +987,29 @@ def test_the_footer_reports_background_shells_and_subagents() -> None:
     assert work.running
 
 
+MONITOR_FOOTER = "  ⏵⏵ auto mode on · 1 monitor · esc to interrupt · ↓ to manage\n"
+
+
+def test_the_footers_monitor_count_is_background_work() -> None:
+    # KYO-984.c1: the footer quoted in the record; before this it read as no work at all.
+    work = pane.classify(screen("monitor-footer.txt")).background
+    assert work.monitors == 1 and work.shells == 0 and work.agents == () and work.running
+    assert MONITOR_FOOTER.strip() in screen("monitor-footer.txt")
+
+
+def test_monitors_plural_and_beside_shells_are_counted() -> None:
+    plural = pane.classify(main_view("  ⏵⏵ auto mode on · 2 monitors · ↓ to manage\n")).background
+    assert plural.monitors == 2 and plural.shells == 0 and plural.running
+    # The combined form is the one KYO-962's fixture carries; an agent's own
+    # "waiting on 1 shell, 1 monitor" is that agent's work and is not the footer's count.
+    both = pane.classify(main_view()).background
+    assert both.shells == 2 and both.monitors == 1
+    only_agent = pane.classify(main_view(
+        "  ⏵⏵ auto mode on · ↓ to manage\n\n  ⏺ main\n"
+        "  ◯ general-purpose  waiting on 1 shell, 1 monitor · Work · since 10:42 AM\n")).background
+    assert only_agent.monitors == 0
+
+
 def test_finished_subagents_are_not_background_work() -> None:
     work = pane.classify(screen("tasks-footer-no-agents.txt")).background
     assert work.shells == 0

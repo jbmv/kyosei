@@ -403,6 +403,7 @@ def _background_json(work: Any) -> dict | None:
     return {
         "running": work.running,
         "shells": work.shells,
+        "monitors": work.monitors,
         "agents": [{"type": kind, "description": what} for kind, what in work.agents],
         "nested": work.nested,
     }

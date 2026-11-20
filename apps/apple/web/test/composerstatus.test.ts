@@ -479,3 +479,16 @@ test("facts that do not say the session is logged out let a send through (KYO-97
     assert.equal(now.open, false);
   }
 });
+
+test("a running monitor is said on the line, after agents and shells, and the line does not wait (KYO-984)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await page.reload();
+  await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)}; })()`);
+  await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 0, monitors: 1, agents: [] } } })`);
+  let now = await page.run<Status>(status);
+  assert.equal(now.text, "1 monitor in the background");
+  await page.run(`window.kyo.screen({ screen: { state: "idle", background: { running: true, shells: 1, monitors: 2,
+    agents: [{ type: "w", description: "x" }] } } })`);
+  now = await page.run<Status>(status);
+  assert.equal(now.text, "1 agent, 1 shell, 2 monitors in the background");
+});

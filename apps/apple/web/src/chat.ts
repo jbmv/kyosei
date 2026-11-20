@@ -938,7 +938,7 @@ function drawQuestionStates(): void {
 }
 
 interface Background {
-  running: boolean; shells: number; agents: { type: string; description: string }[];
+  running: boolean; shells: number; monitors?: number; agents: { type: string; description: string }[];
   /** KYO-962: agents those agents started, drawn under them in the terminal's footer. */
   nested?: number;
 }
@@ -989,6 +989,7 @@ function backgroundWords(): string {
   const own = nested ? ` (and ${nested} ${agents === 1 ? "it" : "they"} started)` : "";
   if (agents) parts.push(`${agents} agent${agents === 1 ? "" : "s"}${own}`);
   if (background.shells) parts.push(`${background.shells} shell${background.shells === 1 ? "" : "s"}`);
+  if (background.monitors) parts.push(`${background.monitors} monitor${background.monitors === 1 ? "" : "s"}`);
   return parts.length ? `${parts.join(", ")} in the background` : "working in the background";
 }
 

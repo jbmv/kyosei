@@ -324,9 +324,9 @@ for a session the index does not hold.
 `live` is whether Claude Code's own process registry holds a running process on the
 session, so a killed session reads `state: "running"` and `live: false`. `has_pane` is
 whether that process is in a tmux pane on `-L default` or `-L kyosei`; `pane_why` says why
-when it is not. `work_running` is true when a turn is running or background shells or
+when it is not. `work_running` is true when a turn is running or background shells, monitors or
 subagents are. It is `null` when there is no pane to read, and the row's other fields say
-why. `background` is `{"running", "shells", "agents": [{"type", "description"}], "nested"}`,
+why. `background` is `{"running", "shells", "monitors", "agents": [{"type", "description"}], "nested"}`,
 or `null` with no screen. `agents` are the session's own agents, and `nested` counts the
 agents those agents started, which the terminal draws under them and which are not counted
 among the session's. An ended session is listed without being opened, so the list reads
