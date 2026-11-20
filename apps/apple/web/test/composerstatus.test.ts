@@ -401,3 +401,81 @@ test("a terminal showing a subagent is said to, and a prompt held for it says wh
   assert.equal(held, `Waiting: ${detail}`);
   assert.doesNotMatch(held, /unrecognised|subagent-view/);
 });
+
+// KYO-974: a send to a session logged out of Claude Code. The server's facts say so; the note
+// says it in place of the cold cache's question, posts nothing, and offers the terminal.
+interface Note { text: string; open: boolean; sent: number }
+const note = `(() => ({
+  text: document.getElementById("composer-note").textContent,
+  open: Boolean(document.querySelector("#composer-note .logged-out-open")),
+  sent: window.posted.filter((p) => p.name === "send").length,
+}))()`;
+const COLD = `{ warm: false, expires_at: "2026-11-19T19:04:00.000Z", recache_tokens_if_cold: 249000 }`;
+const factsWith = (loggedOut: string, cache = COLD) =>
+  `window.kyo.facts({ facts: { git_branch: null, context: null, cache: ${cache}, logged_out: ${loggedOut} } })`;
+const LOGGED_OUT = `{ source: "transcript", reason: "refused", at: "2026-11-20T14:04:00.000Z",
+  text: "Login reached its time limit · Please run /login" }`;
+const pressSend = () => page!.run(`document.querySelector("#boxes .box.main .box-send").click()`);
+
+async function loggedOutSession(): Promise<void> {
+  await page!.reload();
+  await page!.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+    window.kyo.screen({ screen: { state: "idle" } });
+    window.kyo.draft({ boxes: [{ id: "a", text: "words" }], etag: "e" }); })()`);
+  await page!.run(factsWith(LOGGED_OUT));
+}
+
+test("a send to a session logged out of Claude Code posts nothing and says to log in from the terminal, which it opens (KYO-974)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await loggedOutSession();
+  for (const press of [1, 2]) {
+    await pressSend();
+    const now = await page.run<Note>(note);
+    assert.equal(now.sent, 0, `press ${press}`);
+    assert.match(now.text, /^This session is logged out of Claude Code, so nothing was sent\. Log in from the terminal with \/login, then send again\./);
+    assert.doesNotMatch(now.text, /cache went cold/);
+    assert.equal(now.open, true);
+  }
+  await page.run(`document.querySelector("#composer-note .logged-out-open").click()`);
+  const opened = await page.run<{ open: boolean; asked: boolean }>(`({
+    open: document.body.classList.contains("terminal-open"),
+    asked: window.posted.some((p) => p.name === "terminal" && p.body.action === "open"),
+  })`);
+  assert.deepEqual(opened, { open: true, asked: true });
+});
+
+test("logged in again, the note goes and Send asks about the cold cache and then sends, as before (KYO-974)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  await loggedOutSession();
+  await pressSend();
+  assert.equal((await page.run<Note>(note)).open, true);
+  await page.run(factsWith("null"));
+  let now = await page.run<Note>(note);
+  assert.deepEqual([now.text, now.open], ["", false]);
+  await pressSend();
+  now = await page.run<Note>(note);
+  assert.match(now.text, /^The cache went cold at .*Sending rewrites about 249k tokens\. Send again to confirm\.$/);
+  assert.equal(now.sent, 0);
+  await pressSend();
+  assert.equal((await page.run<Note>(note)).sent, 1);
+});
+
+test("facts that do not say the session is logged out let a send through (KYO-974.c5)", async (t) => {
+  if (!page) return t.skip("no Chrome on this machine");
+  const warm = `{ warm: true, expires_at: "2099-01-01T00:00:00.000Z", recache_tokens_if_cold: 1000 }`;
+  // A server that predates the field sends none at all.
+  for (const facts of [
+    `window.kyo.facts({ facts: { git_branch: null, context: null, cache: ${warm} } })`,
+    factsWith("null", warm),
+  ]) {
+    await page.reload();
+    await page.run(`(() => { window.kyo.project({ project: "p", scope: "server/p" }); ${session(true)};
+      window.kyo.screen({ screen: { state: "idle" } });
+      window.kyo.draft({ boxes: [{ id: "a", text: "words" }], etag: "e" }); })()`);
+    await page.run(facts);
+    await pressSend();
+    const now = await page.run<Note>(note);
+    assert.equal(now.sent, 1, facts);
+    assert.equal(now.open, false);
+  }
+});
