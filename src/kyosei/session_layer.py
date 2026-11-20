@@ -562,7 +562,8 @@ def _pid_exists(pid: int) -> bool:
 
 
 def is_working(screen: pane.Screen) -> bool:
-    """Whether a screen shows work running: a turn, or background shells or subagents."""
+    """Whether a screen shows work running: a turn, or background shells, monitors or
+    subagents."""
     return screen.state == pane.WORKING or screen.background.running
 
 
