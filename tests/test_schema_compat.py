@@ -2904,10 +2904,9 @@ def test_this_change_bumps_the_schema_by_one_from_its_base() -> None:
     from kyosei.schema import (
         CREDIT_FIELD_DEFAULTS,
         EXPORT_FIELD_DEFAULTS,
+        PERSON_NOTE_ANCHOR_FIELD_DEFAULTS,
         TURN_REF_FIELD_DEFAULTS,
     )
-
-    from kyosei.schema import PERSON_NOTE_ANCHOR_FIELD_DEFAULTS
 
     assert SCHEMA_VERSION == 37
     assert PERSON_NOTE_ANCHOR_FIELD_DEFAULTS[37] == {
