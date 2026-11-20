@@ -406,6 +406,11 @@ test("a file's line reads `line N`, `lines N-M` and the older `lines N-N` as the
   assert.deepEqual(one, old);
   assert.deepEqual(span?.lines, [4, 5]);
   assert.deepEqual(fileLine("on file src/tidy.py line 5 (words unavailable)")?.lines, [5, 5]);
+  for (const end of ["no longer there", "file deleted or moved"]) {
+    const stale = fileLine(`on file src/tidy.py lines 4-5 was "def reformat(text)..." (${end})`);
+    assert.deepEqual([stale?.path, stale?.lines, stale?.words], ["src/tidy.py", [4, 5], ""]);
+    assert.deepEqual(stale, fileLine("on file src/tidy.py lines 4-5 (words unavailable)"));
+  }
   assert.equal(fileLine('on file src/tidy.py line 0 "x"'), null);
   assert.deepEqual(fileLine('on file a.md in the scratchpad line 3 "x"')?.root, "scratch");
 });

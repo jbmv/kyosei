@@ -1483,7 +1483,11 @@ text as it showed it when the anchor was placed, as `"seen": {"before": [...], "
 either side or fewer at the file's start or end. Without `seen` the server reads the text from
 the file as served. When the file as served at send does not hold the seen text at those
 lines, the prompt is still sent: the anchor is filed with the seen text, marked stale from the
-start, its line reads `(words unavailable)`, and its `digest_check` is `given`. A file that is
+start, its line quotes the first words of the seen text and ends `(no longer there)`
+(`on file <path> line <n> was "<first words>" (no longer there)`), and its `digest_check` is
+`given`. An anchor whose file is not served at send ends `(file deleted or moved)` instead of
+`(no longer there)`, and one with no stored text, or none that holds a word, reads
+`(words unavailable)`. A file that is
 not served at all at send is filed in the same way. When the seen text is found intact at exactly
 one other place in the file, the anchor is filed at those lines instead, without its selection.
 

@@ -403,7 +403,10 @@ cannot be highlighted, so the chip above that paragraph in the sent prompt reads
 and its title says that the document was edited or moved since, and names the paragraph. A
 chip for an anchor to a file reads "stale reference" when the file does not hold the anchored
 text and "file deleted or moved" when the file is gone, and its title quotes the first words of
-what was anchored, which the server stores with the anchor (KYO-977). One whose text the server
+what was anchored, which the server stores with the anchor (KYO-977). The line the server
+types above such a paragraph reads `on file <path> line <n> was "<first words>" (no longer
+there)`, or `(file deleted or moved)` when the file is not served; an anchor without stored
+text reads `(words unavailable)`. The page reads each form as the same file and lines (KYO-983). One whose text the server
 found at other lines is not struck, and an edit near an anchor whose own lines are unchanged does not strike it (KYO-981); its title names the new lines and a click opens the file
 there. An anchor placed in the Files view sends the anchored lines and two lines either side as
 the view showed them when it was placed. `fileanchors.test.ts` covers these.
