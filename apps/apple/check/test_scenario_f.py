@@ -321,3 +321,36 @@ def _files(scenario: harness.Scenario, page: harness.Channel) -> None:
         "return document.getElementById('path-menu') === null;",
         deadline=5,
     )
+
+    # KYO-973 c1: a right-click on a row of the tree shows the page's menu in place of
+    # WebKit's, with the row's path. Reveal in Finder arrives once the app has said the file
+    # exists on this machine; it is not chosen, since choosing it opens a Finder window.
+    place = page.eval(
+        "const row = document.querySelector('#files-side .tree-row[data-file=\"notes.md\"]');"
+        "if (!row) return null;"
+        "const at = row.getBoundingClientRect();"
+        "return { x: at.left + at.width / 2, y: at.top + at.height / 2 };"
+    )
+    if place is not None:
+        page.request("mouse", x=place["x"], y=place["y"], button="right")
+        page.wait("the row's menu", "return !!document.getElementById('path-menu');")
+        page.wait(
+            "Reveal in Finder",
+            "return !!document.querySelector('#path-menu .path-reveal');",
+            deadline=10,
+        )
+        row_menu = page.eval(
+            "const menu = document.getElementById('path-menu');"
+            "return { heading: menu.querySelector('.path-menu-path')?.textContent ?? null,"
+            " buttons: [...menu.querySelectorAll('button')].map((button) => button.textContent) };"
+        )
+        scenario.check(
+            "F.row-menu",
+            "A right-click on a row of the file tree offers Copy path and Reveal in Finder "
+            "for the row's path (KYO-973 c1).",
+            row_menu["buttons"] == ["Copy path", "Reveal in Finder"]
+            and (row_menu["heading"] or "").endswith("/notes.md"),
+            row_menu,
+            look="path-menu",
+        )
+        page.request("key", key="escape")

@@ -511,7 +511,7 @@ Outdent, then Cut, Copy and Paste. WebKit's
 other items, which suit a web page more than a prompt, are left out there. The suggestions
 are taken by their place, as the groups before the first one that holds Look Up, Cut or a
 submenu, because WebKit's names for its items are not documented; if Cut, Copy and Paste are
-not found, nothing is left out and the two items follow the suggestions. Of the two spelling
+not found, nothing is left out and the items follow the suggestions. Of the two spelling
 settings that WebKit's submenu held, Check Spelling While Typing is in the Edit menu's
 Spelling and Grammar (`SpellingCommands` in `App.swift`): the item sends the web view WebKit's
 own action and shows the stored setting as its tick. Correct Spelling Automatically is not
