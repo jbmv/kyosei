@@ -233,8 +233,9 @@ def test_c3_a_blank_line_anchor_goes_stale_when_its_context_no_longer_surrounds_
     # The heading above it changed: line 2 is still blank, and the digest of a blank line
     # still matches, but this is not the blank line that was anchored.
     write(code, "docs/plan.md", PLAN.replace("# The plan", "# Another plan"))
-    assert cmd_digest(serve_notes.file_lines(PLAN.replace("# The plan", "# Another plan")), 2) == (
-        stored["digest"]
+    assert (
+        cmd_digest(serve_notes.file_lines(PLAN.replace("# The plan", "# Another plan")), 2)
+        == (stored["digest"])
     )
     place = only_place(bed, with_files)
     assert place["stale"] is True and place["stale_reason"] == "changed"
@@ -281,8 +282,13 @@ def test_c4_text_found_intact_at_other_lines_is_fresh_there_and_said_to_have_mov
         "lines": [6, 7],
         "moved_from": [4, 5],
     }
-    # Its text with an edit inside its context is not the same place, and no other is.
+    # An edit within its context at the new place does not matter: its words are found
+    # once, so they are the anchor (KYO-981; the context then decided, and called it changed).
     write(code, "src/tidy.py", "import sys\nimport re\n" + SOURCE.replace("LIMIT", "CAP"))
+    still = only_place(bed, with_files)
+    assert still["lines"] == [6, 7] and still["moved_from"] == [4, 5] and "stale" not in still
+    # Its own words edited, it is found nowhere.
+    write(code, "src/tidy.py", "import sys\nimport re\n" + SOURCE.replace("strip", "lstrip"))
     assert only_place(bed, with_files)["stale_reason"] == "changed"
 
 
@@ -312,9 +318,16 @@ def test_c4_locate_states_its_rule_on_lines_alone() -> None:
     assert serve_notes.locate(anchor, lines) == serve_notes.Located("fresh", (4, 5))
     shifted = ["# new"] + lines
     assert serve_notes.locate(anchor, shifted) == serve_notes.Located("moved", (5, 6))
-    # The file's start is part of the context of an anchor within two lines of it.
+    # Words found once are the anchor whatever surrounds them (KYO-981).
     first = serve_notes.snapshot(lines, 1, 1) | {"line_start": 1}
-    assert serve_notes.locate(first, shifted).state == "changed"
+    assert serve_notes.locate(first, shifted) == serve_notes.Located("moved", (2, 2))
+    near = serve_notes.snapshot(lines, 4, 5) | {"line_start": 4}
+    edited = [line.replace("LIMIT", "CAP") for line in lines]
+    assert serve_notes.locate(near, edited) == serve_notes.Located("fresh", (4, 5))
+    # Blank text is a candidate only with its context, and repeated text is told by it.
+    blank = serve_notes.snapshot(lines, 2, 2) | {"line_start": 2}
+    assert serve_notes.locate(blank, ["x", "", "y"]).state == "changed"
+    assert serve_notes.locate(blank, lines) == serve_notes.Located("fresh", (2, 2))
 
 
 # --------------------------------------------------- c5: a file gone, and a file changed
@@ -394,3 +407,46 @@ def test_c7_a_schema_36_note_line_rebuilds_with_no_text_on_its_anchors(
     (anchor,) = kyo("notes", "show", note["id"], "--json").json["note"]["anchors"]
     assert "lines_text" not in anchor and anchor["digest"] == note["anchors"][0]["digest"]
     assert "stale" not in only_place(bed, with_files)
+
+
+# ------------------------------------- KYO-981: an edit near an anchor does not make it stale
+
+
+def test_c981_an_edit_within_the_context_leaves_an_anchor_on_unchanged_lines_fresh(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    sent_with(bed, notes_path, with_files, served("src/tidy.py", 4, 5))
+    # Line 7 and the blank line 3 are both within two lines of the anchor.
+    write(code, "src/tidy.py", SOURCE.replace("LIMIT", "CAP"))
+    place = only_place(bed, with_files)
+    assert place["lines"] == [4, 5] and "stale" not in place and "moved_from" not in place
+    write(code, "src/tidy.py", SOURCE.replace("\n\n\ndef", "\n\ndef"))
+    assert "stale" not in only_place(bed, with_files)
+
+
+def test_c981_an_edit_near_the_anchor_between_placing_and_sending_does_not_file_it_stale(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    placed = served("src/tidy.py", 4, 5, seen=seen_of(SOURCE, 4, 5))
+    write(code, "src/tidy.py", SOURCE.replace("LIMIT", "CAP"))
+    status, sent = post(bed, SEND_PROMPT, one_mark(placed), with_files)
+    assert status == 200, sent
+    (line,) = on_lines(sent)
+    assert "words unavailable" not in line and "def reformat(text):" in line
+    bed.show(IDLE)
+    wait_until(lambda: len(filed_by(bed, notes_path, with_files, sent["held"]["id"])) == 1)
+    place = only_place(bed, with_files)
+    assert place["lines"] == [4, 5] and "stale" not in place
+
+
+def test_c981_text_found_once_at_other_lines_is_moved_although_its_context_changed(
+    bed: Bed, notes_path: str, with_files: str, code: Path
+) -> None:
+    sent_with(bed, notes_path, with_files, served("src/tidy.py", 4, 5))
+    write(
+        code,
+        "src/tidy.py",
+        "import sys\n" + SOURCE.replace("LIMIT", "CAP").replace("import os", "import re"),
+    )
+    place = only_place(bed, with_files)
+    assert place["lines"] == [5, 6] and place["moved_from"] == [4, 5] and "stale" not in place

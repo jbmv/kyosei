@@ -1591,13 +1591,18 @@ After a note's turn anchors come its records and files, each with a `kind` where
 does not hold the id. A file is `{"kind", "root", "path", "lines"}` with its `commit` or
 `session` and its `chars` when it has them. It is fresh when the file as served now holds the
 stored text at those lines with its two lines of context either side, or, where the context was
-cut by the file's start or end, with that edge still there. A later commit that leaves the
-lines and their context as they were does not make it stale; an edit to them does, committed
-or not. When the text and context are found intact at exactly one other place in the file,
-the anchor has moved and is not stale: `lines` are the new lines, `moved_from` the stored ones,
-and `chars` is left out. Otherwise it carries `"stale": true` and a `stale_reason`: `absent`
-when nothing is served at the path, `changed` when the text and context are found nowhere,
-`ambiguous` when they are found at more than one other place, which are listed as `found`, and
+cut by the file's start or end, with that edge still there. Where it does not, the candidates
+are the places in the file whose lines equal the stored text, and text of blank lines is not a
+candidate without its context (KYO-981). With exactly one candidate the anchor is fresh there
+if that is its stored lines, so that an edit to the lines around it does not make it stale, and
+has moved there if not, whatever surrounds it. With several candidates, or for blank text, the
+context decides: the one place where it is intact is fresh or moved to, and more than one such
+place is ambiguous. A later commit that leaves the text as it was does not make the anchor
+stale; an edit to its own lines does, committed or not. A moved anchor is not stale: `lines`
+are the new lines, `moved_from` the stored ones, and `chars` is left out. Otherwise it carries
+`"stale": true` and a `stale_reason`: `absent` when nothing is served at the path, `changed`
+when the text is found nowhere (or, for blank or repeated text, the text with its context),
+`ambiguous` when the context leaves more than one place, which are listed as `found`, and
 `unreadable` when the file is served but cannot be read as text. A stale anchor that stores its
 text also carries `anchored`, the first ten words of that text. An anchor filed before the text
 was stored (schema 37) is compared by the digest at its own lines and is never followed to

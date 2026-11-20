@@ -118,20 +118,20 @@ refused: the anchor is filed with what the person saw, stale from the start, and
 no longer served at all is filed the same way.
 
 An anchor is fresh when the file as served now holds its text with its context at its lines.
-The context is part of the match, so an anchor whose own lines are blank or repeated elsewhere
-in the file is told apart by what surrounds it, and an edit within :data:`CONTEXT_LINES` lines
-of an anchor makes it stale as an edit to its own lines does. Where the anchor ended within
-:data:`CONTEXT_LINES` lines of the file's start or end, that edge is part of its context too.
-A commit to the file that leaves those lines and their context as they were changes nothing.
-
-An anchor whose text and context are not at its lines but are found intact at exactly one
-other place in the same file has MOVED: it is fresh at the new lines, which the marks route
-gives as ``lines``, with the stored lines as ``moved_from`` and no ``chars``, since a
-selection's offsets were counted in a file that has since changed above it. Found intact at
-more than one other place, it is AMBIGUOUS and stale, and the route lists those places as
-``found``: which of two identical passages the person meant is not something the text can
-say. An anchor found moved when its prompt is sent is filed at the new lines, so that the
-line the agent reads and the stored anchor name the same lines.
+Where it does not, the candidates are the places in the file whose lines equal the anchored
+text, and text of blank lines is never a candidate without its context (KYO-981, decided by
+KYO-978). With exactly one candidate the anchor is fresh there if that place is its stored
+lines and MOVED there if not, whatever surrounds it: an edit within :data:`CONTEXT_LINES`
+lines of an anchor whose own lines are unchanged leaves it fresh, and a moved anchor is fresh
+at the new lines, which the marks route gives as ``lines``, with the stored lines as
+``moved_from`` and no ``chars``, since a selection's offsets were counted in a file that has
+since changed above it. With several candidates, or for blank text, the context decides:
+exactly one place with its context intact is where the anchor is fresh or moved; more than one
+is AMBIGUOUS and stale, and the route lists those places as ``found``, since which of two
+identical passages the person meant is not something the text can say; none is changed. Where
+the anchor ended within :data:`CONTEXT_LINES` lines of the file's start or end, that edge is
+part of its context. An anchor found moved when its prompt is sent is filed at the new lines,
+so that the line the agent reads and the stored anchor name the same lines.
 
 The marks route gives a stale anchor's reason as ``stale_reason``: ``absent`` for a file no
 longer served at that path, ``changed`` for text that is not found intact at its lines or
@@ -306,9 +306,7 @@ def _refusing() -> Iterator[None]:
         raise Refusal(422, str(exc), reason="store-refused") from exc
     except sqlite3.OperationalError as exc:
         if is_lock_contention(exc):
-            raise Refusal(
-                503, lock_contention_message(None), reason="store-locked"
-            ) from exc
+            raise Refusal(503, lock_contention_message(None), reason="store-locked") from exc
         raise
 
 
@@ -337,9 +335,7 @@ def _actor(device: device_tokens.Device) -> str:
 
 
 def _device(server: Any, authorization: str | None) -> device_tokens.Device:
-    return serve_send.require_device(
-        server.environ, authorization, device_tokens.PERMISSION_NOTES
-    )
+    return serve_send.require_device(server.environ, authorization, device_tokens.PERMISSION_NOTES)
 
 
 def _authorized_body(
@@ -592,10 +588,13 @@ def snapshot(lines: list[str], first: int, last: int) -> dict[str, str]:
 def locate(anchor: dict, lines: list[str]) -> Located:
     """Where a file anchor that stores its text is in ``lines``, the file as served now.
 
-    Fresh at its own lines when they hold its text with its context; else moved to the one
-    other place that does, ambiguous when more than one does, and changed when none does.
-    A context shorter than :data:`CONTEXT_LINES` lines was cut by the file's start or end,
-    and that edge must still be there.
+    Fresh at its own lines when they hold its text with its context. Otherwise the candidates
+    are the places holding its text, and a text of blank lines is never a candidate without
+    its context. One candidate is the anchor, fresh at its stored lines or moved to it,
+    whatever surrounds it. Of several, the context decides: one with it intact is fresh or
+    moved there, more than one is ambiguous, none is changed. No candidate is changed
+    (KYO-981). A context shorter than :data:`CONTEXT_LINES` lines was cut by the file's start
+    or end, and that edge must still be there.
     """
     text = _decoded(anchor["lines_text"])
     before = _decoded(anchor.get("before_text"))
@@ -619,13 +618,20 @@ def locate(anchor: dict, lines: list[str]) -> Located:
     stored = anchor["line_start"]
     if intact(stored):
         return Located(FRESH, (stored, stored + count - 1))
-    found = tuple(
-        (first, first + count - 1)
+    places = [
+        first
         for first in range(1, len(lines) - count + 2)
-        if first != stored and intact(first)
-    )
+        if lines[first - 1 : first - 1 + count] == text
+    ]
+    if any(line.strip() for line in text) and len(places) == 1:
+        # The words are found once: that place is the anchor, whatever surrounds it (KYO-981).
+        only = places[0]
+        span = (only, only + count - 1)
+        return Located(FRESH if only == stored else MOVED, span)
+    # Blank or repeated text: the context decides.
+    found = tuple((first, first + count - 1) for first in places if intact(first))
     if len(found) == 1:
-        return Located(MOVED, found[0])
+        return Located(FRESH if found[0][0] == stored else MOVED, found[0])
     if found:
         return Located(AMBIGUOUS, found=found)
     return Located(CHANGED)
@@ -706,9 +712,7 @@ def _file_anchor(files: _Files, raw: dict, where: str) -> dict:
         text: str | None = files.text(name, session, path)
     except Refusal as exc:
         if seen is None or not _is_absence(exc):
-            raise Refusal(
-                exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra
-            ) from exc
+            raise Refusal(exc.status, f"{where}: {exc}", headers=exc.headers, **exc.extra) from exc
         # KYO-977: the person saw the file, which is gone since; filed as they saw it.
         text = None
     lines = None if text is None else file_lines(text)
@@ -820,9 +824,7 @@ def _file_place(ctx: commands.Context, files: _Files, anchor: dict) -> dict:
     return place
 
 
-def _file_line(
-    ctx: commands.Context, files: _Files, anchor: dict, session_id: str
-) -> str:
+def _file_line(ctx: commands.Context, files: _Files, anchor: dict, session_id: str) -> str:
     """The line for an anchor read from a served file (module docstring): at the lines its
     text is at now, and without words when it is stale."""
     name, text, found = _file_state(ctx, files, anchor)
@@ -1335,9 +1337,7 @@ def _marks(document: dict, line_count: int) -> list[dict]:
     return marks
 
 
-def _with_marks(
-    segments: list[dict[str, str]], insertions: dict[int, str]
-) -> list[dict[str, str]]:
+def _with_marks(segments: list[dict[str, str]], insertions: dict[int, str]) -> list[dict[str, str]]:
     """The segments with typed text inserted at these offsets of their joined text."""
     pieces: list[tuple[str, str]] = []
     position = 0
@@ -1473,9 +1473,11 @@ def send_prompt(
 
 def _filed_already(ctx: commands.Context, message_id: str) -> bool:
     """Whether a prompt's notes are in the store: they carry its id as their sent message."""
-    row = ctx.store().conn.execute(
-        "SELECT 1 FROM person_notes WHERE sent_message = ? LIMIT 1", (message_id,)
-    ).fetchone()
+    row = (
+        ctx.store()
+        .conn.execute("SELECT 1 FROM person_notes WHERE sent_message = ? LIMIT 1", (message_id,))
+        .fetchone()
+    )
     return row is not None
 
 

@@ -404,7 +404,7 @@ and its title says that the document was edited or moved since, and names the pa
 chip for an anchor to a file reads "stale reference" when the file does not hold the anchored
 text and "file deleted or moved" when the file is gone, and its title quotes the first words of
 what was anchored, which the server stores with the anchor (KYO-977). One whose text the server
-found at other lines is not struck; its title names the new lines and a click opens the file
+found at other lines is not struck, and an edit near an anchor whose own lines are unchanged does not strike it (KYO-981); its title names the new lines and a click opens the file
 there. An anchor placed in the Files view sends the anchored lines and two lines either side as
 the view showed them when it was placed. `fileanchors.test.ts` covers these.
 
