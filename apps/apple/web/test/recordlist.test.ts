@@ -492,3 +492,80 @@ test("a search reaches the text the rows do not hold: the server is asked once t
   assert.equal((await asked(opened)).filter((text) => text === "zzz").length, 1);
   assert.deepEqual(await tableRows(opened, "#records-list"), []);
 });
+
+// KYO-973: the Records view's right-click menu: Anchor to the whole record from a row or from
+// a part of the open record's page that is not a citable element.
+const RECORD_DOC = {
+  id: "KYO-12", kind: "task", title: "The serve route drops a flag in the second request", status: "open",
+  criteria: [{ id: "KYO-12.c1", text: "The flag is kept", state: "unmet-unbuilt" }],
+};
+type Menu = { prevented: boolean; entries: string[]; anchored: unknown[] };
+
+/** Right-clicks the first element `selector` finds, and reads the menu it opened and what Anchor adds. */
+const rightClick = (opened: Page, selector: string, anchor = false) => opened.run<Menu>(`(() => {
+  document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  const target = document.querySelector(${JSON.stringify(selector)});
+  const prevented = !target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 60, clientY: 60 }));
+  const entries = [...document.querySelectorAll("#anchor-menu > *")].map((item) => item.textContent);
+  if (${anchor}) document.querySelector("#anchor-menu .anchor-new")?.click();
+  const held = window.kyo.composer.boxes().length ? window.kyo.composer.boxes()[0].text : "";
+  return { prevented, entries, anchored: [held, [...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)] };
+})()`);
+
+test("a record's row offers Anchor to the whole record, worded by its id and the first words of its title (KYO-973.c4)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await open(records(40));
+  const row = await rightClick(opened, '#records-table [data-open="KYO-7"]', true);
+  assert.equal(row.prevented, true);
+  assert.equal(row.entries[0], "Anchor");
+  const mark = (await opened.run<string[]>(`[...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)`)).join();
+  assert.match(mark, /KYO-7 The record numbered 7/, "the anchor's words");
+  // The drawer's rows too.
+  const side = await rightClick(opened, '#records-side .rec-row[data-open]');
+  assert.equal(side.prevented, true);
+  assert.equal(side.entries[0], "Anchor");
+});
+
+test("on the open record's page, a citable element is anchored as it was, and any other part anchors the whole record (KYO-973.c4)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await open(records(40));
+  await opened.run(`(() => {
+    document.querySelector('#records-table [data-open="KYO-12"]').click();
+    window.kyo.record({ id: "KYO-12", document: ${JSON.stringify(RECORD_DOC)} });
+  })()`);
+  const page_ = await rightClick(opened, "#record", true);
+  assert.equal(page_.prevented, true);
+  assert.equal(page_.entries[0], "Anchor");
+  const whole = (await opened.run<string[]>(`[...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)`)).join();
+  assert.match(whole, /KYO-12 The serve route drops a flag/, "the whole record's id and the first words of its title");
+  // A criterion is a citable element: its anchor is to it, by its id, as before.
+  const criterion = await rightClick(opened, '#record [data-record-ref="KYO-12.c1"] .rec-text, #record [data-ref="KYO-12.c1"] .rec-text', true);
+  assert.equal(criterion.prevented, true);
+  const cited = (await opened.run<string[]>(`[...document.querySelectorAll("#boxes .mark.held")].map((mark) => mark.title)`)).join("\n");
+  assert.match(cited, /KYO-12\.c1 The flag is kept/);
+});
+
+test("no right-click in the Records view shows WebKit's menu, except in the search field (KYO-973.c5)", async (t) => {
+  if (!page) return t.skip("no Chrome here");
+  const opened = await open(records(40));
+  const landing = await opened.run<Record<string, boolean>>(`(() => {
+    const result = {};
+    const fire = (name, selector) => {
+      const target = document.querySelector(selector);
+      result[name] = !target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    };
+    fire("table row", '#records-table [data-open="KYO-7"]');
+    fire("drawer row", "#records-side .rec-row[data-open]");
+    fire("drawer", "#records-side");
+    fire("landing page", "#view-records");
+    fire("search field", "#records-side .records-search");
+    return result;
+  })()`);
+  assert.deepEqual(landing, { "table row": true, "drawer row": true, drawer: true, "landing page": true, "search field": false });
+  await opened.run(`(() => {
+    document.querySelector('#records-table [data-open="KYO-12"]').click();
+    window.kyo.record({ id: "KYO-12", document: ${JSON.stringify(RECORD_DOC)} });
+  })()`);
+  assert.equal(await opened.run(`!document.querySelector("#record h1").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`), true);
+  assert.equal(await opened.run(`!document.querySelector("#view-records").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`), true);
+});
