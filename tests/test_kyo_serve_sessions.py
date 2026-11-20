@@ -660,24 +660,54 @@ def test_the_stream_says_when_a_logged_out_session_is_logged_in_again(bed: Bed, 
     assert opened.event("facts")["facts"]["logged_out"] is None
 
 
-def test_facts_state_an_ended_login_that_claude_auth_status_reports(
-    bed: Bed, tmp_path: Path, monkeypatch
-) -> None:
-    """Before any request has been refused: the login of the session's configuration has ended."""
+def _fake_auth_status(bed: Bed, tmp_path: Path, monkeypatch, **document) -> Path:
+    """A `claude` whose ``auth status`` prints ``document`` for the bed's configuration."""
     from kyosei.harness import claude_code_auth
 
     printed = tmp_path / "auth-status.json"
-    printed.write_text(json.dumps({"loggedIn": False, "authMethod": "none",
-                                   "apiProvider": "firstParty", "configDirectory": str(bed.claude),
-                                   "loginExpiresAt": None}), encoding="utf-8")
+    shown = {"apiProvider": "firstParty", "configDirectory": str(bed.claude), **document}
+    printed.write_text(json.dumps(shown), encoding="utf-8")
     fake = tmp_path / "fake-claude"
     fake.write_text(f'#!/bin/sh\ncat "{printed}"\nexit 1\n', encoding="utf-8")
     fake.chmod(0o755)
     monkeypatch.setattr(claude_code_auth, "find_claude", lambda _environ: str(fake))
+    return printed
+
+
+NO_LOGIN = {"loggedIn": False, "authMethod": "none", "loginExpiresAt": None}
+
+
+def test_facts_state_an_ended_login_that_claude_auth_status_reports(
+    bed: Bed, tmp_path: Path, monkeypatch
+) -> None:
+    """Before any request has been refused: the login of the session's configuration has ended."""
+    _fake_auth_status(bed, tmp_path, monkeypatch, **NO_LOGIN)
     bed.write_transcript(bed.rows(source=FACTS_FILE))
     assert json_body(bed.get(f"{SESSIONS}/{OLD}/turns"))["facts"]["logged_out"] == {
-        "source": "auth-status", "reason": "not-logged-in", "at": None, "text": None,
+        "source": "auth-status",
+        "reason": "not-logged-in",
+        "at": None,
+        "text": None,
     }
+
+
+def test_the_stream_says_when_a_login_is_made_with_no_row_of_the_transcript(
+    bed: Bed, tmp_path: Path, monkeypatch, stream
+) -> None:
+    """Logged in from another session or a shell: this session's transcript gains nothing."""
+    from kyosei.harness import claude_code_auth
+
+    printed = _fake_auth_status(bed, tmp_path, monkeypatch, **NO_LOGIN)
+    bed.write_transcript(bed.rows(source=FACTS_FILE))
+    opened = stream()
+    assert opened.event("ready")["facts"]["logged_out"]["source"] == "auth-status"
+    renewed = {"loggedIn": True, "authMethod": "claude.ai", "loginExpiresAt": "2099-01-01T00:00Z"}
+    printed.write_text(
+        json.dumps({"apiProvider": "firstParty", "configDirectory": str(bed.claude), **renewed}),
+        encoding="utf-8",
+    )
+    claude_code_auth.forget()
+    assert opened.event("facts")["facts"]["logged_out"] is None
 
 
 # ------------------------------------------- KYO-717: the weekly figure first read
