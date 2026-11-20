@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-20** — `KYO-977` (task) — File anchors store their text: stale on any edit, follow a move, and say when the file is gone
 - **2026-11-20** — `KYO-975` (task) — Composer and scratchpads: emphasis draws live while editing, with a format menu and Cmd-B, Cmd-I
 - **2026-11-20** — `KYO-974` (bug) — A send to a logged-out session shows the cold-cache confirmation, not the logout
 - **2026-11-20** — `KYO-973` (task) — Files and Records: the app's right-click menu, with Reveal in Finder and whole-record Anchor
