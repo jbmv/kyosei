@@ -314,6 +314,15 @@ the others are shown as scratchpads, which is saved with the next edit. A held p
 back to edit is the prompt again, and what was typed in the prompt meanwhile becomes a
 scratchpad above it.
 
+A prompt is not posted to a session whose Claude Code is logged out, since the session would
+only refuse it. The server reports that state in the session's facts as `logged_out`
+([`serve-and-desktop.md`](../../docs/reference/topics/serve-and-desktop.md) says how it is
+decided), and on Send the composer's note reads "This session is logged out of Claude Code, so
+nothing was sent. Log in from the terminal with /login, then send again.", with a button that
+opens the terminal. The prompt stays in the box, and the note goes once the facts no longer
+report the state. The check is in `attemptSend` in `web/src/chat.ts` and is tested in
+`web/test/composerstatus.test.ts`.
+
 ### The composer's sections
 
 <!-- governs:
