@@ -388,9 +388,10 @@ def test_a_viewer_sizes_a_session_nobody_is_attached_to(
     status, sized = post(bed, RESIZE, {"connection": connection, "cols": 90, "rows": 20}, token)
     assert status == 200 and (sized["cols"], sized["rows"]) == (90, 20)
     wait_until(lambda: pane.size() == "90x20")
-    # The pane's new size reaches the client as a repaint at that size.
-    repainted = stream.event("screen")
-    assert (repainted["cols"], repainted["rows"]) == (90, 20)
+    # The pane's new size reaches the client as a repaint at that size. A repaint at the old
+    # size can still be queued ahead of it: the open paints once and the pane's first resize
+    # paints again, and both may be taken after the pane is 70x12.
+    wait_until(lambda: (lambda s: (s["cols"], s["rows"]))(stream.event("screen")) == (90, 20))
 
 
 def test_a_viewer_never_resizes_a_session_its_own_terminal_is_attached_to(
