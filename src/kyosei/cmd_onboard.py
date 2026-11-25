@@ -220,7 +220,7 @@ def machine_items(environ: dict[str, str]) -> list[Item]:
         serve = Item(
             "kyo serve",
             "missing",
-            "no login agent; needed only for the desktop app or a dev box (setup decision E3)",
+            "no login agent; needed only for the Mac app or a dev box (setup decision E3)",
             "`kyo serve --install --apply`",
         )
     controller_agent = cmd_controller.launch_agent_path(environ) if manager == "launchd" else None

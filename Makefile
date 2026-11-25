@@ -93,7 +93,7 @@ doctor: $(STAMP)
 	$(BIN)/kyo doctor
 
 # KYO-446: installs this checkout as the machine's `kyo`, the one every hook in every
-# project, every shell and the desktop app run. It is a non-editable snapshot, re-taken in
+# project, every shell and `kyo serve` run. It is a non-editable snapshot, re-taken in
 # seconds. Run it on `main` after every merge that writes a config key or bumps
 # `schema_version`: until then that change blinds every hook in this repository (KYO-335),
 # and `kyo doctor` / `kyo rebuild` name this target as the remedy. `env -u VIRTUAL_ENV` is

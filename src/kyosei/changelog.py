@@ -484,7 +484,7 @@ def load() -> Changelog:
         # what tells them apart. KYO-450 (left by KYO-446.d1): the build's own release
         # flag travels with its kind, so a uv tool is sent to `uv tool upgrade kyosei`
         # for a release and to the re-snapshot for an unreleased snapshot -- never to a
-        # re-pack of the desktop app, which ships no `kyo` any more.
+        # re-pack of the Electron app, which stopped shipping a `kyo` in KYO-450.
         return Changelog(
             [],
             SOURCE_PACKAGED,

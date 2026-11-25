@@ -105,22 +105,6 @@ def test_an_unrelated_empty_directory_cannot_be_told_apart(tmp_path: Path) -> No
     assert buildinfo.install_kind(tmp_path) == buildinfo.INSTALL_KIND_UNKNOWN
 
 
-# ------------------------------------------- the bundled marker is gone everywhere
-
-_KYO_TS = REPO_ROOT / "apps" / "desktop" / "src" / "main" / "kyo.ts"
-_BUILD_MJS = REPO_ROOT / "apps" / "desktop" / "build.mjs"
-
-
-def test_neither_the_desktop_resolver_nor_the_packer_names_the_runtime_any_more() -> None:
-    """KYO-450: this marker used to be held to `BUNDLED_RUNTIME_DIR` in `kyo.ts` and
-    `RUNTIME_DIR_NAME` in `build.mjs`. All three are gone together; a runtime staged
-    back into the app would have to reintroduce the name, and this says where."""
-    for path in (_KYO_TS, _BUILD_MJS):
-        text = path.read_text(encoding="utf-8")
-        assert "BUNDLED_RUNTIME_DIR" not in text, path
-        assert '"kyo-runtime"' not in text, path
-
-
 # --------------------------------------------------------------- the route per kind
 
 

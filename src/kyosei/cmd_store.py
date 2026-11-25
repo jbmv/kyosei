@@ -31,7 +31,7 @@ from .rebuild import rebuild_from_export
 from .schema import SCHEMA_VERSION
 
 #: The one place :func:`cmd_where` says why it has no branch to report, so a reader
-#: (and the desktop app's title bar) can tell "this project is not in git at all"
+#: can tell "this project is not in git at all"
 #: from "git is here and HEAD is detached" without parsing either sentence.
 WHERE_NO_PROJECT = "no-project"
 WHERE_NO_GIT = "no-git"
@@ -163,12 +163,12 @@ def cmd_where(ctx: Context, args: Namespace) -> Output:
         # KYO-379. The machine's store home -- `$KYOSEI_HOME`, or `~/kyosei` -- which
         # holds the per-project homes and, beside them, the machine's project
         # registry (`projects.json`). Needs no project, so it is set in every answer,
-        # including the unconfigured one. The desktop app reads the registry's
-        # location from here rather than carrying a TypeScript copy of
-        # `config.store_home()` (law 3).
+        # including the unconfigured one. The Electron app, until its removal in
+        # KYO-986, read the registry's location from here rather than carrying a
+        # TypeScript copy of `config.store_home()` (law 3).
         "store_home": str(config_module.store_home()),
-        # KYO-572. The session scratchpad -- the file the desktop app's Scratchpad
-        # shows -- resolved by `serve_files.scratchpad_path`, the derivation `kyo serve`
+        # KYO-572. The session scratchpad -- the file `kyo serve`'s scratchpad route
+        # reads and writes -- resolved by `serve_files.scratchpad_path`, the derivation `kyo serve`
         # uses, never a second spelling of it. Null with no project to name it after.
         "scratchpad": None,
         "can_open": False,

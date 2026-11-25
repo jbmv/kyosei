@@ -544,8 +544,9 @@ def check_retired_html_directory(store: Store) -> list[str]:
         f"{out_dir} is left over from `kyo html`, which was retired in KYO-215 — "
         "nothing writes this directory any more, so its pages are frozen at whatever "
         "the board looked like when it was last generated. This is information, not a "
-        "failure: the desktop app is the viewer now, and without it `kyo show`, "
-        "`kyo list`, `kyo map` and `kyo brief` read the same store. Delete the "
+        "failure: `kyo show`, `kyo list`, `kyo map` and `kyo brief` read the store "
+        "directly, and `kyo serve` serves it to its clients, such as Kyosei's Mac app. "
+        "Delete the "
         "directory when you no longer want the old pages — nothing here will delete "
         "it for you"
     ]
@@ -554,10 +555,11 @@ def check_retired_html_directory(store: Store) -> list[str]:
 def check_ideas_scratchpad(store: Store) -> list[str]:
     """KYO-566.c3: a ``scratchpad.md`` under ``ideas/`` is invisible. A NOTICE.
 
-    ``ideas.idea_files`` and the desktop app's ideas tree both skip a file by that name
-    at any depth, so nothing in the CLI or the app lists, counts or opens it -- since
-    KYO-114 the scratchpad is ``<per-project home>/scratchpad.md``, the one path
-    :func:`kyosei.serve_files.scratchpad_target` resolves and the app's Scratchpad opens.
+    ``ideas.idea_files`` skips a file by that name at any depth, as the retired Electron
+    app's ideas tree did, so nothing in the CLI lists or counts it -- since KYO-114 the
+    scratchpad is ``<per-project home>/scratchpad.md``, the one path
+    :func:`kyosei.serve_files.scratchpad_target` resolves for ``kyo serve``'s scratchpad
+    route.
     Every store `kyo init` scaffolded before KYO-566 holds one, and the skill sent ideas
     there, so a thought written in it was found again only by somebody holding its path.
 
@@ -596,14 +598,14 @@ def check_ideas_scratchpad(store: Store) -> list[str]:
             "it holds only the template `kyo init` used to write, so there is nothing to "
             "move: delete it"
             if untouched
-            else f"move what it holds to the scratchpad, {scratchpad} (what the desktop "
-            "app's Scratchpad opens), or a thought to be found later into its own "
-            f"{scaffold.IDEAS_DIR}/<name>.md file, which `kyo ideas review` lists and the "
-            "app shows -- then delete it"
+            else f"move what it holds to the scratchpad, {scratchpad} (the file "
+            "`kyo where` names and `kyo serve`'s scratchpad route reads and writes), or a "
+            f"thought to be found later into its own {scaffold.IDEAS_DIR}/<name>.md file, "
+            "which `kyo ideas review` lists -- then delete it"
         )
         findings.append(
-            f"{path} is invisible to the desktop app and to the CLI: `kyo ideas review`, "
-            "the app's ideas tree and every idea count skip a file named "
+            f"{path} is invisible to the CLI: `kyo ideas review` and every idea count "
+            "skip a file named "
             f"{scaffold.SCRATCHPAD_BASENAME} under {scaffold.IDEAS_DIR}/, because the "
             f"scratchpad moved to {scratchpad} (KYO-114). This is information, not a "
             f"failure: {content}"

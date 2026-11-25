@@ -224,8 +224,8 @@ def hook_store_unreadable_line(ctx: Context | None, args: Namespace) -> str | No
 # on with the one its hooks run now, and one machine-wide `kyo` serves every project:
 # reinstalling it (``uv tool upgrade`` or ``make install-tool``) swaps the `kyo` under
 # all of them while their sessions keep going. KYO-398 was written when a re-pack of
-# the desktop app did that swap (KYO-335); since KYO-450 the app bundles no `kyo` and a
-# re-pack moves none. `UserPromptSubmit`
+# the Electron app did that swap (KYO-335); from KYO-450 that app bundled no `kyo`, and
+# KYO-986 removed it. `UserPromptSubmit`
 # fires once per prompt the user sends, which is the cheapest moment that still lands
 # before the session acts on a stale belief about its tool.
 #

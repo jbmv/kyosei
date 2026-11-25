@@ -53,7 +53,7 @@ GIT_SCRUBBED_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 #: KYO-417.c6: set in the environment of every git call.
 #:
 #: * ``GIT_TERMINAL_PROMPT=0`` -- a credential prompt is a question nobody is there to
-#:   answer: `kyo` runs from session hooks and from the desktop app with no terminal.
+#:   answer: `kyo` runs from session hooks and from `kyo serve` with no terminal.
 #: * ``GIT_NO_LAZY_FETCH=1`` -- in a partial clone (``--filter=blob:none``) a diff or
 #:   ``git show`` that needs a blob git does not have fetches it from the promisor
 #:   remote on the spot. From a Stop hook that is a network round-trip per file, or a

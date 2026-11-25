@@ -573,8 +573,8 @@ Windows has neither login service.
 | Layout | What runs where | Needs |
 |---|---|---|
 | **CLI only** | One machine: repositories, stores, `kyo`, Claude Code in your own terminal. | Nothing below. |
-| **One machine with the app** | The same, plus `kyo serve` at login and the desktop app reading through it. | E3, E4. |
-| **Dev box and light client** | The dev box holds every repository and store, and runs `kyo`, `kyo serve`, and the orchestrator sessions under tmux. The laptop runs the desktop app (or a browser, or `ssh`), plus claude.ai's Remote Control to talk to a session. | E2 to E5, and a private network between the two (Tailscale). |
+| **One machine with the app** | The same, plus `kyo serve` at login and the Mac app reading through it. | E3, E4. |
+| **Dev box and light client** | The dev box holds every repository and store, and runs `kyo`, `kyo serve`, and the orchestrator sessions under tmux. The laptop reaches them through the Mac app, a browser or `ssh`, and can talk to a session through the Mac app or claude.ai's Remote Control. | E2 to E5, and a private network between the two (Tailscale). |
 
 The store stays with whatever writes it. In the dev-box layout the laptop holds no store
 and runs no orchestrator; it only views and talks to them.
@@ -582,7 +582,7 @@ and runs no orchestrator; it only views and talks to them.
 ### E2. One `kyo` per machine, and PATH
 
 - **Install:** `uv tool install kyosei`. It puts `kyo` (and `kyosei`) in `~/.local/bin`.
-  Every hook in every project, every terminal and the desktop app run that one executable.
+  Every hook in every project, every terminal and `kyo serve` run that one executable.
   Upgrading it upgrades every project on the machine at once.
 - **Never install it editable** (`-e`): every project would then track the working tree of
   a checkout, uncommitted edits included.
@@ -645,19 +645,23 @@ and runs no orchestrator; it only views and talks to them.
   **Never `tailscale funnel` this port**: that publishes every project's records to the
   internet.
 
-### E4. The desktop app (macOS)
+### E4. The Mac app and record links
 
-- **What it is:** one viewer of `kyo serve`, and optional; another viewer can be written against the same server. It
-  ships no `kyo` and no server of its own, and says so when `kyo serve` is not answering.
-- **Locally:** it reads this machine's projects at `http://127.0.0.1:47370`. It adds a
-  terminal pane per project and a claude tab listing that project's sessions.
-- **As a light client to a dev box:** in the project switcher, **Connect to a dev box…**.
-  Give it the dev box's tailnet address and an SSH host. It reads and writes through that
-  server; New Project… and Start orchestrator run their commands over SSH. A remote project
-  has no terminal pane, because terminals are local.
-- **Record links (ask):** a `kyosei://` link opens the record in the app. It is clickable
-  only on macOS with the app installed, which registers the scheme. Elsewhere it is unclickable
-  text around an id. So ask: if the operator reads the orchestrator through the app, links; if
+- **What it is:** a native Mac app, kept under `apps/apple/` in Kyosei's repository and built
+  from source for the maintainer's own devices and the current macOS
+  ([its README](../../apps/apple/README.md)). It is one client of `kyo serve`, and optional;
+  another can be written against the same server. It shows a project's Claude Code sessions
+  as rendered conversation, sends prompts to a session, and shows the project's records,
+  files and configuration and a terminal on the session's pane. It holds no store logic and
+  ships no `kyo`.
+- **Locally:** it reads `kyo serve` at `http://127.0.0.1:47370`.
+- **As a light client to a dev box:** name the dev box's server (its Tailscale Serve
+  address, E3) in the app's Settings. Reading a session needs a device token from
+  `kyo devices issue` on the dev box, entered in the same place; sending, starting an
+  orchestrator, the terminal and files each need the matching permission.
+- **Record links (ask):** a `kyosei://` link in a conversation the app shows opens the record
+  in its Records view. Read anywhere else, such as on claude.ai or in a terminal, it is text
+  around an id. So ask: if the operator reads the orchestrator through the app, links; if
   not, plain ids. Record a "no" as `E4: declined` under `onboarding:` in
   `kyosei/config.yml`: `kyo brief` then stops printing the `kyosei://` citation rule and
   its worked example. With no entry, the brief keeps both.

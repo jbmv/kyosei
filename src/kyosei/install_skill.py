@@ -482,7 +482,7 @@ def installed_build_lag(root: Path) -> list[str]:
     KYO-450 (left by KYO-446.d1): the remedy is :func:`buildinfo.upgrade_route` for THIS
     running build, which passes its own release flag -- the re-snapshot (`make
     install-tool`) for an unreleased uv tool, `uv tool upgrade kyosei` for a release --
-    and no longer the desktop app's re-pack, which ships no `kyo` any more.
+    and no longer a re-pack of the Electron app, which stopped shipping a `kyo` in KYO-450.
     """
     from .buildinfo import upgrade_route
 

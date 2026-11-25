@@ -232,11 +232,10 @@ writes nothing.
    handoff document to write by hand — `kyo note --shift` during the session
    covers the judgment a store can't derive, and the next `kyo brief`
    surfaces it.
-7. **Browse**: the desktop app under `apps/desktop/` is the viewer — board,
-   record pages, kind map, link graph — read live from the store. A second client of
-   `kyo serve`, a native Mac app under `apps/apple/`, is built for the maintainer's own
-   devices and is described only in its own README. Without either,
-   `kyo show`, `kyo list`, `kyo map` and `kyo brief` answer the same questions
+7. **Browse**: the Mac app under `apps/apple/`, a client of `kyo serve` built for
+   the maintainer's own devices, shows a project's sessions, records, files and
+   configuration, read live through the server; its own README describes it. Without
+   it, `kyo show`, `kyo list`, `kyo map` and `kyo brief` answer the same questions
    from the terminal. See ["Reading the store"](store.md#reading-the-store).
 
 **Two `kyo doctor` checks apply only to a project that reads transcripts**
@@ -742,78 +741,39 @@ converts it in one run, moving every line verbatim and removing the old file.
 Reclaiming the disk the old versions already cost is a separate, deliberate act;
 see "Where the store lives" in [store.md](store.md).
 
-### The desktop app reads every project through kyo serve (KYO-459)
+### A viewer reads every project through kyo serve (KYO-459)
 
-The desktop app has no server of its own. It is a client of `kyo serve` ("Serving a
-store", in [serve-and-desktop.md](serve-and-desktop.md)) for every project it shows, this machine's included: records, briefs,
-shift notes, gates, activity, docs, facts and the claude tab's sessions are the CLI's
-`--json` documents asked of `/v1/projects/<name>/cmd/…`, ideas and the scratchpad are
-read and written through its file routes (with ETags, so a copy another viewer changed
-is refused rather than overwritten), another machine's document text is read through
-its read-only `docs/` route (KYO-467), and a window's lists follow its events stream. The
-app opens no store database and writes no file of a project's itself; the write
-boundary is `src/kyosei/serve_files.py`, once, for every viewer.
+A viewer has no server of its own and opens no store database. It is a client of
+`kyo serve` ("Serving a store", in [serve-and-desktop.md](serve-and-desktop.md)) for every
+project it shows, this machine's included: records, briefs, shift notes, gates, docs and
+facts are the CLI's `--json` documents asked of `/v1/projects/<name>/cmd/…`, ideas and the
+scratchpad are read and written through its file routes (with ETags, so a copy another
+viewer changed is refused rather than overwritten), document text is read through its
+read-only `docs/` route (KYO-467), and a window's lists follow its events stream. The
+write boundary for files is `src/kyosei/serve_files.py`, once, for every viewer.
 
-**This machine's projects are read at `http://127.0.0.1:47370`**, `kyo serve`'s default
-port (`KYOSEI_SERVE_URL` names another address, which the desktop checks use to point
-every launch at a server of their own). A project is one the server's registry lists
-(`kyo projects list`); opening a directory it does not list runs `kyo projects add`
-there first, and a directory holding no project is refused with the CLI's own sentence.
-**When nothing answers there, every window shows one state**: *kyo serve is not
-running*, the two ways to start it -- `kyo serve --install --apply` (at login from now
-on) and `kyo serve` (in a terminal, for now) -- and **Check again**, which reads the
-window again in place once it answers. The app never starts the server itself.
+This machine's projects are served at `http://127.0.0.1:47370`, `kyo serve`'s default
+port, and another machine's at its Tailscale Serve address ("Reaching it from another
+machine", in [serve-and-desktop.md](serve-and-desktop.md)). A project is one the
+server's registry lists (`kyo projects list`); `kyo projects add` adds one, and no route
+does. The viewer in this repository is the Mac app under
+[`apps/apple/`](../../../apps/apple/README.md), which "The Mac app" in
+[serve-and-desktop.md](serve-and-desktop.md) describes.
 
-**Another machine's projects are read at its address.** On the machine that holds them,
-run `kyo serve` behind Tailscale Serve ("Reaching it from another machine", in [serve-and-desktop.md](serve-and-desktop.md)).
-Then, in the app, open the project switcher at the foot of the rail and choose
-**Connect to a dev box…**: the **Address** is `https://<machine>.<tailnet>.ts.net`, and
-**SSH host** is where New Project… and Start orchestrator run their commands (the
-address's host unless you name another, `me@devbox` or an alias from `~/.ssh/config`).
-There is no password, no token and no certificate to trust: the tailnet's access rule
-is the boundary, and Tailscale Serve's certificate is one the system already trusts.
-The server answers with the projects it serves; pick one and the window reads and
-writes it through that server. Adding a project there is `kyo projects add` over SSH
-(or New Project…), never the connect dialog: kyo serve adds none.
-
-**A project is (server, name).** The switcher's caption shows the server's host under
-the prefix, because the same prefix names a different store on each machine, and a
-`kyosei://` link followed in a window opens in that window's server's project -- never
-this machine's copy that shares its prefix or root. When two connections serve a link's
-project, it opens through the asking window's, and the "you were sent here" strip says
-which connection it chose (KYO-463). New Window from a remote window opens another
-window on the same server, and a server's project remembers its own layout, apart from
-a local project at the same path.
-
-**What is different in a remote project.** This app has no terminal pane there: its
-terminals are local, and the tab says so where the pane would be. The claude tab resolves against the
-remote store's sessions (`kyo sessions --json` there). A document's text is read through
-the server's read-only `docs/` route (KYO-467), which serves the files `kyo docs check`
-lists and no other. A server that stops answering is
-said where each list is, naming its address, and the lists read again when it is back.
-
-**The connection is remembered like a project choice**, in `remotes.json` in the app's
-own data directory beside `project.json`: the address and the project, and nothing
-secret. A remembered server's projects are offered in the switcher as `PREFIX @
-host:port`.
-
-**An earlier build's server is removed by hand.** Builds before KYO-459 ran a server
-of their own ("Install Project Server…", the `dev.kyosei.server` login agent, with a
-password, tokens and a self-minted certificate). The app does not remove
-`dev.kyosei.server` itself (KYO-576). A machine that went straight from a build before
-KYO-459 to a current one still has the agent, which finds no server to run. Remove it
-with two commands:
+**An earlier build's server is removed by hand.** Builds of the Electron app (removed from
+this repository in KYO-986) made before KYO-459 ran a server of their own ("Install Project
+Server…", the `dev.kyosei.server` login agent, with a password, tokens and a self-minted
+certificate). Nothing removes `dev.kyosei.server` (KYO-576). A machine that still has the
+agent can remove it with two commands:
 
 ```sh
 launchctl bootout gui/$(id -u)/dev.kyosei.server
 rm ~/Library/LaunchAgents/dev.kyosei.server.plist
 ```
 
-Its files in the app's data directory (`serve.json`, `serving.json`, `server.sock`,
+Its files in that app's data directory (`serve.json`, `serving.json`, `server.sock`,
 `serve-cert.pem`, `serve-key.pem`, `serve-tokens.json`, `server.log`,
 `remote-tokens.json`, `known-hosts.json`) are read by nothing and can be deleted too.
-A `remotes.json` from before KYO-381 that still holds a `token` on each entry is read
-as it is, and the token is ignored.
 
 ## Quick start
 

@@ -313,7 +313,7 @@ def _refuse_documents_from_a_later_build(
 
     Deliberately names no command that would reconstruct the store, for the reason
     ``store.py`` gives one boundary over: every such command writes the older schema over
-    the newer one. Deliberately readable out of a terminal too — the desktop app shows
+    the newer one. Deliberately readable out of a terminal too — a viewer shows
     it through ``kyo serve``, and KYO-175 points it at stores it does not control, so the
     reader of this sentence may not be at a shell and may not be the person who installed
     anything.

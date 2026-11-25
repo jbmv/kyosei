@@ -573,3 +573,23 @@ def test_an_unreadable_doctor_result_is_not_reported_as_not_run(project: Path) -
     assert item["status"] == "unreadable", item
     assert invoke(["--root", str(project), "doctor"]).code == 0
     assert check(project)["kyo doctor"]["status"] == "present"
+
+
+def test_a_missing_serve_agent_names_a_viewer_that_exists(monkeypatch, tmp_path: Path) -> None:
+    """KYO-986: the readback's `kyo serve` line said the agent was needed "only for the
+    desktop app", an Electron app since removed from the repository. It names the Mac
+    app, the client of `kyo serve` that exists, and keeps naming its remedy."""
+    from kyosei import serve_install
+
+    monkeypatch.setattr(serve_install, "platform_manager", lambda: "launchd")
+    monkeypatch.setattr(
+        serve_install, "agent_path", lambda _manager, _environ: tmp_path / "absent.plist"
+    )
+    monkeypatch.setattr(
+        "kyosei.cmd_controller.launch_agent_path", lambda _environ: tmp_path / "absent-c.plist"
+    )
+    (serve,) = [item for item in cmd_onboard.machine_items({}) if item.label == "kyo serve"]
+    assert serve.status == "missing"
+    assert "needed only for the Mac app or a dev box" in serve.detail
+    assert "desktop" not in serve.detail
+    assert serve.fix == "`kyo serve --install --apply`"

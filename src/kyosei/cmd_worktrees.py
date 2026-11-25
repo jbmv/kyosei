@@ -313,7 +313,7 @@ def _worktree_rows(ctx: Context, store, *, against: str = "main") -> list[dict]:
                 # could not get from it. `created_at` is what the token budget is spent
                 # by (:func:`worker_tokens_index` — the ids in THIS list are not in
                 # creation order, see that function), and it is the start of the run
-                # time the desktop's activity row draws; `report_id` is how
+                # time the Electron app's activity row drew; `report_id` is how
                 # :func:`dispatch_end` finds the ingest that stopped the clock on a
                 # dispatch nobody ever closed.
                 "created_at": row["created_at"],
@@ -537,7 +537,7 @@ def cmd_worktrees(ctx: Context, args: Namespace) -> Output:
     ledger = stop_audits(store)
     # KYO-284: and what each of those workers cost, off the same ledger read. Every
     # row gets an entry — a number, or the named reason there is none — because the
-    # desktop's activity list renders this and derives nothing of its own.
+    # Electron app's activity list rendered this and derived nothing of its own.
     tokens = worker_tokens_index(
         ledger,
         [row["dispatch_id"] for row in rows],
@@ -562,7 +562,7 @@ def cmd_worktrees(ctx: Context, args: Namespace) -> Output:
     )
     # KYO-286: and when each of them finished, off the same ledger read plus one query
     # for the reports table. Every row carries the answer and the name of the source it
-    # came from, because the desktop's activity list renders this and derives nothing.
+    # came from, because the Electron app's activity list rendered this and derived nothing.
     ingested = report_ingest_times(store)
     for row in rows:
         row["worker_tokens"] = tokens[row["dispatch_id"]].as_json()
@@ -760,7 +760,7 @@ REPORT_FILE = ".kyosei-report.json"
 #: repository under an index lock, and the honest row says "git did not answer".
 GIT_FACTS_TIMEOUT_SECONDS = 5.0
 
-#: The ``outcome`` words a git-facts row carries (the desktop's `GitFactsOutcome`).
+#: The ``outcome`` words a git-facts row carries (the Electron app's `GitFactsOutcome`).
 GIT_FACTS_READ = "read"
 GIT_FACTS_NO_WORKTREE = "no-worktree-declared"
 GIT_FACTS_GONE = "directory-gone"

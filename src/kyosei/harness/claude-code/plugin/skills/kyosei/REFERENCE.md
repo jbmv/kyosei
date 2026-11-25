@@ -117,8 +117,7 @@ which is the answer to "what did I just get" after a reinstall; `kyo changelog -
 
 The reinstall itself is the maintainer's, and which command it is follows the kind `kyo version`
 just named. A uv tool install is the one `kyo` on the machine -- every hook in every project, a
-terminal and the desktop app all run it, and the app ships no copy of its own (KYO-450)
--- and it moves one of two ways. A published release is updated with `uv tool upgrade
+terminal and `kyo serve` all run it (KYO-450) -- and it moves one of two ways. A published release is updated with `uv tool upgrade
 kyosei`. A snapshot of a checkout is re-taken with `make install-tool` in that Kyosei checkout
 (it runs `uv tool install --force .` with `VIRTUAL_ENV` unset); `uv tool upgrade` would carry a
 snapshot to the latest release, which is behind the source it was taken from. `kyo version`'s own
@@ -443,8 +442,8 @@ rule the tool would not have enforced.
 `implements` (KYO-786, below); `blocks`, `duplicates`, `supersedes`,
 `same-question-as` and `needs-same-change-as` have no command that writes them as a side effect,
 so they exist only if you run `kyo link`. Do it the moment you notice the relation -- a dependency
-you record in a note is invisible to `kyo show`, `kyo brief` and the desktop's link graph, all of
-which render links -- and check the direction in the echo, which prints the edge as a sentence
+you record in a note is invisible to `kyo show` and `kyo brief`, both of which render links --
+and check the direction in the echo, which prints the edge as a sentence
 with both titles for exactly that reason.
 
 A wrong edge is not permanent: `kyo unlink <link-id> --why` retracts it, and `--why` is required
@@ -905,12 +904,11 @@ restated since the report was written, whose new wording you verify under its ne
 
 Name a record to your maintainer as a markdown link with a `kyosei://` target --
 `[KYO-263](kyosei://KYO/KYO-263)`, the project being the store's own prefix or its directory name
--- and do it wherever you cite one, in every message they read. It is the one form the desktop
-app's claude view can make clickable: claude.ai renders a markdown link as an anchor and strips a
-non-http(s) `href`, so the app's preload reads a click on the anchor that is left and opens the
-record, while a bare id or a bare `kyosei://` URL stays plain text with no element to click.
-Nothing is lost where the app is not in play -- in a browser the same link opens it through the
-registered scheme, and read anywhere else it is still the id written out.
+-- and do it wherever you cite one, in every message they read. It is the form the Mac app opens
+as a record from a conversation it shows: the app draws the markdown link as a link and opens the
+record in its Records view, while a bare id or a bare `kyosei://` URL stays plain text with no
+element to click. Nothing is lost where the app is not in play: read anywhere else, it is still
+the id written out.
 
 ### Doc fragments, and why only the orchestrator can number them (KYO-299)
 
@@ -1041,8 +1039,8 @@ writing them all along (KYO-131).
 ### An unobserved criterion is invisible until it is gated (KYO-264, KYO-265)
 
 `kyo verify <cid> --verdict unmet-unobserved --method reasoned-about --why "..."` stores the wait;
-it does not make the wait findable, and nothing else does either. The desktop's Awaiting list is
-derived from open `awaiting:human-run` / `awaiting:human-review` gates and reads nothing else --
+it does not make the wait findable, and nothing else does either. The Mac app's Awaiting you list
+is derived from open `awaiting:human-run` / `awaiting:human-review` gates and reads nothing else --
 not criterion states, not statuses -- and the brief's gated work section and `kyo list --gate-tag`
 read gates too.
 

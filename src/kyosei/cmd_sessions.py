@@ -1,7 +1,7 @@
 """``kyo sessions`` — which Claude Code sessions this project has, and where each
 one is on claude.ai.
 
-KYO-186 stage 1. The desktop app wants to open a claude.ai pane on *this
+KYO-186 stage 1. The Electron app (removed in KYO-986) wanted to open a claude.ai pane on *this
 project's* Remote Control session, and nothing in the system knew which one that
 was. This command is the half that knows: it runs from a session hook, in the
 session itself, and writes what it observes into the store's local state.

@@ -345,7 +345,7 @@ def test_the_two_schema_directions_do_not_share_a_message_or_a_remedy(
     # not install this build.
     assert "install a kyosei" in ahead.err
     assert "intact" in ahead.err
-    assert "the desktop app and every project's hooks run" in ahead.err
+    assert "kyo serve and every project's hooks run" in ahead.err
     # KYO-466: the app carries no runtime of its own any more, so the
     # reader who did not install this build is no longer told it came with the app.
     assert "bundled with the application" not in ahead.err, ahead.err
@@ -7357,7 +7357,7 @@ def test_the_kept_mention_is_still_ruled_out_rather_than_offered() -> None:
 _SHARED_CLAUSE_FRAGMENTS = (
     "this build is the stale side of the pair",
     "a build has no way to know what a later schema added",
-    "the desktop app and every project's hooks run",
+    "kyo serve and every project's hooks run",
 )
 
 

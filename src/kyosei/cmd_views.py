@@ -225,9 +225,10 @@ def cmd_docs(ctx: Context, args: Namespace) -> Output:
         #
         # WHY HERE, on a command whose job is a pass/fail verdict. The KYO-109 query
         # source is reachable only through a Base a project has declared with `source:
-        # docs`, and a reader — the desktop app's docs mode, and anything else wanting
-        # the governance layer rather than the build's verdict on it — cannot require
-        # that a project happen to have declared one, and many projects have not. So the
+        # docs`, and a reader wanting the governance layer rather than the build's
+        # verdict on it, as the Electron app's docs mode did until KYO-986, cannot
+        # require that a project happen to have declared one, and many projects have
+        # not. So the
         # rows are put on the command every project can already run.
         #
         # NOT a second enumerator and not a second answer: `docs_staleness.document_row`
@@ -2560,9 +2561,9 @@ def _show(ctx: Context, args: Namespace) -> Output:
             # disagreement. Additive and not in the export, as `standing` is.
             "reports": [_with_entry_ids(report) for report in doc["reports"]],
             # KYO-587: a recx search artifact carries the lines
-            # `kyo show <evidence-id>` prints before it, so the desktop app shows the
-            # same words without a second recognition rule. Every other artifact is
-            # exactly what the export document holds.
+            # `kyo show <evidence-id>` prints before it, so a viewer can show the same
+            # words without a second recognition rule, as the Electron app did. Every
+            # other artifact is exactly what the export document holds.
             "evidence_artifacts": [_with_untrusted_notice(a) for a in doc["evidence_artifacts"]],
             "docs_obligation_groups": docs_obligations.collapse_obligations(
                 doc["docs_obligations"]

@@ -372,7 +372,7 @@ def gate_prompt_lines(gate_prompts: list[dict]) -> list[str]:
     for waiting in gate_prompts:
         lines.append(
             "nothing makes this wait findable: no open `awaiting:*` gate and no running "
-            "dispatch, so it is in the desktop's Awaiting list nowhere and in `kyo "
+            "dispatch, so it is in the Mac app's Awaiting you list nowhere and in `kyo "
             "brief`'s gated work nowhere. Gate it yourself — this command wrote no gate:"
         )
         lines.append(f"  {waiting['remedy']}")
@@ -893,7 +893,7 @@ def _verify_one(ctx: Context, args: Namespace) -> Output:
     if waiting is not None:
         lines.append(
             "nothing makes this wait findable: no open `awaiting:*` gate and no running "
-            "dispatch, so it is in the desktop's Awaiting list nowhere and in `kyo "
+            "dispatch, so it is in the Mac app's Awaiting you list nowhere and in `kyo "
             "brief`'s gated work nowhere. Gate it yourself — this command wrote no gate:"
         )
         lines.append(f"  {waiting['remedy']}")

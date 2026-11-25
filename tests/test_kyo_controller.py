@@ -973,7 +973,8 @@ def test_start_reports_waiting_for_trust_naming_the_folder_and_sends_no_keystrok
     assert text.code == 0, text
     assert "waiting-for-trust" in text.out
     assert f"Claude Code is asking whether to trust {folder}" in text.out
-    assert "`kyo orchestrator attach proj`" in text.out and "terminal tab" in text.out
+    assert "`kyo orchestrator attach proj`" in text.out and "terminal drawer" in text.out
+    assert "desktop app" not in text.out  # KYO-986: the Electron app is removed
     # Not plain success: the sentence says it is not on claude.ai yet.
     assert "will not register with Remote Control until a person answers" in text.out
     # Nothing was typed into the pane: the stand-in's `read` is still waiting.
@@ -994,6 +995,7 @@ def test_list_reports_a_session_showing_the_prompt_as_waiting_for_trust(
     assert row["trust_folder"] == str(registered.resolve())
     text = invoke(["controller", "list"]).out
     assert "waiting-for-trust" in text and "`kyo orchestrator attach proj`" in text
+    assert "Mac app's terminal drawer" in text and "desktop app" not in text  # KYO-986
     # A session that is not showing it is not waiting.
     assert invoke(["controller", "stop", "proj"]).code == 0
     write_claude(env["bin"], FAKE_CLAUDE)
@@ -1030,7 +1032,8 @@ def test_an_unrecognised_prompt_still_says_not_registered_yet_and_where_to_look(
     text = invoke(["controller", "start", "proj"])
     assert text.code == 0, text
     assert "has not registered with Remote Control yet" in text.out
-    assert "`kyo orchestrator attach proj`" in text.out and "terminal tab" in text.out
+    assert "`kyo orchestrator attach proj`" in text.out and "terminal drawer" in text.out
+    assert "desktop app" not in text.out  # KYO-986: the Electron app is removed
     assert "waiting-for-trust" not in text.out
 
 

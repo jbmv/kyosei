@@ -1155,7 +1155,9 @@ Deferred to v2+: local live server; full docs validator rule set; external event
 Electron app (native shell, point-at-a-project-directory, ideas editor pane — the state-read-only
 rule is permanent regardless of shell); optional Obsidian-vault mirror export of the structured
 store; criterion-as-query auto-evaluation. Two of these have since been built: the local server
-is `kyo serve` (KYO-448) and the Electron app is `apps/desktop/`. What either may write is law 12.
+is `kyo serve` (KYO-448), and the Electron app was `apps/desktop/` until KYO-986 removed it; the
+viewer now is the native Mac app under `apps/apple/`, a client of `kyo serve`. What either may
+write is law 12.
 
 ## Tech choices
 
@@ -1165,8 +1167,8 @@ is `kyo serve` (KYO-448) and the Electron app is `apps/desktop/`. What either ma
 - **pytest** as the floor from milestone 1; **ruff** for lint. CI runs both; `kyo doctor` is
   exercised by the suite and is not a CI step of its own.
 - Viewer: specified as server-side-rendered static HTML + vendored JS (graph lib only), with no
-  CDN and no network at runtime. That viewer was retired with milestone 7 (KYO-215); the
-  desktop app reads the store through `kyo serve`.
+  CDN and no network at runtime. That viewer was retired with milestone 7 (KYO-215); the Mac
+  app under `apps/apple/` reads the store through `kyo serve`.
 - The tool lives in this repo and installs as a CLI (`pipx` / `uv tool install`) with two console
   entry points — `kyosei` and the blessed short alias `kyo` (identical); each consumer
   project gets `ideas/` and `kyosei/` via `kyo init`, and keeps its own `docs/`.

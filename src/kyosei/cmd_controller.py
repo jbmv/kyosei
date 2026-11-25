@@ -1,9 +1,11 @@
 """``kyo controller`` — detached claude Remote Control sessions on this machine (KYO-458).
 
-The desktop app's Start controller button (KYO-383,
-``apps/desktop/src/main/controller.ts``) moved out of the app and into the CLI, so that
-another machine — or the app — starts a controller on the dev box with ``ssh host kyo
-controller start <project>`` and the SSH connection can close at once.
+The Electron app's Start controller button (KYO-383, in its
+``apps/desktop/src/main/controller.ts``; the app was removed in KYO-986) moved out of the
+app and into the CLI, so that another machine starts a controller on the dev box with
+``ssh host kyo controller start <project>`` and the SSH connection can close at once, and
+``kyo serve``'s start route, which the Mac app's Start orchestrator button calls, starts
+one the same way.
 
 WHERE THE SESSION RUNS, AND WHY THERE (KYO-458.m1). A process
 started directly in an SSH session cannot use the login keychain
@@ -45,8 +47,8 @@ matches exactly rather than by prefix.
 
 ATTACH (KYO-474). ``kyo controller attach <project>`` is the one verb that knows both
 rules above -- the socket, and the exact ``=<prefix>`` target -- so a person on another
-machine types ``ssh -t HOST "zsh -lc 'kyo controller attach KYO'"`` and the desktop
-app's terminal tab runs the same words. It replaces itself with ``tmux <socket args>
+machine types ``ssh -t HOST "zsh -lc 'kyo controller attach KYO'"``, as the retired
+Electron app's terminal tab did. It replaces itself with ``tmux <socket args>
 attach -t =<prefix>`` in the same scrubbed environment ``start`` uses. The line printed
 for a person to paste quotes the target (``-t '=KYO'``), because zsh expands a bare
 word that begins with ``=`` (KYO-963); the exec has no shell and passes it bare. Attaching over
@@ -138,7 +140,8 @@ STARTED = "started"
 #: (``SETTLE_SECONDS`` included). Measured: the dialog was on screen 1.2s
 #: after a login zsh exec'd claude in an untrusted folder; this leaves room for a
 #: loaded machine. ``list`` re-reads the pane on every ask, so a prompt drawn later
-#: than this is still reported -- the desktop app asks every couple of seconds.
+#: than this is still reported to a caller that asks again, as the retired Electron app
+#: did every couple of seconds.
 TRUST_WAIT_SECONDS = 5.0
 
 #: How often the pane is read inside that wait.
@@ -1021,8 +1024,8 @@ def cmd_controller(ctx: Context, args: Namespace) -> Output:
             if row["waiting_for_trust"]:
                 state += (
                     f", {WAITING_FOR_TRUST}: {trust_sentence(row['trust_folder'])}; answer "
-                    f"it with `kyo orchestrator attach {row['project']}` or in the desktop "
-                    "app's terminal tab"
+                    f"it with `kyo orchestrator attach {row['project']}` or in the Mac "
+                    "app's terminal drawer"
                 )
             lines.append(
                 f"  {row['project']:<20} {row['prefix']:<8} {state}"
@@ -1058,7 +1061,7 @@ def cmd_controller(ctx: Context, args: Namespace) -> Output:
             if data["remote_control_name"]
             else ""
         )
-        where = f"`kyo orchestrator attach {project.name}` here, or the desktop app's terminal tab"
+        where = f"`kyo orchestrator attach {project.name}` here, or the Mac app's terminal drawer"
         if data["waiting_for_trust"]:
             lines = [
                 f"kyo orchestrator: started {data['session']} for {project.name} on "

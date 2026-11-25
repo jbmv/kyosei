@@ -110,8 +110,8 @@ dispatch or criterion. The whole workflow, step by step, is in
   started and the setup decisions, with the reasoning behind each choice.
 - **[docs/reference/topics/](docs/reference/topics/README.md)**: the full reference,
   grouped by subject: install and upgrading, day-to-day operation, the store and its
-  layout, the registries, the dispatch loop, docs governance, serving and the desktop
-  app, and the rules and exit codes.
+  layout, the registries, the dispatch loop, docs governance, serving and the Mac app,
+  and the rules and exit codes.
 - **[docs/reference/cli.md](docs/reference/cli.md)**: every command and flag, generated
   from the parser. `kyo <command> --help` prints the same.
 - **`kyo changelog`**: what each build changed, as packaged with the build you run.
@@ -129,10 +129,9 @@ make test    # the Python suite
 make lint    # ruff
 ```
 
-The desktop app under `apps/desktop/` is a separate Electron project with its own checks;
-see its README. The Mac app under `apps/apple/` is a native client of `kyo serve` that shows
-a project's sessions, records, files and configuration and sends prompts to a session, and
-[its README](apps/apple/README.md) describes what it adds. Kyosei's own development is tracked with Kyosei. Source comments, tests
+The Mac app under `apps/apple/` is a native client of `kyo serve` that shows a project's
+sessions, records, files and configuration and sends prompts to a session, with checks of
+its own; [its README](apps/apple/README.md) describes what it adds and how it is built. Kyosei's own development is tracked with Kyosei. Source comments, tests
 and these documents cite its records as `KYO-n`, the id of a record in that tracker, with
 a suffix such as `.c2` or `.d1` for a criterion or dispatch within one;
 `kyo changelog --all` lists the completed records with their titles.

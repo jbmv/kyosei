@@ -1415,8 +1415,8 @@ def cmd_touch_drift(ctx: Context, args: Namespace) -> Output:
     KYO-147.c4 considered putting the "apply it" flag here and did not: this is a
     pure read, and three separate write-capability declarations in this project agree
     that it is (``cli.MUTATING_COMMANDS``, records mode's ``RECORDS_READ_COMMANDS``
-    allowlist, and the desktop app's ``KYO_WRITING_COMMANDS``, which
-    ``tests/test_kyo140_desktop_command_drift.py`` keeps in step). The correction is
+    allowlist, and the Electron app's ``KYO_WRITING_COMMANDS``, which a drift test kept
+    in step until KYO-986 removed the app). The correction is
     applied by ``kyo edit --touches-from-drift <dispatch-id>`` instead, which is the
     command KYO-71's own output has always named as the remedy and which every one of
     those declarations already calls a write.

@@ -334,8 +334,8 @@ def _ready_records(store: Store, registry: kinds.KindRegistry) -> _Readiness:
 # ------------------------------------------------------------------------- KYO-267
 #
 # A criterion recorded `unmet-unobserved` because a person has not looked yet is a
-# wait, and only an open `awaiting:*` gate makes a wait FINDABLE: the desktop's
-# Awaiting list, the brief's "gated work" section and `kyo list --gate-tag` all read
+# wait, and only an open `awaiting:*` gate makes a wait FINDABLE: the Mac app's
+# Awaiting you list, the brief's "gated work" section and `kyo list --gate-tag` all read
 # gates and nothing else. An unobserved criterion with no gate appears on no surface a
 # person opens. See docs/design/review.md#kyo-267.
 #

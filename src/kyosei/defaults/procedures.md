@@ -506,9 +506,9 @@ claimed by several open records at once long before anyone notices.
 Name every record to your maintainer as a markdown link with a `kyosei://` target --
 `[KYO-263](kyosei://KYO/KYO-263)`, the project being the store's own prefix or its
 directory name -- in every message of a session, closing summaries and tables included.
-This is the only form the desktop app's claude view renders clickable (KYO-263): a bare
-id, or a bare `kyosei://` URL with no markdown link wrapped around it, stays plain text with
-no element to click. The rule is in this ledger because an instruction read once, when the
+This is the form the Mac app opens as a record from a conversation it shows (KYO-263): a
+bare id, or a bare `kyosei://` URL with no markdown link wrapped around it, stays plain text
+with no element to click. The rule is in this ledger because an instruction read once, when the
 skill is invoked, does not hold over a long session: an orchestrator links ids for its first
 hours and drifts to bare ids in its closing summaries, and the session brief, which carries
 this ledger, is a surface a session re-reads. Not proposed: linking ids inside `kyo` output itself --
@@ -516,7 +516,7 @@ that output is read by the orchestrator, not rendered for the maintainer, and a 
 link in every row would cost brief size (KYO-323) for no reader.
 
 This rule applies only where onboarding's [E4] answer is not no. A maintainer who does not
-read the orchestrator through the desktop app has nowhere to click a `kyosei://` link, so
+read the orchestrator through the Mac app has nowhere to click a `kyosei://` link, so
 there it is noise around an id (KYO-561). That answer is recorded as `E4: declined` under
 `onboarding:` in `kyosei/config.yml`, and `kyo brief` then prints neither this rule nor
 its worked example: cite records as plain ids.

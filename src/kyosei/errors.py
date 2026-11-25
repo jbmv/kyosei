@@ -89,7 +89,7 @@ class SchemaMismatch(KyoseiError):
     :data:`kyosei.schema.SCHEMA_VERSION` compiled into the running build.
 
     KYO-168 gave each direction its own sentence, which fixed what a human reads in a
-    terminal and gave a *program* nothing: the desktop app (KYO-175.c4) has to tell
+    terminal and gave a *program* nothing: the Electron app (KYO-175.c4) had to tell
     "this store is newer than me" from "this store is older than me" — opposite
     remedies, one of them destructive — and its only route was to substring-match
     prose, which makes its branching a hostage of the next improvement to the wording.

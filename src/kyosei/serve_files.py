@@ -1,7 +1,7 @@
 """``kyo serve``'s write boundary: every file it touches, in one module (KYO-456).
 
-Ported once from the desktop app's former ``assertWritable``, whose rule the desktop README now
-states under "The write path" (``apps/desktop/README.md``, "The compose tab"). Law 12: no
+Ported once from the Electron app's former ``assertWritable``, whose rule that app's README
+stated under "The write path" until the app was removed (KYO-986). Law 12: no
 viewer changes a record, and the ideas layer is writable from anywhere -- so the server,
 where every remote viewer's writes land, is where that line
 has to hold. The law's one exception is not in this module: a person's notes are filed

@@ -21,8 +21,8 @@ make test    # the Python suite, in parallel across all cores
 Provision with `make venv` rather than installing by hand. [AGENTS.md](AGENTS.md) explains why,
 and is the fuller guide for a person or an agent working on this repository.
 
-The desktop app under `apps/desktop/` is a separate Electron project with its own
-[README](apps/desktop/README.md) and checks. It has been run only on macOS.
+The Mac app under `apps/apple/` is a Swift package with a web renderer, with its own
+[README](apps/apple/README.md) and checks. It is built for the current macOS.
 
 ## What a change needs
 

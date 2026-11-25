@@ -8,10 +8,9 @@ governs: src/kyosei/cmd_harness.py, src/kyosei/cmd_harness_migrate.py, src/kyose
 
 **One `kyo` per machine, installed as a uv tool, and `kyo version` says which kind a
 running copy is (KYO-317).** Every hook in every project, every
-Terminal.app session, the desktop app and the app's terminal panes run that one
-executable, found on your login shell's PATH. The desktop app ships no Python and no
-`kyo` of its own (KYO-450): it reads your projects through the `kyo` you install
-here, and says so plainly when there is none.
+Terminal.app session and `kyo serve` run that one executable, found on your login
+shell's PATH. The Mac app under `apps/apple/` ships no `kyo` of its own: it reads your
+projects through a `kyo serve` started from the `kyo` you install here.
 
 ```sh
 uv tool install kyosei   # a release from PyPI; or: pipx install kyosei
@@ -185,8 +184,8 @@ named.** A working tree needs no reinstall at all — `git pull` or a newer comm
 is the whole remedy, and `kyo version` says so rather than naming a command that
 does not apply. A uv tool is moved by `make install-tool` from a Kyosei checkout
 when it is an unreleased snapshot, and by `uv tool upgrade kyosei` when it is a
-published release; `kyo version` names which. Swapping or re-packing the desktop
-app does not move `kyo`, because the app ships none (KYO-450). **A running `kyo serve`
+published release; `kyo version` names which. Replacing the Mac app does not move
+`kyo`, because the app ships none. **A running `kyo serve`
 keeps serving the build it started as** ("Serving a store", in [serve-and-desktop.md](serve-and-desktop.md)): after the upgrade,
 
 ```sh
@@ -282,13 +281,12 @@ install included — nothing above applies and the commands behave exactly as th
 always have. `kyo version`'s own upgrade line asks the same question, so it stops
 naming the destructive two here (KYO-318.n1).
 
-**Desktop builds that carried their own `kyo` (KYO-450).** Earlier builds of the desktop
-app shipped a CPython runtime and could link `kyo` and `kyosei` onto PATH from Kyosei →
-**Install Command Line Tools…**. Current builds do neither. At every launch the app removes
-any `kyo` or `kyosei` link in `~/.local/bin`, `~/bin` or `/usr/local/bin` that points into
-its **own** `userData/cli/`, which only it ever wrote, along with its old shim directories,
-and says once, in a dialog, which links it removed. Anything else at those names (a uv
-tool's `kyo`, a link somewhere else) is left as it was. Install `kyo` as above, then run
+**Desktop builds that carried their own `kyo` (KYO-450).** Builds of the Electron app
+before KYO-450 shipped a CPython runtime and could link `kyo` and `kyosei` onto PATH from
+Kyosei → **Install Command Line Tools…**; that app was later removed from the repository
+(KYO-986). A machine that ran such a build can still hold a `kyo` or `kyosei` link in
+`~/.local/bin`, `~/bin` or `/usr/local/bin` that points into that app's data directory
+(`userData/cli/`). Remove such a link by hand, install `kyo` as above, then run
 `kyo doctor` and, on the copies, `kyo install-hooks` in each project.
 
 Crossing a `schema_version` bump is a longer sequence, and it is in "Upgrading a
