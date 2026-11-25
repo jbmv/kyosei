@@ -107,7 +107,11 @@ def test_doctor_reports_a_written_ideas_scratchpad_as_a_notice(kyo, project: Pat
     assert result.json["problems"] == []
     (notice,) = [n for n in result.json["notices"] if n.startswith("[ideas_scratchpad] ")]
     assert str(leftover) in notice
-    assert "invisible to the desktop app and to the CLI" in notice
+    assert "invisible to the CLI" in notice
+    # KYO-986: the Electron app is removed, so the notice no longer names it or its
+    # Scratchpad; the scratchpad is named by what reads it now.
+    assert "desktop app" not in notice
+    assert "`kyo where`" in notice and "`kyo serve`" in notice
     assert str(_expected_scratchpad(project)) in notice, "names the scratchpad's real path"
     assert "ideas/<name>.md" in notice, "names where a thought to be found later goes"
 

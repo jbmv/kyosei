@@ -147,8 +147,12 @@ def test_a_leftover_html_directory_is_reported_as_a_notice(kyo, project: Path) -
     assert notice.startswith("[retired_html_directory] ")
     assert "kyo html" in notice, "the reader is told what used to write it"
     assert "kyo show" in notice and "kyo brief" in notice, (
-        "a project without the desktop app is told what reads the store instead"
+        "the reader is told what reads the store instead"
     )
+    # KYO-986: the Electron app it once named is removed; the viewer named is the one
+    # that exists, reached through `kyo serve`.
+    assert "desktop app" not in notice
+    assert "`kyo serve`" in notice and "Mac app" in notice
 
     human = kyo("doctor")
     assert human.code == 0, human

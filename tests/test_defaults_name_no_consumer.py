@@ -61,7 +61,7 @@ from kyosei.private_terms import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-#: The public tree: code, tests, the public docs, the design record, the desktop app,
+#: The public tree: code, tests, the public docs, the design record, the Mac app,
 #: templates, tools and the build backend.
 ROOTS = (
     "src",
@@ -74,7 +74,7 @@ ROOTS = (
     "docs/reference/topics",
     "docs/reference/cli.md",
     "docs/design",
-    "apps/desktop",
+    "apps/apple",
     "templates",
     "tools",
     "build_backend",
