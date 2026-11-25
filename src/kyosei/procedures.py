@@ -942,6 +942,7 @@ SUPERSEDED_RULE_WORDINGS: dict[str, frozenset[str]] = {
             "24a85ecea8b4fc8797f8990f6b14e67b0cdcdf80100f80aec2ca4483dc5c8cc8",
             "28ca5acbb34d319d87350ed2e8f7b7aa1dfad4f52198e51615a5cd63259a3bc9",
             "3387ea0d101bb337450b6e9c6a7500d0bef12ea5bf733a47991cd55463363e4e",
+            "c370fab85b395c87a0f8de9b874856f0fbe17e09aaab5bcc965eb8a745530eb9",
         }
     ),
     (
