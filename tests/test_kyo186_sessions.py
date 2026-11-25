@@ -28,7 +28,6 @@ from kyosei.cmd_sessions import (
     EVENT_END,
     EVENT_START,
     EVENT_STOP,
-    REMOTE_INDEX_URL,
     SESSIONS_FILE,
     SESSIONS_SCHEMA,
     STATE_ENDED,
@@ -39,7 +38,6 @@ from kyosei.cmd_sessions import (
     read_sessions,
     record_event,
     remote_url,
-    resolve_pane_url,
     sessions_path,
     write_sessions,
 )
@@ -371,68 +369,6 @@ def test_the_events_this_build_records_are_exactly_the_three_it_installs() -> No
     assert installed == {EVENT_START, EVENT_STOP, EVENT_END}
 
 
-# -------------------------------------------------------------- the resolution
-
-
-def entry(session: str, *, state: str, seen: str, url: str | None) -> dict:
-    return {
-        "session_id": session,
-        "state": state,
-        "last_seen": seen,
-        "ended_at": seen if state == STATE_ENDED else None,
-        "url": url,
-    }
-
-
-def test_a_running_session_outranks_an_ended_one_however_recent() -> None:
-    file = cmd_sessions.SessionsFile(
-        [
-            entry("old", state=STATE_RUNNING, seen="2026-01-01T00:00:00.000Z", url="u-running"),
-            entry("new", state=STATE_ENDED, seen="2026-01-02T00:00:00.000Z", url="u-ended"),
-        ],
-        None,
-        True,
-    )
-    url, why = resolve_pane_url(file)
-    assert url == "u-running"
-    assert "running" in why
-
-
-def test_the_most_recent_running_session_wins_among_several() -> None:
-    file = cmd_sessions.SessionsFile(
-        [
-            entry("a", state=STATE_RUNNING, seen="2026-01-01T00:00:00.000Z", url="u-a"),
-            entry("b", state=STATE_RUNNING, seen="2026-01-03T00:00:00.000Z", url="u-b"),
-        ],
-        None,
-        True,
-    )
-    assert resolve_pane_url(file)[0] == "u-b"
-
-
-def test_every_way_the_file_can_fail_falls_through_to_the_account_session_list() -> None:
-    """Step 3 of KYO-186's resolution order, which the record is explicit is not a
-    consolation prize: on a machine where Claude Code runs somewhere else it is what
-    the feature IS. Each of these reaches it for a *different* stated reason, and
-    the reason is carried so a reader can tell them apart."""
-    cases = {
-        "never written": cmd_sessions.SessionsFile([], None, False),
-        "unreadable": cmd_sessions.SessionsFile([], "it is not JSON", True),
-        "no session has a page": cmd_sessions.SessionsFile(
-            [entry("a", state=STATE_RUNNING, seen="2026-01-01T00:00:00.000Z", url=None)],
-            None,
-            True,
-        ),
-    }
-    whys = set()
-    for label, file in cases.items():
-        url, why = resolve_pane_url(file)
-        assert url == REMOTE_INDEX_URL, label
-        assert why, label
-        whys.add(why)
-    assert len(whys) == len(cases), "three different reasons, not one message three times"
-
-
 # ---------------------------------------------------- the gitignore, and the trap
 
 
@@ -590,3 +526,15 @@ def test_the_listing_names_each_sessions_process(project: Path, kyo) -> None:
     run = kyo("sessions")
     assert run.code == 0, run
     assert "process 4242 (claude) on workstation" in run.out, run.out
+
+
+def test_the_sessions_json_and_text_carry_no_pane_url(project: Path, kyo) -> None:
+    """KYO-987: the fields that told a removed app which page to open stay removed."""
+    write_sessions(sessions_path(project), [])
+    run = kyo("sessions", "--json")
+    assert run.code == 0, run
+    data = json.loads(run.out)
+    assert "pane_url" not in data and "pane_url_why" not in data, data
+    text = kyo("sessions")
+    assert "a pane here would open" not in text.out
+    assert not hasattr(cmd_sessions, "resolve_pane_url")
