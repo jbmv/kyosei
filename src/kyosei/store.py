@@ -1477,11 +1477,11 @@ def open_store(
     # added, and to rewrite their config claiming the downgrade was intended. Nearly
     # unreachable while one store and one build move together; ordinary once more than
     # one installed `kyo` reads the same stores -- a second machine, or the `kyo serve` a
-    # desktop app reads through -- and one of them is older than the build that wrote one.
+    # viewer reads through -- and one of them is older than the build that wrote one.
     #
     # KYO-178: and all three refusals below carry a payload as well as a sentence.
     # KYO-168's split fixed what a human reads; it left a program with nothing but the
-    # prose to branch on, and the desktop app (KYO-175.c4) has to tell these two
+    # prose to branch on, and the Electron app (KYO-175.c4) had to tell these two
     # directions apart to know whether a remedy is safe. `SchemaMismatch` builds the
     # payload out of its required arguments — see `errors.py` for why it is a class
     # and not a `.data` assignment here — so what a caller reads is `direction`,
@@ -1508,7 +1508,7 @@ def open_store(
         conn.close()
         # Deliberately names no command that would reconstruct the store: every such
         # command here writes the OLDER schema over a newer one. Deliberately readable
-        # out of a terminal too — KYO-175 puts this on screen in the desktop app, where
+        # out of a terminal too — KYO-175 put this on screen in a viewer, where
         # the reader is not at a shell and may not be the person who installed anything.
         # KYO-182: the three clauses this shares verbatim with `rebuild.py`'s later-export
         # refusal come from `contracts` and are not restated here. The message is still

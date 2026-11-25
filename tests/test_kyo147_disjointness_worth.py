@@ -492,9 +492,9 @@ def test_edit_stores_the_correction_touch_drift_printed(kyo, git_project, tmp_pa
 def test_touch_drift_itself_still_writes_nothing(kyo, git_project, tmp_path) -> None:
     """`kyo touch-drift` stays a pure read, and three separate write-capability
     declarations in this project depend on that being true: `cli.MUTATING_COMMANDS`,
-    records mode's `RECORDS_READ_COMMANDS` allowlist, and the desktop app's
-    `KYO_WRITING_COMMANDS` (which `tests/test_kyo140_desktop_command_drift.py` keeps
-    in step with the first). Putting the write here would have made all three wrong at
+    records mode's `RECORDS_READ_COMMANDS` allowlist, and the Electron app's
+    `KYO_WRITING_COMMANDS` (kept in step with the first by a drift test until KYO-986
+    removed the app). Putting the write here would have made all three wrong at
     once, which is why c4's flag went on `kyo edit` instead."""
     from kyosei.cli import MUTATING_COMMANDS
 

@@ -65,12 +65,11 @@ command -v kyo >/dev/null 2>&1 || { d="${CLAUDE_PROJECT_DIR:-$PWD}"; c="$(git -C
 
 It exists because a hook's whole interface is its command string, and a session whose PATH has no
 `kyo` — a teammate who cloned the repository without installing Kyosei, or a machine whose
-desktop app is its only Kyosei — used to get `/bin/sh: kyo: command not found` from every one of
+Electron app (removed in KYO-986) was its only Kyosei — used to get `/bin/sh: kyo: command not found` from every one of
 these hooks, which names nothing anyone can act on, while the push, suite, worker-branch and
 cleanliness guards silently did not run. The guard replaces that one line with a line that says
 what is wrong and the command that fixes it. Since KYO-450 that is `uv tool install kyosei` alone:
-the desktop app runs the `kyo` you install and ships none of its own, so its old "Install command
-line tools" action is gone, and a line installed under that older message is superseded by
+the Electron app's old "Install command line tools" action went when it stopped shipping a `kyo`, and a line installed under that older message is superseded by
 today's the next time `kyo install-hooks` runs. When `kyo` *is* present it is one `command -v` and
 changes nothing: the hook runs exactly as before and keeps its own exit status.
 
@@ -192,8 +191,8 @@ Running doctor last is also better on its own merits: its verdict then covers ev
 just did, rather than everything it is about to undo. `kyo sweep` is the only step here that
 mutates the store (one sweep run); `kyo doctor` writes nothing.
 
-KYO-215 then retired `kyo html` out of the middle of this chain — the desktop app is the viewer
-and a project without it reads with `kyo show`, `kyo list`, `kyo map` and `kyo brief`, so there
+KYO-215 then retired `kyo html` out of the middle of this chain — a viewer reads the store live
+through `kyo serve`, and a project without one reads with `kyo show`, `kyo list`, `kyo map` and `kyo brief`, so there
 is no generated site left to go stale. The rule about order is what survives the command that
 taught it.
 
@@ -351,9 +350,9 @@ addressed to the orchestrator, who is the party that can act on it.
 ### `SessionStart` / `Stop` / `SessionEnd` → `kyo sessions --hook`
 
 **KYO-186.** Records this session in the store's local `kyosei/sessions.json` — which Claude
-Code sessions this project has, and which claude.ai Remote Control page each one is on — so the
-desktop app's claude.ai pane can open on *this project's* orchestrator session rather than on
-whatever the browser last had.
+Code sessions this project has, and which claude.ai Remote Control page each one is on — so that
+`kyo sessions` and `kyo serve`'s session routes can name *this project's* sessions. (The Electron
+app, removed in KYO-986, opened its claude.ai pane on the orchestrator session it found here.)
 
 One command under three events, because each does a job the other two cannot.
 

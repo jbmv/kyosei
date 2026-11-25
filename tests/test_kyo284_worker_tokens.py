@@ -377,6 +377,8 @@ def test_the_latest_turn_travels_on_the_answer_and_is_not_added_across_transcrip
     # And `kyo show` prints it, because c3 is a reader checking the app's row
     # against that command -- a figure on only one of the two cannot be compared.
     assert f"latest turn {one_turn} tokens" in spend.sentence()
+    # KYO-986: the Electron app's activity row it was compared with is removed.
+    assert "desktop" not in spend.sentence()
 
 
 # -------------------------------------------- the matched transcript, and only it

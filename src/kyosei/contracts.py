@@ -1783,7 +1783,7 @@ def knowledge_disposal_remedy(record_id: str) -> str:
 # **They stay two messages.** KYO-179's worker argued against collapsing them and the
 # argument holds: one names a database and is raised at open, the other names an export
 # directory and specific files and says that nothing was written — and which artifact is
-# meant is the thing a reader in the desktop app most needs to know. One parameterised
+# meant is the thing a reader in a viewer most needs to know. One parameterised
 # message for both sites would produce a sentence vague about exactly that. What moves here
 # is only the three clauses they already stated verbatim in two files, with no shared
 # source.
@@ -1834,9 +1834,10 @@ def installed_build_clause() -> str:
 
     It used to say the build was "bundled with the application you are running" and that
     upgrading it meant updating that application. The app's bundled runtime was retired,
-    and KYO-450 retired the install kind: the desktop app runs the machine's
-    one `kyo`, the same copy every project's hooks run, so a reader in the app is looking
-    at an install somebody made rather than a part of the app (KYO-466). Which route
+    and KYO-450 retired the install kind: the Electron app, since removed (KYO-986),
+    ran the machine's one `kyo`, the same copy every project's hooks and `kyo serve`
+    run, so a reader is looking at an install somebody made rather than a part of an
+    app (KYO-466). Which route
     moves that install is :func:`kyosei.buildinfo.upgrade_route`'s answer for the copy
     raising the refusal -- asked, not restated, so this sentence cannot name a route the
     copy does not take. No trailing full stop: both sites follow it with an em dash and
@@ -1846,8 +1847,8 @@ def installed_build_clause() -> str:
 
     return (
         "If you did not install this kyosei yourself, it is the one on this machine that "
-        "the desktop app and every project's hooks run -- the app carries no copy of its "
-        "own -- and upgrading it is for whoever installed it: " + upgrade_route()
+        "`kyo serve` and every project's hooks run, and upgrading it is for whoever "
+        "installed it: " + upgrade_route()
     )
 
 

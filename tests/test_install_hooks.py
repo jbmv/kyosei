@@ -628,6 +628,11 @@ def test_a_line_behind_the_retired_guard_message_is_carried_to_today_s(
     result = kyo("install-hooks", "--copies", "--json")
     assert result.code == 0, result
     assert any("current message" in change for change in result.json["changes"]), result.json
+    # KYO-986: the note names the action as the removed Electron app's, not a desktop app's.
+    assert any(
+        "retired Electron app's action" in change for change in result.json["changes"]
+    ), result.json
+    assert not any("desktop app" in change for change in result.json["changes"]), result.json
 
     after = json.loads(settings_path.read_text(encoding="utf-8"))
     for event, groups in current["hooks"].items():

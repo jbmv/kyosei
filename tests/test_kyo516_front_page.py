@@ -43,7 +43,8 @@ MOVED_HEADINGS = (
     "### The whole suite is the orchestrator's: `orchestrator_only_commands` (KYO-298)",
     "### Doc fragments: a document that grows by numbered section (KYO-299)",
     "### What an in-repo store costs the repository (KYO-268)",
-    "### The desktop app reads every project through kyo serve (KYO-459)",
+    # KYO-986 retitled this one and "The Mac app" below when the Electron app was removed.
+    "### A viewer reads every project through kyo serve (KYO-459)",
     "## Quick start",
     "### One record, one file: `--from` (KYO-330)",
     "## Where the store lives",
@@ -62,7 +63,7 @@ MOVED_HEADINGS = (
     "## Sweep, next, and the session briefing",
     '### Staleness coverage — "no flags" is not the same as "nothing is stale"',
     "## Reading the store",
-    "## The desktop app (`apps/desktop/`)",
+    "## The Mac app (`apps/apple/`)",
     "## Layer 3: the docs-SOT skeleton validator",
     "## Rules with machinery behind them",
     "## Exit codes",

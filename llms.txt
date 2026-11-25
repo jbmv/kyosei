@@ -25,11 +25,10 @@ AGENTS.md first.
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change
 - [AGENTS.md](AGENTS.md): building, testing and contributing; the venv rules and the store rules for dispatched workers
 - [Design charter](docs/design/charter.md): the laws, the architecture and the reasoning behind them
-- [Desktop app](apps/desktop/README.md): the Electron viewer that reads projects through `kyo serve`, built from source with its own checks
 - [Mac app](apps/apple/README.md): a native macOS client of `kyo serve` that shows a project's sessions, records, files and configuration and sends prompts to a session, built from source
 
 ## Optional
 
 - [README](README.md): the front page: what Kyosei is, installing, and where to go next
-- [Operating reference](docs/reference/topics/README.md): the full reference by topic -- install and upgrading, the store, registries, the dispatch loop, docs governance, serve and the desktop app
+- [Operating reference](docs/reference/topics/README.md): the full reference by topic -- install and upgrading, the store, registries, the dispatch loop, docs governance, serve and the Mac app
 - [Topic references](docs/reference/topics/): one page per mechanism, in depth

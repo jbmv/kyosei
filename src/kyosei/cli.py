@@ -124,8 +124,9 @@ Handler = Callable[[commands.Context, argparse.Namespace], commands.Output]
 #: ``cmd_records.py`` — and `kyo dispatch`'s disjointness check has something to
 #: answer with other than "collides".
 #: KYO-519 (KYO-513): the spellings `kyo orchestrator` is also accepted under. Kept
-#: permanently: the desktop app runs `kyo controller ...` on the wire (KYO-513), and an
-#: app snapshot in the field cannot be upgraded by a kyo release. Each spelling is a key
+#: permanently: the Electron app ran `kyo controller ...` on the wire (KYO-513), and a
+#: snapshot of it in the field cannot be upgraded by a kyo release; the app left this
+#: repository in KYO-986 and the alias stays. Each spelling is a key
 #: of :data:`COMMAND_TABLE` and of ``serve.NOT_SERVED``.
 ORCHESTRATOR_COMMAND_ALIASES: tuple[str, ...] = ("controller",)
 
@@ -407,8 +408,8 @@ MUTATING_COMMANDS = (
     # already on this list — so every events row it causes is written under the
     # composed command's own name, and an acceptance that applies nothing writes
     # none. It is named here for what the declaration is FOR: a caller (records mode,
-    # the desktop app, `kyo reference`) asking whether this command may change the
-    # store, and the answer is yes.
+    # `kyo reference`) asking whether this command may change the store, and the
+    # answer is yes.
     "accept",
     # KYO-494: `kyo confirm` writes through the commands it composes, as `accept` does.
     "confirm",
@@ -1133,8 +1134,9 @@ def build_parser() -> KyoseiParser:
         # this is the command KYO-71's own output already names as the remedy, and
         # because `kyo touch-drift` is a pure read that every write-capability
         # declaration in this project (cli.MUTATING_COMMANDS, records mode's
-        # allowlist, the desktop app's KYO_WRITING_COMMANDS) agrees is a pure read.
-        # Making it write would have made all three wrong at once.
+        # allowlist, and until KYO-986 removed it the Electron app's
+        # KYO_WRITING_COMMANDS) agrees is a pure read. Making it write would have made
+        # all three wrong at once.
         "--touches-from-drift",
         metavar="DISPATCH_ID",
         help="REPLACE this record's touches with the correction `kyo touch-drift "
@@ -4273,7 +4275,7 @@ def json_is_compact(args: argparse.Namespace, stdout_is_tty: bool) -> bool:
 
     ``--pretty`` forces indentation, ``--compact-json`` forces one line, and with
     neither the reader decides: a terminal gets indentation (a person is reading),
-    anything else — an agent, a pipe, the desktop app — gets one line. Passing both is
+    anything else — an agent, a pipe, `kyo serve` — gets one line. Passing both is
     ``--pretty``: asking to read it is the more specific request.
     """
     if getattr(args, "pretty", False):

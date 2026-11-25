@@ -830,14 +830,14 @@ def _link_form_example(store: Store) -> str:
 
 
 #: KYO-561: the setup decision that asks whether the maintainer reads the orchestrator
-#: through the desktop app, the one surface where a `kyosei://` link is clickable.
+#: through the Mac app, which opens a `kyosei://` link in a conversation it shows.
 RECORD_LINKS_DECISION = "E4"
 
 
 def record_links_declined(store: Store) -> bool:
     """KYO-561: whether ``onboarding:`` in ``kyosei/config.yml`` records setup decision
     [E4] as ``declined`` -- the maintainer does not read the orchestrator through the
-    desktop app, so a ``kyosei://`` link is noise around an id there.
+    Mac app, so a ``kyosei://`` link is noise around an id there.
 
     Only ``declined`` drops the links: ``deferred`` and no answer at all leave the brief
     exactly as it was (KYO-561.c3), because a link the maintainer cannot click costs a

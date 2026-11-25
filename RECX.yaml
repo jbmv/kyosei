@@ -12,7 +12,7 @@ description: |
   raises an obligation to update the section or confirm it. The CLI is `kyo`; it ships a
   Claude Code plugin with the session hooks and the orchestrator's skill. Kyosei does not
   start agents itself, and Claude Code is the only agent harness it integrates with. The
-  Electron viewer under apps/desktop/ is optional and not listed as a module.
+  native Mac client of `kyo serve` under apps/apple/ is optional and not listed as a module.
 license: Apache-2.0
 status: experimental
 capabilities:

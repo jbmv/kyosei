@@ -207,7 +207,7 @@ class WorkerTokens:
             "latest_turn_tokens": self.latest_turn_tokens,
             # KYO-298.c6: ADDITIVE fields — two new keys beside the existing ones,
             # nothing renamed and nothing re-meant, so `kyo worktrees --json`'s
-            # consumers (the desktop's activity poll among them) read exactly what
+            # consumers (the Electron app's activity poll was one) read exactly what
             # they read before and a consumer that has not heard of re-writes is
             # unaffected.
             "context_rewrites": self.context_rewrites,
@@ -252,7 +252,7 @@ class WorkerTokens:
             f"{self.output_tokens} output) over {self.messages} assistant message(s) "
             f"in {self.transcripts} transcript(s); latest turn {self.latest_turn_tokens} "
             "tokens (all four counts of the last assistant message — what claude.ai's "
-            "agent card shows, and what the desktop's activity row shows, to within the "
+            "agent card shows, to within the "
             f"output tokens the transcript records mid-stream); {self.rewrite_clause()} "
             f"— {self.why}"
         )
@@ -314,7 +314,7 @@ def sum_transcript_usage(path: Path) -> TranscriptUsage:
     for the two measurements that settled that.
 
     Streamed a line at a time and never read whole: these files reach tens of
-    megabytes, and this runs on the desktop app's activity poll. Measured on this
+    megabytes, and this ran on the Electron app's activity poll. Measured on this
     project's own transcripts, 3.4 MB / 1316 lines summed in 0.014s, because the
     cheap substring test below skips every line that has no `usage` in it at all
     without paying `json.loads` for it. What is held across the stream is one small
@@ -686,7 +686,7 @@ def worker_tokens(store, dispatch_id: str) -> WorkerTokens:
 TOKENS_NOT_SUMMED = "not-summed-this-run"
 
 #: How many of a listing's dispatches get their transcripts summed. `kyo
-#: worktrees --json` is on the desktop app's 5-SECOND activity poll (KYO-264), and
+#: worktrees --json` was on the Electron app's 5-SECOND activity poll (KYO-264), and
 #: this store already holds 144 dispatches that declared a worktree; summing every
 #: one of them per tick would put seconds of transcript parsing on a loop that has
 #: to finish in well under five. 24 because the app shows 12 finished rows

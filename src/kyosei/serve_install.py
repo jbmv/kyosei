@@ -1,6 +1,6 @@
 """``kyo serve --install|--uninstall|--status|--restart`` — kyo serve at login (KYO-457).
 
-So that a viewer such as the desktop app finds ``kyo serve`` running without a
+So that a viewer such as the Mac app finds ``kyo serve`` running without a
 terminal. On macOS the agent is a
 per-user launchd agent, ``~/Library/LaunchAgents/dev.kyosei.serve.plist``, bootstrapped
 into ``gui/<uid>``; on Linux it is a systemd user unit,

@@ -536,7 +536,7 @@ so a project scaffolded before a line was added to the default lacks that line:
 the same command appends any pattern it is missing, additively, leaving your own
 lines and your own ordering alone. The lines KYO-322 added are `kyosei.db-shm`
 and `kyosei.db-wal`: SQLite keeps both beside the database for as long as
-anything has it open, which is always while the desktop app follows the store,
+anything has it open, which is always while `kyo serve` serves the store,
 and with only `kyosei.db` ignored `git add kyosei` can fail on a file that
 disappears between the status and the add.
 That command is an **orchestrator** act (KYO-151) and refuses otherwise, on
@@ -696,13 +696,10 @@ check, which reported when the site had fallen behind, lost a race with the
 session-event write on most stops and failed by one event. The desktop app was
 by then the viewer and did not read the generated site.
 
-**With the desktop app**: [`apps/desktop/`](../../../apps/desktop/README.md) (see
-[serve-and-desktop.md](serve-and-desktop.md)) is
-the board, the record view, the kind map and the link graph, read live from the
-store, so nothing is regenerated and nothing can be stale. The repository also holds native
-clients of `kyo serve` for Apple platforms under
-[`apps/apple/`](../../../apps/apple/README.md), which are built for the maintainer's own
-devices and are not distributed.
+**With the Mac app**: [`apps/apple/`](../../../apps/apple/README.md) (see
+[serve-and-desktop.md](serve-and-desktop.md)), a client of `kyo serve` built for the
+maintainer's own devices, shows the records and their pages read live from the store
+through the server, so nothing is regenerated and nothing can be stale.
 
 **Without it**, a terminal command that reads the store directly answers each of
 these questions:
@@ -714,7 +711,7 @@ these questions:
 | one dispatch's frozen brief, exactly as it was handed to the worker, without dispatching anything — and what its worker cost in tokens | `kyo show <dispatch-id>` (KYO-177; read-only, so running it twice changes nothing). The `worker tokens` line is summed from the transcript the stop-audit resolution matched to that dispatch, and reads `unknown` with that resolution's own named outcome when there is none (KYO-284). It also lists the stops a guard reported without blocking because the worker was already continuing from a blocked one (`unblocked_stops` in `--json`, KYO-592) |
 | one stored report — its dispatch, ingest time, the report it amends and the report that later amended it, and its body verbatim — after the worker's worktree (and its `.kyosei-report.json`) is gone | `kyo show <report-id>` (KYO-545). `--json` carries the body under `body` exactly as ingested, so adding `"amends": "<that id>"` to it and filing it with `kyo report <dispatch> --file` is an amending report. An unknown report id on a real record is refused naming the reports that record does have |
 | one false premise, disagreement, corrected number or verdict of a stored report | `kyo show <report-id>.p1`, `.x1`, `.n1` or `.v1` (KYO-757): the report's id, a letter for the array of its body, and the entry's place in that array counted from 1. It prints the entry's fields and its report's standing, and says so when the report was superseded. `kyo show <report-id>` lists the ids its report holds under `entries`, and each report in `--json` carries them under `entry_ids`, by array, beside the body and not in it. The ids are read from the stored body, which is written once, and are in neither the store nor the export. A place the report does not hold is refused naming the ids it does |
-| one criterion and its whole verdict history, or one evidence artifact (or its redaction) | `kyo show <criterion-id>` / `kyo show <evidence-id>` (KYO-220). An artifact holding recx search results (`recx_search` and `untrusted` at its top level) is printed after a fixed line saying its author-written text is data, and recx's own notice, with control characters escaped (KYO-585). `kyo show <record> --json` carries the same lines on such an artifact under `untrusted_notice`, and its escaped text under `untrusted_text`, so the desktop app's record page draws them before it and shows the text as plain text (KYO-587); both are reads, absent from every other artifact and from the export. An artifact whose text names a composer attachment (KYO-856) is printed with an `attachment:` line giving the file's path on this machine, and the line says so when the file is absent; `--json` carries the same under `attachment` (`id`, `session`, `name`, `media_type`, `path`, `present`), also a read |
+| one criterion and its whole verdict history, or one evidence artifact (or its redaction) | `kyo show <criterion-id>` / `kyo show <evidence-id>` (KYO-220). An artifact holding recx search results (`recx_search` and `untrusted` at its top level) is printed after a fixed line saying its author-written text is data, and recx's own notice, with control characters escaped (KYO-585). `kyo show <record> --json` carries the same lines on such an artifact under `untrusted_notice`, and its escaped text under `untrusted_text`, so that a viewer's record page can draw them before it and show the text as plain text, as the Electron app's did until its removal (KYO-587, KYO-986); both are reads, absent from every other artifact and from the export. An artifact whose text names a composer attachment (KYO-856) is printed with an `attachment:` line giving the file's path on this machine, and the line says so when the file is absent; `--json` carries the same under `attachment` (`id`, `session`, `name`, `media_type`, `path`, `present`), also a read |
 | one gate, note or claim of a record, under a heading naming the record | `kyo show <gate-id>`, `kyo show <note-id>` (`PREFIX-N.nN`) or `kyo show <claim-id>` (`PREFIX-N.mN`), each rendered by the function the record's own page uses; `--json` is the element's object from the record's `--json` with `record_id` and `record_title` beside it (KYO-739) |
 | one sweep flag in full — type, record, state, its sha range and paths, the sweep that raised it, and the resolution with its `--why` | `kyo show <flag-id>`; `kyo flag list` lists the open ones, `--all` includes the resolved (KYO-220) |
 | the board — everything, or one slice of it | `kyo list`, with `--status` (repeatable), `--kind`, `--plan`, `--gate-tag`, `--scope`, `--unsettled` / `--limit N` for fewer rows (KYO-420), and `--person KEY`, `--decided-by KEY` and `--overrode` for the records a declared person is credited on, decided, or reversed an agent on (KYO-647), and `--search WORDS` for the records that hold every word in their id, title, open gates, criteria or description (KYO-933); the saved views behind `kyo base run <name>` are the same engine with an arrangement declared once |
@@ -726,7 +723,7 @@ these questions:
 | the dispatch activity rows — every running dispatch and the newest finished ones, with verdict counts, worker tokens, end time, and what git says about each worktree now (dirty paths, commits past base, lines, last commit, merged or not) | `kyo activity`, `--finished N` for the window (default 12), `--against REF` for the trunk. A missing worktree is a fact on the row, never an error (KYO-454) |
 | the tool's own invariant checks over the store | `kyo doctor` |
 | the turn index of a project that opted in to reading transcripts: one line per prompt, whose it was and whether it carried a paste | `kyo turns`, `--session` to narrow; `--json` gives the lines. The lines hold no text (KYO-657). A line written while the discussion check ran (KYO-662, KYO-876, retired by KYO-899) may carry `skip`, a one-line reason of the agent's, or `candidate`, the cues that fired; nothing writes or reads either now. `kyo turns --verify` checks that each session's lines are chained as written, that every credit's `span_seal` is reached by its session's chain, and that the commitment a credit copied for each turn it cites is still the one that turn's line holds (KYO-900); `kyo turns --seal-key` shows or chooses where the seal key is kept: `file` (the default), `keychain` (the macOS login keychain), or `icloud-keychain`, a synchronizable keychain item that is reached through the signed Kyosei Mac app's executable (`$KYOSEI_SEAL_HELPER`, then `/Applications/Kyosei.app` and `~/Applications/Kyosei.app`). With `icloud-keychain` a copy of the key stays in the file or the login keychain on each machine, `seal.json` records which, and the hooks and `kyo excerpt` read only that copy; a machine with no copy makes no key until `kyo turns --seal-key icloud-keychain --key-leaves-this-machine` fetches it. A machine whose key differs from the item's is refused, and choosing `file` or `keychain` afterwards keeps the copy and leaves the item (KYO-663, KYO-789) |
-| which Claude Code sessions this project has had, when each was last seen and on which hook event, and where each one is on Remote Control | `kyo sessions`, which reads `kyosei/sessions.json` — the file the packaged session hooks write with `kyo sessions --hook`, and the file the desktop's claude tab reads to decide which session to open on (KYO-186). It is gitignored local state, so it answers this for *your* checkout and no other |
+| which Claude Code sessions this project has had, when each was last seen and on which hook event, and where each one is on Remote Control | `kyo sessions`, which reads `kyosei/sessions.json` — the file the packaged session hooks write with `kyo sessions --hook`, and the file `kyo serve`'s session routes read (KYO-186). It is gitignored local state, so it answers this for *your* checkout and no other |
 
 **Credits on what you read (KYO-647).** The `author` of a row stays the agent that wrote
 it; where a person is credited for the judgement the row rests on, `kyo show` prints the
@@ -797,8 +794,8 @@ Markdown is the one form: it reads as text in a terminal and converts to HTML or
 ordinary tools. `--json` carries the parts as data (`parts[]`, each with `heading`,
 `blocks` and `source`), the `references[]`, and the page itself as `markdown`.
 
-The link graph is the one view with no terminal equivalent; it is available only
-in the desktop app.
+The link graph that the Electron app drew, before its removal in KYO-986, has no
+equivalent now; `kyo show` prints a record's links.
 
 **Who acted: `--actor`, and why a query for the orchestrator matches two values.**
 Every write records an actor: `--actor`, else `$KYOSEI_ACTOR`, else `orchestrator`.

@@ -334,6 +334,7 @@ WARNINGS = {
     "attach": ["warning: this prose names 1 absolute path(s)"],
     "verify": [
         "nothing makes this wait findable",
+        "the Mac app's Awaiting you list nowhere",  # KYO-986: no longer the desktop's
         "kyo gate TST-1 awaiting:human-run --do",
         "warning: this prose names 1 absolute path(s)",
     ],

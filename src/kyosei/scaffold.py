@@ -49,11 +49,12 @@ from .store import create_database
 #: hardcoding the string (law 3).
 #:
 #: KYO-566: `kyo init` no longer writes a file by this name. The scratchpad moved to the
-#: per-project home in KYO-114 (``serve_files.scratchpad_target``, what the desktop app's
-#: Scratchpad opens), and an ``ideas/scratchpad.md`` is skipped by every reader -- so a
-#: scaffolded one was a place to write that nothing ever showed again. The name stays
-#: because the skip stays (a store scaffolded before this still holds one), and
-#: ``kyo doctor``'s ``ideas_scratchpad`` notice names where such a file's content belongs.
+#: per-project home in KYO-114 (``serve_files.scratchpad_target``, what
+#: `kyo serve`'s scratchpad route reads and writes), and an ``ideas/scratchpad.md`` is
+#: skipped by every reader -- so a scaffolded one was a place to write that nothing ever
+#: showed again. The name stays because the skip stays (a store scaffolded before this
+#: still holds one), and ``kyo doctor``'s ``ideas_scratchpad`` notice names where such a
+#: file's content belongs.
 IDEAS_DIR = "ideas"
 SCRATCHPAD_BASENAME = "scratchpad.md"
 
@@ -82,7 +83,7 @@ rebuild` needs to reconstruct `kyosei.db` from this directory alone (charter, La
 #:
 #: Every line is local state beside the database that must never be committed: the
 #: database itself, its SQLite WAL sidecars (open whenever anything holds the database,
-#: which with the desktop app is always), the session hooks' ``sessions.json`` (it carries
+#: which with `kyo serve` running is always), the session hooks' ``sessions.json`` (it carries
 #: a claude.ai Remote Control session id and is rebuildable), the doctor report, and
 #: interrupted writers' temporary files. An untracked file that appears and vanishes
 #: between stops is a failed ``git add`` and a dirty tree at somebody's stop. The sidecar

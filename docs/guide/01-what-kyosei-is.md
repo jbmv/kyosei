@@ -33,9 +33,10 @@ Everything else reads through it.
   projects and writes files under `ideas/`. A device you issue a token to with
   `kyo devices` can also read a project's Claude Code sessions, send input to one and file
   your notes in the store. No viewer changes a record.
-- The desktop app (macOS) is one such viewer: a board, record pages and a terminal per
-  project. Without it, `kyo brief`, `kyo list` and `kyo show` answer the same questions in
-  the terminal.
+- The Mac app under `apps/apple/` is one such viewer, built from source for the
+  maintainer's own devices: a project's sessions, its records and files, and a terminal on
+  a session's pane. Without it, `kyo brief`, `kyo list` and `kyo show` answer the same
+  questions in the terminal.
 
 Kyosei is built for Claude Code, whose hooks enforce its rules. Another agent harness can
 run `kyo` commands, but nothing would enforce the rules there.
@@ -48,8 +49,8 @@ A Kyosei project has two areas, and the line between them is deliberate.
 **`ideas/` is yours.** Write one file per idea, named however you like. There
 is no format, no required field and no command to run. Nothing there is counted, checked
 or flagged as stale. An idea can sit half-formed for as long as you like. A passing
-thought can go in the desktop app's Scratchpad instead, one file at
-`~/kyosei/<project>/scratchpad.md` that nothing lists; a thought you want to find again
+thought can go in the session scratchpad instead, one file at
+`~/kyosei/<project>/scratchpad.md`, which `kyo where` names and nothing lists; a thought you want to find again
 belongs in its own file under `ideas/`.
 
 **`kyosei/` is the orchestrator's.** It holds the records, their history, the project's

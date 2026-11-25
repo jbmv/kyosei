@@ -198,7 +198,7 @@ RETIRED_PATH_GUARD_NOTES: dict[str, str] = {
     **{
         _unwalked_guard_prefix(m): (
             "behind the PATH guard's current message, which names `uv tool install "
-            "kyosei` rather than the desktop app's retired action"
+            "kyosei` rather than the retired Electron app's action"
         )
         for m in RETIRED_PATH_GUARD_MESSAGES
     },

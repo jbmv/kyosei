@@ -740,6 +740,8 @@ def test_an_unobserved_criterion_with_no_gate_is_reported_as_a_notice(kyo) -> No
     assert f"{record}.c1" in notice
     assert "watch the badge after a cold start" in notice
     assert f"kyo gate {record} awaiting:human-run --do " in notice
+    # KYO-986: the list it names is one that exists, the Mac app's Awaiting you.
+    assert "Mac app's Awaiting you list" in notice and "desktop" not in notice
 
     human = kyo("doctor")
     assert human.code == 0, human

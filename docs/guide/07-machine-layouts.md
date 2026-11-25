@@ -1,7 +1,7 @@
 # Machine layouts
 
 After this page you will be able to choose where Kyosei runs: on one machine with the CLI
-alone, on one machine with the desktop app, or on a dev box you reach from a laptop.
+alone, on one machine with the Mac app, or on a dev box you reach from a laptop.
 
 ## Which layout?
 
@@ -12,8 +12,8 @@ measured.
 | Layout | What runs where | You need |
 |---|---|---|
 | **CLI only** | One machine holds the repositories, the stores, `kyo`, and Claude Code in your own terminal. | Nothing more. |
-| **One machine with the app** | The same, plus `kyo serve` started at login and the desktop app reading through it. | `kyo serve`, the app. |
-| **Dev box and light client** | The dev box holds every repository and store and runs `kyo`, `kyo serve` and the orchestrator sessions under tmux. The laptop runs the app (or a browser, or `ssh`) and talks to a session through claude.ai's Remote Control. | Everything below, and a private network between the two machines, such as Tailscale. |
+| **One machine with the app** | The same, plus `kyo serve` started at login and the Mac app reading through it. | `kyo serve`, the app. |
+| **Dev box and light client** | The dev box holds every repository and store and runs `kyo`, `kyo serve` and the orchestrator sessions under tmux. The laptop reaches them through the app, a browser or `ssh`, and talks to a session through the app or claude.ai's Remote Control. | Everything below, and a private network between the two machines, such as Tailscale. |
 
 Start with CLI only. Add the app when you want to see the board rather than ask for it, and
 the dev box when you want sessions to keep running while your laptop is closed.
@@ -24,7 +24,7 @@ layout the laptop holds no store and runs no orchestrator; it only views and tal
 ## One `kyo` per machine
 
 ([E2](setup-decisions.md#e2-one-kyo-per-machine-and-path)) `uv tool install kyosei`
-puts `kyo` in `~/.local/bin`. Every project's hooks, every terminal and the app run that one
+puts `kyo` in `~/.local/bin`. Every project's hooks, every terminal and `kyo serve` run that one
 copy, so upgrading it upgrades every project on the machine at once. Never install it in
 editable mode: every project would then run whatever is in a checkout, unfinished edits
 included.
@@ -69,21 +69,20 @@ The reference lists
   `tailscale serve --bg 47370`) and restrict access with a tailnet rule. Never use
   `tailscale funnel` on this port: that publishes every project's records to the internet.
 
-## The desktop app
+## The Mac app
 
-([E4](setup-decisions.md#e4-the-desktop-app-macos)) A macOS viewer of `kyo serve`: a board,
-record pages, a terminal pane per project and a list of each project's Claude Code
-sessions. It ships no `kyo` and no server of its own, and says so when `kyo serve` is not
-answering. To use it as a light client, choose **Connect to a dev box…** in its project
-switcher and give it the dev box's tailnet address and an SSH host.
+([E4](setup-decisions.md#e4-the-mac-app-and-record-links)) The repository holds a native Mac
+app under `apps/apple/`, a client of `kyo serve` built from source for the maintainer's own
+devices and the current macOS; [its README](../../apps/apple/README.md) describes it and how
+it is built. It shows a project's Claude Code sessions as rendered conversation and sends
+prompts to them, and beside the conversation it shows the project's records, files and
+configuration and a terminal on the session's pane. It ships no `kyo` and no server of its
+own. To use it as a light client, name the dev box's server in its Settings, with a device
+token issued there.
 
-The app registers `kyosei://` links, so an orchestrator can write each record id as a link
-that opens the record. That helps only if you read the orchestrator where the app is
-installed; elsewhere the link is noise around an id, so the setup agent asks.
-
-The repository also holds a native Mac app under `apps/apple/`, a client of the session,
-send and note routes. It is built from source for the maintainer's own devices and is not
-distributed; [its README](../../apps/apple/README.md) describes it.
+A `kyosei://` link in a conversation the app shows opens the record in the app, so an
+orchestrator can write each record id as such a link. That helps only if you read the
+orchestrator in the app; elsewhere the link is noise around an id, so the setup agent asks.
 
 ## Orchestrator sessions under tmux
 

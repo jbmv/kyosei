@@ -77,8 +77,8 @@ def check_ungated_unobserved_criteria(store: Store) -> list[str]:
         findings.append(
             f"{item['id']} ({item['status']}) is waiting on somebody to look — "
             f"{criteria} — and no open `awaiting:*` gate says so, with nothing running "
-            f"against the record. Until it is gated the wait is in the desktop's "
-            f"Awaiting list nowhere and in `kyo brief`'s gated work nowhere: "
+            f"against the record. Until it is gated the wait is in the Mac app's "
+            f"Awaiting you list nowhere and in `kyo brief`'s gated work nowhere: "
             f"`{item['remedy']}`. Verifying the criterion "
             f"clears this too; either way the wait stops being invisible (KYO-267)"
         )

@@ -259,7 +259,8 @@ transcript of its own, because a second reading of the harness's private file
 layout could give a second answer to which transcript belongs to which dispatch. A dispatch with no
 matched, recorded transcript reads `unknown` with the resolution's own named
 outcome as the reason, never a zero. `kyo worktrees --json` carries the same
-answer on every row, which is where the desktop app's activity list reads it.
+answer on every row; the Electron app's activity list, removed in KYO-986, read it
+there.
 
 Three things qualify that sum (KYO-292).
 **One assistant message is counted once, not once per content block**: the
@@ -275,7 +276,7 @@ cumulative sum was already past it. It runs about a percent under the card,
 because the transcript records that last message's output tokens mid-stream. The
 four summed counts and the all-in total are carried beside it, as what the
 worker used altogether. And **`kyo worktrees --json`
-sums under a budget**, because it is on the desktop's five-second poll: the
+sums under a budget**, because it was on the Electron app's five-second poll: the
 budget is spent on the most recently *created* dispatches plus every running
 one, and a row outside it says `not-summed-this-run` and names
 `kyo show <dispatch-id>`, which is never capped.
@@ -1066,7 +1067,7 @@ Under both forms, where the list prints, each orchestrator-audience rule prints 
 store's own record-link example: its title and its enforced-by kind in a word
 (`mechanism` or `aspirational`), then one line naming `kyo rules "<title>"` for the
 rest (KYO-531). Where `onboarding:` in `kyosei/config.yml` records setup decision E4 as
-`declined` (the maintainer does not read the orchestrator through the desktop app), the
+`declined` (the maintainer does not read the orchestrator through the Mac app), the
 brief prints neither the record-link example nor the `kyosei://` citation rule; `--json`
 carries `link_example: null` (KYO-561). A rule added since the previous brief in this project prints in
 full instead, marked `NEW` and naming the brief it was compared against. A rule whose

@@ -397,8 +397,8 @@ def registry_graph(registry: KindRegistry) -> tuple[list[dict], list[dict]]:
     """The registry as a graph: kinds + ``intake``/``idea`` pseudo-nodes, promotion
     edges from ``accepts_from``/``produces`` (charter: "the viewer renders it as a
     circles-and-arrows kind map"). One source of truth for this shape (law 3) —
-    ``cmd_views.cmd_map`` (``kyo map --json``) and the desktop app both read this
-    rather than each deriving it themselves (KYO-11.c4).
+    ``cmd_views.cmd_map`` (``kyo map --json``) reads this, as the Electron app did until
+    KYO-986, rather than each deriving it (KYO-11.c4).
     """
     nodes = [
         {

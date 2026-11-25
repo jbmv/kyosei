@@ -840,7 +840,7 @@ def test_the_refusal_names_upgrading_the_build_and_not_a_command(kyo, project: P
     # And the same reader-is-not-at-a-shell sentence KYO-168 wrote for the db boundary:
     # KYO-175 points the desktop app at stores it does not control, and the app runs
     # the machine's one `kyo` rather than a runtime of its own (KYO-466).
-    assert "the desktop app and every project's hooks run" in err, err
+    assert "`kyo serve` and every project's hooks run" in err, err
     assert "bundled with the application" not in err, err
 
 
@@ -1425,7 +1425,7 @@ def test_the_ledger_refusal_reads_as_the_same_mechanism_as_the_document_one(
     assert (
         f"install a kyosei that speaks schema_version {SCHEMA_VERSION + 4} or later"
     ) in ledger_err, ledger_err
-    assert "the desktop app and every project's hooks run" in ledger_err, ledger_err
+    assert "`kyo serve` and every project's hooks run" in ledger_err, ledger_err
     assert "bundled with the application" not in ledger_err, ledger_err
 
     # The same store, the same later version, the other half of the export: everything

@@ -668,8 +668,9 @@ def run(
                 "title": row["title"],
                 "counted": counted,
                 # KYO-467: the record's own stamps, as the store keeps them. Read by
-                # the desktop's records list (records.ts), whose Created and Modified
-                # sorts had nothing to sort by without a Base.
+                # the Mac app's records list (`apps/apple/web/src/records.ts`), and
+                # before it by the Electron app's, whose Created and Modified sorts had
+                # nothing to sort by without a Base.
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "people": credit.get("people", []),

@@ -67,8 +67,6 @@ their own temporary projects.
 - Design record (laws, architecture, reasoning): `docs/design/charter.md` — read it before
   changing the schema, the kind registry, or any law-adjacent behavior. Its laws were drawn
   from an operational log of earlier agent-run projects, which is not published.
-- The desktop app: `apps/desktop/`, a separate Electron project with its own README and
-  checks.
 - The Mac app: `apps/apple/`, a native client of `kyo serve` that shows a project's sessions,
   records, files and configuration and sends prompts to a session; `apps/apple/README.md` describes it.
 - `llms.txt` at the repository root routes a visiting agent to the right one of these.

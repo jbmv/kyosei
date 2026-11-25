@@ -315,7 +315,7 @@ class BuildIdentity:
             "dirty": self.dirty,
             "source": self.source,
             "kind": self.kind,
-            # KYO-445.c1: the two facts a reader of a release -- and the desktop app's
+            # KYO-445.c1: the two facts a reader of a release -- and a viewer's
             # compatibility check -- needs without opening a store: whether this
             # build is a published release, and the one schema it speaks. The schema
             # is the constant this build was written against, not any store's, so it

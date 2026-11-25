@@ -288,7 +288,7 @@ Ask these together, in one message. Propose an answer for each from what you rea
   `kyo doctor` prints one notice saying so; a no is recorded as `D13: declined` under
   `onboarding:`, which ends the notice.
 - **[E1] Machine layout.** Ask: "CLI only on this machine (default), this machine with the
-  desktop app, or a dev box you reach from a laptop?"
+  Mac app, or a dev box you reach from a laptop?"
 - **[E3] `kyo serve`.** Ask only if **[E1]** is not CLI only: "May I run
   `kyo serve --install --apply` so the server starts at login? (Loopback only. The routes
   that need no token have no password: every account on this machine can read the records
@@ -300,9 +300,10 @@ Ask these together, in one message. Propose an answer for each from what you rea
   no token and do not turn sending on: say that a token comes from
   `kyo devices issue <name> --permission <p>`, and that the send and terminal routes also
   refuse until the operator adds `serve_send: true` to `~/kyosei/settings.yml`.
-- **[E4] Desktop app and record links.** Ask only if **[E1]** includes the app: "Do you read
-  the orchestrator through the desktop app? (If so I write record ids as `kyosei://` links;
-  elsewhere they are noise around an id.)" A "no" is recorded as `E4: declined` under
+- **[E4] Mac app and record links.** Ask only if **[E1]** includes the app: "Do you read
+  the orchestrator through the Mac app? (If so I write record ids as `kyosei://` links,
+  which open the record from a conversation the app shows; elsewhere they are noise around
+  an id.)" A "no" is recorded as `E4: declined` under
   `onboarding:` in `kyosei/config.yml`; `kyo brief` then drops the `kyosei://` citation
   rule and its worked example, and record ids stay plain. A "yes" needs no entry.
 - **[E5] Orchestrator sessions under tmux.** Ask only for a dev box on macOS: "May I run
