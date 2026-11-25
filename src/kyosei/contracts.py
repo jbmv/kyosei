@@ -1847,7 +1847,7 @@ def installed_build_clause() -> str:
 
     return (
         "If you did not install this kyosei yourself, it is the one on this machine that "
-        "`kyo serve` and every project's hooks run, and upgrading it is for whoever "
+        "kyo serve and every project's hooks run, and upgrading it is for whoever "
         "installed it: " + upgrade_route()
     )
 

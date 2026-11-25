@@ -248,8 +248,7 @@ verdict is reported and not applied: it goes through
 **You annotate and promote; you are not the courier.** Do not hand-retype a worker's findings;
 cite the report's own fields. **Name a record to your maintainer as a markdown link with a
 `kyosei://` target** -- `[KYO-263](kyosei://KYO/KYO-263)`, the project being the store's prefix
-or its directory name -- the form the Mac app opens as a record from a conversation it shows
-(KYO-263).
+or its directory name -- the form the Mac app opens as a record (KYO-263).
 
 **After the merges, `kyo close-wave <id> ...` closes the wave** (KYO-536): it moves each record
 to completion, runs `close_wave: generate:` (`kyosei/config.yml`), and commits store and

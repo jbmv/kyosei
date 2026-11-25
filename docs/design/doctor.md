@@ -149,8 +149,9 @@ surface. The third candidate, `html_freshness`, no longer exists (KYO-215).
 ## KYO-215
 
 `retired_html_directory` replaces `html_freshness` (KYO-27), which asked whether the generated
-site was behind the store. `kyo html` is gone -- the desktop app is the viewer, and a project
-without it reads with `kyo show`, `kyo list`, `kyo map` and `kyo brief` -- so the site cannot be
+site was behind the store. `kyo html` is gone -- `kyo show`, `kyo list`, `kyo map` and
+`kyo brief` read the store directly, and a viewer such as the Mac app reads it through
+`kyo serve` -- so the site cannot be
 behind, it can only be abandoned, and a directory of pages that stopped updating on an unknown
 date is exactly the "reads as authoritative" failure `html_freshness` was filed about.
 

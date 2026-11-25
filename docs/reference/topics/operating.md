@@ -760,8 +760,8 @@ does. The viewer in this repository is the Mac app under
 [`apps/apple/`](../../../apps/apple/README.md), which "The Mac app" in
 [serve-and-desktop.md](serve-and-desktop.md) describes.
 
-**An earlier build's server is removed by hand.** Builds of the Electron app, which this
-repository held until KYO-986, ran a server of their own before KYO-459 ("Install Project
+**An earlier build's server is removed by hand.** Builds of the Electron app (removed from
+this repository in KYO-986) made before KYO-459 ran a server of their own ("Install Project
 Server…", the `dev.kyosei.server` login agent, with a password, tokens and a self-minted
 certificate). Nothing removes `dev.kyosei.server` (KYO-576). A machine that still has the
 agent can remove it with two commands:
