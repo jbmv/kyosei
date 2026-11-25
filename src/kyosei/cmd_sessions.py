@@ -101,11 +101,6 @@ BRIDGE_ID_PREFIX = "cse_"
 #: "This session couldn't be found", so the two ids are not interchangeable.
 REMOTE_URL_PREFIX = "https://claude.ai/code/session_"
 
-#: The page that lists the account's own Remote Control sessions. The resolution's
-#: last step, and not a consolation prize: on a machine where Claude Code runs
-#: somewhere else this is what the feature *is*.
-REMOTE_INDEX_URL = "https://claude.ai/code"
-
 # ------------------------------------------------------- the named outcomes
 #
 # stop_target's rule, applied to this reach. Each of these is an answer a reader
@@ -903,47 +898,6 @@ def read_question(environ: dict[str, str] | None, session_id: str) -> dict | Non
     return {key: document[key] for key in ("call_id", "name", "asked_at", "input")}
 
 
-# --------------------------------------------------------------- resolution
-
-
-def resolve_pane_url(file: SessionsFile) -> tuple[str, str]:
-    """The URL a claude.ai pane should open, and why — the store's half of it.
-
-    Steps 2 and 3 of KYO-186's resolution order. Step 1 (the session running in
-    *this window's* terminal pane) is the app's, because only the app knows what is
-    in its own pane; it falls through to here, which is why this returns a URL for
-    every input rather than an Optional.
-    """
-    running = [e for e in file.entries if e.get("state") == STATE_RUNNING and e.get("url")]
-    if running:
-        # `entries` is written newest-first; sorted again here so a hand-edited or
-        # foreign-ordered file cannot make two readers disagree.
-        best = max(running, key=lambda e: str(e.get("last_seen", "")))
-        return str(best["url"]), (
-            f"the most recently active running session in {SESSIONS_FILE} "
-            f"({best.get('session_id')}, last seen {best.get('last_seen')})"
-        )
-    ended = [e for e in file.entries if e.get("url")]
-    if ended:
-        best = max(ended, key=lambda e: str(e.get("last_seen", "")))
-        return str(best["url"]), (
-            f"no running session in {SESSIONS_FILE} has a Remote Control page; the most "
-            f"recent one that does and has ended "
-            f"({best.get('session_id')}, {best.get('ended_at')})"
-        )
-    if file.problem is not None:
-        return REMOTE_INDEX_URL, f"{file.problem} — falling back to the account's own session list"
-    if not file.present:
-        return REMOTE_INDEX_URL, (
-            f"no {SESSIONS_FILE} in this store yet (no session hook has run here) — "
-            "the account's own session list"
-        )
-    return REMOTE_INDEX_URL, (
-        f"{SESSIONS_FILE} names no session with a Remote Control page — "
-        "the account's own session list"
-    )
-
-
 # ----------------------------------------------------------------- the command
 
 
@@ -1037,7 +991,6 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
         )
     if not getattr(args, "hook", False):
         file = read_sessions(path)
-        url, why = resolve_pane_url(file)
         lines = [f"sessions file: {path}"]
         if file.problem is not None:
             lines.append(f"  unusable: {file.problem}")
@@ -1066,8 +1019,6 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
             )
             if not entry.get("url"):
                 lines.append(f"      {entry.get('remote_control_why')}")
-        lines.append(f"a pane here would open: {url}")
-        lines.append(f"  because {why}")
         return Output(
             lines=lines,
             data={
@@ -1076,8 +1027,6 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
                 "present": file.present,
                 "problem": file.problem,
                 "sessions": file.entries,
-                "pane_url": url,
-                "pane_url_why": why,
             },
         )
 
