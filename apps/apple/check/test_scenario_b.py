@@ -20,6 +20,7 @@ only through ``harness.forget_settings`` and ``harness.save_project``, and is le
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -272,6 +273,11 @@ def test_scenario_b_switching(run: harness.Run, check_build: Path, results) -> N
             "return document.getElementById('projects-list').querySelectorAll('.project-row')"
             ".length >= 3;",
         )
+        # The page is told it has no project before SwiftUI draws the window's title again,
+        # so the title is waited for as `Window.turned` waits for it (KYO-990); one that does
+        # not follow is the check's failure, with what it said.
+        with contextlib.suppress(harness.CheckError):
+            harness.poll("the window's title to be Kyosei", lambda: window.title() == "Kyosei")
         gone = window.project_list()
         gone["title"] = window.title()
         gone["saved"] = harness.saved_project()
