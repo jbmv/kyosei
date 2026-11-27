@@ -283,18 +283,20 @@ def this_session(ctx: Context, project: Path) -> tuple[list[str], dict]:
     tell the person to reload or to start a new session. Where no row could be written, it
     says that the Mac app does not show the session until then.
     """
-    from .cmd_sessions import SESSION_ID_ENV, record_this_session
+    from .cmd_sessions import NOT_A_SESSION, SESSION_ID_ENV, record_this_session
 
     layout = ctx.layout
     through = None if layout is None else layout.store_via_main_checkout
-    if not (ctx.environ.get(SESSION_ID_ENV) or "").strip():
-        session = {"session_id": None, "recorded": False, "listed": False,
-                   "why": f"${SESSION_ID_ENV} is not set, so this is not a Claude Code session"}  # fmt: skip
+    session_id = (ctx.environ.get(SESSION_ID_ENV) or "").strip() or None
+    session: dict
+    if session_id is None:
+        session = {"session_id": None, "recorded": False, "listed": False, "why": NOT_A_SESSION}
     elif through is not None:
-        session = {"session_id": ctx.environ[SESSION_ID_ENV].strip(), "recorded": False,
-                   "listed": False,
-                   "why": f"this is a linked git worktree reading the store at {through}, "
-                   "whose ledger belongs to the session running in that checkout"}  # fmt: skip
+        session = {
+            "session_id": session_id, "recorded": False, "listed": False,
+            "why": f"this is a linked git worktree reading the store at {through}, whose "
+            "ledger belongs to the session running in that checkout",
+        }  # fmt: skip
     else:
         session = record_this_session(Path(ctx.root), ctx.environ, project)
     tell = (

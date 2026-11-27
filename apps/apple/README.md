@@ -910,7 +910,11 @@ session the drawer shows the project's orchestrator session, found by its tmux n
 (KYO-964): a session that Claude Code holds on its question whether to trust the folder has
 run no hook, so the server lists no session for it, and the question is answered there. When
 a start answers that the session waits on that question, the Start panel offers Open the
-terminal. Once Claude Code has begun, the chat follows the session and the drawer turns to its
+terminal. When a start answers that the project's session hooks are not installed (KYO-988),
+the session will never be listed, so the panel says so, names the remedy (`kyo onboard` in the
+session's terminal, then a new session or `/reload-plugins` there) and offers Open the
+terminal; the app stops waiting for the session and gives the button back once the server's
+`GET orchestrator` says the session has ended. Once Claude Code has begun, the chat follows the session and the drawer turns to its
 pane. The chat follows the session in the pane when its id changes (`/clear`, `/resume`), and
 while the session it shows is not live it asks for the project's sessions every three seconds
 and follows one that starts later, however it was started (KYO-966).

@@ -152,7 +152,15 @@ decides, and how a setup agent can find the answer before asking.
   | The session ends | `kyo turns --hook` | Silent; where D14 is yes, confirms the turn index from the transcript and copies the transcript to the local archive. |
 
 - **Without them:** the commands still work, but every rule above becomes something the agent
-  has to remember.
+  has to remember. A session is also listed for the project (`kyo sessions`, the Mac app)
+  only once one of its hooks has run, so `kyo orchestrator start` says when the project has
+  none (`session_hooks` in its document).
+- **A session already running when the plugin is enabled:** Claude Code loads the plugin's
+  hooks into it only when the person types `/reload-plugins` there; otherwise they reach
+  sessions started afterwards. Run inside such a session, `kyo harness install claude-code`
+  lists it for the project itself, and its output says to tell the person to reload or to
+  start a new session. A session that ran before any hook was installed is listed from its
+  transcript at the next session's start, where D14 is yes.
 - **Decides:** the operator, between the plugin, the copies and neither.
 - **Checked by:** `kyo onboard --check` and `kyo doctor`. A project on the plugin reads one
   `harness` item: present; missing (the marketplace is not registered or the plugin is not

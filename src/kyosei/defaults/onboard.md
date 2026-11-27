@@ -188,7 +188,12 @@ Run, using the answers from round one:
    CLAUDE.md, and it writes the advisory git `pre-push` hook. Read its output: with
    `claude` not on PATH it enables nothing and the section stays until it is run again
    where `claude` is, and a `pre-push` hook the operator already had is kept, with the
-   line to add to it named.
+   line to add to it named. The plugin's hooks reach only sessions started afterwards, and
+   this running session only once the person types `/reload-plugins` in it, which you
+   cannot do for them. Tell the person to type `/reload-plugins` in this session, or to
+   start a new session. Run inside this session, the command lists it for the project
+   itself; where its output says it could not, also tell the person that the Mac app does
+   not show this session until then.
 5. If **[C1]** chose the copies: `kyo install-hooks --copies`. It writes `.claude/settings.json`,
    and also the skill of **[C2]** and the CLAUDE.md section of **[C3]**, so do not run
    `kyo install-skill` after it: that would only report every file already current.

@@ -809,6 +809,9 @@ EVENT_ENABLED = "plugin-enabled"
 #: transcript does not say when it ended; ``last_seen`` is its last timestamped record.
 EVENT_TRANSCRIPT = "no-hook"
 
+#: Why no session's row was written by a command run outside Claude Code.
+NOT_A_SESSION = f"${SESSION_ID_ENV} is not set, so this is not a Claude Code session"
+
 _TRANSCRIPT_NAME = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$"
 )
@@ -889,10 +892,8 @@ def transcript_entry(path: Path) -> dict | None:
             first = record["timestamp"]
         if cwd is None and isinstance(record.get("cwd"), str):
             cwd = record["cwd"]
-    last = next(
-        (r["timestamp"] for r in reversed(list(_records(tail))) if isinstance(r.get("timestamp"), str)),
-        None,
-    )
+    timed = [r["timestamp"] for r in _records(tail) if isinstance(r.get("timestamp"), str)]
+    last = timed[-1] if timed else None
     lookup = find_bridge_session(str(path))
     return {
         "session_id": path.name[: -len(".jsonl")],
@@ -955,12 +956,16 @@ def record_this_session(store_root: Path, environ: dict[str, str], cwd: Path) ->
     session_id = (environ.get(SESSION_ID_ENV) or "").strip()
     path = sessions_path(store_root)
     if not session_id:
-        return {"session_id": None, "recorded": False, "listed": False, "path": str(path),
-                "why": f"${SESSION_ID_ENV} is not set, so this is not a Claude Code session"}  # fmt: skip
+        return {
+            "session_id": None, "recorded": False, "listed": False, "path": str(path),
+            "why": NOT_A_SESSION,
+        }  # fmt: skip
     current = read_sessions(path)
     if any(entry.get("session_id") == session_id for entry in current.entries):
-        return {"session_id": session_id, "recorded": False, "listed": True, "path": str(path),
-                "why": "the session is listed already"}  # fmt: skip
+        return {
+            "session_id": session_id, "recorded": False, "listed": True, "path": str(path),
+            "why": "the session is listed already",
+        }  # fmt: skip
     result = record_event(
         Path(store_root),
         session_id=session_id,

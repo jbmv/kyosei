@@ -79,8 +79,9 @@ def not_served(action: str) -> Refusal:
         f"kyo serve starts an orchestrator session and shows its terminal, and does nothing "
         f"else to one (KYO-718, KYO-964), so `{ROUTE}/{action}` is not a route; POST to "
         f"`{ROUTE}/{START}` to start one, GET `{ROUTE}` to read whether it runs, GET "
-        f"`{ROUTE}/terminal` to answer what its screen asks, end one with /exit in its terminal, and run every other `kyo orchestrator` "
-        "subcommand in a terminal on the machine or over SSH",
+        f"`{ROUTE}/terminal` to answer what its screen asks, end one with /exit in its "
+        "terminal, and run every other `kyo orchestrator` subcommand in a terminal on the "
+        "machine or over SSH",
         reason="not-served",
     )
 

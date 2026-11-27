@@ -1670,6 +1670,23 @@ whether to trust `trust_folder`, and the session does not register with Remote C
 a person answers in its terminal (see "Starting an orchestrator from another machine" above). The route answers after the
 same wait the command makes, which is several seconds.
 
+The document also carries `session_hooks` (KYO-988): `installed`, `route` (`plugin`,
+`copies` or null), `harness`, `detail` and `fix`, read from the check behind `kyo doctor`'s
+`harness` item. A session is listed for its project only once one of its hooks has run, so
+when `installed` is false the session that was started is never listed, and the Mac app's
+Start panel says so and names the remedy instead of waiting for it. `installed` is false where
+that check finds the plugin `missing`, null where the settings cannot be read, and true
+otherwise. The start enables nothing.
+
+```
+GET /v1/projects/<name>/orchestrator
+```
+
+answers `running` (with `session` when it runs, and `why` when it does not), read from the
+tmux server with `list-panes`. It needs a device token of any permission, starts nothing and is
+not logged. The Mac app reads it to give the Start button back once a session the project's
+hooks could not list has ended.
+
 The request needs a device token holding the `start` permission, sent as for the send routes:
 
 ```
@@ -1696,7 +1713,8 @@ A refusal is the usual `{"ok": false, "error", "refused_by"}` with a `reason` co
 `no-token`, `unknown-token`, `revoked-token`, `no-start-permission`, `bad-request`,
 `already-running` (409: the project's session is running, and no second one is started),
 `start-failed` (502: tmux, the orchestrator command or the project's prefix; the sentence
-says which), `not-served` (404: any other path under `orchestrator/` but its terminal), `tokens-unreadable` and
+says which), `not-served` (404: any other path under `orchestrator/` but its terminal, and a
+POST to `orchestrator` itself), `tokens-unreadable` and
 `send-log-unusable`.
 
 Every attempt is a line of `$KYOSEI_HOME/send-log.jsonl` with the action `orchestrator-start`:

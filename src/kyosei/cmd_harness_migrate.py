@@ -371,10 +371,10 @@ def migrate_claude_code(ctx: Context) -> Output:
         PLUGIN_ID,
         _run_claude,
         claude_program,
-        this_session,
         ensure_local_settings_ignored,
         link_path,
         package_dir,
+        this_session,
         write_link,
     )
     from .config import refuse_real_home_from_a_dispatch_worktree
