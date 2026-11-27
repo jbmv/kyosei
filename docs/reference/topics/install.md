@@ -50,6 +50,12 @@ Both `kyosei` and `kyo` are installed and are the same program.
    own git directory, no hook is written there, since that directory is either shared
    with other repositories or tracked in this one, and the command names the directory
    and the line to add (KYO-416).
+4. The plugin's hooks reach the Claude Code sessions started in the project afterwards. A
+   session already running there loads them only when you type `/reload-plugins` in it
+   (measured on Claude Code 2.1.332, KYO-988). Run inside a Claude Code session, the command
+   therefore lists that session for the project itself, in `sessions.json`, so that `kyo
+   sessions` and the Mac app show it, and its output says to reload or to start a new
+   session. `kyo harness migrate` does the same.
 
 The plugin is not offered by any hosted marketplace; the installed package is its only
 source, which keeps its skill and hooks the same version as the `kyo` that runs them. With

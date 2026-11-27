@@ -44,6 +44,13 @@ Kyosei never answers it and never pre-trusts a folder by writing `~/.claude.json
 start still says the session has not registered with Remote Control yet and where to
 look.
 
+**A project with no session hooks** (KYO-988). A session is listed for its project (`kyo
+sessions`, the Mac app) only once one of its hooks has run. `kyo orchestrator start` reads
+the check behind `kyo doctor`'s `harness` item and, where neither the plugin nor the copies
+are installed, says that the session will not be listed and names the remedy: `kyo onboard`
+in the session, then `/reload-plugins` there or a new session (`session_hooks` in `--json`).
+The start enables nothing.
+
 **The command is a machine setting: `orchestrator_command` in
 `$KYOSEI_HOME/settings.yml`** (`~/kyosei/settings.yml` by default; KYO-462). It is
 a list of arguments, and the literal `{prefix}` in any of them is replaced by the
