@@ -8,6 +8,7 @@ Dates are UTC, so a record completed in the evening west of Greenwich can carry 
 
 ## app-desktop
 
+- **2026-11-27** — `KYO-990` (bug) — make app-check fails scenario B since KYO-989: a line typed after the session starts is lost
 - **2026-11-25** — `KYO-986` (task) — Remove the Electron app (apps/desktop) and the documents' references to it
 - **2026-11-20** — `KYO-977` (task) — File anchors store their text: stale on any edit, follow a move, and say when the file is gone
 - **2026-11-20** — `KYO-975` (task) — Composer and scratchpads: emphasis draws live while editing, with a format menu and Cmd-B, Cmd-I
