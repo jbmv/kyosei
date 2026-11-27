@@ -537,8 +537,28 @@ class AlreadyRunning(KyoseiError):
     route (KYO-719) can answer it as a conflict and not as a failed start."""
 
 
+def hookless_sentence(hooks: dict) -> str | None:
+    """KYO-988: what a start says when the project's sessions run no Kyosei hook, else None.
+
+    A session is listed for its project only once one of its hooks has run, so such a
+    session is never listed: not by `kyo sessions`, and not by the Mac app, which waits for
+    the row. The remedy is the one the Mac app's Start panel names.
+    """
+    if hooks.get("installed") is not False:
+        return None
+    return (
+        f"this project's session hooks are not installed ({hooks.get('detail')}), so the "
+        "session runs no Kyosei hook and is never listed for the project: `kyo sessions` "
+        "and the Mac app do not show it. Run `kyo onboard` in the session, which installs "
+        "them, then type /reload-plugins in it or start a new session"
+    )
+
+
 def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> dict:
+    from .doctor_install import session_hooks
+
     session = project.prefix
+    hooks = session_hooks(project.root, environ)
     command = home_settings.load(environ).controller_argv(session)
     running = server_running(tmux)
     if not running and over_ssh(environ):
@@ -595,6 +615,9 @@ def start(project: ControllerProject, tmux: Tmux, environ: dict[str, str]) -> di
     waiting = watch_for_trust(tmux, session, spawned + TRUST_WAIT_SECONDS)
     return {
         "state": WAITING_FOR_TRUST if waiting else STARTED,
+        # KYO-988: whether the session will ever be listed. Read, never acted on: a start
+        # enables nothing in the project.
+        "session_hooks": hooks,
         "waiting_for_trust": waiting,
         "trust_folder": alive[0].cwd if waiting else None,
         "session": session,
@@ -691,6 +714,20 @@ def orchestrator_pane(root: str | Path, environ: dict[str, str]) -> Orchestrator
         if name == session and dead != "1" and pane_id:
             return OrchestratorPane(tmux.binary, tmux.socket_args, tmux.env, session, pane_id)
     raise NoOrchestratorSession(missing)
+
+
+def orchestrator_running(root: str | Path, environ: dict[str, str]) -> dict:
+    """Whether the registered project at ``root`` has a live orchestrator session (KYO-988).
+
+    ``kyo serve``'s ``GET orchestrator`` answers with this, so that a client which started a
+    session the project's hooks will never list can tell when that session has ended. It is
+    :func:`orchestrator_pane`'s ``list-panes`` read and nothing more.
+    """
+    try:
+        pane = orchestrator_pane(root, environ)
+    except NoOrchestratorSession as exc:
+        return {"running": False, "why": str(exc)}
+    return {"running": True, "session": pane.session}
 
 
 def stop(project: ControllerProject, tmux: Tmux) -> dict:
@@ -1079,6 +1116,9 @@ def cmd_controller(ctx: Context, args: Namespace) -> Output:
                 "reads the terminal, not claude.ai); if claude.ai does not list it within a "
                 f"minute, look at the session: {where}",
             ]
+        hookless = hookless_sentence(data["session_hooks"])
+        if hookless is not None:
+            lines.append(f"kyo orchestrator: {hookless}")
     elif args.action == "attach":
         # Returns only when the exec did not replace this process: in the suite.
         data = attach(project, tmux, environ)

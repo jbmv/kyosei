@@ -1086,3 +1086,77 @@ def test_start_and_list_leave_no_claude_json_in_home(env, registered: Path) -> N
     assert invoke(["controller", "start", "proj"]).code == 0
     assert invoke(["controller", "list"]).code == 0
     assert not (env["home"] / ".claude.json").exists()
+
+
+# ------------------------------------------ KYO-988: a project whose sessions run no hook
+
+#: A stand-in `claude` that, asked to install the plugin, writes what Claude Code writes: the
+#: local-scope enablement in the project and the install record in its config directory.
+#: Run as anything else it is the session, like FAKE_CLAUDE.
+PLUGIN_CLAUDE = """#!/bin/sh
+if [ "$1" = plugin ]; then
+  if [ "$2" = install ]; then
+    config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    mkdir -p .claude "$config/plugins"
+    printf '{"enabledPlugins": {"kyosei@kyosei": true}}\\n' > .claude/settings.local.json
+    printf '{"plugins": {"kyosei@kyosei": [{"scope": "local", "projectPath": "%s"}]}}\\n' \\
+      "$(pwd -P)" > "$config/plugins/installed_plugins.json"
+  fi
+  exit 0
+fi
+printf '%s\\n' "$*" > "$(dirname "$0")/claude.args"
+exec sleep 300
+"""
+
+
+@pytest.fixture
+def claude_config(monkeypatch, tmp_path: Path) -> Path:
+    directory = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(directory))
+    return directory
+
+
+def test_kyo988_c1_a_start_where_no_hook_is_installed_says_so_from_doctors_check(
+    env, registered: Path, claude_config: Path
+) -> None:
+    from kyosei.doctor_install import harness_state
+
+    run = invoke(["controller", "start", "proj", "--json"])
+    assert run.code == 0, run
+    hooks = run.json["session_hooks"]
+    assert hooks["installed"] is False and hooks["route"] is None, hooks
+    assert hooks["harness"] == "missing"
+    # The same check `kyo doctor`'s harness item and `kyo onboard --check` read.
+    assert hooks["detail"] == harness_state(registered, os.environ, ask_claude=False).detail
+    assert "no settings file enables kyosei@kyosei" in hooks["detail"]
+    # The start enabled nothing.
+    assert not (registered / ".claude").exists()
+    assert invoke(["controller", "stop", "proj"]).code == 0
+    text = invoke(["controller", "start", "proj"])
+    assert text.code == 0, text
+    assert "session hooks are not installed" in text.out
+    assert "is never listed for the project" in text.out
+    assert "`kyo onboard`" in text.out and "/reload-plugins" in text.out
+
+
+def test_kyo988_c1_a_start_where_the_copies_are_installed_says_they_are(
+    env, registered: Path, claude_config: Path
+) -> None:
+    assert invoke(["--root", str(registered), "install-hooks", "--copies"]).code == 0
+    run = invoke(["controller", "start", "proj", "--json"])
+    assert run.code == 0, run
+    hooks = run.json["session_hooks"]
+    assert (hooks["installed"], hooks["route"]) == (True, "copies"), hooks
+    assert invoke(["controller", "stop", "proj"]).code == 0
+    assert "session hooks are not installed" not in invoke(["controller", "start", "proj"]).out
+
+
+def test_kyo988_c1_a_start_where_the_plugin_is_installed_says_it_is(
+    env, registered: Path, claude_config: Path
+) -> None:
+    write_claude(env["bin"], PLUGIN_CLAUDE)
+    assert invoke(["--root", str(registered), "harness", "install", "claude-code"]).code == 0
+    run = invoke(["controller", "start", "proj", "--json"])
+    assert run.code == 0, run
+    hooks = run.json["session_hooks"]
+    assert (hooks["installed"], hooks["route"]) == (True, "plugin"), hooks

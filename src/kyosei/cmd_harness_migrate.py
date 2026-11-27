@@ -374,6 +374,7 @@ def migrate_claude_code(ctx: Context) -> Output:
         ensure_local_settings_ignored,
         link_path,
         package_dir,
+        this_session,
         write_link,
     )
     from .config import refuse_real_home_from_a_dispatch_worktree
@@ -432,6 +433,9 @@ def migrate_claude_code(ctx: Context) -> Output:
     lines.append(
         f"project: enabled {PLUGIN_ID} in {code_root} at local scope ({LOCAL_SETTINGS_REL})"
     )
+    # KYO-988: the plugin's hooks reach this running session only after a reload.
+    session_lines, session = this_session(ctx, code_root)
+    lines.extend(session_lines)
 
     # 3: remove the copies.
     removed: list[dict] = []
@@ -534,5 +538,6 @@ def migrate_claude_code(ctx: Context) -> Output:
             "left": left,
             "pre_push": {"changes": pre_push_changes, "notes": pre_push_notes},
             "source_checkout": note,
+            "this_session": session,
         },
     )

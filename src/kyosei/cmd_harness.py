@@ -266,6 +266,83 @@ def _run_claude(program: str, args: list[str], cwd: Path, environ: dict[str, str
     return output
 
 
+#: What a running Claude Code session needs before the hooks of a plugin enabled during it
+#: run there (KYO-988, measured on Claude Code 2.1.332: none of the plugin's hooks ran in
+#: the session until ``/reload-plugins`` was typed in it; its next ``Stop`` then ran them).
+RELOAD_COMMAND = "/reload-plugins"
+
+
+def this_session(ctx: Context, project: Path) -> tuple[list[str], dict]:
+    """KYO-988.c5-c6: list the Claude Code session this command runs in, and say what it
+    still lacks, once the plugin has been enabled in ``project``.
+
+    A session is listed only once one of its hooks has run, and a session in which the
+    plugin is enabled runs none of them until the person types :data:`RELOAD_COMMAND` in
+    it, which an agent cannot do. So the command writes the session's row itself
+    (:func:`kyosei.cmd_sessions.record_this_session`), and its output tells the agent to
+    tell the person to reload or to start a new session. Where no row could be written, it
+    says that the Mac app does not show the session until then.
+    """
+    from .cmd_sessions import NOT_A_SESSION, SESSION_ID_ENV, record_this_session
+
+    layout = ctx.layout
+    through = None if layout is None else layout.store_via_main_checkout
+    session_id = (ctx.environ.get(SESSION_ID_ENV) or "").strip() or None
+    session: dict
+    if session_id is None:
+        session = {"session_id": None, "recorded": False, "listed": False, "why": NOT_A_SESSION}
+    elif through is not None:
+        session = {
+            "session_id": session_id, "recorded": False, "listed": False,
+            "why": f"this is a linked git worktree reading the store at {through}, whose "
+            "ledger belongs to the session running in that checkout",
+        }  # fmt: skip
+    else:
+        session = record_this_session(Path(ctx.root), ctx.environ, project)
+    tell = (
+        f"Tell the person to type {RELOAD_COMMAND} in this session now, or to start a new "
+        "session"
+    )
+    if session["session_id"] is None:
+        lines = [
+            "hooks: Kyosei's hooks reach only the Claude Code sessions started in this project "
+            f"from now on, and a session already running here only once the person types "
+            f"{RELOAD_COMMAND} in it. Tell the person to start a new session, or to type "
+            f"{RELOAD_COMMAND} in the one running here; until then the Mac app does not show "
+            "a session that was running before this command"
+        ]
+    elif session["listed"]:
+        recorded = (
+            f"session: this Claude Code session ({session['session_id']}) is listed for the "
+            f"project now, in {session.get('path')}, written by this command, so `kyo "
+            "sessions` and the Mac app show it"
+            if session["recorded"]
+            else f"session: this Claude Code session ({session['session_id']}) is listed "
+            "for the project already"
+        )
+        reach = (
+            "Claude Code loads a plugin enabled during a session only when the person types "
+            f"{RELOAD_COMMAND} in it; otherwise its hooks reach only sessions started "
+            f"afterwards. {tell}"
+        )
+        lines = [
+            recorded,
+            f"hooks: the plugin's hooks do not run in this session yet. {reach}. Until then "
+            "this session runs no stop-time sweep, doctor or turn index"
+            if session["recorded"]
+            else f"hooks: the plugin's hooks reach this session only after a reload. {reach}",
+        ]
+    else:
+        lines = [
+            f"session: this Claude Code session ({session['session_id']}) could not be "
+            f"listed for the project: {session['why']}",
+            "hooks: they reach only sessions started afterwards, and this one only once the "
+            f"person types {RELOAD_COMMAND} in it. {tell}, and say that the Mac app does not "
+            "show this session until then",
+        ]
+    return lines, {**session, "reload": RELOAD_COMMAND}
+
+
 def install_claude_code(ctx: Context) -> Output:
     """The ``claude-code`` harness: link, register, then enable in the project here.
 
@@ -326,6 +403,7 @@ def install_claude_code(ctx: Context) -> Output:
         "pre_push": None,
         "claude_md_section_removed": False,
         "commands_to_run": to_run,
+        "this_session": None,
     }
 
     def shown(args: list[str], cwd: Path | None = None) -> str:
@@ -366,6 +444,8 @@ def install_claude_code(ctx: Context) -> Output:
             lines.append(
                 f"project: enabled {PLUGIN_ID} in {project} at local scope ({LOCAL_SETTINGS_REL})"
             )
+            session_lines, data["this_session"] = this_session(ctx, project)
+            lines.extend(session_lines)
             # KYO-613: the plugin's session-start brief now names the project, so the
             # section saying setup is incomplete is wrong from here on.
             removed = claude_md_without_init_section(project)

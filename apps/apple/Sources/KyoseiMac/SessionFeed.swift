@@ -589,10 +589,18 @@ final class SessionFeed {
         let marked = !((body["marks"] as? [Any]) ?? []).isEmpty
         var body = body
         if !marked { body["marks"] = nil }
-        guard let session = current, let token = Self.deviceToken(),
-            let data = try? JSONSerialization.data(withJSONObject: body)
-        else {
-            send("sent", #"{"error": "No session or device token to send with."}"#)
+        // KYO-988: each missing piece is named alone, so a project that lists no session is
+        // not told about a token it holds.
+        guard let session = current else {
+            send("sent", #"{"error": "There is no session to send to: this project lists no live session."}"#)
+            return
+        }
+        guard let token = Self.deviceToken() else {
+            send("sent", #"{"error": "No device token to send with. Enter one in Settings."}"#)
+            return
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else {
+            send("sent", #"{"error": "The message could not be put into JSON."}"#)
             return
         }
         let client = client
@@ -1375,7 +1383,14 @@ final class SessionFeed {
                 #"{"phase": "answered", "status": \#(reply.status), "reply": \#(document)}"#)
             // A session already running may not be listed yet, so it is watched for as well.
             let running = object?["reason"] as? String == "already-running"
-            if reply.status == 200 || running {
+            // KYO-988: a session the project's hooks cannot list is never waited for; the
+            // button comes back once its tmux session has ended.
+            let hooks = object?["session_hooks"] as? [String: Any]
+            let hookless = hooks?["installed"] as? Bool == false
+            if reply.status == 200, hookless {
+                followHooklessSession()
+                if terminalOpen, terminalOrchestrator { openTerminal() }
+            } else if reply.status == 200 || running {
                 followStartedSession()
                 // A drawer open on the orchestrator's terminal was refused while there was no
                 // session to show, and now there is one, waiting on the trust prompt or not.
@@ -1409,6 +1424,42 @@ final class SessionFeed {
                 "The session was started, but the server has not listed it after ten minutes. "
                 + "`kyo orchestrator list` on the server's machine says what is running."
             send("start", #"{"phase": "failed", "text": \#(quoted(why))}"#)
+        }
+    }
+
+    /// KYO-988: follows a session started in a project whose session hooks are not installed.
+    /// The server will not list it, so the app does not wait for that. It shows the session
+    /// if one is listed after all (the person ran `kyo onboard` in it, which lists it, or
+    /// typed /reload-plugins there), and gives the Start button back once the server says
+    /// the orchestrator's tmux session has ended.
+    private func followHooklessSession() {
+        startWatch?.cancel()
+        let project = project
+        startWatch = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.startWatchPoll)
+                guard !Task.isCancelled, project == self.project else { return }
+                if let rows = try? await client.sessions(project: project),
+                    let row = rows.first(where: { $0.live && $0.has_pane })
+                        ?? rows.first(where: { $0.live })
+                {
+                    guard !Task.isCancelled else { return }
+                    if current != row.session_id { select(session: row.session_id) }
+                    await sendMenu()
+                    return
+                }
+                guard let token = Self.deviceToken(),
+                    let reply = try? await client.authorised(
+                        "GET", "v1/projects/\(project)/orchestrator", token: token),
+                    reply.status == 200,
+                    let object = try? JSONSerialization.jsonObject(with: reply.data)
+                        as? [String: Any],
+                    object["running"] as? Bool == false
+                else { continue }
+                guard !Task.isCancelled, project == self.project else { return }
+                send("start", #"{"phase": "ended"}"#)
+                return
+            }
         }
     }
 

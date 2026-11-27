@@ -102,7 +102,8 @@ this server starts. It needs a device token holding the ``start`` permission and
 ``orchestrator/terminal`` with its ``input`` and ``resize`` (KYO-964): the terminal routes
 above, on the orchestrator session found by its tmux name, which is how a claude waiting on
 the trust prompt, and so recorded as no session, is reached. :mod:`kyosei.serve_terminal`
-holds them. The ``orchestrator`` command stays on :data:`NOT_SERVED`.
+holds them. ``orchestrator`` itself (GET, KYO-988) says whether that session runs, read
+with ``list-panes``. The ``orchestrator`` command stays on :data:`NOT_SERVED`.
 
 THE FILES OF A PROJECT (KYO-735). ``files`` (the roots), ``files/{root}/tree[/{relpath}]`` (one
 directory), ``files/{root}/blob/{relpath}`` (one file's bytes, with an ``ETag``) and
@@ -900,11 +901,15 @@ class ServeHandler(BaseHTTPRequestHandler):
                 raise _no_route(method, split.path)
             allowed = ("GET",) if len(rest) == 4 else ("POST",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == ORCHESTRATOR_ROUTE:
-            if rest[3:] != [ORCHESTRATOR_START]:
+            if len(rest) == 3 and method == "GET":
+                # KYO-988: whether the session runs, read and nothing else.
+                allowed = ("GET",)
+            elif rest[3:] != [ORCHESTRATOR_START]:
                 from . import serve_orchestrator
 
                 raise serve_orchestrator.not_served("/".join(rest[3:]))
-            allowed = ("POST",)
+            else:
+                allowed = ("POST",)
         elif len(rest) == 3 and rest[0] == "projects" and rest[2] == PROJECT_CONFIG_ROUTE:
             allowed = ("GET",)
         elif len(rest) >= 3 and rest[0] == "projects" and rest[2] == HISTORY_ROUTE:
@@ -1003,6 +1008,8 @@ class ServeHandler(BaseHTTPRequestHandler):
             return self._config_write(rest[1], rest[2], rest[3], split.query)
         if rest[2] == "cmd":
             return self._command(rest[1], rest[3], rest[4:], split.query)
+        if rest[2] == ORCHESTRATOR_ROUTE and len(rest) == 3:
+            return self._orchestrator_status(rest[1], split.query)
         if rest[2] == ORCHESTRATOR_ROUTE and rest[3] == SESSION_TERMINAL_ROUTE:
             return self._session_terminal(rest[1], "", rest[4:], split.query, orchestrator=True)
         if rest[2] == ORCHESTRATOR_ROUTE:
@@ -1314,6 +1321,23 @@ class ServeHandler(BaseHTTPRequestHandler):
             action,
             self.headers.get("Authorization"),
             self._body,
+        )
+        return 200, _json_bytes(document)
+
+    def _orchestrator_status(self, name: str, query: str) -> tuple:
+        """``GET orchestrator`` (KYO-988), :mod:`kyosei.serve_orchestrator`'s read."""
+        from . import serve_orchestrator
+
+        if query:
+            raise Refusal(
+                400,
+                "the orchestrator route takes no query string; send the token as "
+                "`Authorization: Bearer <token>`",
+            )
+        document = serve_orchestrator.status(
+            self.server.environ,
+            lambda: self.server.project(name).root,
+            self.headers.get("Authorization"),
         )
         return 200, _json_bytes(document)
 

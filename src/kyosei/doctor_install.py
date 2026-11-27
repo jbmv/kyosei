@@ -58,6 +58,8 @@ HARNESS_DOUBLED = "doubled"
 #: Not one of the states above: a settings file whose enablement or copies cannot be
 #: read, so no state can be told. Its fix is the file's correction.
 HARNESS_UNREADABLE = "unreadable"
+#: The detail of a project on the copies, where the harness item is not shown.
+HARNESS_ON_COPIES = "on the copies"
 
 #: How a run that asked `claude` names its source.
 HARNESS_SOURCE_CLAUDE = "`claude plugin list --json`"
@@ -283,7 +285,9 @@ def harness_state(
                 False, None, unreadable_copies, None, enabled=False, source=None
             )
         if hooks or skills:
-            return HarnessState(False, None, "on the copies", None, enabled=False, source=None)
+            return HarnessState(
+                False, None, HARNESS_ON_COPIES, None, enabled=False, source=None
+            )
         why = (
             f"{PLUGIN_ID} is disabled for this project in {enabled_in}"
             if enabled is False
@@ -415,6 +419,46 @@ def harness_state(
         None,
         source,
     )
+
+
+#: The routes a project's session hooks can come by, as :func:`session_hooks` names them.
+HOOKS_ROUTE_PLUGIN = "plugin"
+HOOKS_ROUTE_COPIES = "copies"
+
+
+def session_hooks(code_root: Path, environ: Mapping[str, str] | None = None) -> dict:
+    """KYO-988: whether a Claude Code session started in ``code_root`` runs Kyosei's hooks.
+
+    A session is listed for its project (``sessions.json``, `kyo sessions`, the Mac app)
+    only once one of its hooks has run, so a session started where none is installed is
+    never listed. ``kyo orchestrator start`` and ``kyo serve``'s start route carry this
+    document so that a client can say so instead of waiting on a row that cannot arrive.
+
+    It is :func:`harness_state`, the check behind `kyo doctor`'s ``harness`` item and `kyo
+    onboard --check`, read without running ``claude``, as `kyo doctor --hook` reads it.
+    ``installed`` is False where that check finds the plugin ``missing``: no settings file
+    enables it and no copies are installed, or a settings file enables a plugin Claude Code
+    has not installed for the project. It is None where the settings cannot be read, and
+    True otherwise. Nothing here enables anything; ``fix`` names the command that would.
+    """
+    state = harness_state(code_root, environ, ask_claude=False)
+    installed: bool | None
+    if not state.on_plugin:
+        # On the copies, or a settings.json whose copies cannot be read (its detail says so).
+        readable = state.detail == HARNESS_ON_COPIES
+        installed, route = (True, HOOKS_ROUTE_COPIES) if readable else (None, None)
+    else:
+        route = HOOKS_ROUTE_PLUGIN if state.enabled else None
+        installed = (
+            None if state.status == HARNESS_UNREADABLE else state.status != HARNESS_MISSING
+        )
+    return {
+        "installed": installed,
+        "route": route,
+        "harness": state.status,
+        "detail": state.detail,
+        "fix": state.fix,
+    }
 
 
 def on_the_plugin(store: Store) -> bool:
