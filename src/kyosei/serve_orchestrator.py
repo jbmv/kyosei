@@ -3,14 +3,21 @@
 ``POST /v1/projects/{project}/orchestrator/start``, with a JSON object as its body, starts
 that project's orchestrator session on the server's machine and answers with what ``kyo
 orchestrator start <project> --json`` prints, ``waiting-for-trust`` and its folder included.
-It exists so that a device with no SSH path to the machine can start a session.
+It exists so that a device with no SSH path to the machine can start a session. The
+document carries ``session_hooks`` (KYO-988), whether the project's sessions run Kyosei's
+hooks: a session is listed only once one of its hooks has run, so a client told
+``installed: false`` stops waiting for the session to be listed.
+
+``GET /v1/projects/{project}/orchestrator`` (KYO-988) answers whether that session runs,
+read with ``list-panes``, so that such a client can give its Start button back once the
+session has ended.
 
 THE ONE PROCESS ``kyo serve`` STARTS. Every other route reads, writes a file or a note, or
 sends keys to a session that already runs. No route stops a session (``/exit`` in its
 terminal ends one) or runs another ``kyo orchestrator`` subcommand, and the command itself
 stays on :data:`kyosei.serve.NOT_SERVED`. The one other route under ``orchestrator/`` is the
 orchestrator session's terminal (KYO-964), which starts nothing and is
-:mod:`kyosei.serve_terminal`'s.
+:mod:`kyosei.serve_terminal`'s; ``GET orchestrator`` itself reads and starts nothing.
 
 WHAT STANDS IN FRONT OF A START, in order, each refused by a sentence naming its remedy:
 
@@ -71,8 +78,8 @@ def not_served(action: str) -> Refusal:
         404,
         f"kyo serve starts an orchestrator session and shows its terminal, and does nothing "
         f"else to one (KYO-718, KYO-964), so `{ROUTE}/{action}` is not a route; POST to "
-        f"`{ROUTE}/{START}` to start one, GET `{ROUTE}/terminal` to answer what its screen "
-        "asks, end one with /exit in its terminal, and run every other `kyo orchestrator` "
+        f"`{ROUTE}/{START}` to start one, GET `{ROUTE}` to read whether it runs, GET "
+        f"`{ROUTE}/terminal` to answer what its screen asks, end one with /exit in its terminal, and run every other `kyo orchestrator` "
         "subcommand in a terminal on the machine or over SSH",
         reason="not-served",
     )
@@ -107,6 +114,26 @@ def _start(
                 f"the orchestrator session was not started: {exc}",
                 reason="start-failed",
             ) from exc
+
+
+def status(
+    environ: dict[str, str], root_of: Callable[[], str], authorization: str | None
+) -> dict[str, Any]:
+    """``GET orchestrator``: whether the project's orchestrator session runs (KYO-988).
+
+    A read, refused like the session reads without a device token of any permission. It
+    lets a client that started a session the project's hooks will never list give its
+    Start button back once that session has ended. It starts nothing, sends nothing and is
+    not logged.
+    """
+    serve_send.require_reader(environ, authorization)
+    try:
+        return {"ok": True, **cmd_controller.orchestrator_running(root_of(), environ)}
+    except (KyoseiError, OSError, subprocess.SubprocessError) as exc:
+        raise Refusal(
+            502, f"whether the orchestrator session runs could not be read: {exc}",
+            reason="status-failed",
+        ) from exc
 
 
 def perform(

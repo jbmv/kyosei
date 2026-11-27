@@ -786,6 +786,199 @@ def record_event(
     }
 
 
+# ------------------------------------------------------- sessions no hook recorded
+#
+# KYO-988. A session is listed only once one of its hooks has run, so a session that ran in
+# the project before its hooks were installed has a transcript and no row, and a session in
+# which the plugin was enabled has no row until its hooks are loaded. Two writers fill
+# those gaps, each with a ``last_event`` that is no hook event's, so that no reader takes
+# the row for one a hook wrote.
+
+#: The ``last_event`` of the row `kyo harness install claude-code` and `kyo harness migrate`
+#: write for the Claude Code session they run in, named by :data:`SESSION_ID_ENV`. Measured
+#: on Claude Code 2.1.332: a plugin enabled during a session runs none of its hooks there
+#: until the person types ``/reload-plugins``, and its next ``Stop`` then writes the row
+#: as usual. Until then this row is the session's only one: it has the process (the
+#: command's ancestry reaches the session as a hook's does) and no transcript path, URL,
+#: turn index line or stop count, since only a hook is handed those.
+EVENT_ENABLED = "plugin-enabled"
+
+#: The ``last_event`` of a row listed from a transcript, at the ``SessionStart`` of a later
+#: session of the project: the session ran with no hook, so nothing recorded it. It is
+#: marked ended, since no hook will ever say otherwise, with no ``ended_at``, since the
+#: transcript does not say when it ended; ``last_seen`` is its last timestamped record.
+EVENT_TRANSCRIPT = "no-hook"
+
+_TRANSCRIPT_NAME = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$"
+)
+
+#: How many lines at the start of a transcript are read for its first timestamp and cwd.
+#: Measured on the two hookless transcripts of KYO-988: the first timestamped record, which
+#: carries the cwd, was line 5.
+UNLISTED_HEAD_LINES = 40
+#: How many bytes at its end are read for its last timestamp.
+UNLISTED_TAIL_BYTES = 64 * 1024
+
+
+def _iso(epoch: float) -> str:
+    from datetime import UTC, datetime
+
+    stamp = datetime.fromtimestamp(epoch, UTC)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
+
+
+def _records(lines: list[str]):
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
+def unlisted_transcripts(entries: list[dict], directory: Path, own: str) -> list[Path]:
+    """The transcripts in ``directory`` whose session ``entries`` do not list.
+
+    ``directory`` is the one Claude Code keeps this project's transcripts in, taken from
+    the path a hook was handed and never recomputed. Only top-level ``<uuid>.jsonl`` files
+    are sessions; a subagent's transcript lies beneath its session's directory. Once the
+    file holds :data:`MAX_SESSIONS` entries, a transcript last written before the oldest of
+    them is passed over: it would be dropped again by the cap, so it is not read.
+    """
+    listed = {str(entry.get("session_id")) for entry in entries}
+    floor = (
+        min(str(entry.get("last_seen", "")) for entry in entries)
+        if len(entries) >= MAX_SESSIONS
+        else None
+    )
+    try:
+        children = sorted(directory.iterdir())
+    except OSError:
+        return []
+    found: list[Path] = []
+    for path in children:
+        if not _TRANSCRIPT_NAME.match(path.name):
+            continue
+        session_id = path.name[: -len(".jsonl")]
+        if session_id == own or session_id in listed:
+            continue
+        try:
+            if not path.is_file():
+                continue
+            if floor is not None and _iso(path.stat().st_mtime) <= floor:
+                continue
+        except OSError:
+            continue
+        found.append(path)
+    return found
+
+
+def transcript_entry(path: Path) -> dict | None:
+    """The row of the session whose transcript is ``path``, read from it; None if unreadable."""
+    try:
+        head = _head_lines(path, UNLISTED_HEAD_LINES)
+        tail = _tail_lines(path, UNLISTED_TAIL_BYTES)
+        modified = _iso(path.stat().st_mtime)
+    except OSError:
+        return None
+    first = cwd = None
+    for record in _records(head):
+        if first is None and isinstance(record.get("timestamp"), str):
+            first = record["timestamp"]
+        if cwd is None and isinstance(record.get("cwd"), str):
+            cwd = record["cwd"]
+    last = next(
+        (r["timestamp"] for r in reversed(list(_records(tail))) if isinstance(r.get("timestamp"), str)),
+        None,
+    )
+    lookup = find_bridge_session(str(path))
+    return {
+        "session_id": path.name[: -len(".jsonl")],
+        "state": STATE_ENDED,
+        "first_seen": first or modified,
+        "last_seen": last or first or modified,
+        "last_event": EVENT_TRANSCRIPT,
+        "cwd": cwd,
+        "remote_control_id": lookup.bridge_session_id,
+        "url": lookup.url,
+        "remote_control_outcome": lookup.outcome,
+        "remote_control_why": lookup.why,
+        "ended_at": None,
+        "pid": None,
+        "process": None,
+        "host": None,
+        "transcript_path": home_relative(str(path)),
+        "scratchpad_dir": None,
+        "stops": 0,
+        "stopped_at": None,
+    }
+
+
+def list_unlisted_sessions(store_root: Path, transcript_path: str | None, own: str) -> dict:
+    """Add a row for each session of this project that ran with no hook (KYO-988.c4).
+
+    Run at ``SessionStart``, the first event of a session whose hooks are installed, so a
+    session that ran before they were is listed once the project has them. Returns what
+    was added; never raises.
+    """
+    path = sessions_path(store_root)
+    if not transcript_path:
+        return {"added": [], "why": "the hook payload named no transcript, so no directory"}
+    current = read_sessions(path)
+    if current.problem is not None:
+        return {"added": [], "why": current.problem}
+    directory = Path(transcript_path).expanduser().parent
+    added = [
+        entry
+        for entry in (
+            transcript_entry(found)
+            for found in unlisted_transcripts(current.entries, directory, own)
+        )
+        if entry is not None
+    ]
+    if not added:
+        return {"added": [], "why": None}
+    problem = write_sessions(path, [*current.entries, *added])
+    return {"added": [e["session_id"] for e in added], "why": problem}
+
+
+def record_this_session(store_root: Path, environ: dict[str, str], cwd: Path) -> dict:
+    """Write the row of the Claude Code session this command runs in (KYO-988.c5).
+
+    For `kyo harness install claude-code` and `kyo harness migrate`, run inside a session:
+    its hooks were not installed when it began, so it has no row and the Mac app does not
+    show it. The session is the one :data:`SESSION_ID_ENV` names, and its process is found
+    as a hook finds it. A session that already has a row keeps it untouched. Never raises.
+    """
+    session_id = (environ.get(SESSION_ID_ENV) or "").strip()
+    path = sessions_path(store_root)
+    if not session_id:
+        return {"session_id": None, "recorded": False, "listed": False, "path": str(path),
+                "why": f"${SESSION_ID_ENV} is not set, so this is not a Claude Code session"}  # fmt: skip
+    current = read_sessions(path)
+    if any(entry.get("session_id") == session_id for entry in current.entries):
+        return {"session_id": session_id, "recorded": False, "listed": True, "path": str(path),
+                "why": "the session is listed already"}  # fmt: skip
+    result = record_event(
+        Path(store_root),
+        session_id=session_id,
+        event=EVENT_ENABLED,
+        cwd=str(cwd),
+        transcript_path=None,
+        process=session_process(),
+    )
+    written = result["write_problem"] is None
+    return {
+        "session_id": session_id,
+        "recorded": written,
+        "listed": written,
+        "path": str(path),
+        "why": result["write_problem"],
+    }
+
+
 # ------------------------------------------------------- the question a session waits on
 #
 # KYO-940. Claude Code writes the assistant record that holds an ``AskUserQuestion`` call to
@@ -1011,6 +1204,14 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
                     else "not recorded"
                 )
             )
+            written_by = {
+                EVENT_ENABLED: "no hook has run in this session yet; listed by `kyo harness` "
+                "when it enabled the plugin here (KYO-988)",
+                EVENT_TRANSCRIPT: "no hook ran in this session; listed from its transcript "
+                "by a later session's start (KYO-988)",
+            }.get(str(entry.get("last_event")))
+            if written_by is not None:
+                lines.append(f"      {written_by}")
             lines.append(f"      transcript: {entry.get('transcript_path') or 'not recorded'}")
             lines.append(f"      scratchpad: {entry.get('scratchpad_dir') or 'not recorded'}")
             lines.append(
@@ -1094,6 +1295,22 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
         lines.append(f"{SESSIONS_FILE}: {result['write_problem']}")
     if result["read_problem"] is not None:
         lines.append(f"{SESSIONS_FILE}: {result['read_problem']} (rewritten from this session)")
+    unlisted = None
+    if event == EVENT_START and result["write_problem"] is None:
+        # KYO-988.c4: the sessions that ran here before the hooks were installed. Their
+        # transcripts are read only in a project that has opted in to that (KYO-656), and
+        # only such a project's sessions are served, so elsewhere they would have no reader.
+        from .cmd_turns import _config_of
+        from .config import transcripts_opted_in
+
+        config = _config_of(ctx)
+        if config is not None and transcripts_opted_in(config):
+            transcript = payload.get("transcript_path")
+            unlisted = list_unlisted_sessions(
+                Path(ctx.root), transcript if isinstance(transcript, str) else None, session_id
+            )
+            if unlisted["added"] and unlisted["why"] is not None:
+                lines.append(f"{SESSIONS_FILE}: {unlisted['why']}")
     announced = None
     if event == "Stop" and not lines:
         # KYO-770: the session's task list, announced and never a block. This hook's group
@@ -1110,5 +1327,10 @@ def cmd_sessions(ctx: Context, args: Namespace) -> Output:
             lines.append(cmd_agenda.stop_hook_output(announced))
     return Output(
         lines=lines,
-        data={"ok": result["write_problem"] is None, **result, "agenda_announced": announced},
+        data={
+            "ok": result["write_problem"] is None,
+            **result,
+            "agenda_announced": announced,
+            "unlisted": unlisted,
+        },
     )

@@ -23,7 +23,9 @@ from kyosei import cli, cmd_controller, device_tokens, serve, serve_orchestrator
 from .conftest import invoke
 from .test_kyo_controller import (  # noqa: F401 - the fixtures, by name
     MEASURED_TRUST_SCREEN,
+    PLUGIN_CLAUDE,
     bin_dir,
+    claude_config,
     env,
     no_real_launchctl,
     registered,
@@ -321,10 +323,11 @@ def test_no_route_runs_any_other_orchestrator_subcommand(
     assert {"stop", "attach", "list"} <= set(others)
     for name in [*others, "install", "uninstall", "start/proj", ""]:
         path = f"{orchestrator}/{name}".rstrip("/")
-        for status, refused in (
-            post(served, path, token),
-            (lambda got: (got[0], body_json(got[2])))(served.get(path)),
-        ):
+        answers = [post(served, path, token)]
+        if name:
+            # KYO-988: GET `orchestrator` itself reads whether the session runs.
+            answers.append((lambda got: (got[0], body_json(got[2])))(served.get(path)))
+        for status, refused in answers:
             assert status == 404, (name, refused)
             assert refused["reason"] == "not-served" and "KYO-718" in refused["error"]
             assert "/exit" in refused["error"]
@@ -356,7 +359,7 @@ def test_the_start_module_cannot_stop_a_session() -> None:
         and isinstance(node.value, ast.Name)
         and node.value.id == "cmd_controller"
     }
-    assert reached == {"AlreadyRunning", "start_registered"}, reached
+    assert reached == {"AlreadyRunning", "start_registered", "orchestrator_running"}, reached
     imported = [
         alias.name
         for node in ast.walk(tree)
@@ -364,3 +367,58 @@ def test_the_start_module_cannot_stop_a_session() -> None:
         for alias in node.names
     ]
     assert "stop" not in imported and "subprocess" not in imported
+
+
+# ------------------------------------------- KYO-988: a project whose sessions run no hook
+
+STATUS = "/v1/projects/proj/orchestrator"
+
+
+def status_of(client: Client, token: str | None) -> tuple[int, dict]:
+    headers = {} if token is None else {"Authorization": f"Bearer {token}"}
+    status, _, raw = client.request(STATUS, headers=headers)
+    return status, body_json(raw)
+
+
+def test_kyo988_c1_the_route_says_the_hooks_are_missing_and_the_remedy_clears_it(
+    env, served: Client, token: str, registered: Path, claude_config: Path
+) -> None:
+    status, started = post(served, START, token)
+    assert status == 200, started
+    assert started["session_hooks"]["installed"] is False, started
+    assert started["session_hooks"]["harness"] == "missing"
+    # The remedy the Start panel names: `kyo onboard`, whose step 4 is this command.
+    write_claude(env["bin"], PLUGIN_CLAUDE)
+    assert invoke(["--root", str(registered), "harness", "install", "claude-code"]).code == 0
+    tmux(env["socket"], "kill-session", "-t", "=TST")
+    status, started = post(served, START, token)
+    assert status == 200, started
+    assert started["session_hooks"]["installed"] is True, started
+    assert started["session_hooks"]["route"] == "plugin"
+
+
+def test_kyo988_c3_get_orchestrator_says_whether_the_session_runs(
+    env, served: Client, token: str, store_home: Path
+) -> None:
+    reader = issue("phone")  # a token of no permission reads it
+    status, document = status_of(served, reader)
+    assert (status, document["running"]) == (200, False), document
+    assert post(served, START, token)[0] == 200
+    status, document = status_of(served, reader)
+    assert (status, document["running"], document["session"]) == (200, True, "TST"), document
+    tmux(env["socket"], "kill-session", "-t", "=TST")
+    status, document = status_of(served, reader)
+    assert (status, document["running"]) == (200, False), document
+    assert "no orchestrator session TST is running" in document["why"]
+    # Nothing was started by asking, and nothing was logged.
+    assert sessions(env) == []
+    assert [row["action"] for row in log_rows(store_home)] == [serve_orchestrator.LOG_ACTION]
+
+
+def test_kyo988_c3_get_orchestrator_needs_a_token_and_issuing_one_clears_it(
+    env, served: Client
+) -> None:
+    status, refused = status_of(served, None)
+    assert status == 401, refused
+    status, document = status_of(served, issue("phone"))
+    assert status == 200 and document["running"] is False, document
