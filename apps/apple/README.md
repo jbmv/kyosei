@@ -86,7 +86,9 @@ The files that the later sections do not name, with what each holds:
 | File | What it holds |
 |---|---|
 | `Package.swift` | the package: the `KyoseiClient` library, the `KyoseiMac` executable and a test target for each |
-| `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the parser of its event stream, and the follower that reconnects a session's stream |
+| `Sources/KyoseiClient/ServeClient.swift` | the requests to `kyo serve`, the connections they are sent on, the parser of its event stream, and the follower that reconnects a session's stream |
+| `Sources/KyoseiClient/ConnectionLog.swift` | the connection log, described under "The connection and its log" |
+| `Sources/KyoseiMac/SystemWatch.swift` | the watch of the machine's sleep and wake and of its network path, which writes each to the connection log and starts the feed's reads again |
 | `Sources/KyoseiClient/SealKeyItem.swift` | the seal key as a synchronizable keychain item, and the `seal-key` mode's contract with `kyo` |
 | `Sources/KyoseiMac/App.swift` | the executable's entry, which is the `seal-key` mode or the app; the application delegate, the one window, the File menu's Projects… item and the Settings scene. In a check build the entry first refuses a launch that names no test server and puts the build's own pasteboard in the general one's place, and the delegate starts the app as an accessory app and starts the check channel |
 | `web/build.mjs` | the build of the page into the app's resources, which are not committed |
@@ -938,6 +940,47 @@ item, which iCloud Keychain carries (KYO-789). The executable does that only whe
 window is made. `kyo` is to run it that way when a person chooses the `icloud-keychain` key
 store; that part of `kyo` is planned and not built. Without the two variables the package
 carries no entitlement.
+
+### The connection and its log
+
+<!-- governs:
+- apps/apple/Sources/KyoseiClient/ConnectionLog.swift
+- apps/apple/Sources/KyoseiMac/SystemWatch.swift
+-->
+
+While the chat does not follow its session, the status bar says "Not live since" the moment
+it stopped, and hovering says why; the app is connecting again meanwhile (KYO-725).
+
+Every request of a server is sent on a URL session of the app's own (`Connections` in
+`ServeClient.swift`, KYO-989). A URL session keeps a connection open for the requests that
+follow, and to a server behind an HTTP/2 proxy, as Tailscale Serve is, it sends every request
+and stream on one connection. A connection that goes silent without closing, as one can across
+a sleep, is kept: each later request times out on it, and a new connection is not opened until
+a new session is made. The app therefore makes a new session when a request or stream times
+out, when the machine wakes, and when a network path is satisfied again after one that was
+not; on a wake and on a returning path it also starts every read and stream again at once,
+rather than waiting on timers the sleep may have stopped. The chat is then read again from the
+top; the composer's boxes are left as they are. `kyo serve` reached on its own port closes each
+connection after its answer, and is not affected by a kept connection.
+
+The app writes a connection log to `~/Library/Logs/Kyosei/connection.log`, or to the file
+`KYOSEI_CONNECTION_LOG` names, which a person can hand over after the chat stopped following
+its session. It holds the app's launch with its server and project, the machine's sleep and
+wake, each change of network path with whether it is satisfied and its interfaces, each read or
+stream that failed with its error and the wait before the next attempt, each new session of
+connections with its reason, and each return to live. Each line begins with its time in ISO 8601
+with the local offset. The file is kept across launches; when it would pass 512 KiB it is moved
+to `connection.log.1`, replacing the one there, and a new one is begun. A check build writes a
+log only where `KYOSEI_CONNECTION_LOG` names one.
+
+The tests are `Tests/KyoseiMacTests/SilentConnectionTests.swift`, which drive the requests
+against a stand-in server whose connections go silent (`Tests/KyoseiMacTests/Fixtures/silent-relay.mjs`,
+run by Node and skipped without it), and `Tests/KyoseiMacTests/WakeTests.swift`, which drive the
+feed through a wake and exist only in a check build:
+
+```
+swift test --scratch-path .build/check -Xswiftc -DKYOSEI_CHECK --filter WakeTests
+```
 
 ## The check build and its harness
 

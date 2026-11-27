@@ -17,6 +17,7 @@ let package = Package(
             resources: [.copy("Resources/renderer")]
         ),
         .testTarget(name: "KyoseiClientTests", dependencies: ["KyoseiClient"]),
-        .testTarget(name: "KyoseiMacTests", dependencies: ["KyoseiMac"]),
+        // The stand-in server of SilentConnectionTests is run by Node, not built (KYO-989).
+        .testTarget(name: "KyoseiMacTests", dependencies: ["KyoseiMac"], exclude: ["Fixtures"]),
     ]
 )
