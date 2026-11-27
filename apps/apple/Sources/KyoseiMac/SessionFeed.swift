@@ -182,11 +182,20 @@ final class SessionFeed {
     private var typing = false
     private var resizing: Task<Void, Never>?
     private var currentLive = false
+    /// The machine's sleep and wake and its network path, which restart the reads (KYO-989).
+    @ObservationIgnored private var systemWatch: SystemWatch?
+    /// What the projects reads last had to say of a failure, so that it is logged once.
+    private var projectsTrouble: String?
 
     init(client: ServeClient, project: String) {
         self.client = client
         self.project = project
+        systemWatch = SystemWatch(log: client.connections.log) { [weak self] reason in
+            self?.reconnect(reason)
+        }
     }
+
+    private var log: ConnectionLog { client.connections.log }
 
     private static let serverKey = "serverURL"
     private static let projectKey = "project"
@@ -216,9 +225,31 @@ final class SessionFeed {
     }
 
     static func fromEnvironment() -> SessionFeed {
-        SessionFeed(
+        if let file = connectionLogFile {
+            ConnectionLog.shared.open(at: file)
+            let build = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ConnectionLog.shared.write(
+                "started, build \(build ?? "unknown"), server \(savedServer), project "
+                    + (savedProject.isEmpty ? "none" : savedProject))
+        }
+        return SessionFeed(
             client: ServeClient(base: URL(string: savedServer)!, token: deviceToken()),
             project: savedProject)
+    }
+
+    /// Where the connection log is written (KYO-989): `KYOSEI_CONNECTION_LOG` when the
+    /// environment names a file, and otherwise `~/Library/Logs/Kyosei/connection.log`. A
+    /// check build writes one only where its run names it.
+    static var connectionLogFile: URL? {
+        if let named = environment["KYOSEI_CONNECTION_LOG"], !named.isEmpty {
+            return URL(fileURLWithPath: named)
+        }
+        #if KYOSEI_CHECK
+        return nil
+        #else
+        return FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?
+            .appending(path: "Logs/Kyosei/connection.log")
+        #endif
     }
 
     /// Points this window at another server or project, and reads it afresh.
@@ -274,7 +305,10 @@ final class SessionFeed {
             handedEtags = [:]
             agendaEtags = [:]
             tokenNeeded = nil
-            client = ServeClient(base: server, token: Self.deviceToken())
+            client.connections.close()
+            client = ServeClient(
+                base: server, token: Self.deviceToken(),
+                connections: Connections(log: client.connections.log))
         } else {
             // Settings may have saved another token for the same server.
             takeSavedToken()
@@ -344,16 +378,39 @@ final class SessionFeed {
         // With no project there is nothing to follow, and the page shows the list of them.
         guard !project.isEmpty else { return }
         task = Task { await run() }
-        menuTask = Task {
-            while !Task.isCancelled {
-                await sendMenu()
-                try? await Task.sleep(for: Self.menuRefresh)
-            }
-        }
+        menuTask = Task { await followMenu() }
         sendRecordsStart()
         sendFilesStart()
         send("configStart", #"{"project": \#(quoted(project))}"#)
         recordsTask = Task { await followProject() }
+    }
+
+    private func followMenu() async {
+        while !Task.isCancelled {
+            await sendMenu()
+            try? await Task.sleep(for: Self.menuRefresh)
+        }
+    }
+
+    /// Starts every read and stream again, on new connections (KYO-989): after a wake, and
+    /// when a network path returns. What was out is cancelled rather than waited for, since
+    /// its timer may not have run while the machine slept and its connection may be one that
+    /// will not answer again. The session is read again from the top, as after a `reset`
+    /// frame; the composer's boxes, which are the page's, are left as they are.
+    func reconnect(_ reason: String) {
+        client.connections.renew(reason)
+        guard started else { return }
+        retry.reset()
+        projectsTask?.cancel()
+        projectsTask = Task { await followProjects() }
+        guard !project.isEmpty else { return }
+        task?.cancel()
+        task = Task { await run() }
+        menuTask?.cancel()
+        menuTask = Task { await followMenu() }
+        recordsTask?.cancel()
+        recordsTask = Task { await followProject(missed: true) }
+        if terminalOpen { openTerminal() }
     }
 
     // MARK: The project dropdown and the session links (KYO-761)
@@ -393,20 +450,27 @@ final class SessionFeed {
             } catch {
                 guard !Task.isCancelled, client.base == self.client.base else { return }
                 servedProblem = ServeClient.describe(error)
+                noteProjectsTrouble("the list of projects failed: \(ConnectionLog.words(error))")
             }
         }
         if let served {
             let names = served.filter(\.can_open).map(\.name)
             typealias Read = (name: String, rows: [SessionRow]?, needed: String?)
             var reads: [Read] = []
+            var failures: [String] = []
             for name in names {
                 do {
                     reads.append((name, try await client.sessions(project: name), nil))
                 } catch {
                     reads.append((name, nil, ServeClient.tokenNeeded(error)))
+                    failures.append(ConnectionLog.words(error))
                 }
             }
             guard !Task.isCancelled, client.base == self.client.base else { return }
+            noteProjectsTrouble(
+                failures.first.map {
+                    "\(failures.count) of \(names.count) session lists failed, the first: \($0)"
+                })
             var found: [String: [SessionRow]] = [:]
             for read in reads {
                 if let rows = read.rows { found[read.name] = rows.filter(\.live) }
@@ -423,6 +487,18 @@ final class SessionFeed {
             }
         }
         sendProjects()
+    }
+
+    /// Writes what the projects reads have to say of a failure when it differs from what they
+    /// last said, since they are made every few seconds; nil is that they succeeded.
+    private func noteProjectsTrouble(_ trouble: String?) {
+        guard trouble != projectsTrouble else { return }
+        if let trouble {
+            log.write(trouble + "; read again within " + ConnectionLog.words(Self.menuRefresh))
+        } else {
+            log.write("the projects and their session lists were read")
+        }
+        projectsTrouble = trouble
     }
 
     private func followProjects() async {
@@ -460,7 +536,7 @@ final class SessionFeed {
     private func takeSavedToken() {
         let saved = Self.deviceToken()
         guard saved != client.token else { return }
-        client = ServeClient(base: client.base, token: saved)
+        client = ServeClient(base: client.base, token: saved, connections: client.connections)
     }
 
     /// Takes what a session read answered: a refusal for want of a token is said in the
@@ -1190,7 +1266,7 @@ final class SessionFeed {
             request.timeoutInterval = 120
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             do {
-                for try await event in Self.terminalEvents(request) {
+                for try await event in client.stream(request) {
                     // A stream that was cancelled still yields what it had buffered.
                     if Task.isCancelled { return }
                     if event.name == "ready" {
@@ -1220,42 +1296,6 @@ final class SessionFeed {
             terminalFrame(
                 "note", #"{"text": "The terminal's connection was lost. Connecting again."}"#)
             try? await Task.sleep(for: .seconds(1))
-        }
-    }
-
-    /// The terminal stream's events. It carries the device token, which the session's event
-    /// stream does not, and a refusal's body, which says why.
-    private nonisolated static func terminalEvents(
-        _ request: URLRequest
-    ) -> AsyncThrowingStream<ServerEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard code == 200 else {
-                        var body: [UInt8] = []
-                        for try await byte in bytes where body.count < 65536 { body.append(byte) }
-                        throw ServeError.status(code, String(decoding: body, as: UTF8.self))
-                    }
-                    var parser = ServerEventParser()
-                    var line: [UInt8] = []
-                    for try await byte in bytes {
-                        guard byte == UInt8(ascii: "\n") else {
-                            line.append(byte)
-                            continue
-                        }
-                        if let event = parser.feed(line: String(decoding: line, as: UTF8.self)) {
-                            continuation.yield(event)
-                        }
-                        line.removeAll(keepingCapacity: true)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
@@ -1560,10 +1600,10 @@ final class SessionFeed {
     /// view reads again what changed. After a lost connection the page is told once more,
     /// since a change made meanwhile was not heard. A change of the project's own composer
     /// draft is the app's to read (KYO-798), and matters while no session is live.
-    private func followProject() async {
+    private func followProject(missed: Bool = false) async {
         let project = project
         var retry = Backoff()
-        var lost = false
+        var lost = missed
         let client = client
         while !Task.isCancelled {
             if lost {
@@ -1572,6 +1612,7 @@ final class SessionFeed {
                 draftChanged(.project)
                 projectAgendaChanged()
             }
+            let failure: String
             do {
                 for try await event in client.projectEvents(project: project)
                 where event.name == "changed" {
@@ -1589,11 +1630,18 @@ final class SessionFeed {
                         send("recordsChanged", event.data)
                     }
                 }
+                if Task.isCancelled { return }
+                failure = "kyo serve closed it"
             } catch {
                 if Task.isCancelled { return }
+                failure = ConnectionLog.words(error)
             }
             lost = true
-            try? await Task.sleep(for: retry.next())
+            let wait = retry.next()
+            log.write(
+                "project stream of \(project) ended: \(failure); next attempt in "
+                    + ConnectionLog.words(wait))
+            try? await Task.sleep(for: wait)
         }
     }
 
@@ -2007,6 +2055,9 @@ final class SessionFeed {
     }
 
     private func becomeLive() {
+        if state != .live {
+            log.write("live: \(project) \(current ?? "no session")")
+        }
         state = .live
         retry.reset()
     }
@@ -2022,6 +2073,7 @@ final class SessionFeed {
 
     private func run() async {
         while !Task.isCancelled {
+            var failure: String?
             do {
                 let sessions = try await client.sessions(project: project)
                 // A request that answered as the task was cancelled does not throw, and
@@ -2080,8 +2132,15 @@ final class SessionFeed {
                 // The next attempt carries a token saved since this one was refused.
                 if tokenNeeded != nil { takeSavedToken() }
                 print("[feed] \(error)")
+                failure = ConnectionLog.words(error)
             }
-            try? await Task.sleep(for: retry.next())
+            let wait = retry.next()
+            if let failure {
+                log.write(
+                    "session read of \(project) failed: \(failure); next attempt in "
+                        + ConnectionLog.words(wait))
+            }
+            try? await Task.sleep(for: wait)
         }
     }
 

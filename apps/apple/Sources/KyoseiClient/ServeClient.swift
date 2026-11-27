@@ -212,9 +212,26 @@ public struct ServeClient: Sendable {
     /// refuses each of those reads with 401.
     public let token: String?
 
-    public init(base: URL, token: String? = nil) {
+    /// The connections every request of this client is sent on, which `Connections.renew`
+    /// replaces when one of them may be dead (KYO-989). Copies of a client share them.
+    public let connections: Connections
+
+    public init(base: URL, token: String? = nil, connections: Connections = Connections()) {
         self.base = base
         self.token = token
+        self.connections = connections
+    }
+
+    /// A request's answer, sent on the client's connections. A request that timed out has them
+    /// renewed, since the connection it went out on may be one that will never answer again.
+    public func load(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let session = connections.session
+        do {
+            return try await session.data(for: request)
+        } catch {
+            connections.failed(error, on: session)
+            throw error
+        }
     }
 
     private func url(_ path: String, cursor: String? = nil) -> URL {
@@ -225,7 +242,7 @@ public struct ServeClient: Sendable {
     }
 
     private func get(_ path: String) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url(path))
+        let (data, response) = try await load(URLRequest(url: url(path)))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else {
             throw ServeError.status(code, String(decoding: data, as: UTF8.self))
@@ -244,7 +261,7 @@ public struct ServeClient: Sendable {
     }
 
     private func read(_ path: String) async throws -> (data: Data, response: HTTPURLResponse?) {
-        let (data, response) = try await URLSession.shared.data(for: sessionRequest(path))
+        let (data, response) = try await load(sessionRequest(path))
         let http = response as? HTTPURLResponse
         guard http?.statusCode == 200 else {
             throw ServeError.status(http?.statusCode ?? 0, String(decoding: data, as: UTF8.self))
@@ -290,7 +307,7 @@ public struct ServeClient: Sendable {
         if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
         if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await load(request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
@@ -312,7 +329,7 @@ public struct ServeClient: Sendable {
     public func screen(project: String, session: String) async -> PaneSnapshot? {
         var request = sessionRequest("v1/projects/\(project)/sessions/\(session)/screen")
         request.timeoutInterval = 10
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await load(request),
             (response as? HTTPURLResponse)?.statusCode == 200
         else { return nil }
         var snapshot = PaneSnapshot()
@@ -334,11 +351,19 @@ public struct ServeClient: Sendable {
         var request = sessionRequest(
             "v1/projects/\(project)/sessions/\(session)/events", cursor: cursor)
         request.timeoutInterval = idleLimit
-        let finalRequest = request
+        return stream(request)
+    }
+
+    /// The Server-Sent Events of `request` until the connection ends. A refusal ends it with
+    /// `ServeError.status` and the server's own sentence, and a stream that timed out has the
+    /// client's connections renewed, as any request that timed out does (KYO-989).
+    public func stream(_ request: URLRequest) -> AsyncThrowingStream<ServerEvent, Error> {
+        let connections = connections
         return AsyncThrowingStream { continuation in
             let task = Task {
+                let session = connections.session
                 do {
-                    let (bytes, response) = try await URLSession.shared.bytes(for: finalRequest)
+                    let (bytes, response) = try await session.bytes(for: request)
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard code == 200 else {
                         // The refusal's body is the server's own sentence, which says why.
@@ -361,11 +386,73 @@ public struct ServeClient: Sendable {
                     }
                     continuation.finish()
                 } catch {
+                    connections.failed(error, on: session)
                     continuation.finish(throwing: error)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+}
+
+/// The connections a client's requests are sent on (KYO-989).
+///
+/// A `URLSession` keeps a connection open for the requests that follow, and to a server
+/// behind an HTTP/2 proxy (Tailscale Serve answers in HTTP/2) it sends every request and
+/// every stream on one connection. A connection that went silent without closing, as one can
+/// across a sleep, is kept: each request put on it times out, the session goes on putting the
+/// next one there, and neither `flush` nor `reset` makes it open another; a new session
+/// does. So a request that times out, a wake and a network path that returns each renew the
+/// session, and what was still out on the old one is let finish.
+public final class Connections: @unchecked Sendable {
+    private let lock = NSLock()
+    private let make: @Sendable () -> URLSession
+    private var current: URLSession
+    private var renewals = 0
+    /// Where each renewal is written, with its reason.
+    public let log: ConnectionLog
+
+    public init(
+        log: ConnectionLog = .shared,
+        make: @escaping @Sendable () -> URLSession = { URLSession(configuration: .default) }
+    ) {
+        self.log = log
+        self.make = make
+        current = make()
+    }
+
+    /// The session new requests are sent on.
+    public var session: URLSession { lock.withLock { current } }
+
+    /// How many times the session has been renewed.
+    public var renewed: Int { lock.withLock { renewals } }
+
+    /// Replaces the session, for `reason`, when it is still `failed` (any session when nil),
+    /// so that the requests of one dead connection that time out together renew it once.
+    @discardableResult
+    public func renew(_ reason: String, replacing failed: URLSession? = nil) -> Bool {
+        let old: URLSession? = lock.withLock {
+            guard failed == nil || failed === current else { return nil }
+            let old = current
+            current = make()
+            renewals += 1
+            return old
+        }
+        guard let old else { return false }
+        old.finishTasksAndInvalidate()
+        log.write("new connections: \(reason)")
+        return true
+    }
+
+    /// Takes the error of a request sent on `session`: a timeout renews it.
+    func failed(_ error: Error, on session: URLSession) {
+        guard (error as? URLError)?.code == .timedOut else { return }
+        renew("a request timed out", replacing: session)
+    }
+
+    /// Lets what is out finish and sends nothing more, for a client that is left.
+    public func close() {
+        session.finishTasksAndInvalidate()
     }
 }
 
@@ -595,7 +682,8 @@ public struct SessionFollower: Sendable {
     private enum Outcome: Sendable {
         case ended
         case refused(String)
-        case lost(String, stale: Bool)
+        /// Why, in the status bar's words, and in the log's when they say more.
+        case lost(String, stale: Bool, detail: String? = nil)
     }
 
     private func run(cursor: String?, _ out: AsyncStream<FollowUpdate>.Continuation) async {
@@ -610,18 +698,24 @@ public struct SessionFollower: Sendable {
             }
             if Task.isCancelled { return }
             let start = since ?? Date()
+            let log = client.connections.log
             switch outcome {
             case .ended:
                 return
             case .refused(let reason):
+                log.write("stream of \(project) \(session) refused: \(reason)")
                 out.yield(.notLive(since: start, reason: reason))
                 return
-            case .lost(let reason, let stale):
+            case .lost(let reason, let stale, let detail):
                 since = start
                 if stale { progress.requireProof() }
                 out.yield(.notLive(since: start, reason: reason))
+                let wait = backoff.next()
+                log.write(
+                    "stream of \(project) \(session) lost: \(detail ?? reason); next attempt in "
+                        + ConnectionLog.words(wait))
+                try? await Task.sleep(for: wait)
             }
-            try? await Task.sleep(for: backoff.next())
         }
     }
 
@@ -677,7 +771,8 @@ public struct SessionFollower: Sendable {
             if case ServeError.status(let code, _) = error, (400..<500).contains(code) {
                 return .refused(ServeClient.describe(error))
             }
-            return .lost(ServeClient.describe(error), stale: false)
+            return .lost(
+                ServeClient.describe(error), stale: false, detail: ConnectionLog.words(error))
         }
     }
 }
@@ -766,7 +861,7 @@ extension ServeClient {
         if !flags.isEmpty {
             components.queryItems = flags.map { URLQueryItem(name: $0.name, value: $0.value) }
         }
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        let (data, response) = try await load(URLRequest(url: components.url!))
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
@@ -778,36 +873,7 @@ extension ServeClient {
     ) -> AsyncThrowingStream<ServerEvent, Error> {
         var request = URLRequest(url: base.appending(path: "v1/projects/\(project)/events"))
         request.timeoutInterval = idleLimit
-        let finalRequest = request
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let (bytes, response) = try await URLSession.shared.bytes(for: finalRequest)
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard code == 200 else {
-                        var body: [UInt8] = []
-                        for try await byte in bytes where body.count < 65536 { body.append(byte) }
-                        throw ServeError.status(code, String(decoding: body, as: UTF8.self))
-                    }
-                    var parser = ServerEventParser()
-                    var line: [UInt8] = []
-                    for try await byte in bytes {
-                        guard byte == UInt8(ascii: "\n") else {
-                            line.append(byte)
-                            continue
-                        }
-                        if let event = parser.feed(line: String(decoding: line, as: UTF8.self)) {
-                            continuation.yield(event)
-                        }
-                        line.removeAll(keepingCapacity: true)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        return stream(request)
     }
 }
 
@@ -918,7 +984,7 @@ extension ServeClient {
         }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await load(request)
         let http = response as? HTTPURLResponse
         return FileReply(
             data: data, status: http?.statusCode ?? 0,
