@@ -2208,6 +2208,26 @@ const kyo = {
     // A server from before boxes had ids sends none, and a box is then named here.
     const saved = frame.boxes.filter((box) => box.text || box.marks?.length || box.scratch?.heading)
       .map((box) => ({ ...box, id: box.id || boxId() }));
+    // KYO-990: the app asks the page for its pending save before it turns, and reads the new
+    // draft a moment later. What was typed in between, as it is when a person types just
+    // after a session has started, is in no draft yet, and replacing the boxes would lose it:
+    // it is merged with the draft turned to, as an edit made here, and saved there. A box
+    // the server moved from the draft left to this one keeps its id, so it is not doubled.
+    if (frame.turned && frame.etag !== null && scope !== null) {
+      const merged = mergeDraft(agreed, currentBoxes(), saved);
+      if (merged.unsaved) {
+        posted.clear();
+        seenEtag = frame.etag;
+        applyBoxes(merged.boxes);
+        lastMove = null;
+        tellUndoSoon();
+        agreed = agreedWith(saved, new Set(merged.boxes.filter((box) => saved.includes(box)).map((box) => box.id)));
+        keepCurrent();
+        adoptShelf();
+        if (merged.save) remember();
+        return;
+      }
+    }
     // Saves still unanswered were of another draft, or of this one before it was read.
     posted.clear();
     agreed = agreedOn([]);

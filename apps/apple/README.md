@@ -182,7 +182,10 @@ the two: an ended session's go to the project's draft, and a new session's first
 them. The app learns that the followed session has ended from the session list it reads every
 five seconds, and then reads the project's draft in place of what the window holds, so that
 the copy another device saved last is the one shown. A save that is waiting is sent before
-the composer turns from one draft to another. The page also keeps each project's prompts in
+the composer turns from one draft to another, and the next draft is read 300 ms later. What
+is typed in that interval, as it is when a person types just after a session has started,
+is held by neither draft; the page merges it with the next draft as an edit made in this
+window, by the merge described below, and saves it there (KYO-990). The page also keeps each project's prompts in
 its own storage, under the server and the project, which is all a device with no token has.
 
 A draft saved on another device is shown without reopening anything (KYO-798). The server
